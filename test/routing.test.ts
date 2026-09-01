@@ -37,6 +37,30 @@ test("routing precedence is thread, then user, then channel", () => {
   fs.rmSync(directory, { recursive: true, force: true });
 });
 
+test("a thread can stay pinned to one agent and pane", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "herdr-target-"));
+  const store = new RoutingStore(path.join(directory, "state.json"));
+  const thread = { ...context, threadId: "agent-thread" };
+  store.bind(thread, {
+    workspaceId: "w1",
+    agentName: "codex",
+    paneId: "w1:p1",
+  });
+  assert.deepEqual(store.resolve(thread), {
+    discordGuildId: "g",
+    discordChannelId: "c",
+    discordThreadId: "agent-thread",
+    discordUserId: "u",
+    workspaceId: "w1",
+    agentName: "codex",
+    paneId: "w1:p1",
+    createdAt: store.resolve(thread)?.createdAt,
+    updatedAt: store.resolve(thread)?.updatedAt,
+  });
+  store.flush();
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
 test("agent target validation rejects cross-workspace and unauthorized targets", () => {
   assert.doesNotThrow(() =>
     validateAgentTarget(agent, { workspaceId: "w1" } as never, ["w1"]),

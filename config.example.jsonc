@@ -9,6 +9,7 @@
     "allowedChannelIds": [],
     "allowedUserIds": [],
     "messageContent": true,
+    "requireMention": true,
     "commandPrefix": "/herdr",
   },
   "allowedWorkspaceIds": [],

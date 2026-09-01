@@ -37,7 +37,8 @@ directory's `state/`) and the configured state filename is restricted to one
 basename, preventing traversal.
 
 The Discord adapter requires `messageContent` because the requested
-`/herdr ...` commands and free-text approval replies are text messages. It
+`/herdr ...` commands, mapped-thread prompts, and free-text approval replies are
+text messages. It
 uses only the Gateway intents needed for guild messages plus message content;
 there is no inbound web server. Guild, channel and user allowlists are checked
 before command, reply, or button handling. Empty lists mean “not restricted by
@@ -118,6 +119,7 @@ can be enabled with `requireMention` or `HERDR_DISCORD_REQUIRE_MENTION`.
 ```text
 /herdr workspaces
 /herdr use <workspace-id-or-label>
+/herdr target <agent-name-or-pane-id>
 /herdr current
 /herdr agents [workspace-id]
 /herdr assign <agent-name-or-pane-id> <prompt>
@@ -129,6 +131,11 @@ can be enabled with `requireMention` or `HERDR_DISCORD_REQUIRE_MENTION`.
 
 `workspaces` displays Herdr-returned label/path, IDs, and agent states.
 `current` displays the effective mapping and reports stale agent/pane data.
+`target` binds the current Discord thread (or user when used outside a thread)
+to one live Herdr agent without sending a prompt. In a thread with an active
+target, an ordinary user message is a direct prompt to that agent, subject to
+the same allowlist, stale-mapping, and busy checks as `assign`. This is a
+one-to-one route: the bridge never broadcasts a thread message to all agents.
 `assign` binds the current thread or user to the selected workspace/agent and
 uses `agent.prompt`; a working agent or duplicate active stream is rejected as
 busy. `read` uses `recent_unwrapped`, `wait` uses the event-driven Herdr wait,

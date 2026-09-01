@@ -44,6 +44,10 @@ export type ApprovalHandler = (
   text: string,
   userId: string,
 ) => Promise<void>;
+export type PromptHandler = (
+  context: CommandContext,
+  text: string,
+) => Promise<void>;
 
 export class DiscordAdapter {
   readonly name = "discord";
@@ -51,6 +55,7 @@ export class DiscordAdapter {
   private readonly ready: Promise<void>;
   private commandHandler: CommandHandler | null = null;
   private approvalHandler: ApprovalHandler | null = null;
+  private promptHandler: PromptHandler | null = null;
 
   constructor(
     private readonly config: DiscordConfig,
@@ -84,6 +89,10 @@ export class DiscordAdapter {
 
   onApproval(handler: ApprovalHandler): void {
     this.approvalHandler = handler;
+  }
+
+  onPrompt(handler: PromptHandler): void {
+    this.promptHandler = handler;
   }
 
   async start(): Promise<void> {
@@ -208,15 +217,24 @@ export class DiscordAdapter {
       return;
     const context = this.contextFor(message, message.channel.id);
     const approval = this.routing.getApprovalForThread(context);
-    if (!approval || !this.approvalHandler) return;
+    if (approval && this.approvalHandler) {
+      try {
+        await this.approvalHandler(
+          approval,
+          message.content.trim(),
+          message.author.id,
+        );
+      } catch (error) {
+        await message.reply(`❌ Approval rejected: ${safeError(error)}`);
+      }
+      return;
+    }
+    const prompt = this.parsePrompt(message);
+    if (!prompt || !this.promptHandler) return;
     try {
-      await this.approvalHandler(
-        approval,
-        message.content.trim(),
-        message.author.id,
-      );
+      await this.promptHandler({ message, routing: context }, prompt);
     } catch (error) {
-      await message.reply(`❌ Approval rejected: ${safeError(error)}`);
+      await message.reply(`❌ Prompt rejected: ${safeError(error)}`);
     }
   }
 
@@ -294,6 +312,19 @@ export class DiscordAdapter {
       name: parts[0].toLowerCase(),
       args: parts.slice(1),
     };
+  }
+
+  private parsePrompt(message: Message): string | null {
+    if (!message.channel.isThread() || !message.content.trim()) return null;
+    let content = message.content.trim();
+    const mention = this.client.user
+      ? new RegExp(`<@!?${this.client.user.id}>`, "g")
+      : null;
+    const mentioned = mention ? mention.test(content) : false;
+    if (mention) content = content.replace(mention, "").trim();
+    if (this.config.requireMention && !mentioned) return null;
+    if (!content || content.startsWith(this.config.commandPrefix)) return null;
+    return content;
   }
 
   private contextFor(

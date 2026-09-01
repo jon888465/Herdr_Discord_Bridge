@@ -97,6 +97,19 @@ export async function run(): Promise<void> {
       throw new Error("you are not authorized to control this agent");
     }
   });
+  discord.onPrompt(async (context, text) => {
+    try {
+      await promptMappedAgent(text, context, {
+        config,
+        herdr,
+        routing,
+        discord,
+        activeStreams,
+      });
+    } catch (error) {
+      await discord.reply(context.message, `❌ ${safeError(error)}`);
+    }
+  });
   await discord.start();
 
   const watcher = new AgentWatcher(herdr, config.pollIntervalMs);
@@ -145,6 +158,9 @@ async function handleCommand(
       return;
     case "use":
       await useWorkspace(args, context, runtime);
+      return;
+    case "target":
+      await targetAgent(args, context, runtime);
       return;
     case "current":
       await currentTarget(context, runtime);
@@ -239,6 +255,26 @@ async function useWorkspace(
   await runtime.discord.reply(
     context.message,
     `✅ Routing for this ${context.routing.threadId ? "thread" : "user"} now targets **${workspace.label || workspace.name || workspace.workspace_id}** (\`${mapping.workspaceId}\`). Existing agents were not moved or restarted.`,
+  );
+}
+
+async function targetAgent(
+  args: string[],
+  context: CommandContext,
+  runtime: Runtime,
+): Promise<void> {
+  const query = args.join(" ").trim();
+  if (!query) throw new Error("usage: /herdr target <agent-name-or-pane-id>");
+  const agent = findAgent(await runtime.herdr.listAgents(), query);
+  validateAgentTarget(agent, undefined, runtime.config.allowedWorkspaceIds);
+  runtime.routing.bind(context.routing, {
+    workspaceId: agent.workspace_id,
+    agentName: agentLabel(agent),
+    paneId: agent.pane_id,
+  });
+  await runtime.discord.reply(
+    context.message,
+    `🎯 This ${context.routing.threadId ? "thread" : "user"} now talks to **${agentLabel(agent)}** in workspace \`${agent.workspace_id}\` / pane \`${agent.pane_id}\`. Subsequent non-command messages in this thread will be sent only to this agent.`,
   );
 }
 
@@ -352,9 +388,51 @@ async function assignAgent(
     agentName: agentLabel(agent),
     paneId: agent.pane_id,
   });
+  await dispatchPrompt(
+    agent,
+    prompt,
+    context,
+    runtime,
+    `📨 Assigned to **${target.agentName || query}** in \`${target.workspaceId}\` / \`${agent.pane_id}\`. Herdr is running the prompt.`,
+  );
+}
+
+async function promptMappedAgent(
+  prompt: string,
+  context: CommandContext,
+  runtime: Runtime,
+): Promise<void> {
+  if (prompt.length > 12000 || prompt.includes("\u0000"))
+    throw new Error(
+      "prompt is empty, contains an invalid character, or is too long",
+    );
+  const agent = await resolveContextAgent("", context, runtime);
+  await dispatchPrompt(
+    agent,
+    prompt,
+    context,
+    runtime,
+    `📨 Sent to **${agentLabel(agent)}** in \`${agent.workspace_id}\` / \`${agent.pane_id}\`.`,
+  );
+}
+
+async function dispatchPrompt(
+  agent: AgentRecord,
+  prompt: string,
+  context: CommandContext,
+  runtime: Runtime,
+  acknowledgement: string,
+): Promise<void> {
+  if (
+    agent.agent_status === "working" ||
+    runtime.activeStreams.has(agent.terminal_id)
+  )
+    throw new Error(
+      `agent is busy (${agent.pane_id}); wait for it to settle before assigning another prompt`,
+    );
   const progress = await runtime.discord.reply(
     context.message,
-    `📨 Assigned to **${target.agentName || query}** in \`${target.workspaceId}\` / \`${agent.pane_id}\`. Herdr is running the prompt.`,
+    acknowledgement,
   );
   await runtime.herdr.promptAgent(agent.pane_id, prompt);
   runtime.activeStreams.add(agent.terminal_id);
@@ -617,6 +695,7 @@ function helpText(prefix: string): string {
     `**Herdr Discord Bridge**`,
     `${prefix} workspaces`,
     `${prefix} use <workspace-id-or-label>`,
+    `${prefix} target <agent-or-pane>`,
     `${prefix} current`,
     `${prefix} agents [workspace-id]`,
     `${prefix} assign <agent-or-pane> <prompt>`,
