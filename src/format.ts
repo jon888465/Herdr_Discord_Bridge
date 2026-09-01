@@ -28,6 +28,36 @@ export function codeBlock(value: string, language = "text"): string {
   return "```" + language + "\n" + value.replace(/```/g, "``\u200b`") + "\n```";
 }
 
+export function agentHeader(
+  agentName: string,
+  workspaceId: string,
+  paneId: string,
+  agentKind?: string,
+): string {
+  const kind = agentKind && agentKind !== agentName ? ` · ${agentKind}` : "";
+  const rows = [
+    boxRow(`🤖 ${cleanBoxValue(agentName)}${cleanBoxValue(kind)}`),
+    boxRow(`Workspace: ${cleanBoxValue(workspaceId)}`),
+    boxRow(`Pane: ${cleanBoxValue(paneId)}`),
+  ];
+  return codeBlock(
+    [
+      "┌─────────────────────────────┐",
+      ...rows,
+      "└─────────────────────────────┘",
+    ].join("\n"),
+  );
+}
+
+function boxRow(value: string): string {
+  const clipped = value.slice(0, 27);
+  return `│ ${clipped.padEnd(27, " ")} │`;
+}
+
+function cleanBoxValue(value: string): string {
+  return stripAnsi(value).replace(/[\r\n]/g, " ");
+}
+
 export function statusEmoji(status: string): string {
   switch (status) {
     case "working":

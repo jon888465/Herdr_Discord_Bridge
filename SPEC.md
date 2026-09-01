@@ -36,10 +36,14 @@ values. State is stored below `HERDR_PLUGIN_STATE_DIR` (or the config
 directory's `state/`) and the configured state filename is restricted to one
 basename, preventing traversal.
 
+Handoff context is bounded by `handoffLines` (default `40`) and
+`handoffMaxChars` (default `6000`). These limits are applied before a handoff
+is posted to Discord or sent to the destination Agent.
+
 The Discord adapter requires `messageContent` because the requested
 `/herdr ...` commands, mapped-thread prompts, and free-text approval replies are
-text messages. It
-uses only the Gateway intents needed for guild messages plus message content;
+text messages. It uses only the Gateway intents needed for guild messages plus
+message content;
 there is no inbound web server. Guild, channel and user allowlists are checked
 before command, reply, or button handling. Empty lists mean “not restricted by
 that dimension” and should be replaced with explicit IDs for a sensitive
@@ -100,10 +104,31 @@ Mappings are separate maps and are resolved in this exact order:
 thread mapping > user mapping > channel default
 ```
 
-Thread mappings are keyed by guild, parent channel and thread. User mappings
-are keyed by guild and user, so one user's `/herdr use` cannot replace another
-user's selection. Switching workspace only writes a routing record. It does
-not call any Herdr focus, move, close, restart, or create method.
+Thread mappings are keyed by guild, parent channel and thread. Each thread
+route contains an `activeAgentKey` plus independent Agent mappings:
+
+```json
+{
+  "activeAgentKey": "w1:p2",
+  "agents": {
+    "w1:p2": {
+      "workspaceId": "project-backend",
+      "agentName": "codex",
+      "paneId": "w1:p2"
+    },
+    "w1:p3": {
+      "workspaceId": "project-review",
+      "agentName": "hermes",
+      "paneId": "w1:p3"
+    }
+  }
+}
+```
+
+User mappings are keyed by guild and user, so one user's default cannot
+replace another user's selection. `/herdr use <agent>` changes only
+`activeAgentKey`; it does not call any Herdr focus, move, close, restart, or
+create method. Existing Agent sessions are never reset by routing changes.
 
 Agent commands resolve a live agent from `agent.list`. A target can match a
 unique agent name/alias, agent kind, pane ID, terminal ID, or terminal title;
@@ -118,29 +143,51 @@ can be enabled with `requireMention` or `HERDR_DISCORD_REQUIRE_MENTION`.
 
 ```text
 /herdr workspaces
-/herdr use <workspace-id-or-label>
-/herdr target <agent-name-or-pane-id>
+/herdr agents
+/herdr status
 /herdr current
-/herdr agents [workspace-id]
+/herdr use <agent-name-or-pane-id>
+/herdr ask <agent-name-or-pane-id> <prompt>
+/herdr target <agent-name-or-pane-id>
 /herdr assign <agent-name-or-pane-id> <prompt>
 /herdr read [agent-name-or-pane-id]
-/herdr status
 /herdr wait [agent-name-or-pane-id]
 /herdr cancel [agent-name-or-pane-id]
+/herdr handoff <from-agent> <to-agent> [instruction]
+/herdr team add <agent-name-or-pane-id>
+/herdr team remove <agent-name-or-pane-id>
+/herdr team ask <prompt>
 ```
 
 `workspaces` displays Herdr-returned label/path, IDs, and agent states.
 `current` displays the effective mapping and reports stale agent/pane data.
-`target` binds the current Discord thread (or user when used outside a thread)
-to one live Herdr agent without sending a prompt. In a thread with an active
-target, an ordinary user message is a direct prompt to that agent, subject to
-the same allowlist, stale-mapping, and busy checks as `assign`. This is a
-one-to-one route: the bridge never broadcasts a thread message to all agents.
+`use` binds one live Agent as the active target for the current Discord thread
+(or user when used outside a thread) without sending a prompt. `target` is a
+backward-compatible alias. In a thread with an active target, an ordinary
+user message is a direct prompt to that Agent, subject to the same allowlist,
+stale-mapping, and busy checks as `assign`. `ask` sends a one-shot prompt to a
+named Agent and records that Agent in the thread without changing its active
+target. `team add` and `team remove` manage independent thread participants;
+`team ask` sends only the supplied prompt to each participant and never
+broadcasts the thread or terminal history.
 `assign` binds the current thread or user to the selected workspace/agent and
 uses `agent.prompt`; a working agent or duplicate active stream is rejected as
 busy. `read` uses `recent_unwrapped`, `wait` uses the event-driven Herdr wait,
 and `cancel` uses Herdr's official key API rather than simulated keyboard
 input.
+
+Every Agent response and progress message includes an explicit Agent,
+Workspace, and Pane identity header. When one thread has multiple participants,
+each output is posted as a separate labeled response; the bridge does not use
+multiple Discord bot tokens.
+
+`handoff <from> <to>` reads only `handoffLines` of recent source output and
+limits the generated handoff to `handoffMaxChars`. It redacts common token and
+authorization formats, wraps the excerpt as untrusted observed output, and
+sends only that bounded summary plus an optional user instruction to the
+destination. This supports a deliberate transfer after a token/context limit
+without copying the source Agent's full history. The destination becomes the
+active thread Agent only after the handoff prompt is delivered successfully.
 
 Terminal output is ANSI-stripped, control-character filtered, and split below
 Discord's 2,000-character limit at line or word boundaries. Assignment output
@@ -152,10 +199,11 @@ semantic state; it never claims access to hidden chain-of-thought.
 
 The watcher polls `agent.list` at a bounded interval and ignores the initial
 snapshot. A configured transition to `blocked` reads the detection snapshot and
-posts it to the mapped Discord channel, then starts a Discord thread. The
-bridge creates a random opaque approval token only after the thread exists and
-stores it with guild, channel, thread, message, terminal, workspace and pane
-identity plus an expiry.
+posts it to every mapped Discord destination for that Agent. If the destination
+is already a mapped thread, that thread is reused; otherwise the bridge starts
+a Discord thread. The bridge creates a random opaque approval token only after
+the thread exists and stores it with guild, channel, thread, message, terminal,
+workspace and pane identity plus an expiry.
 
 The root message receives a tokenized “Approve / continue” button. A button is
 accepted only when the token was minted by this bridge, the guild/channel match,
@@ -193,8 +241,10 @@ npm run build
 ```
 
 Tests cover message splitting/ANSI handling, routing precedence and
-authorization/stale mapping, config path safety, and a mock newline-delimited
-Herdr socket for ping/list/read/prompt/wait/cancel plus bounded retry. A final
-diff scan must contain no real credentials, tokens, private local config, or
-runtime state. The plugin manifest must be linkable by Herdr and the completed
-change must be committed and pushed to the requested remote.
+authorization/stale mapping, active Agent selection, multiple thread Agent
+mappings, legacy state migration, Agent identity headers, config path safety,
+and a mock newline-delimited Herdr socket for ping/list/read/prompt/wait/cancel
+plus bounded retry. A final diff scan must contain no real credentials, tokens,
+private local config, or runtime state. The plugin manifest must be linkable by
+Herdr and the completed change must be committed and pushed to the requested
+remote.

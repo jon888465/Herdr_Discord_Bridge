@@ -61,6 +61,77 @@ test("a thread can stay pinned to one agent and pane", () => {
   fs.rmSync(directory, { recursive: true, force: true });
 });
 
+test("a thread keeps multiple agent mappings while switching its active agent", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "herdr-team-"));
+  const store = new RoutingStore(path.join(directory, "state.json"));
+  const thread = { ...context, threadId: "team-thread" };
+  store.bind(thread, {
+    workspaceId: "w1",
+    agentName: "codex",
+    paneId: "w1:p1",
+  });
+  store.bind(
+    thread,
+    {
+      workspaceId: "w1",
+      agentName: "hermes",
+      paneId: "w1:p2",
+    },
+    { activate: false },
+  );
+  assert.equal(store.resolve(thread)?.agentName, "codex");
+  assert.deepEqual(
+    store
+      .threadTargets(thread)
+      .map((item) => item.agentName)
+      .sort(),
+    ["codex", "hermes"],
+  );
+  store.bind(thread, {
+    workspaceId: "w1",
+    agentName: "hermes",
+    paneId: "w1:p2",
+  });
+  assert.equal(store.resolve(thread)?.agentName, "hermes");
+  assert.equal(store.threadTargets(thread).length, 2);
+  store.flush();
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test("legacy single thread mappings migrate to the active-agent route", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "herdr-migrate-"));
+  const file = path.join(directory, "state.json");
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      threadMappings: {
+        "g:c:legacy-thread": {
+          discordGuildId: "g",
+          discordChannelId: "c",
+          discordThreadId: "legacy-thread",
+          discordUserId: "u",
+          workspaceId: "w1",
+          agentName: "codex",
+          paneId: "w1:p1",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    }),
+  );
+  const store = new RoutingStore(file);
+  assert.equal(
+    store.resolve({ ...context, threadId: "legacy-thread" })?.paneId,
+    "w1:p1",
+  );
+  assert.equal(
+    store.threadTargets({ ...context, threadId: "legacy-thread" }).length,
+    1,
+  );
+  store.flush();
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
 test("agent target validation rejects cross-workspace and unauthorized targets", () => {
   assert.doesNotThrow(() =>
     validateAgentTarget(agent, { workspaceId: "w1" } as never, ["w1"]),

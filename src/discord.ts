@@ -13,6 +13,7 @@ import {
 } from "discord.js";
 import type { DiscordConfig } from "./config.js";
 import {
+  agentHeader,
   codeBlock,
   splitDiscordText,
   statusEmoji,
@@ -126,22 +127,38 @@ export class DiscordAdapter {
     context: string,
     target: TargetMapping,
   ): Promise<void> {
-    const channel = await this.client.channels.fetch(target.discordChannelId);
-    if (!channel || !(channel instanceof TextChannel))
-      throw new Error("configured Discord channel is not a text channel");
+    const channel = await this.client.channels.fetch(
+      target.discordThreadId || target.discordChannelId,
+    );
+    if (
+      !channel ||
+      (!(channel instanceof TextChannel) && !(channel instanceof ThreadChannel))
+    )
+      throw new Error(
+        "configured Discord destination is not a text channel or thread",
+      );
     const state = agent.agent_status;
-    const title = agentLabel(agent) || target.paneId;
-    const header = `${statusEmoji(state)} **${title}** is **${state}**\nworkspace: \`${agent.workspace_id}\` · pane: \`${agent.pane_id}\``;
+    const title = agentLabel(agent) || target.paneId || "unknown agent";
+    const identity = agentHeader(
+      title,
+      agent.workspace_name || agent.workspace_id,
+      agent.pane_id,
+      agent.agent,
+    );
+    const header = `${identity}\n${statusEmoji(state)} **${title}** is **${state}**`;
     const body = context ? `\n${codeBlock(stripAnsi(context))}` : "";
     const chunks = splitDiscordText(`${header}${body}`);
     const message = await channel.send(chunks[0]);
     for (const chunk of chunks.slice(1)) await channel.send(chunk);
 
     if (state !== "blocked") return;
-    const thread = await message.startThread({
-      name: `↩ ${title}`.slice(0, 90),
-      autoArchiveDuration: 1440,
-    });
+    const thread =
+      channel instanceof ThreadChannel
+        ? channel
+        : await message.startThread({
+            name: `↩ ${title}`.slice(0, 90),
+            autoArchiveDuration: 1440,
+          });
     const approval = this.routing.createApproval({
       discordGuildId: target.discordGuildId,
       discordChannelId: target.discordChannelId,
@@ -187,7 +204,7 @@ export class DiscordAdapter {
       );
       if (channel instanceof ThreadChannel) {
         await channel.send(
-          `${statusEmoji(status)} Agent is now **${status}**. This approval is closed.`,
+          `${agentHeader(approval.agentName, approval.workspaceId, approval.paneId)}\n${statusEmoji(status)} Agent is now **${status}**. This approval is closed.`,
         );
       }
     } catch {
@@ -246,10 +263,11 @@ export class DiscordAdapter {
       return;
     const button = interaction as ButtonInteraction;
     const guildId = button.guildId;
-    if (
-      !guildId ||
-      !this.isAllowed(guildId, button.channelId, button.user.id)
-    ) {
+    const buttonChannel = button.channel;
+    const parentChannelId = buttonChannel?.isThread()
+      ? buttonChannel.parentId || button.channelId
+      : button.channelId;
+    if (!guildId || !this.isAllowed(guildId, parentChannelId, button.user.id)) {
       await button.reply({
         content: "⛔ You are not authorized to control this agent.",
         ephemeral: true,
@@ -259,7 +277,8 @@ export class DiscordAdapter {
     const token = button.customId.slice(BUTTON_PREFIX.length);
     const approval = this.routing.getApproval(token, {
       guildId,
-      channelId: button.channelId,
+      channelId: parentChannelId,
+      ...(buttonChannel?.isThread() ? { threadId: buttonChannel.id } : {}),
       userId: button.user.id,
     });
     if (

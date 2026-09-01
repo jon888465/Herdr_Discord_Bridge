@@ -83,8 +83,13 @@ export interface ApprovalRecord {
   active: boolean;
 }
 
+export interface ThreadRoute {
+  activeAgentKey?: string;
+  agents: Record<string, TargetMapping>;
+}
+
 export interface PersistedRoutingState {
-  threadMappings: Record<string, TargetMapping>;
+  threadRoutes: Record<string, ThreadRoute>;
   userMappings: Record<string, TargetMapping>;
   channelDefaults: Record<string, TargetMapping>;
   approvals: Record<string, ApprovalRecord>;

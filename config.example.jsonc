@@ -18,6 +18,8 @@
   "reconnectBaseMs": 250,
   "approvalTimeoutMs": 900000,
   "outputLines": 80,
+  "handoffLines": 40,
+  "handoffMaxChars": 6000,
   "streamIntervalMs": 1200,
   "maxTrackedApprovals": 256,
   "stateFile": "routing.json",

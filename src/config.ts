@@ -21,6 +21,8 @@ export interface Config {
   reconnectBaseMs: number;
   approvalTimeoutMs: number;
   outputLines: number;
+  handoffLines: number;
+  handoffMaxChars: number;
   streamIntervalMs: number;
   maxTrackedApprovals: number;
   stateFile: string;
@@ -35,6 +37,8 @@ const DEFAULTS: Config = {
   reconnectBaseMs: 250,
   approvalTimeoutMs: 900000,
   outputLines: 80,
+  handoffLines: 40,
+  handoffMaxChars: 6000,
   streamIntervalMs: 1200,
   maxTrackedApprovals: 256,
   stateFile: "routing.json",
@@ -200,6 +204,12 @@ export function loadConfig(): Config {
       86400000,
     ),
     outputLines: positiveInt(source.outputLines, DEFAULTS.outputLines, 500),
+    handoffLines: positiveInt(source.handoffLines, DEFAULTS.handoffLines, 200),
+    handoffMaxChars: positiveInt(
+      source.handoffMaxChars,
+      DEFAULTS.handoffMaxChars,
+      12000,
+    ),
     streamIntervalMs: positiveInt(
       source.streamIntervalMs,
       DEFAULTS.streamIntervalMs,

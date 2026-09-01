@@ -10,11 +10,21 @@ import type {
 } from "./types.js";
 
 const EMPTY_STATE: PersistedRoutingState = {
-  threadMappings: {},
+  threadRoutes: {},
   userMappings: {},
   channelDefaults: {},
   approvals: {},
 };
+
+type TargetInput = Omit<
+  TargetMapping,
+  | "discordGuildId"
+  | "discordChannelId"
+  | "discordThreadId"
+  | "discordUserId"
+  | "createdAt"
+  | "updatedAt"
+>;
 
 export class RoutingStore {
   private state: PersistedRoutingState;
@@ -30,10 +40,13 @@ export class RoutingStore {
   }
 
   resolve(context: RoutingContext): TargetMapping | undefined {
-    const thread = context.threadId
-      ? this.state.threadMappings[
+    const route = context.threadId
+      ? this.state.threadRoutes[
           threadKey(context.guildId, context.channelId, context.threadId)
         ]
+      : undefined;
+    const thread = route?.activeAgentKey
+      ? route.agents[route.activeAgentKey]
       : undefined;
     if (thread) return thread;
     const user =
@@ -46,17 +59,9 @@ export class RoutingStore {
 
   bind(
     context: RoutingContext,
-    target: Omit<
-      TargetMapping,
-      | "discordGuildId"
-      | "discordChannelId"
-      | "discordThreadId"
-      | "discordUserId"
-      | "createdAt"
-      | "updatedAt"
-    >,
+    target: TargetInput,
+    options: { activate?: boolean } = {},
   ): TargetMapping {
-    const current = this.resolve(context);
     const timestamp = this.now().toISOString();
     const mapping: TargetMapping = {
       ...target,
@@ -64,16 +69,31 @@ export class RoutingStore {
       discordChannelId: context.channelId,
       ...(context.threadId ? { discordThreadId: context.threadId } : {}),
       ...(context.userId ? { discordUserId: context.userId } : {}),
-      createdAt: current?.createdAt ?? timestamp,
+      createdAt: timestamp,
       updatedAt: timestamp,
     };
-    if (context.threadId)
-      this.state.threadMappings[
-        threadKey(context.guildId, context.channelId, context.threadId)
-      ] = mapping;
-    else
+    if (context.threadId) {
+      const key = threadKey(
+        context.guildId,
+        context.channelId,
+        context.threadId,
+      );
+      const route = this.state.threadRoutes[key] || { agents: {} };
+      const targetKey = mappingKey(target);
+      const previous = route.agents[targetKey];
+      route.agents[targetKey] = {
+        ...mapping,
+        createdAt: previous?.createdAt ?? timestamp,
+      };
+      if (options.activate !== false || !route.activeAgentKey)
+        route.activeAgentKey = targetKey;
+      this.state.threadRoutes[key] = route;
+      this.scheduleSave();
+      return route.agents[targetKey];
+    } else {
       this.state.userMappings[userKey(context.guildId, context.userId)] =
         mapping;
+    }
     this.scheduleSave();
     return mapping;
   }
@@ -81,31 +101,16 @@ export class RoutingStore {
   bindThread(
     context: RoutingContext,
     threadId: string,
-    target: Omit<
-      TargetMapping,
-      | "discordGuildId"
-      | "discordChannelId"
-      | "discordThreadId"
-      | "discordUserId"
-      | "createdAt"
-      | "updatedAt"
-    >,
+    target: TargetInput,
+    options: { activate?: boolean } = {},
   ): TargetMapping {
     const threadContext = { ...context, threadId };
-    return this.bind(threadContext, target);
+    return this.bind(threadContext, target, options);
   }
 
   setChannelDefault(
     context: RoutingContext,
-    target: Omit<
-      TargetMapping,
-      | "discordGuildId"
-      | "discordChannelId"
-      | "discordThreadId"
-      | "discordUserId"
-      | "createdAt"
-      | "updatedAt"
-    >,
+    target: TargetInput,
   ): TargetMapping {
     const timestamp = this.now().toISOString();
     const key = channelKey(context.guildId, context.channelId);
@@ -120,6 +125,32 @@ export class RoutingStore {
     this.state.channelDefaults[key] = mapping;
     this.scheduleSave();
     return mapping;
+  }
+
+  threadTargets(context: RoutingContext): TargetMapping[] {
+    if (!context.threadId) return [];
+    const route =
+      this.state.threadRoutes[
+        threadKey(context.guildId, context.channelId, context.threadId)
+      ];
+    return route ? Object.values(route.agents) : [];
+  }
+
+  removeThreadTarget(context: RoutingContext, target: TargetMapping): boolean {
+    if (!context.threadId) return false;
+    const key = threadKey(context.guildId, context.channelId, context.threadId);
+    const route = this.state.threadRoutes[key];
+    if (!route) return false;
+    const targetKey = mappingKey(target);
+    if (!route.agents[targetKey]) return false;
+    delete route.agents[targetKey];
+    if (route.activeAgentKey === targetKey) {
+      route.activeAgentKey = Object.keys(route.agents)[0];
+    }
+    if (Object.keys(route.agents).length === 0)
+      delete this.state.threadRoutes[key];
+    this.scheduleSave();
+    return true;
   }
 
   createApproval(
@@ -199,7 +230,9 @@ export class RoutingStore {
 
   allMappings(): TargetMapping[] {
     return [
-      ...Object.values(this.state.threadMappings),
+      ...Object.values(this.state.threadRoutes).flatMap((route) =>
+        Object.values(route.agents),
+      ),
       ...Object.values(this.state.userMappings),
       ...Object.values(this.state.channelDefaults),
     ];
@@ -266,8 +299,23 @@ function loadState(filePath: string): PersistedRoutingState {
     const parsed = JSON.parse(
       fs.readFileSync(filePath, "utf8"),
     ) as Partial<PersistedRoutingState>;
+    const threadRoutes = parsed.threadRoutes ?? {};
+    const legacyMappings =
+      (
+        parsed as Partial<PersistedRoutingState> & {
+          threadMappings?: Record<string, TargetMapping>;
+        }
+      ).threadMappings ?? {};
+    for (const [key, mapping] of Object.entries(legacyMappings)) {
+      if (threadRoutes[key]) continue;
+      const targetKey = mappingKey(mapping);
+      threadRoutes[key] = {
+        activeAgentKey: targetKey,
+        agents: { [targetKey]: mapping },
+      };
+    }
     return {
-      threadMappings: parsed.threadMappings ?? {},
+      threadRoutes,
       userMappings: parsed.userMappings ?? {},
       channelDefaults: parsed.channelDefaults ?? {},
       approvals: parsed.approvals ?? {},
@@ -275,6 +323,14 @@ function loadState(filePath: string): PersistedRoutingState {
   } catch {
     return cloneEmptyState();
   }
+}
+
+export function mappingKey(
+  target: Pick<TargetMapping, "workspaceId" | "agentName" | "paneId">,
+): string {
+  return (
+    target.paneId || `${target.workspaceId}:${target.agentName || "unknown"}`
+  );
 }
 
 function saveState(filePath: string, state: PersistedRoutingState): void {

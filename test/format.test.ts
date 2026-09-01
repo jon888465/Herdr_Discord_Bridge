@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { codeBlock, splitDiscordText, stripAnsi } from "../src/format.js";
+import {
+  agentHeader,
+  codeBlock,
+  splitDiscordText,
+  stripAnsi,
+} from "../src/format.js";
 
 test("stripAnsi removes terminal escape sequences and controls", () => {
   assert.equal(stripAnsi("\u001b[31mred\u001b[0m\n\u0000ok"), "red\nok");
@@ -25,4 +30,11 @@ test("codeBlock neutralizes nested fences", () => {
   const rendered = codeBlock("a```b");
   assert.ok(rendered.startsWith("```text\n"));
   assert.equal((rendered.match(/```/g) || []).length, 2);
+});
+
+test("agent header identifies the Agent, workspace, and pane", () => {
+  const rendered = agentHeader("codex", "project-backend", "w1:p2", "backend");
+  assert.match(rendered, /🤖 codex · backend/);
+  assert.match(rendered, /Workspace: project-backend/);
+  assert.match(rendered, /Pane: w1:p2/);
 });
