@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.DS_Store
+config.json
+*.local.json
+.env
+.env.*
+!.env.example
+state/
+coverage/

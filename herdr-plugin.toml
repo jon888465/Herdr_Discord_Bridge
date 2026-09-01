@@ -1,0 +1,18 @@
+id = "herdr-discord-bridge"
+name = "Herdr Discord Bridge"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+description = "Drive Herdr workspaces and coding agents from Discord over the outbound Gateway."
+platforms = ["linux", "macos", "windows"]
+
+[[build]]
+command = ["npm", "ci"]
+
+[[build]]
+command = ["npm", "run", "build"]
+
+[[panes]]
+id = "bridge"
+title = "Discord bridge"
+placement = "split"
+command = ["node", "dist/index.js"]

@@ -1,0 +1,23 @@
+{
+  // Copy this file to the directory printed by:
+  //   herdr plugin config-dir herdr-discord-bridge
+  // The real config is gitignored. Environment variables override file values.
+  "discord": {
+    "enabled": true,
+    "botToken": "",
+    "allowedGuildIds": [],
+    "allowedChannelIds": [],
+    "allowedUserIds": [],
+    "messageContent": true,
+    "commandPrefix": "/herdr",
+  },
+  "allowedWorkspaceIds": [],
+  "pollIntervalMs": 2000,
+  "requestTimeoutMs": 5000,
+  "reconnectBaseMs": 250,
+  "approvalTimeoutMs": 900000,
+  "outputLines": 80,
+  "streamIntervalMs": 1200,
+  "maxTrackedApprovals": 256,
+  "stateFile": "routing.json",
+}

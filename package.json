@@ -1,0 +1,36 @@
+{
+  "name": "herdr-discord-bridge",
+  "version": "0.1.0",
+  "description": "Discord Gateway bridge for controlling coding agents running in Herdr panes",
+  "type": "module",
+  "bin": {
+    "herdr-discord-bridge": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "format": "prettier --write 'src/**/*.ts' 'test/**/*.ts' 'scripts/**/*.mjs' '*.json' '*.jsonc' '*.md'",
+    "format:check": "prettier --check 'src/**/*.ts' 'test/**/*.ts' 'scripts/**/*.mjs' '*.json' '*.jsonc' '*.md'",
+    "typecheck": "tsc --noEmit",
+    "lint": "node scripts/lint.mjs",
+    "test": "npm run build && node --test dist/test/*.test.js",
+    "check": "npm run typecheck && npm test",
+    "start": "node dist/index.js",
+    "dry-run": "node dist/index.js --dry-run"
+  },
+  "keywords": [
+    "herdr",
+    "herdr-plugin",
+    "discord",
+    "gateway",
+    "coding-agents"
+  ],
+  "license": "Apache-2.0",
+  "dependencies": {
+    "discord.js": "^14.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "prettier": "^3.3.0",
+    "typescript": "^5.6.0"
+  }
+}
