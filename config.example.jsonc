@@ -12,6 +12,7 @@
     "requireMention": true,
     "commandPrefix": "/herdr",
   },
+  "notifyOn": ["blocked"],
   "allowedWorkspaceIds": [],
   "pollIntervalMs": 2000,
   "requestTimeoutMs": 5000,

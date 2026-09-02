@@ -1,0 +1,97 @@
+import { stripAnsi } from "./format.js";
+
+export interface CliOutputAdapter {
+  extractLatestResponse(
+    prompt: string,
+    output: string,
+    baseline: string,
+  ): string;
+}
+
+class MarkerCliAdapter implements CliOutputAdapter {
+  constructor(private readonly markers: readonly string[]) {}
+
+  extractLatestResponse(
+    prompt: string,
+    output: string,
+    baseline: string,
+  ): string {
+    const normalizedOutput = stripAnsi(output).replace(/\r/g, "");
+    const candidates = this.markers.map((marker) => `${marker}${prompt}`);
+    const markerIndex = Math.max(
+      ...candidates.map((marker) => normalizedOutput.lastIndexOf(marker)),
+    );
+    if (markerIndex >= 0) {
+      const marker =
+        candidates.find((item) =>
+          normalizedOutput.slice(markerIndex).startsWith(item),
+        ) || "";
+      return stripCliChrome(
+        normalizedOutput.slice(markerIndex + marker.length),
+      );
+    }
+    return outputSinceBaseline(baseline, normalizedOutput);
+  }
+}
+
+const codexAdapter = new MarkerCliAdapter(["› ", "❯ "]);
+const antigravityAdapter = new MarkerCliAdapter(["> "]);
+const genericAdapter = new MarkerCliAdapter([
+  "› ",
+  "❯ ",
+  "> ",
+  "user: ",
+  "User: ",
+  "You: ",
+]);
+
+export function latestAgentResponse(
+  agentKind: string | undefined,
+  prompt: string,
+  output: string,
+  baseline: string,
+): string {
+  return adapterFor(agentKind).extractLatestResponse(prompt, output, baseline);
+}
+
+function adapterFor(agentKind: string | undefined): CliOutputAdapter {
+  const kind = (agentKind || "").toLowerCase();
+  if (kind.includes("antigravity") || kind === "agy") return antigravityAdapter;
+  if (kind.includes("codex")) return codexAdapter;
+  return genericAdapter;
+}
+
+function stripCliChrome(value: string): string {
+  return value
+    .split("\n")
+    .filter(
+      (line) =>
+        !/^\s*gpt-[^\s]+\s+\S+\s+·\s+.+$/.test(line) &&
+        !/^\s*[─-]{8,}\s*$/.test(line) &&
+        !/^\s*\? for shortcuts\s*$/.test(line),
+    )
+    .join("\n")
+    .trim();
+}
+
+function outputSinceBaseline(baseline: string, output: string): string {
+  const normalizedBaseline = stripAnsi(baseline).replace(/\r/g, "");
+  const normalizedOutput = stripAnsi(output).replace(/\r/g, "");
+  if (!normalizedOutput.trim()) return "";
+  if (!normalizedBaseline.trim()) return normalizedOutput.trim();
+  if (normalizedOutput === normalizedBaseline) return "";
+  if (normalizedOutput.startsWith(normalizedBaseline))
+    return stripCliChrome(normalizedOutput.slice(normalizedBaseline.length));
+
+  const baselineLines = normalizedBaseline.split("\n");
+  const outputLines = normalizedOutput.split("\n");
+  const maxOverlap = Math.min(baselineLines.length, outputLines.length);
+  for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
+    if (
+      baselineLines.slice(-overlap).join("\n") ===
+      outputLines.slice(0, overlap).join("\n")
+    )
+      return stripCliChrome(outputLines.slice(overlap).join("\n"));
+  }
+  return "";
+}

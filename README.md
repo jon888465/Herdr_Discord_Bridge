@@ -43,6 +43,42 @@ herdr plugin pane open \
 The install step runs the plugin build automatically. The pane starts
 `node dist/src/index.js`, which is the compiled bridge entrypoint.
 
+To run local changes before pushing them to GitHub, first close any existing
+bridge pane, then build and link this checkout:
+
+```text
+herdr pane list
+herdr plugin pane close <pane_id>  # only if a bridge pane is open
+npm ci
+npm run build
+herdr plugin unlink herdr-discord-bridge  # only if the GitHub copy is installed
+herdr plugin link . --enabled
+herdr plugin config-dir herdr-discord-bridge
+```
+
+Keep the existing `config.json`, or create it in the directory printed by the
+last command. Open the linked plugin:
+
+```text
+herdr plugin pane open \
+  --plugin herdr-discord-bridge \
+  --entrypoint bridge
+```
+
+After editing local source files, run `npm run build` again and reopen the pane
+to load the new code. Check the installed source with `herdr plugin list`; it
+should identify the plugin as a local link.
+
+The complete local rebuild/restart flow is also available as a script:
+
+```text
+./scripts/rebuild-and-run.sh
+```
+
+It builds the checkout, closes existing Discord bridge panes, replaces the
+installed plugin with a local link, and opens a fresh bridge pane. It does not
+modify the plugin configuration or Discord token.
+
 Fill in the bot token and explicit guild/channel/user allowlists in `config.json`
 or use environment variables. Never commit that file. Discord Message Content
 must be enabled because the bridge accepts the `/herdr ...` text commands,

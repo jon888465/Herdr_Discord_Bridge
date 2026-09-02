@@ -31,7 +31,7 @@ export interface Config {
 }
 
 const DEFAULTS: Config = {
-  notifyOn: ["blocked", "done"],
+  notifyOn: ["blocked"],
   pollIntervalMs: 2000,
   requestTimeoutMs: 5000,
   reconnectBaseMs: 250,

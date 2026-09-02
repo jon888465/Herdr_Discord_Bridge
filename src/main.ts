@@ -1,4 +1,5 @@
 import { loadConfig, statePath } from "./config.js";
+import { latestAgentResponse } from "./cli-adapter.js";
 import { DiscordAdapter, type CommandContext } from "./discord.js";
 import {
   agentHeader,
@@ -669,10 +670,13 @@ async function dispatchPrompt(
     context.message,
     acknowledgement,
   );
+  const baselineOutput = await runtime.herdr
+    .readAgent(agent.pane_id, "recent_unwrapped", runtime.config.outputLines)
+    .catch(() => "");
   await runtime.herdr.promptAgent(agent.pane_id, prompt);
   runtime.activeStreams.add(agent.terminal_id);
-  void streamAgent(agent, progress, runtime).finally(() =>
-    runtime.activeStreams.delete(agent.terminal_id),
+  void streamAgent(agent, progress, runtime, prompt, baselineOutput).finally(
+    () => runtime.activeStreams.delete(agent.terminal_id),
   );
 }
 
@@ -816,6 +820,8 @@ async function streamAgent(
   initial: AgentRecord,
   progress: import("discord.js").Message,
   runtime: Runtime,
+  prompt: string,
+  baselineOutput: string,
 ): Promise<void> {
   const started = Date.now();
   let lastOutput = "";
@@ -850,9 +856,15 @@ async function streamAgent(
         "recent_unwrapped",
         runtime.config.outputLines,
       );
-      if (output && output !== lastOutput) {
-        lastOutput = output;
-        const preview = splitDiscordText(output, 1650)[0];
+      const latestOutput = latestAgentResponse(
+        current.agent,
+        prompt,
+        output,
+        baselineOutput,
+      );
+      if (latestOutput && latestOutput !== lastOutput) {
+        lastOutput = latestOutput;
+        const preview = splitDiscordText(latestOutput, 1650)[0];
         await runtime.discord.editProgress(
           progress,
           `${agentHeaderFor(current)}\n${statusEmoji(current.agent_status)} **${current.agent_status}**\n${codeBlock(preview)}`,
@@ -871,11 +883,6 @@ async function streamAgent(
         progress,
         `${agentHeaderFor(current)}\n${statusEmoji(current.agent_status)} Prompt finished with **${current.agent_status}**.\n${codeBlock(splitDiscordText(lastOutput || "(no output)", 1650)[0])}`,
       );
-      if (lastOutput && splitDiscordText(lastOutput).length > 1)
-        await runtime.discord.postOutput(
-          progress,
-          `${agentHeaderFor(current)}\nFinal output:\n${codeBlock(lastOutput)}`,
-        );
       return;
     }
   }
