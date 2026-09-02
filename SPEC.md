@@ -140,6 +140,12 @@ Missing panes, exited agents, workspace changes, and stale mappings fail closed.
 
 The text command prefix defaults to `/herdr`; an optional mention requirement
 can be enabled with `requireMention` or `HERDR_DISCORD_REQUIRE_MENTION`.
+When the bridge bot is mentioned, a known command may omit the prefix, so both
+`@bridge agents` and `@bridge /herdr agents` are accepted. Unknown mention text
+is treated as a direct prompt only when the message is in a mapped thread;
+this keeps ordinary conversation from becoming an accidental command while
+supporting the shorter syntax. `help` documents these forms and all supported
+operations.
 
 ```text
 /herdr workspaces

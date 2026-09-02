@@ -29,6 +29,22 @@ import { agentLabel } from "./types.js";
 import { RoutingStore } from "./routing.js";
 
 const BUTTON_PREFIX = "hdb.approve.";
+const SHORT_COMMANDS = new Set([
+  "help",
+  "workspaces",
+  "agents",
+  "status",
+  "current",
+  "use",
+  "ask",
+  "target",
+  "assign",
+  "read",
+  "wait",
+  "cancel",
+  "handoff",
+  "team",
+]);
 
 export interface CommandContext {
   message: Message;
@@ -316,16 +332,20 @@ export class DiscordAdapter {
       : null;
     const mentioned = mention ? mention.test(content) : false;
     if (mention) content = content.replace(mention, "").trim();
-    if (this.config.requireMention && !mentioned) return null;
-    if (!content.startsWith(this.config.commandPrefix)) return null;
-    const rest = content.slice(this.config.commandPrefix.length).trim();
-    if (!rest)
+    const parsed = parseCommandText(
+      content,
+      this.config.commandPrefix,
+      mentioned,
+      this.config.requireMention,
+    );
+    if (!parsed) return null;
+    if (!parsed.rest)
       return {
         context: { message, routing: this.contextFor(message) },
         name: "help",
         args: [],
       };
-    const parts = rest.split(/\s+/);
+    const parts = parsed.rest.split(/\s+/);
     return {
       context: { message, routing: this.contextFor(message) },
       name: parts[0].toLowerCase(),
@@ -381,6 +401,22 @@ export class DiscordAdapter {
         this.config.allowedUserIds.includes(userId))
     );
   }
+}
+
+export function parseCommandText(
+  content: string,
+  commandPrefix: string,
+  mentioned: boolean,
+  requireMention: boolean,
+): { rest: string } | null {
+  if (requireMention && !mentioned) return null;
+  const hasPrefix = content.startsWith(commandPrefix);
+  const shortCommand = content.split(/\s+/, 1)[0]?.toLowerCase();
+  if (!hasPrefix && (!mentioned || !SHORT_COMMANDS.has(shortCommand)))
+    return null;
+  return {
+    rest: hasPrefix ? content.slice(commandPrefix.length).trim() : content,
+  };
 }
 
 function safeError(error: unknown): string {

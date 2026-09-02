@@ -20,6 +20,16 @@ direct prompts in mapped threads, and free-text replies in approval threads.
 
 ## Commands
 
+The bridge accepts both command forms:
+
+```text
+@bridge agents
+@bridge use codex
+@bridge help
+```
+
+The original prefixed form remains supported:
+
 ```text
 /herdr workspaces
 /herdr agents
@@ -37,6 +47,11 @@ direct prompts in mapped threads, and free-text replies in approval threads.
 /herdr team remove <agent-name-or-pane-id>
 /herdr team ask <prompt>
 ```
+
+When `requireMention` is enabled, mention the bot for both forms, for example
+`@bridge agents` or `@bridge /herdr agents`. In a mapped thread, a message
+whose first word is not a known command remains a direct prompt to the active
+Agent.
 
 `/herdr use <agent>` switches the active Agent for the current Discord thread
 without moving or restarting any Herdr pane. `/herdr ask <agent> ...` sends a

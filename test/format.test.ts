@@ -6,6 +6,7 @@ import {
   splitDiscordText,
   stripAnsi,
 } from "../src/format.js";
+import { parseCommandText } from "../src/discord.js";
 
 test("stripAnsi removes terminal escape sequences and controls", () => {
   assert.equal(stripAnsi("\u001b[31mred\u001b[0m\n\u0000ok"), "red\nok");
@@ -37,4 +38,18 @@ test("agent header identifies the Agent, workspace, and pane", () => {
   assert.match(rendered, /🤖 codex · backend/);
   assert.match(rendered, /Workspace: project-backend/);
   assert.match(rendered, /Pane: w1:p2/);
+});
+
+test("mention-only commands and prefixed commands share the same parser", () => {
+  assert.deepEqual(parseCommandText("agents", "/herdr", true, true), {
+    rest: "agents",
+  });
+  assert.deepEqual(parseCommandText("/herdr agents", "/herdr", true, true), {
+    rest: "agents",
+  });
+  assert.equal(parseCommandText("agents", "/herdr", false, true), null);
+  assert.equal(
+    parseCommandText("please inspect auth", "/herdr", true, true),
+    null,
+  );
 });
