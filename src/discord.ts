@@ -10,6 +10,7 @@ import {
   Message,
   ThreadChannel,
   TextChannel,
+  StringSelectMenuBuilder,
 } from "discord.js";
 import type { DiscordConfig } from "./config.js";
 import {
@@ -29,6 +30,7 @@ import { agentLabel } from "./types.js";
 import { RoutingStore } from "./routing.js";
 
 const BUTTON_PREFIX = "hdb.approve.";
+const MODEL_SELECT_PREFIX = "hdb.model.";
 const SHORT_COMMANDS = new Set([
   "help",
   "workspaces",
@@ -39,6 +41,7 @@ const SHORT_COMMANDS = new Set([
   "ask",
   "target",
   "assign",
+  "model",
   "read",
   "wait",
   "cancel",
@@ -61,6 +64,11 @@ export type ApprovalHandler = (
   text: string,
   userId: string,
 ) => Promise<void>;
+export type ModelSelectHandler = (
+  context: RoutingContext,
+  targetPaneId: string,
+  model: string,
+) => Promise<void>;
 export type PromptHandler = (
   context: CommandContext,
   text: string,
@@ -73,6 +81,7 @@ export class DiscordAdapter {
   private commandHandler: CommandHandler | null = null;
   private approvalHandler: ApprovalHandler | null = null;
   private promptHandler: PromptHandler | null = null;
+  private modelSelectHandler: ModelSelectHandler | null = null;
 
   constructor(
     private readonly config: DiscordConfig,
@@ -110,6 +119,38 @@ export class DiscordAdapter {
 
   onPrompt(handler: PromptHandler): void {
     this.promptHandler = handler;
+  }
+
+  onModelSelect(handler: ModelSelectHandler): void {
+    this.modelSelectHandler = handler;
+  }
+
+  async showModelPicker(
+    message: Message,
+    agent: AgentRecord,
+    models: string[],
+  ): Promise<Message> {
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId(MODEL_SELECT_PREFIX + agent.pane_id)
+      .setPlaceholder("Choose a model")
+      .addOptions(
+        models.slice(0, 25).map((model) => ({
+          label: model.slice(0, 100),
+          value: model.slice(0, 100),
+        })),
+      );
+    return message.reply({
+      content:
+        agentHeader(
+          agentLabel(agent),
+          agent.workspace_name || agent.workspace_id,
+          agent.pane_id,
+          agent.agent,
+        ) + "\nSelect a model for this Agent:",
+      components: [
+        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu),
+      ],
+    });
   }
 
   async start(): Promise<void> {
@@ -272,6 +313,55 @@ export class DiscordAdapter {
   }
 
   private async handleInteraction(interaction: Interaction): Promise<void> {
+    if (
+      interaction.isStringSelectMenu() &&
+      interaction.customId.startsWith(MODEL_SELECT_PREFIX)
+    ) {
+      const select = interaction;
+      const guildId = select.guildId;
+      const channel = select.channel;
+      const parentChannelId = channel?.isThread()
+        ? channel.parentId || select.channelId
+        : select.channelId;
+      if (
+        !guildId ||
+        !this.isAllowed(guildId, parentChannelId, select.user.id)
+      ) {
+        await select.reply({
+          content: "⛔ You are not authorized to control this agent.",
+          ephemeral: true,
+        });
+        return;
+      }
+      if (!this.modelSelectHandler) {
+        await select.reply({
+          content: "Model switching is unavailable.",
+          ephemeral: true,
+        });
+        return;
+      }
+      try {
+        await this.modelSelectHandler(
+          this.contextFor(select.message as Message),
+          select.customId.slice(MODEL_SELECT_PREFIX.length),
+          select.values[0],
+        );
+        await select.update({
+          content:
+            select.message.content +
+            "\n✅ Model switch requested: **" +
+            select.values[0] +
+            "**",
+          components: [],
+        });
+      } catch (error) {
+        await select.reply({
+          content: "❌ Could not switch model: " + safeError(error),
+          ephemeral: true,
+        });
+      }
+      return;
+    }
     if (
       !interaction.isButton() ||
       !interaction.customId.startsWith(BUTTON_PREFIX)

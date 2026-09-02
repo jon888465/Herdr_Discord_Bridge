@@ -4,6 +4,8 @@ Drive coding agents that are already running in Herdr panes from Discord. The
 bridge uses Discord's outbound Gateway WebSocket and Herdr's local socket; it
 does not expose a public HTTP endpoint and does not replace Herdr's PTY/runtime.
 
+[English](README.md) | [繁體中文](README.zh-TW.md)
+
 ## Install, update, and run as a Herdr plugin
 
 Install the plugin from GitHub and enable it:
@@ -105,6 +107,8 @@ The original prefixed form remains supported:
 /herdr ask <agent-name-or-pane-id> <prompt>
 /herdr target <agent-name-or-pane-id>
 /herdr assign <agent-name-or-pane-id> <prompt>
+/herdr model <model>
+/herdr model <agent-name-or-pane-id> <model>
 /herdr read <agent-name-or-pane-id>
 /herdr wait <agent-name-or-pane-id>
 /herdr cancel <agent-name-or-pane-id>
@@ -118,6 +122,13 @@ When `requireMention` is enabled, mention the bot for both forms, for example
 `@bridge agents` or `@bridge /herdr agents`. In a mapped thread, a message
 whose first word is not a known command remains a direct prompt to the active
 Agent.
+
+`/herdr model <model>` switches the model of the current thread Agent without
+restarting its pane or conversation. Use `/herdr model <agent> <model>` to target
+a specific Agent. The model string is passed through the selected CLI adapter as
+that CLI's model-switch command; the Agent must be idle. Running `/herdr model` shows a Discord select menu for the
+selected Agent; choosing an option disables the menu and reports the requested
+switch. Direct model names remain supported for models not listed by the picker.
 
 `/herdr use <agent>` switches the active Agent for the current Discord thread
 without moving or restarting any Herdr pane. `/herdr ask <agent> ...` sends a
@@ -155,6 +166,14 @@ Pane. A typical Discord thread therefore looks like:
 The bridge uses one Discord bot token for all Herdr Agents. Agent sessions stay
 in Herdr; switching or handing off only changes routing and does not reset the
 source pane. No full Discord or CLI history is copied to another Agent.
+
+For prompt replies, the bridge records the terminal snapshot before sending the
+prompt and forwards only output after that prompt. CLI-specific prompt markers
+and terminal chrome are handled by adapters in `src/cli-adapter.ts`; Codex and
+Antigravity (`agy`) have separate adapters, while unknown CLIs use a safe
+generic adapter. If no reliable prompt boundary is found, historical output is
+not forwarded. The default `notifyOn` setting is `["blocked"]`, so a separate
+`done` notification is not posted after a completed prompt.
 
 When Herdr reports an agent blocked, the bridge posts terminal context in a
 Discord thread with an approval button. An allowlisted user can press it or

@@ -24,7 +24,7 @@ context read, a Discord thread, then an API-delivered response.
 ## 2. Runtime and configuration
 
 The plugin is TypeScript compiled to `dist/` and started by the manifest pane
-with `node dist/index.js`. Herdr injects `HERDR_SOCKET_PATH` and
+with `node dist/src/index.js`. Herdr injects `HERDR_SOCKET_PATH` and
 `HERDR_PLUGIN_CONFIG_DIR`; the bridge also supports the documented default
 socket and `HERDR_SESSION` resolution for standalone operation.
 
@@ -197,8 +197,13 @@ active thread Agent only after the handoff prompt is delivered successfully.
 
 Terminal output is ANSI-stripped, control-character filtered, and split below
 Discord's 2,000-character limit at line or word boundaries. Assignment output
-updates a progress message periodically, then posts the final output when it
-needs multiple messages. The bridge only forwards observed terminal output and
+records a pre-prompt snapshot and forwards only the latest response after the
+user prompt. CLI-specific prompt markers and terminal chrome are isolated in
+`src/cli-adapter.ts`; Codex and Antigravity (`agy`) use separate adapters, and
+unknown CLIs use a conservative generic adapter. If no reliable boundary is
+found, historical output is not forwarded. A completed prompt is represented by
+the edited progress message; the default `notifyOn` is `["blocked"]`, so no
+separate `done` notification is sent. The bridge only forwards observed terminal output and
 semantic state; it never claims access to hidden chain-of-thought.
 
 ## 6. Blocked and approval flow

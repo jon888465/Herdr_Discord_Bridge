@@ -1,6 +1,7 @@
 import { stripAnsi } from "./format.js";
 
 export interface CliOutputAdapter {
+  modelCommand(model: string): string;
   extractLatestResponse(
     prompt: string,
     output: string,
@@ -9,7 +10,14 @@ export interface CliOutputAdapter {
 }
 
 class MarkerCliAdapter implements CliOutputAdapter {
-  constructor(private readonly markers: readonly string[]) {}
+  constructor(
+    private readonly markers: readonly string[],
+    private readonly modelCommandPrefix = "/model",
+  ) {}
+
+  modelCommand(model: string): string {
+    return this.modelCommandPrefix + " " + model;
+  }
 
   extractLatestResponse(
     prompt: string,
@@ -44,6 +52,22 @@ const genericAdapter = new MarkerCliAdapter([
   "User: ",
   "You: ",
 ]);
+
+export function modelOptionsFor(agentKind: string | undefined): string[] {
+  const kind = (agentKind || "").toLowerCase();
+  if (kind.includes("codex"))
+    return ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
+  if (kind.includes("antigravity") || kind === "agy")
+    return ["gemini-3.6-flash", "gemini-3.7-flash", "claude-opus-4.6"];
+  return ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
+}
+
+export function modelCommandFor(
+  agentKind: string | undefined,
+  model: string,
+): string {
+  return adapterFor(agentKind).modelCommand(model);
+}
 
 export function latestAgentResponse(
   agentKind: string | undefined,

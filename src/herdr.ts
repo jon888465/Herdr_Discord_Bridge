@@ -176,6 +176,14 @@ export class HerdrClient {
     return normalizeArray<AgentRecord>(result, "agents");
   }
 
+  async sendInput(target: string, text: string): Promise<void> {
+    await this.request("pane.send_input", {
+      pane_id: target,
+      text,
+      keys: ["enter"],
+    });
+  }
+
   async readAgent(
     target: string,
     source: ReadSource = "recent_unwrapped",

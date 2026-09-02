@@ -1,5 +1,9 @@
 import { loadConfig, statePath } from "./config.js";
-import { latestAgentResponse } from "./cli-adapter.js";
+import {
+  latestAgentResponse,
+  modelCommandFor,
+  modelOptionsFor,
+} from "./cli-adapter.js";
 import { DiscordAdapter, type CommandContext } from "./discord.js";
 import {
   agentHeader,
@@ -104,6 +108,21 @@ export async function run(): Promise<void> {
       throw new Error("you are not authorized to control this agent");
     }
   });
+  discord.onModelSelect(async (_context, targetPaneId, model) => {
+    const agent = (await herdr.listAgents()).find(
+      (candidate) => candidate.pane_id === targetPaneId,
+    );
+    if (!agent) throw new Error("agent or pane is no longer available");
+    validateAgentTarget(agent, undefined, config.allowedWorkspaceIds);
+    assertAgentAvailable(agent, {
+      config,
+      herdr,
+      routing,
+      discord,
+      activeStreams,
+    });
+    await herdr.sendInput(agent.pane_id, modelCommandFor(agent.agent, model));
+  });
   discord.onPrompt(async (context, text) => {
     try {
       await promptMappedAgent(text, context, {
@@ -183,6 +202,9 @@ async function handleCommand(
       return;
     case "assign":
       await assignAgent(args, context, runtime);
+      return;
+    case "model":
+      await modelAgent(args, context, runtime);
       return;
     case "read":
       await readAgent(args, context, runtime);
@@ -403,6 +425,41 @@ async function status(
   await runtime.discord.reply(
     context.message,
     `${reachable ? "🟢" : "🔴"} Herdr socket: ${reachable ? "reachable" : "unreachable"}\nRouting mappings: ${mappings}\nPending approvals: ${approvals}`,
+  );
+}
+
+async function modelAgent(
+  args: string[],
+  context: CommandContext,
+  runtime: Runtime,
+): Promise<void> {
+  const query = args.length > 1 ? args.shift()?.trim() || "" : "";
+  const model = args.join(" ").trim();
+  if (!model) {
+    const agent = await resolveContextAgent("", context, runtime);
+    await runtime.discord.showModelPicker(
+      context.message,
+      agent,
+      modelOptionsFor(agent.agent),
+    );
+    return;
+  }
+  if (model.length > 160 || /[\u0000\r\n]/.test(model))
+    throw new Error("model name is invalid or too long");
+  const agent = await resolveContextAgent(query, context, runtime);
+  assertAgentAvailable(agent, runtime);
+  await runtime.herdr.sendInput(
+    agent.pane_id,
+    modelCommandFor(agent.agent, model),
+  );
+  await runtime.discord.reply(
+    context.message,
+    agentHeaderFor(agent) +
+      "\n✅ Sent model switch request to **" +
+      agentLabel(agent) +
+      "**: `" +
+      model +
+      "`",
   );
 }
 
