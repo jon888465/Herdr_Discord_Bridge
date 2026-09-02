@@ -42,6 +42,7 @@ const SHORT_COMMANDS = new Set([
   "target",
   "assign",
   "model",
+  "discord",
   "read",
   "wait",
   "cancel",
@@ -82,6 +83,7 @@ export class DiscordAdapter {
   private approvalHandler: ApprovalHandler | null = null;
   private promptHandler: PromptHandler | null = null;
   private modelSelectHandler: ModelSelectHandler | null = null;
+  private paused = false;
 
   constructor(
     private readonly config: DiscordConfig,
@@ -123,6 +125,14 @@ export class DiscordAdapter {
 
   onModelSelect(handler: ModelSelectHandler): void {
     this.modelSelectHandler = handler;
+  }
+
+  isPaused(): boolean {
+    return this.paused;
+  }
+
+  setPaused(value: boolean): void {
+    this.paused = value;
   }
 
   async showModelPicker(
@@ -279,6 +289,7 @@ export class DiscordAdapter {
       return;
     const command = this.parseCommand(message);
     if (command) {
+      if (this.paused && command.name !== "discord") return;
       if (!this.commandHandler) return;
       await this.commandHandler(command.context, command.name, command.args);
       return;
@@ -313,6 +324,14 @@ export class DiscordAdapter {
   }
 
   private async handleInteraction(interaction: Interaction): Promise<void> {
+    if (this.paused) {
+      if (interaction.isButton() || interaction.isStringSelectMenu())
+        await interaction.reply({
+          content: "⏸️ Discord command handling is paused.",
+          ephemeral: true,
+        });
+      return;
+    }
     if (
       interaction.isStringSelectMenu() &&
       interaction.customId.startsWith(MODEL_SELECT_PREFIX)

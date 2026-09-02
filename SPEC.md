@@ -24,8 +24,13 @@ context read, a Discord thread, then an API-delivered response.
 ## 2. Runtime and configuration
 
 The plugin is TypeScript compiled to `dist/` and started by the manifest pane
-with `node dist/src/index.js`. Herdr injects `HERDR_SOCKET_PATH` and
+with `node dist/src/index.js`. The local restart script targets tab 1 in all modes:
+no argument starts the installed plugin, `-r` rebuilds and links the local checkout,
+and `-rg` reinstalls `jon888465/Herdr_Discord_Bridge` from GitHub. It does not
+focus that tab, so subsequent Agent panes use the caller's existing tab rather
+than being implicitly placed in tab 1. Herdr injects `HERDR_SOCKET_PATH` and
 `HERDR_PLUGIN_CONFIG_DIR`; the bridge also supports the documented default
+socket and `HERDR_SESSION` resolution for standalone operation.
 socket and `HERDR_SESSION` resolution for standalone operation.
 
 Configuration is read from `config.json` in `HERDR_PLUGIN_CONFIG_DIR` (or
@@ -183,7 +188,8 @@ and `cancel` uses Herdr's official key API rather than simulated keyboard
 input.
 
 Every Agent response and progress message includes an explicit Agent,
-Workspace, and Pane identity header. When one thread has multiple participants,
+Workspace, and Pane identity header. The WK row includes both its Herdr ID and
+name when available. When one thread has multiple participants,
 each output is posted as a separate labeled response; the bridge does not use
 multiple Discord bot tokens.
 
@@ -203,7 +209,9 @@ user prompt. CLI-specific prompt markers and terminal chrome are isolated in
 unknown CLIs use a conservative generic adapter. If no reliable boundary is
 found, historical output is not forwarded. A completed prompt is represented by
 the edited progress message; the default `notifyOn` is `["blocked"]`, so no
-separate `done` notification is sent. The bridge only forwards observed terminal output and
+separate `done` notification is sent. Discord command and approval handling can be paused without disconnecting the
+bot with `/herdr discord disable`; `/herdr discord status` and `/herdr discord enable`
+remain available. Only `discord.allowedUserIds` may change this state. The bridge only forwards observed terminal output and
 semantic state; it never claims access to hidden chain-of-thought.
 
 ## 6. Blocked and approval flow

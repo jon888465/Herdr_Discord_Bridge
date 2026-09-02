@@ -34,9 +34,9 @@ test("codeBlock neutralizes nested fences", () => {
 });
 
 test("agent header identifies the Agent, workspace, and pane", () => {
-  const rendered = agentHeader("codex", "project-backend", "w1:p2", "backend");
+  const rendered = agentHeader("codex", "w1", "w1:p2", "backend", "review");
   assert.match(rendered, /🤖 codex · backend/);
-  assert.match(rendered, /Workspace: project-backend/);
+  assert.match(rendered, /WK: w1 · review/);
   assert.match(rendered, /Pane: w1:p2/);
 });
 

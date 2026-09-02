@@ -71,15 +71,19 @@ After editing local source files, run `npm run build` again and reopen the pane
 to load the new code. Check the installed source with `herdr plugin list`; it
 should identify the plugin as a local link.
 
-The complete local rebuild/restart flow is also available as a script:
+Use the restart script in one of three modes:
 
 ```text
-./scripts/rebuild-and-run.sh
+./scripts/run.sh       # start only; no rebuild or reinstall
+./scripts/run.sh -r    # npm ci, build, and run the local checkout
+./scripts/run.sh -rg   # reinstall main from GitHub and run
 ```
 
-It builds the checkout, closes existing Discord bridge panes, replaces the
-installed plugin with a local link, and opens a fresh bridge pane. It does not
-modify the plugin configuration or Discord token.
+All modes close existing Discord bridge panes and keep tab 1 dedicated to the
+bridge. If tab 1 already contains Agent panes, they are moved to a reusable
+`Agents` tab before the bridge is opened. The script does not focus the bridge
+pane or the Agents tab, so subsequent Agent panes are not implicitly placed in
+tab 1. The script does not modify the plugin configuration or Discord token.
 
 Fill in the bot token and explicit guild/channel/user allowlists in `config.json`
 or use environment variables. Never commit that file. Discord Message Content
@@ -109,6 +113,7 @@ The original prefixed form remains supported:
 /herdr assign <agent-name-or-pane-id> <prompt>
 /herdr model <model>
 /herdr model <agent-name-or-pane-id> <model>
+/herdr discord enable|disable|status
 /herdr read <agent-name-or-pane-id>
 /herdr wait <agent-name-or-pane-id>
 /herdr cancel <agent-name-or-pane-id>
@@ -129,6 +134,18 @@ a specific Agent. The model string is passed through the selected CLI adapter as
 that CLI's model-switch command; the Agent must be idle. Running `/herdr model` shows a Discord select menu for the
 selected Agent; choosing an option disables the menu and reports the requested
 switch. Direct model names remain supported for models not listed by the picker.
+
+To pause Discord command and approval handling while keeping the bot connected, use:
+
+```text
+/herdr discord disable
+/herdr discord status
+/herdr discord enable
+```
+
+Only user IDs listed in `discord.allowedUserIds` can change this state. The restart
+script keeps the bridge in tab 1 without focusing it; leave the active tab unchanged
+so subsequently opened Agent panes are not implicitly placed in tab 1.
 
 `/herdr use <agent>` switches the active Agent for the current Discord thread
 without moving or restarting any Herdr pane. `/herdr ask <agent> ...` sends a

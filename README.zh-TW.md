@@ -57,10 +57,26 @@ herdr plugin pane open \
 在 push 到 GitHub 前，可直接 link 目前 checkout：
 
 ```text
-./scripts/rebuild-and-run.sh
+./scripts/run.sh
 ```
 
-這個 script 會執行 `npm ci`、`npm run build`、找出並關閉 Discord bridge pane、unlink 舊 plugin、link 本地 plugin，最後開啟新的 bridge pane。它不會修改 plugin 設定或 Discord token。
+使用這個 script 時：
+
+```text
+./scripts/run.sh       # 只啟動，不 rebuild 或 reinstall
+./scripts/run.sh -r    # npm ci、build，並執行本地 checkout
+./scripts/run.sh -rg   # 從 GitHub 重新安裝 main 並啟動
+```
+
+三種模式都會讓 tab 1 專門給 Discord bridge 使用。如果 tab 1 已有其他 Agent pane，script 會建立或重用 `Agents` tab 並將它們搬過去；bridge 與 Agents tab 都不會被 focus，因此之後開啟的 Agent 不會被放到 tab 1。它不會修改 plugin 設定或 Discord token。
+
+```text
+./scripts/run.sh       # 只啟動，不 rebuild 或 reinstall
+./scripts/run.sh -r    # npm ci、build，並執行本地 checkout
+./scripts/run.sh -rg   # 從 GitHub 重新安裝 main 並啟動
+```
+
+三種模式都會找出並關閉既有 Discord bridge pane，使用 tab 1 的既有 pane 作為 split target，最後將新的 bridge pane 開在 tab 1。script 不會 focus bridge，因此之後開啟的其他 Agent pane 不會因重建流程被帶到 tab 1。它不會修改 plugin 設定或 Discord token。
 
 若要手動執行：
 
@@ -88,6 +104,7 @@ herdr plugin pane open \
 
 ```text
 /herdr model <agent-name-or-pane-id> <model>
+/herdr discord enable|disable|status
 ```
 
 切換不會重啟 pane 或清除對話；Agent 工作中時會拒絕切換。實際的 model
@@ -96,6 +113,18 @@ command 由 CLI adapter 處理，避免 Codex、Antigravity（`agy`）與其他 
 
 `/herdr model` 會顯示 Discord dropdown，列出該 CLI adapter 的 model 選項；也
 可以直接指定 model 名稱。model 名稱仍需符合該 CLI 支援的名稱。
+
+要暫停 Discord command 與 approval 處理但保持 bot 連線，可使用：
+
+```text
+/herdr discord disable
+/herdr discord status
+/herdr discord enable
+```
+
+只有 `discord.allowedUserIds` 內的 user ID 可以變更狀態。重建 script 會把 bridge
+放在 tab 1 但不 focus；保留原本的 active tab，之後開啟的其他 Agent pane 就不會
+因為重建流程被帶到 tab 1。
 
 ## 回覆擷取行為
 
@@ -109,7 +138,7 @@ command 由 CLI adapter 處理，避免 Codex、Antigravity（`agy`）與其他 
 
 model/path 等 terminal UI metadata 會被過濾。如果找不到可靠的 prompt 邊界，bridge 不會把整份歷史 snapshot 當作回覆轉送。
 
-Agent 完成後，回覆會更新原本的 progress message；預設不會另外發送 `done` 通知。只有 `blocked` 狀態會依設定發送額外通知。
+Agent 完成後，回覆會更新原本的 progress message；預設不會另外發送 `done` 通知。 回應標頭的 WK（Workspace） 會同時顯示 Herdr ID 與名稱（名稱可取得時）。只有 `blocked` 狀態會依設定發送額外通知。
 
 ## Discord 指令
 

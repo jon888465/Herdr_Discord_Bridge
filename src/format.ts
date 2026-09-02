@@ -33,11 +33,14 @@ export function agentHeader(
   workspaceId: string,
   paneId: string,
   agentKind?: string,
+  workspaceName?: string,
 ): string {
   const kind = agentKind && agentKind !== agentName ? ` · ${agentKind}` : "";
   const rows = [
     boxRow(`🤖 ${cleanBoxValue(agentName)}${cleanBoxValue(kind)}`),
-    boxRow(`Workspace: ${cleanBoxValue(workspaceId)}`),
+    boxRow(
+      `WK: ${cleanBoxValue(workspaceId)}${workspaceName && workspaceName !== workspaceId ? ` · ${cleanBoxValue(workspaceName)}` : ""}`,
+    ),
     boxRow(`Pane: ${cleanBoxValue(paneId)}`),
   ];
   return codeBlock(

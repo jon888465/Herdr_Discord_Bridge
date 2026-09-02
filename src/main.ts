@@ -206,6 +206,9 @@ async function handleCommand(
     case "model":
       await modelAgent(args, context, runtime);
       return;
+    case "discord":
+      await discordControl(args, context, runtime);
+      return;
     case "read":
       await readAgent(args, context, runtime);
       return;
@@ -425,6 +428,40 @@ async function status(
   await runtime.discord.reply(
     context.message,
     `${reachable ? "🟢" : "🔴"} Herdr socket: ${reachable ? "reachable" : "unreachable"}\nRouting mappings: ${mappings}\nPending approvals: ${approvals}`,
+  );
+}
+
+async function discordControl(
+  args: string[],
+  context: CommandContext,
+  runtime: Runtime,
+): Promise<void> {
+  const userId = context.message.author.id;
+  if (
+    runtime.config.discord.allowedUserIds.length === 0 ||
+    !runtime.config.discord.allowedUserIds.includes(userId)
+  )
+    throw new Error(
+      "Discord bot control requires your user ID in allowedUserIds",
+    );
+  const action = args[0]?.toLowerCase();
+  if (!action || !["enable", "disable", "status"].includes(action))
+    throw new Error("usage: /herdr discord enable|disable|status");
+  if (action === "status") {
+    await runtime.discord.reply(
+      context.message,
+      runtime.discord.isPaused()
+        ? "⏸️ Discord command handling is paused."
+        : "✅ Discord command handling is enabled.",
+    );
+    return;
+  }
+  runtime.discord.setPaused(action === "disable");
+  await runtime.discord.reply(
+    context.message,
+    action === "disable"
+      ? "⏸️ Discord command handling paused. Use `/herdr discord enable` to resume."
+      : "✅ Discord command handling enabled.",
   );
 }
 
@@ -752,9 +789,10 @@ function agentTarget(agent: AgentRecord): {
 function agentHeaderFor(agent: AgentRecord): string {
   return agentHeader(
     agentLabel(agent),
-    agent.workspace_name || agent.workspace_id,
+    agent.workspace_id,
     agent.pane_id,
     agent.agent,
+    agent.workspace_name,
   );
 }
 
