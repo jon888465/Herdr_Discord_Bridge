@@ -4,14 +4,44 @@ Drive coding agents that are already running in Herdr panes from Discord. The
 bridge uses Discord's outbound Gateway WebSocket and Herdr's local socket; it
 does not expose a public HTTP endpoint and does not replace Herdr's PTY/runtime.
 
-## Install as a Herdr plugin
+## Install, update, and run as a Herdr plugin
+
+Install the plugin from GitHub and enable it:
 
 ```text
-herdr plugin install jon888465/Herdr_Discord_Bridge
+herdr plugin install jon888465/Herdr_Discord_Bridge --ref main --yes
+herdr plugin enable herdr-discord-bridge
+```
+
+Create the configuration file. The command prints the directory used by the
+plugin; copy the example there and fill in the bot token and allowlists:
+
+```text
 herdr plugin config-dir herdr-discord-bridge
 cp config.example.jsonc <config-dir>/config.json
-herdr plugin pane open herdr-discord-bridge/bridge
 ```
+
+Start the Discord bridge pane:
+
+```text
+herdr plugin pane open \
+  --plugin herdr-discord-bridge \
+  --entrypoint bridge
+```
+
+To update an existing installation, close the old pane using its `pane_id` from
+the pane-open response, reinstall the plugin, then open a new pane:
+
+```text
+herdr plugin pane close <pane_id>
+herdr plugin install jon888465/Herdr_Discord_Bridge --ref main --yes
+herdr plugin pane open \
+  --plugin herdr-discord-bridge \
+  --entrypoint bridge
+```
+
+The install step runs the plugin build automatically. The pane starts
+`node dist/src/index.js`, which is the compiled bridge entrypoint.
 
 Fill in the bot token and explicit guild/channel/user allowlists in `config.json`
 or use environment variables. Never commit that file. Discord Message Content

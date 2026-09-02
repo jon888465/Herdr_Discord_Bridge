@@ -15,4 +15,4 @@ command = ["npm", "run", "build"]
 id = "bridge"
 title = "Discord bridge"
 placement = "split"
-command = ["node", "dist/index.js"]
+command = ["node", "dist/src/index.js"]
