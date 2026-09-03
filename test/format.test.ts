@@ -27,6 +27,18 @@ test("splitDiscordText respects the Discord-safe limit and prefers lines", () =>
   );
 });
 
+test("splitDiscordText preserves long agent responses across all chunks", () => {
+  const response = "response line\n".repeat(300);
+  const chunks = splitDiscordText(codeBlock(response));
+
+  assert.ok(chunks.length > 1);
+  assert.ok(chunks.every((chunk) => chunk.length <= 1900));
+  assert.equal(
+    chunks.join("").replace(/\s/g, ""),
+    codeBlock(response).replace(/\s/g, ""),
+  );
+});
+
 test("codeBlock neutralizes nested fences", () => {
   const rendered = codeBlock("a```b");
   assert.ok(rendered.startsWith("```text\n"));

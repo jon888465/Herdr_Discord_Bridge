@@ -34,6 +34,7 @@ const MODEL_SELECT_PREFIX = "hdb.model.";
 const SHORT_COMMANDS = new Set([
   "help",
   "workspaces",
+  "wk",
   "agents",
   "status",
   "current",

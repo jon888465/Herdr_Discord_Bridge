@@ -154,6 +154,7 @@ Agent 完成後，回覆會更新原本的 progress message；預設不會另外
 
 ```text
 /herdr workspaces
+/herdr wk use <workspace-id-or-name>
 /herdr agents
 /herdr status
 /herdr current
@@ -173,6 +174,21 @@ Agent 完成後，回覆會更新原本的 progress message；預設不會另外
 ```
 
 設定 `requireMention` 後，兩種 command 都必須 mention bot，例如 `@bridge agents` 或 `@bridge /herdr agents`。在已 mapping 的 thread 中，普通文字會被當作 active Agent 的 prompt。
+
+### 選擇 Agent
+
+選擇 workspace 與選擇 Agent 是兩個不同動作。要把 Discord thread 導向
+Herdr 中已經執行的 Agent，請依序輸入：
+
+```text
+@bridge agents
+@bridge use w2:p1
+@bridge current
+```
+
+`wk use <workspace>` 只會記錄 workspace route，不會移動、重啟或自動選擇
+Agent。請使用 `agents` 清單顯示的 pane ID；如果不同 workspace 有同名 Agent
+（例如都叫 `codex`），不要只輸入 Agent 名稱。
 
 ## 開發與驗證
 

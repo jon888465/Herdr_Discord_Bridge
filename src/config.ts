@@ -36,7 +36,7 @@ const DEFAULTS: Config = {
   requestTimeoutMs: 5000,
   reconnectBaseMs: 250,
   approvalTimeoutMs: 900000,
-  outputLines: 80,
+  outputLines: 500,
   handoffLines: 40,
   handoffMaxChars: 6000,
   streamIntervalMs: 1200,

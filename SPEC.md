@@ -171,6 +171,7 @@ operations.
 ```
 
 `workspaces` displays Herdr-returned label/path, IDs, and agent states.
+`wk use <workspace-id-or-name>` binds only an existing, authorized Herdr workspace for the current route; it does not create a workspace, pane, or Agent. Select an Agent afterward with `use`, `target`, or `assign`.
 `current` displays the effective mapping and reports stale agent/pane data.
 `use` binds one live Agent as the active target for the current Discord thread
 (or user when used outside a thread) without sending a prompt. `target` is a

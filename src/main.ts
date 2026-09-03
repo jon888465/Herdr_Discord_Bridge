@@ -109,7 +109,7 @@ export async function run(): Promise<void> {
     }
   });
   discord.onModelSelect(async (_context, targetPaneId, model) => {
-    const agent = (await herdr.listAgents()).find(
+    const agent = (await herdr.listAgentsWithWorkspaceNames()).find(
       (candidate) => candidate.pane_id === targetPaneId,
     );
     if (!agent) throw new Error("agent or pane is no longer available");
@@ -182,6 +182,9 @@ async function handleCommand(
     case "workspaces":
       await listWorkspaces(context, runtime);
       return;
+    case "wk":
+      await workspaceCommand(args, context, runtime);
+      return;
     case "use":
       await useAgentOrWorkspace(args, context, runtime);
       return;
@@ -246,7 +249,7 @@ async function listWorkspaces(
     );
     return;
   }
-  const agents = await runtime.herdr.listAgents();
+  const agents = await runtime.herdr.listAgentsWithWorkspaceNames();
   const lines = workspaces.map((workspace) => {
     const id = workspace.workspace_id;
     const label = workspace.label || workspace.name || "(unnamed)";
@@ -261,6 +264,16 @@ async function listWorkspaces(
   await runtime.discord.reply(context.message, lines.join("\n\n"));
 }
 
+async function workspaceCommand(
+  args: string[],
+  context: CommandContext,
+  runtime: Runtime,
+): Promise<void> {
+  if (args.shift()?.toLowerCase() !== "use")
+    throw new Error("usage: /herdr wk use <workspace-id-or-name>");
+  await useWorkspace(args, context, runtime);
+}
+
 async function useAgentOrWorkspace(
   args: string[],
   context: CommandContext,
@@ -268,7 +281,7 @@ async function useAgentOrWorkspace(
 ): Promise<void> {
   const selector = args.join(" ").trim();
   if (!selector) throw new Error("usage: /herdr use <agent-name-or-pane-id>");
-  const agents = await runtime.herdr.listAgents();
+  const agents = await runtime.herdr.listAgentsWithWorkspaceNames();
   if (agents.some((agent) => agentMatches(agent, selector))) {
     await bindActiveAgent(findAgent(agents, selector), context, runtime);
     return;
@@ -323,7 +336,10 @@ async function targetAgent(
 ): Promise<void> {
   const query = args.join(" ").trim();
   if (!query) throw new Error("usage: /herdr target <agent-name-or-pane-id>");
-  const agent = findAgent(await runtime.herdr.listAgents(), query);
+  const agent = findAgent(
+    await runtime.herdr.listAgentsWithWorkspaceNames(),
+    query,
+  );
   await bindActiveAgent(agent, context, runtime);
 }
 
@@ -356,7 +372,7 @@ async function currentTarget(
     );
     return;
   }
-  const agents = await runtime.herdr.listAgents();
+  const agents = await runtime.herdr.listAgentsWithWorkspaceNames();
   const agent = mapping.paneId
     ? agents.find((candidate) => candidate.pane_id === mapping.paneId)
     : undefined;
@@ -387,7 +403,7 @@ async function listAgents(
   runtime: Runtime,
 ): Promise<void> {
   const mapping = runtime.routing.resolve(context.routing);
-  const agents = (await runtime.herdr.listAgents()).filter(
+  const agents = (await runtime.herdr.listAgentsWithWorkspaceNames()).filter(
     (agent) =>
       runtime.config.allowedWorkspaceIds.length === 0 ||
       runtime.config.allowedWorkspaceIds.includes(agent.workspace_id),
@@ -514,7 +530,10 @@ async function assignAgent(
       "prompt is empty, contains an invalid character, or is too long",
     );
   const mapping = runtime.routing.resolve(context.routing);
-  const agent = findAgent(await runtime.herdr.listAgents(), query);
+  const agent = findAgent(
+    await runtime.herdr.listAgentsWithWorkspaceNames(),
+    query,
+  );
   validateAgentTarget(agent, mapping, runtime.config.allowedWorkspaceIds);
   const target = runtime.routing.bind(context.routing, {
     workspaceId: agent.workspace_id,
@@ -540,7 +559,10 @@ async function askAgent(
   if (!query || !prompt)
     throw new Error("usage: /herdr ask <agent-name-or-pane-id> <prompt>");
   validatePrompt(prompt);
-  const agent = findAgent(await runtime.herdr.listAgents(), query);
+  const agent = findAgent(
+    await runtime.herdr.listAgentsWithWorkspaceNames(),
+    query,
+  );
   validateAgentTarget(agent, undefined, runtime.config.allowedWorkspaceIds);
   assertAgentAvailable(agent, runtime);
   runtime.routing.bind(context.routing, agentTarget(agent), {
@@ -589,7 +611,10 @@ async function teamAdd(
     );
   const query = args.join(" ").trim();
   if (!query) throw new Error("usage: /herdr team add <agent-name-or-pane-id>");
-  const agent = findAgent(await runtime.herdr.listAgents(), query);
+  const agent = findAgent(
+    await runtime.herdr.listAgentsWithWorkspaceNames(),
+    query,
+  );
   validateAgentTarget(agent, undefined, runtime.config.allowedWorkspaceIds);
   runtime.routing.bind(context.routing, agentTarget(agent), {
     activate: false,
@@ -641,7 +666,7 @@ async function teamAsk(
     throw new Error(
       "this thread has no team agents; use /herdr team add first",
     );
-  const agents = await runtime.herdr.listAgents();
+  const agents = await runtime.herdr.listAgentsWithWorkspaceNames();
   const failures: string[] = [];
   await Promise.all(
     targets.map(async (target) => {
@@ -684,7 +709,7 @@ async function handoffAgent(
     );
   if (fromQuery.toLowerCase() === toQuery.toLowerCase())
     throw new Error("handoff source and destination must be different agents");
-  const agents = await runtime.herdr.listAgents();
+  const agents = await runtime.herdr.listAgentsWithWorkspaceNames();
   const source = findAgent(agents, fromQuery);
   const destination = findAgent(agents, toQuery);
   validateAgentTarget(source, undefined, runtime.config.allowedWorkspaceIds);
@@ -897,7 +922,7 @@ async function resolveContextAgent(
   runtime: Runtime,
 ): Promise<AgentRecord> {
   const mapping = runtime.routing.resolve(context.routing);
-  const agents = await runtime.herdr.listAgents();
+  const agents = await runtime.herdr.listAgentsWithWorkspaceNames();
   const agent = query
     ? findAgent(agents, query)
     : mapping?.paneId
@@ -928,7 +953,7 @@ async function streamAgent(
     );
     let agents: AgentRecord[];
     try {
-      agents = await runtime.herdr.listAgents();
+      agents = await runtime.herdr.listAgentsWithWorkspaceNames();
     } catch {
       continue;
     }
@@ -949,7 +974,7 @@ async function streamAgent(
       const output = await runtime.herdr.readAgent(
         current.pane_id,
         "recent_unwrapped",
-        runtime.config.outputLines,
+        Math.max(runtime.config.outputLines, 500),
       );
       const latestOutput = latestAgentResponse(
         current.agent,
@@ -976,7 +1001,11 @@ async function streamAgent(
     ) {
       await runtime.discord.editProgress(
         progress,
-        `${agentHeaderFor(current)}\n${statusEmoji(current.agent_status)} Prompt finished with **${current.agent_status}**.\n${codeBlock(splitDiscordText(lastOutput || "(no output)", 1650)[0])}`,
+        `${agentHeaderFor(current)}\n${statusEmoji(current.agent_status)} Prompt finished with **${current.agent_status}**.\nFull response is posted below.`,
+      );
+      await runtime.discord.postOutput(
+        progress,
+        codeBlock(lastOutput || "(no output)"),
       );
       return;
     }
@@ -1040,7 +1069,7 @@ async function deliverApproval(
   herdr: HerdrClient,
   routing: RoutingStore,
 ): Promise<void> {
-  const agents = await herdr.listAgents();
+  const agents = await herdr.listAgentsWithWorkspaceNames();
   const current = agents.find(
     (agent) =>
       agent.terminal_id === approval.terminalId &&
@@ -1120,6 +1149,7 @@ function helpText(prefix: string): string {
     `\`${prefix} use <agent>\` — 切換 thread 的 active Agent`,
     `\`${prefix} status\` — 檢查 Herdr socket 與 routing`,
     `\`${prefix} workspaces\` — 列出可用 workspace`,
+    `\`${prefix} wk use <workspace>\` — 只切換 route workspace，不會選 Agent`,
     "",
     "**對話與執行**",
     `\`${prefix} ask <agent> <prompt>\` — 單次指定 Agent，不切換 active Agent`,
@@ -1127,6 +1157,7 @@ function helpText(prefix: string): string {
     `\`${prefix} read [agent]\` — 讀取最近輸出`,
     `\`${prefix} wait [agent]\` — 等待 Agent 到達穩定狀態`,
     `\`${prefix} cancel [agent]\` — 送出 Ctrl-C`,
+    `\`${prefix} model [agent] [model]\` — 顯示或切換指定 Agent 的 model（可用 pane ID，例如 w2:p1）`,
     "",
     "**多 Agent 與交接**",
     `\`${prefix} team add <agent>\` / \`${prefix} team remove <agent>\` — 管理 thread participants`,
@@ -1135,9 +1166,11 @@ function helpText(prefix: string): string {
     "",
     "**推薦流程**",
     "1. 在 Discord 建立 thread。",
-    `2. 輸入 \`@bot use codex\`（或 \`${prefix} use codex\`）。`,
-    "3. 直接 mention bot 後輸入對話內容；訊息只會送給 active Agent。",
-    `4. 需要轉交時輸入 \`@bot handoff codex hermes\`。`,
+    `2. 輸入 \`@bot agents\`，從清單確認 Agent 的 workspace 與 pane ID。`,
+    `3. 輸入 \`@bot use <pane-id>\`（例如 \`@bot use w2:p1\`）選取 active Agent。`,
+    "4. 直接 mention bot 後輸入對話內容；訊息只會送給 active Agent。",
+    `5. 需要轉交時輸入 \`@bot handoff <from-agent> <to-agent>\`。`,
+    "注意：不同 workspace 可能有同名 Agent；這時請使用 pane ID，不要只輸入 codex。",
   ].join("\n");
 }
 

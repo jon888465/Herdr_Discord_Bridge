@@ -104,6 +104,7 @@ The original prefixed form remains supported:
 
 ```text
 /herdr workspaces
+/herdr wk use <workspace-id-or-name>
 /herdr agents
 /herdr status
 /herdr current
@@ -127,6 +128,22 @@ When `requireMention` is enabled, mention the bot for both forms, for example
 `@bridge agents` or `@bridge /herdr agents`. In a mapped thread, a message
 whose first word is not a known command remains a direct prompt to the active
 Agent.
+
+### Selecting an Agent
+
+Selecting a workspace and selecting an Agent are separate operations. To route
+a thread to an Agent already running in Herdr:
+
+```text
+@bridge agents
+@bridge use w2:p1
+@bridge current
+```
+
+`wk use <workspace>` only records the workspace route; it does not move,
+restart, or automatically select an Agent. Use the pane ID shown by `agents`,
+especially when multiple workspaces contain an Agent with the same name (such
+as `codex`).
 
 `/herdr model <model>` switches the model of the current thread Agent without
 restarting its pane or conversation. Use `/herdr model <agent> <model>` to target

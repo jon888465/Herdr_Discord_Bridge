@@ -43,6 +43,8 @@ interface RequestOptions {
 
 /** Newline-delimited JSON client. Each request gets a bounded fresh connection. */
 export class HerdrClient {
+  private workspaceNameCache = new Map<string, string | undefined>();
+  private workspaceNameCacheAt = 0;
   constructor(
     private readonly socketPath = resolveSocketPath(),
     private readonly defaultTimeoutMs = 5000,
@@ -174,6 +176,30 @@ export class HerdrClient {
   async listAgents(): Promise<AgentRecord[]> {
     const result = await this.request<{ agents?: AgentRecord[] }>("agent.list");
     return normalizeArray<AgentRecord>(result, "agents");
+  }
+
+  async listAgentsWithWorkspaceNames(): Promise<AgentRecord[]> {
+    const agents = await this.listAgents();
+    const now = Date.now();
+    if (now - this.workspaceNameCacheAt > 10000) {
+      try {
+        const workspaces = await this.listWorkspaces();
+        this.workspaceNameCache = new Map(
+          workspaces.map((workspace) => [
+            workspace.workspace_id,
+            workspace.label || workspace.name,
+          ]),
+        );
+        this.workspaceNameCacheAt = now;
+      } catch {
+        return agents;
+      }
+    }
+    return agents.map((agent) => ({
+      ...agent,
+      workspace_name:
+        agent.workspace_name || this.workspaceNameCache.get(agent.workspace_id),
+    }));
   }
 
   async sendInput(target: string, text: string): Promise<void> {
