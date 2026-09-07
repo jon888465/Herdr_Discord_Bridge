@@ -68,6 +68,8 @@ herdr plugin pane open \
 ./scripts/run.sh -rg   # 從 GitHub 重新安裝 main 並啟動
 ```
 
+如果 Herdr server 尚未啟動，`run.sh` 會先自動啟動 headless server 並等待 socket ready，再執行 bridge 重建流程；不需要先手動輸入 `herdr`，也不會停止既有 Herdr server。
+
 三種模式都會讓 tab 1 專門給 Discord bridge 使用。如果 tab 1 已有其他 Agent pane，script 會建立或重用 `Agents` tab 並將它們搬過去；bridge 與 Agents tab 都不會被 focus，因此之後開啟的 Agent 不會被放到 tab 1。它不會修改 plugin 設定或 Discord token。
 
 ```text

@@ -1,0 +1,170 @@
+# Team Orchestration Specification
+
+Status: Proposed
+
+## 1. Purpose
+
+When a Discord thread has a Team and receives a Team Task, the active Agent
+becomes the Lead. The Lead decomposes the request into child assignments. The
+bridge validates and dispatches those assignments to different Team
+Participants, monitors their Herdr states, collects bounded reports, and asks
+the Lead to synthesize the outcome for the user.
+
+The desired relationship is:
+
+```text
+1 Discord user / thread
+        -> 1 Team Task
+        -> 1 Lead + N Participants
+        -> N Assignments
+        -> 1 Synthesis response
+```
+
+## 2. Entry point and user experience
+
+The existing command remains the entry point:
+
+```text
+@bridge team ask <task>
+```
+
+It changes from direct fan-out to orchestration only when the current thread
+has a Team. A thread without a Team keeps the current error and asks the user
+to add participants first.
+
+Before starting, the bridge resolves and validates:
+
+1. the active Agent as Lead;
+2. all Team Participants;
+3. workspace authorization and live pane identity;
+4. that no target has a conflicting active stream.
+
+The bridge posts a task receipt containing the Lead, frozen Roster, and task
+ID. Each Assignment receives its own labeled progress message. The final
+message contains the Lead's Synthesis and a compact Assignment summary.
+
+## 3. Planning contract
+
+The Lead receives the user task and a strict planning instruction. It must
+return a machine-readable plan with no more than one assignment per available
+Participant unless the plan explicitly marks an assignment as sequential.
+
+```json
+{
+  "assignments": [
+    {
+      "id": "backend",
+      "participantPaneId": "w2:p3",
+      "instruction": "Implement the backend change and run its tests.",
+      "dependsOn": []
+    }
+  ]
+}
+```
+
+The bridge, not the Lead, enforces the contract:
+
+- assignment IDs are unique;
+- every target is in the frozen Roster and is not the Lead;
+- dependencies reference existing assignments and contain no cycle;
+- instructions are bounded and contain no control characters;
+- each Participant has at most one active assignment at a time;
+- unknown targets or malformed plans fail closed.
+
+The Lead may reserve an assignment for itself only in a future extension. In
+the first version it remains the planner, monitor, and synthesizer.
+
+## 4. Scheduling and monitoring
+
+Assignments with no unfinished dependencies are dispatched in parallel,
+subject to a configured concurrency limit. The scheduler dispatches newly
+unblocked assignments when dependencies complete.
+
+Herdr state handling:
+
+| Herdr state | Assignment behavior |
+| --- | --- |
+| `idle` | eligible for dispatch |
+| `working` | running; do not dispatch another assignment |
+| `blocked` | pause assignment and use existing Discord approval flow |
+| `done` / `idle` after work | collect report and mark completed |
+| `unknown` | do not infer success; mark observable failure or require review |
+| missing pane/Agent | mark failed and stop dependent assignments |
+
+The Team Roster is frozen for the task. Adding or removing Discord Team
+members affects the next Team Task only.
+
+## 5. Synthesis
+
+After all assignments reach a terminal state, the bridge sends the Lead a
+bounded synthesis prompt containing:
+
+- the original user task;
+- the assignment plan;
+- each Assignment's status and bounded report;
+- failures, blocked work, and skipped dependents;
+- an instruction to distinguish completed facts from assumptions.
+
+The Lead's response is posted as the final user-facing result. The bridge
+must not claim that failed or skipped assignments completed. If the Lead is
+unavailable, the bridge posts the collected reports and marks synthesis as
+failed rather than silently selecting another Lead.
+
+## 6. State model
+
+```text
+planning -> dispatching -> running -> synthesizing -> completed
+     |           |            |             |
+   failed      failed       failed        failed
+     \\___________ cancelled at user request __________/
+```
+
+Assignment states are independently tracked as `pending`, `running`,
+`blocked`, `completed`, `failed`, or `cancelled`.
+
+Cancellation stops future dispatches and sends the official Herdr cancel
+operation to running assignments. It does not close panes or stop Herdr.
+
+## 7. Persistence and observability
+
+Each Team Task records at least:
+
+```json
+{
+  "taskId": "...",
+  "discordGuildId": "...",
+  "discordChannelId": "...",
+  "discordThreadId": "...",
+  "lead": { "workspaceId": "...", "paneId": "...", "agentName": "..." },
+  "roster": [],
+  "assignments": [],
+  "state": "running",
+  "createdAt": "...",
+  "updatedAt": "..."
+}
+```
+
+The persisted record is for recovery, status reporting, and audit. It stores
+bounded reports and statuses, not unrestricted terminal history.
+
+## 8. Safety and non-goals
+
+- No automatic workspace, pane, worktree, or Agent creation during a task.
+- No arbitrary shell commands generated by the Lead.
+- No silent reassignment when an Agent is busy, stale, unauthorized, or
+  ambiguous.
+- No simultaneous writes to the same files unless an explicit future policy
+  permits it.
+- No hidden chain-of-thought forwarding; only bounded observed reports.
+- No automatic merge or conflict resolution in the first version.
+
+## 9. Acceptance criteria
+
+- A Team Task uses the active Agent as Lead.
+- The Lead's plan is validated before any child assignment is dispatched.
+- Independent assignments run on distinct Team Participants.
+- Dependent assignments wait for prerequisites.
+- Discord shows task, assignment, blocked, failed, and final synthesis states.
+- A completed task includes every assignment's terminal status.
+- A stale or malformed target cannot receive a prompt.
+- Restart/recovery does not duplicate an assignment or final synthesis.

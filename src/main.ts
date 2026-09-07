@@ -486,8 +486,13 @@ async function modelAgent(
   context: CommandContext,
   runtime: Runtime,
 ): Promise<void> {
-  const query = args.length > 1 ? args.shift()?.trim() || "" : "";
-  const model = args.join(" ").trim();
+  const candidates =
+    args.length === 1
+      ? await runtime.herdr.listAgentsWithWorkspaceNames()
+      : [];
+  const request = parseModelRequest(args, candidates);
+  const query = request.query;
+  const model = request.model;
   if (!model) {
     const agent = await resolveContextAgent("", context, runtime);
     await runtime.discord.showModelPicker(
@@ -548,6 +553,26 @@ async function assignAgent(
     `${agentHeaderFor(agent)}\n📨 Assigned prompt to **${target.agentName || query}**. Herdr is running the prompt.`,
   );
 }
+export function parseModelRequest(
+  args: string[],
+  agents: AgentRecord[],
+): { query: string; model: string } {
+  const selector = args.join(" ").trim();
+  if (
+    args.length === 1 &&
+    agents.some((agent) => agentMatches(agent, selector))
+  ) {
+    return { query: selector, model: "" };
+  }
+  if (args.length > 1) {
+    return {
+      query: args[0]?.trim() || "",
+      model: args.slice(1).join(" ").trim(),
+    };
+  }
+  return { query: "", model: selector };
+}
+
 
 async function askAgent(
   args: string[],
@@ -794,7 +819,11 @@ async function dispatchPrompt(
     .catch(() => "");
   await runtime.herdr.promptAgent(agent.pane_id, prompt);
   runtime.activeStreams.add(agent.terminal_id);
-  void streamAgent(agent, progress, runtime, prompt, baselineOutput).finally(
+  void streamAgent(agent, progress, runtime, prompt, baselineOutput)
+    .catch((error) =>
+      console.error(`Discord stream failed: ${safeError(error)}`),
+    )
+    .finally(
     () => runtime.activeStreams.delete(agent.terminal_id),
   );
 }
@@ -974,7 +1003,7 @@ async function streamAgent(
       const output = await runtime.herdr.readAgent(
         current.pane_id,
         "recent_unwrapped",
-        Math.max(runtime.config.outputLines, 500),
+        Math.max(runtime.config.outputLines, 2000),
       );
       const latestOutput = latestAgentResponse(
         current.agent,
@@ -999,6 +1028,23 @@ async function streamAgent(
       settledPolls >= (sawWorking ? 2 : 4) ||
       current.agent_status === "blocked"
     ) {
+      if (!lastOutput) {
+        try {
+          const finalOutput = await runtime.herdr.readAgent(
+            current.pane_id,
+            "recent_unwrapped",
+            Math.max(runtime.config.outputLines, 2000),
+          );
+          lastOutput = latestAgentResponse(
+            current.agent,
+            prompt,
+            finalOutput,
+            baselineOutput,
+          );
+        } catch {
+          // Keep the completion message useful even if the final read fails.
+        }
+      }
       await runtime.discord.editProgress(
         progress,
         `${agentHeaderFor(current)}\n${statusEmoji(current.agent_status)} Prompt finished with **${current.agent_status}**.\nFull response is posted below.`,

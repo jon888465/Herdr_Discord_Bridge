@@ -79,6 +79,8 @@ Use the restart script in one of three modes:
 ./scripts/run.sh -rg   # reinstall main from GitHub and run
 ```
 
+If the Herdr server is not running, `run.sh` starts the headless server and waits for its socket before continuing; you do not need to type `herdr` first, and the script does not stop an existing Herdr server.
+
 All modes close existing Discord bridge panes and keep tab 1 dedicated to the
 bridge. If tab 1 already contains Agent panes, they are moved to a reusable
 `Agents` tab before the bridge is opened. The script does not focus the bridge

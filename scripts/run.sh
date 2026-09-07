@@ -29,6 +29,31 @@ case "$mode" in
     exit 2
     ;;
 esac
+ensure_herdr_server() {
+  if herdr status server >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local server_log="${TMPDIR:-/tmp}/herdr-server.log"
+  echo "Herdr server is not running; starting headless server..."
+  nohup herdr server >>"$server_log" 2>&1 </dev/null &
+
+  for _ in {1..50}; do
+    if herdr status server >/dev/null 2>&1; then
+      echo "Herdr server is ready."
+      return 0
+    fi
+    sleep 0.2
+  done
+
+  echo "Herdr server did not become ready; log: $server_log" >&2
+  if [[ -f "$server_log" ]]; then
+    tail -n 40 "$server_log" >&2
+  fi
+  return 1
+}
+
+ensure_herdr_server
 
 echo "Finding existing Discord bridge panes..."
 mapfile -t bridge_panes < <(
