@@ -1,6 +1,6 @@
 import { PROGRESS_UPDATE_MS, formatElapsed } from "./progress-time.js";
 import { prepareImages } from "./attachments.js";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { splitFinalMarkdown } from "./final-format.js";
 import {
   CodexTranscript,
@@ -828,7 +828,11 @@ async function dispatchPrompt(
         throw new Error("此 Agent 尚未支援本機圖片交付。");
       const paths = await prepareImages(
         attachments,
-        join(dirname(statePath(runtime.config)), "attachments"),
+        join(
+          agent.cwd || process.cwd(),
+          ".herdr-discord-bridge",
+          "attachments",
+        ),
       );
       prompt +=
         "\n\n使用者附圖（本機檔案）：\n" +

@@ -1,93 +1,83 @@
-# Herdr Discord Bridge specification
+# Herdr Discord Bridge 規格
 
-## 1. Scope and architecture
+## 1. 範圍與架構
 
-This plugin is a local Herdr control client with Discord as the human interface.
-The coding CLI remains a real process in a Herdr pane:
+此 plugin 是本機 Herdr 控制端，以 Discord 作為人類使用者介面。程式 CLI
+仍是 Herdr pane 中運作的真實程序：
 
 ```text
-Discord Gateway (outbound WebSocket)
-        -> this bridge
-        -> Herdr local Unix socket / Windows named pipe
-        -> Herdr workspace, pane and recognized agent
-        -> the CLI already running in that pane
+Discord Gateway（outbound WebSocket）
+        -> 此 bridge
+        -> Herdr 本機 Unix socket / Windows named pipe
+        -> Herdr workspace、pane 與已辨識的 agent
+        -> 該 pane 中已經執行的 CLI
 ```
 
-The bridge is not an ACP broker and never starts a coding CLI itself. A Discord
-disconnect therefore cannot stop an agent. The bridge also never exposes an
-HTTP listener or a public endpoint.
+Bridge 不是 ACP broker，也不會自行啟動 coding CLI。因此 Discord 斷線不會
+停止 agent。Bridge 也不會開啟 HTTP listener 或 public endpoint。
 
-The design follows Herdr's documented plugin v1 manifest and socket API, and
-the blocked/approval pattern from `herdr-hail`: status observation, terminal
-context read, a Discord thread, then an API-delivered response.
+設計遵循 Herdr 文件中的 plugin v1 manifest 與 socket API，以及
+`herdr-hail` 的 blocked/approval 模式：觀察狀態、讀取 terminal context、
+建立 Discord thread，再透過 API 傳送回應。
 
-## 2. Runtime and configuration
+## 2. 執行環境與設定
 
-The plugin is TypeScript compiled to `dist/` and started by the manifest pane
-with `node dist/src/index.js`. The local restart script targets tab 1 in all modes:
-no argument starts the installed plugin, `-r` rebuilds and links the local checkout,
-and `-rg` reinstalls `jon888465/Herdr_Discord_Bridge` from GitHub. It does not
-focus that tab, so subsequent Agent panes use the caller's existing tab rather
-than being implicitly placed in tab 1. Herdr injects `HERDR_SOCKET_PATH` and
-`HERDR_PLUGIN_CONFIG_DIR`; the bridge also supports the documented default
-socket and `HERDR_SESSION` resolution for standalone operation.
-socket and `HERDR_SESSION` resolution for standalone operation.
+Plugin 以 TypeScript 編譯至 `dist/`，由 manifest pane 以
+`node dist/src/index.js` 啟動。本機 restart script 在所有模式下都以 tab 1
+為目標：無參數時啟動已安裝 plugin，`-r` 重新建置並連結本機 checkout，
+`-rg` 從 GitHub 重新安裝 `jon888465/Herdr_Discord_Bridge`。它不會聚焦該
+tab，因此後續 Agent pane 會使用呼叫端原本的 tab，不會被隱含放入 tab 1。
+Herdr 會注入 `HERDR_SOCKET_PATH` 與 `HERDR_PLUGIN_CONFIG_DIR`；standalone
+執行時也支援文件定義的預設 socket 與 `HERDR_SESSION` 解析方式。
 
-Configuration is read from `config.json` in `HERDR_PLUGIN_CONFIG_DIR` (or
-`~/.config/herdr-discord-bridge/config.json` standalone). Tokens may be
-provided by `HERDR_DISCORD_BOT_TOKEN` or `DISCORD_BOT_TOKEN`. The example file
-is JSONC, but the real file is gitignored. Environment variables override file
-values. State is stored below `HERDR_PLUGIN_STATE_DIR` (or the config
-directory's `state/`) and the configured state filename is restricted to one
-basename, preventing traversal.
+設定從 `HERDR_PLUGIN_CONFIG_DIR` 中的 `config.json` 讀取（standalone 時為
+`~/.config/herdr-discord-bridge/config.json`）。Token 可由
+`HERDR_DISCORD_BOT_TOKEN` 或 `DISCORD_BOT_TOKEN` 提供。範例檔是 JSONC，
+實際設定檔會被 gitignore。環境變數會覆蓋檔案設定。狀態儲存在
+`HERDR_PLUGIN_STATE_DIR` 下（或 config directory 的 `state/`）；設定的
+state filename 僅允許單一 basename，以防止 path traversal。
 
-Handoff context is bounded by `handoffLines` (default `40`) and
-`handoffMaxChars` (default `6000`). These limits are applied before a handoff
-is posted to Discord or sent to the destination Agent.
+Handoff context 受 `handoffLines`（預設 `40`）與 `handoffMaxChars`（預設
+`6000`）限制。這些限制會在 handoff 發到 Discord 或送往目的 Agent 前套用。
 
-The Discord adapter requires `messageContent` because the requested
-`/herdr ...` commands, mapped-thread prompts, and free-text approval replies are
-text messages. It uses only the Gateway intents needed for guild messages plus
-message content;
-there is no inbound web server. Guild, channel and user allowlists are checked
-before command, reply, or button handling. Empty lists mean “not restricted by
-that dimension” and should be replaced with explicit IDs for a sensitive
-deployment. `allowedWorkspaceIds`, when non-empty, is an additional Herdr
-workspace authorization boundary.
+Discord adapter 需要 `messageContent`，因為 `/herdr ...` 指令、已映射 thread
+中的 prompt，以及純文字 approval 回覆都是文字訊息。它只使用 guild message
+與 message content 所需的 Gateway intents；沒有 inbound web server。Command、
+reply 或 button 處理前會檢查 guild、channel 與 user allowlist。空清單表示
+該維度不限制；敏感部署應改用明確 ID。非空的 `allowedWorkspaceIds` 會再增加
+一層 Herdr workspace 授權邊界。
 
 ## 3. Herdr protocol client
 
-`HerdrClient` sends one newline-delimited JSON request over a fresh local
-socket connection. A response with `error` becomes a typed `HerdrError`; no
-request parameters or prompt text are included in error logs. Fresh bounded
-connections avoid a broken long-lived request multiplexing every operation.
+`HerdrClient` 會在新的本機 socket connection 上送出一筆以換行分隔的 JSON
+request。帶有 `error` 的 response 會轉成 typed `HerdrError`；錯誤 log 不會
+包含 request parameters 或 prompt 文字。每個操作使用新的 bounded connection，
+避免長連線故障使所有 operation 的 multiplexing 一起失效。
 
-Socket failures retry at most twice with exponential backoff starting at
-`reconnectBaseMs`. Protocol errors do not retry. The watcher continues on the
-next interval after an outage, so a socket failure is reported without a crash
-loop and without affecting Herdr panes.
+Socket failure 最多重試兩次，使用從 `reconnectBaseMs` 開始的 exponential
+backoff。Protocol error 不重試。Watcher 在故障後於下一個 interval 繼續，
+因此 socket failure 只會被回報，不會形成 crash loop，也不影響 Herdr pane。
 
-The client uses these official methods:
+Client 使用下列官方方法：
 
-| Bridge operation | Herdr method                                                                                |
-| ---------------- | ------------------------------------------------------------------------------------------- |
-| health           | `ping`                                                                                      |
-| workspaces       | `workspace.list`, with `session.snapshot` fallback                                          |
-| agents           | `agent.list`                                                                                |
-| output           | `agent.read`                                                                                |
-| assign           | `agent.prompt`, with legacy `agent.send` fallback                                           |
-| blocked reply    | legacy-compatible `agent.send`, with `agent.prompt` and official `pane.send_input` fallback |
-| wait             | `agent.wait`                                                                                |
-| cancel           | `agent.send_keys` with `ctrl+c`                                                             |
+| Bridge 操作 | Herdr method |
+| --- | --- |
+| health | `ping` |
+| workspaces | `workspace.list`，以 `session.snapshot` fallback |
+| agents | `agent.list` |
+| output | `agent.read` |
+| assign | `agent.prompt`，以 legacy `agent.send` fallback |
+| blocked reply | 相容 legacy 的 `agent.send`，以 `agent.prompt` 與官方 `pane.send_input` fallback |
+| wait | `agent.wait` |
+| cancel | `agent.send_keys`，傳送 `ctrl+c` |
 
-IDs are always copied from Herdr JSON responses. The bridge never predicts a
-workspace or pane ID and never accepts a filesystem path as a workspace
-selector. `agent.prompt` and `agent.send` carry JSON text; Discord input is not
-passed through a shell.
+ID 一律複製自 Herdr JSON response。Bridge 不會預測 workspace 或 pane ID，也
+不接受 filesystem path 作為 workspace selector。`agent.prompt` 與
+`agent.send` 傳送 JSON text；Discord input 不會經過 shell。
 
-## 4. Routing and authorization
+## 4. 路由與授權
 
-The persisted routing record contains the requested Discord and Herdr fields:
+持久化 routing record 包含下列 Discord 與 Herdr 欄位：
 
 ```json
 {
@@ -103,14 +93,14 @@ The persisted routing record contains the requested Discord and Herdr fields:
 }
 ```
 
-Mappings are separate maps and are resolved in this exact order:
+Mapping 分成不同 map，並依下列確切順序解析：
 
 ```text
 thread mapping > user mapping > channel default
 ```
 
-Thread mappings are keyed by guild, parent channel and thread. Each thread
-route contains an `activeAgentKey` plus independent Agent mappings:
+Thread mapping 以 guild、parent channel 與 thread 作為 key。每個 thread route
+包含 `activeAgentKey` 與獨立的 Agent mapping：
 
 ```json
 {
@@ -130,27 +120,25 @@ route contains an `activeAgentKey` plus independent Agent mappings:
 }
 ```
 
-User mappings are keyed by guild and user, so one user's default cannot
-replace another user's selection. `/herdr use <agent>` changes only
-`activeAgentKey`; it does not call any Herdr focus, move, close, restart, or
-create method. Existing Agent sessions are never reset by routing changes.
+User mapping 以 guild 與 user 作為 key，因此一位使用者的預設值不會取代另一
+位使用者的選擇。`/herdr use <agent>` 只會變更 `activeAgentKey`，不會呼叫
+Herdr 的 focus、move、close、restart 或 create method。變更 routing 不會重設
+既有 Agent session。
 
-Agent commands resolve a live agent from `agent.list`. A target can match a
-unique agent name/alias, agent kind, pane ID, terminal ID, or terminal title;
-ambiguous matches are rejected and pane ID is requested. Every resolved target
-is checked against the selected workspace and configured workspace allowlist.
-Missing panes, exited agents, workspace changes, and stale mappings fail closed.
+Agent 指令會從 `agent.list` 解析 live agent。Target 可比對唯一的 agent
+name/alias、agent kind、pane ID、terminal ID 或 terminal title；若有歧義則
+拒絕並要求使用 pane ID。每個解析出的 target 都會檢查 selected workspace
+與設定的 workspace allowlist。Pane 不存在、agent 已退出、workspace 改變或
+mapping 過期時，一律 fail closed。
 
-## 5. Discord commands and output
+## 5. Discord 指令與輸出
 
-The text command prefix defaults to `/herdr`; an optional mention requirement
-can be enabled with `requireMention` or `HERDR_DISCORD_REQUIRE_MENTION`.
-When the bridge bot is mentioned, a known command may omit the prefix, so both
-`@bridge agents` and `@bridge /herdr agents` are accepted. Unknown mention text
-is treated as a direct prompt only when the message is in a mapped thread;
-this keeps ordinary conversation from becoming an accidental command while
-supporting the shorter syntax. `help` documents these forms and all supported
-operations.
+文字指令 prefix 預設為 `/herdr`；可用 `requireMention` 或
+`HERDR_DISCORD_REQUIRE_MENTION` 啟用 mention 要求。提及 bridge bot 時，已知
+指令可省略 prefix，因此 `@bridge agents` 與 `@bridge /herdr agents` 都接受。
+未知的 mention 文字只有在訊息位於已映射 thread 時才會當成 direct prompt；這
+可避免普通對話意外成為指令，同時支援較短語法。`help` 會說明這些形式與所有
+支援的操作。
 
 ```text
 /herdr workspaces
@@ -170,127 +158,116 @@ operations.
 /herdr team ask <prompt>
 ```
 
-`workspaces` displays Herdr-returned label/path, IDs, and agent states.
-`wk use <workspace-id-or-name>` binds only an existing, authorized Herdr workspace for the current route; it does not create a workspace, pane, or Agent. Select an Agent afterward with `use`, `target`, or `assign`.
-`current` displays the effective mapping and reports stale agent/pane data.
-`use` binds one live Agent as the active target for the current Discord thread
-(or user when used outside a thread) without sending a prompt. `target` is a
-backward-compatible alias. In a thread with an active target, an ordinary
-user message is a direct prompt to that Agent, subject to the same allowlist,
-stale-mapping, and busy checks as `assign`. `ask` sends a one-shot prompt to a
-named Agent and records that Agent in the thread without changing its active
-target. `team add` and `team remove` manage independent thread participants;
-`team ask` sends only the supplied prompt to each participant and never
-broadcasts the thread or terminal history.
-`assign` binds the current thread or user to the selected workspace/agent and
-uses `agent.prompt`; a working agent or duplicate active stream is rejected as
-busy. `read` uses `recent_unwrapped`, `wait` uses the event-driven Herdr wait,
-and `cancel` uses Herdr's official key API rather than simulated keyboard
-input.
+`workspaces` 顯示 Herdr 回傳的 label/path、ID 與 agent state。`wk use
+<workspace-id-or-name>` 只會將目前 route 綁定到既有且已授權的 Herdr workspace；
+不會建立 workspace、pane 或 Agent。之後使用 `use`、`target` 或 `assign` 選擇
+Agent。`current` 顯示有效 mapping，並回報過期的 agent/pane 資料。
 
-Every Agent response and progress message includes an explicit Agent,
-Workspace, and Pane identity header. The WK row includes both its Herdr ID and
-name when available. When one thread has multiple participants,
-each output is posted as a separate labeled response; the bridge does not use
-multiple Discord bot tokens.
+`use` 會在目前 Discord thread（若不在 thread 則為 user）綁定一個 live Agent
+作為 active target，但不送出 prompt。Thread 有 active target 時，普通 user
+message 會直接送給該 Agent，並套用與 `assign` 相同的 allowlist、過期 mapping
+與 busy 檢查。`target` 是向後相容的 alias。`ask` 對指定 Agent 發送一次性
+prompt，並將該 Agent 記錄到 thread，但不改變 active target。`team add` 與
+`team remove` 管理獨立的 thread participants；`team ask` 只將指定 prompt 送給
+每個 participant，不會廣播 thread 或 terminal history。
 
-`handoff <from> <to>` reads only `handoffLines` of recent source output and
-limits the generated handoff to `handoffMaxChars`. It redacts common token and
-authorization formats, wraps the excerpt as untrusted observed output, and
-sends only that bounded summary plus an optional user instruction to the
-destination. This supports a deliberate transfer after a token/context limit
-without copying the source Agent's full history. The destination becomes the
-active thread Agent only after the handoff prompt is delivered successfully.
+`assign` 將目前 thread 或 user 綁定至選定的 workspace/agent，並使用
+`agent.prompt`；正在工作的 Agent 或重複的 active stream 會被視為 busy 而拒絕。
+`read` 使用 `recent_unwrapped`，`wait` 使用 event-driven Herdr wait，
+`cancel` 使用 Herdr 官方 key API，而非模擬鍵盤輸入。
+
+每個 Agent response 與 progress message 都包含明確的 Agent、Workspace、Pane
+identity header。WK row 在可取得時同時包含 Herdr ID 與名稱。一個 thread 有
+多個 participant 時，每個輸出都會以獨立且有 label 的 response 發送；Bridge
+不使用多個 Discord bot token。
+
+`handoff <from> <to>` 只讀取來源最近 `handoffLines` 行，並將產生的 handoff
+限制在 `handoffMaxChars`。它會遮罩常見 token 與 authorization 格式，將摘錄
+包裝為不可信的 observed output，再將該 bounded summary 與可選的使用者指示
+送往目的地。這支援在 token/context limit 後進行明確轉交，不會複製來源 Agent
+的完整 history。只有在 handoff prompt 成功送出後，目的地才成為 active thread
+Agent。
 
 ### Response streaming v1
 
-The progress message shows the latest 1,500 characters of the prompt-scoped
-CLI response, refreshed every ten seconds (on the next stream poll). Elapsed wall time is
-shown after the status even when output is unchanged. The first card and final
-are sent promptly. Final duration is frozen when completion is observed, excluding
-Discord delivery time; blocked waiting time is included. This is polling-based
-rolling preview, not a token stream. State changes remain visible even without
-new text. Progress delivery failure does not prevent final delivery.
+Progress message 顯示 prompt scope CLI response 的最新 1,500 個字元，並每十秒
+（下一次 stream poll）重新整理。即使輸出沒有變化，status 後仍會顯示經過的
+wall time。第一張 card 與 final 會即時送出。Final duration 在觀察到完成時
+凍結，不包含 Discord delivery time；等待 blocked 的時間會計入。這是以 polling
+為基礎的 rolling preview，不是 token stream。即使沒有新文字，state change
+仍會顯示。Progress delivery failure 不會阻止 final delivery。
 
-For Codex, before dispatch the bridge resolves the exact Herdr agent_session
-ID under CODEX_HOME/sessions (default ~/.codex/sessions) and records the file
-offset. Only subsequent event_msg records are consumed. task_started plus an
-exact user_message match associates a turn; agent_message with phase
-final_answer supplies the answer, and matching task_complete confirms completion.
-Both legacy user_message/agent_message and item_completed envelopes containing
-UserMessage/AgentMessage are supported. Item events must match the active turn_id.
-Public commentary and command-execution status provide preview when terminal
-prompt extraction is unavailable; Reasoning items are ignored.
-Reasoning and commentary records are not used as final. No second Agent is started.
-Missing, ambiguous, inaccessible or incompatible transcripts use the terminal
-fallback. Different per-pane CODEX_HOME settings require the bridge to use the
-same catalog; remote-only session files are not supported.
+對 Codex 而言，dispatch 前 Bridge 會在 `CODEX_HOME/sessions`（預設
+`~/.codex/sessions`）下解析確切的 Herdr `agent_session` ID，並記錄檔案 offset。
+只會消費之後的 event_msg record。`task_started` 加上完全相符的
+`user_message` 用來關聯 turn；`agent_message` 的 `phase final_answer` 提供
+答案；相符的 `task_complete` 確認完成。支援 legacy `user_message`/
+`agent_message`，以及包含 `UserMessage`/`AgentMessage` 的 `item_completed`
+envelope。Item event 必須符合 active `turn_id`。當 terminal prompt extraction
+無法使用時，公開的 commentary 與 command-execution status 可提供 preview；
+Reasoning item 會忽略。
 
-The terminal fallback retains the longest prompt-scoped observed excerpt.
-It does not claim this excerpt is a complete final or an accumulated transcript.
-Only four unchanged successful reads in idle/done, followed by ten seconds of
-continued settlement, allow fallback completion. blocked, unknown, changing
-output and failed reads reset settlement. A structured completion can finish
-without a successful terminal read. A replaced Agent session stops observation.
+Reasoning 與 commentary record 不會作為 final。Bridge 不會啟動第二個 Agent。
+Transcript 缺少、不明確、無法存取或格式不相容時，使用 terminal fallback。每個
+pane 不同的 `CODEX_HOME` 必須使用相同 catalog；不支援只存在遠端的 session
+file。
 
-Final is sent separately, using Markdown-aware chunks below Discord's content
-limit. finished is shown after all chunks are sent. Missing final is described
-as capture incomplete, never as proof of an empty Agent answer. Partial/failed
-Discord delivery is reported separately. Progress edit failures are isolated.
-No hidden reasoning events are consumed. Terminal preview is still observed CLI
-text and is not a semantic tool-event feed.
+Terminal fallback 保留最長的、限定於 prompt scope 的已觀察摘錄；不會宣稱此
+摘錄是完整 final 或累積 transcript。只有在 idle/done 狀態連續四次未變且成功的
+read，再持續 settlement 十秒，才允許 fallback 完成。blocked、unknown、輸出
+變動或 read failure 都會重設 settlement。Structured completion 可在沒有成功
+terminal read 時完成。Agent session 被替換後停止觀察。
 
-This first version does not implement persistent delivery retries, mirror
-commands, an agy structured transcript adapter, or automatic attachment mode.
-Already-sent chunks are not replayed on delivery failure; SDK transport handling
-remains in effect. Monitoring has a 24-hour ceiling. This experimental local
-transcript format is version-dependent and must retain regression fixtures.
+Final 會獨立發送，使用 Markdown-aware chunks，且不超過 Discord content limit。
+所有 chunks 發送完後才顯示 finished。缺少 final 時會描述為 capture incomplete，
+絕不把它當成 Agent 回覆為空的證據。部分或失敗的 Discord delivery 會另外回報。
+Progress edit failure 與 final delivery 隔離。Bridge 不會消費 hidden reasoning
+event；terminal preview 仍是被觀察到的 CLI text，不是 semantic tool-event feed。
 
-Discord command and approval handling can be paused without disconnecting the
-bot with /herdr discord disable; status and enable remain available.
-Only discord.allowedUserIds may change this state. The default notifyOn remains
-blocked, avoiding a duplicate done notification.
+第一版不實作 persistent delivery retries、mirror commands、agy structured
+transcript adapter 或 automatic attachment mode。已送出的 chunks 在 delivery
+failure 時不會重播；SDK transport handling 仍有效。Monitoring 上限為 24 小時。
+此實驗性本機 transcript format 依版本而異，必須保留 regression fixtures。
 
-See [Chinese response design](docs/response-events-design.zh-TW.md) for the
-longer-term event contract and implementation phases.
+Discord command 與 approval handling 可用 `/herdr discord disable` 暫停，而不
+斷開 bot；status 與 enable 仍可使用。只有 `discord.allowedUserIds` 能變更此
+狀態。預設 `notifyOn` 維持 `blocked`，避免重複的 done notification。
 
-## 6. Blocked and approval flow
+較長期的 event contract 與實作階段請參閱
+[中文回應設計](docs/response-events-design.zh-TW.md)。
 
-The watcher polls `agent.list` at a bounded interval and ignores the initial
-snapshot. A configured transition to `blocked` reads the detection snapshot and
-posts it to every mapped Discord destination for that Agent. If the destination
-is already a mapped thread, that thread is reused; otherwise the bridge starts
-a Discord thread. The bridge creates a random opaque approval token only after
-the thread exists and stores it with guild, channel, thread, message, terminal,
-workspace and pane identity plus an expiry.
+## 6. Blocked 與 approval 流程
 
-The root message receives a tokenized “Approve / continue” button. A button is
-accepted only when the token was minted by this bridge, the guild/channel match,
-the caller passes the allowlist, the token is active and unexpired, and a fresh
-`agent.list` still has the same terminal, workspace and pane in `blocked` state.
-Free-text replies are accepted only inside the exact thread stored with that
-approval and pass the same allowlist and live-target checks. The text is sent
-through `agent.send`/`agent.prompt`; on newer Herdr versions where a blocked
-`agent.prompt` is intentionally rejected, the official `pane.send_input` API
-submits the text and Enter atomically. It is never shell-evaluated.
+Watcher 以 bounded interval polling `agent.list`，並忽略初始 snapshot。偵測到
+設定的 `blocked` transition 後，讀取 detection snapshot，並將它發送到該 Agent
+所有已映射的 Discord destination。若 destination 已是 mapped thread，就重用該
+thread；否則 Bridge 建立 Discord thread。Thread 建立後，Bridge 才產生隨機且
+不透明的 approval token，並連同 guild、channel、thread、message、terminal、
+workspace、pane identity 與 expiry 一起儲存。
 
-Approvals expire, are bounded in count, and are deactivated when the agent
-recovers, exits, or the target becomes stale. Recovery/exit notices are best
-effort and deleted Discord threads are safe to ignore. State is atomically
-written with restrictive file permissions and is flushed on shutdown.
+Root message 會收到帶 token 的「Approve / continue」button。只有 token 由此
+Bridge mint、guild/channel 相符、呼叫者通過 allowlist、token 仍 active 且未過期，
+並且最新的 `agent.list` 仍顯示相同 terminal、workspace、pane 為 `blocked` 狀態
+時，button 才會被接受。純文字 reply 只有在 approval 儲存的精確 thread 內才
+接受，並通過相同 allowlist 與 live-target 檢查。文字透過 `agent.send`/`agent.prompt`
+送出；在新版 Herdr 有意拒絕 blocked `agent.prompt` 時，使用官方
+`pane.send_input` API 原子地送出文字與 Enter。絕不以 shell 評估。
 
-## 7. Lifecycle and failure behavior
+Approval 會過期且數量受限；agent 恢復、退出或 target 過期時會停用。Recovery/
+exit notice 採 best effort；被刪除的 Discord thread 可安全忽略。State 以限制性
+檔案權限原子寫入，並在 shutdown 時 flush。
 
-Discord.js owns Gateway reconnect behavior. The Herdr watcher has one
-in-flight poll at a time and retries socket operations only a finite number of
-times. Discord or Herdr failure is surfaced to the Discord command or process
-log without stopping remote work. A long assignment stream can run for up to
-24 hours and can be inspected at any time with `read`; it reports an exited
-pane and stops tracking when Herdr no longer returns the target.
+## 7. 生命週期與失敗行為
 
-## 8. Verification and completion definition
+Discord.js 負責 Gateway reconnect。Herdr watcher 同一時間只允許一個 in-flight
+poll，socket operation 也只有限次重試。Discord 或 Herdr failure 會回報給 Discord
+command 或 process log，不會停止遠端工作。長時間 assignment stream 最長可執行
+24 小時，任何時候都可用 `read` 檢查；當 Herdr 不再回傳 target 時，會回報 pane
+已退出並停止追蹤。
 
-The repository must pass:
+## 8. 驗證與完成定義
+
+Repository 必須通過：
 
 ```text
 npm run lint
@@ -299,46 +276,42 @@ npm test
 npm run build
 ```
 
-Tests cover message splitting/ANSI handling, routing precedence and
-authorization/stale mapping, active Agent selection, multiple thread Agent
-mappings, legacy state migration, Agent identity headers, config path safety,
-and a mock newline-delimited Herdr socket for ping/list/read/prompt/wait/cancel
-plus bounded retry. A final diff scan must contain no real credentials, tokens,
-private local config, or runtime state. The plugin manifest must be linkable by
-Herdr. Commit/push and runtime restart or deployment follow the user's authorization;
-automated checks do not by themselves authorize publication.
+測試涵蓋 message splitting/ANSI handling、routing precedence 與
+authorization/stale mapping、active Agent selection、多 thread Agent mapping、
+legacy state migration、Agent identity header、config path safety，以及用於
+ping/list/read/prompt/wait/cancel 與 bounded retry 的 mock newline-delimited
+Herdr socket。Final diff scan 不得包含真實 credential、token、private local
+config 或 runtime state。Plugin manifest 必須能被 Herdr link。Commit/push 與
+runtime restart 或 deployment 依使用者授權執行；自動檢查本身不代表已授權發布。
 
-## Discord replies and local image delivery (2026-09-09)
+## Discord reply 與本機圖片傳遞（2026-09-09）
 
-An authorized same-channel reply to this bot satisfies the prompt mention gate.
-References are fetched and validated against bot, guild and channel identity.
-Unresolvable references and parent-channel image/reply prompts receive errors;
-the bridge never guesses a cross-thread destination. Existing routing and
-workspace validation still apply. Paused prompts are not dispatched.
+對此 bot 的同 channel 授權 reply 可滿足 prompt mention gate。Bridge 會取得並
+驗證 reference 的 bot、guild 與 channel identity。無法解析的 reference，以及
+parent channel 的 image/reply prompt 會回報錯誤；Bridge 絕不猜測跨 thread 的
+destination。既有 routing 與 workspace validation 仍會套用。暫停中的 prompt
+不會 dispatch。
 
-Image-only thread messages use a default image-inspection prompt. Up to four
-PNG/JPEG/WebP attachments, each at most 5 MiB, are downloaded from Discord HTTPS
-CDN hosts with no redirects, a timeout, streamed byte limit and signature checks.
-Generated local paths under the bridge state attachments directory are passed
-to Codex/agy with an explicit instruction to use an image-viewing tool.
-This is local file delivery, not native multimodal input, and requires the Agent
-to access the same filesystem. Unsupported agents/formats and failed downloads
-are reported. Successful files are retained (no automatic retention cleanup yet);
-failed batches remove only their own newly created temporary directory.
-The terminal is reserved during preparation to prevent concurrent dispatches.
+只有圖片的 thread message 使用預設 image-inspection prompt。最多下載四個
+PNG/JPEG/WebP attachment，每個最多 5 MiB；下載來源限 Discord HTTPS CDN host，
+禁止 redirect，具有 timeout、streamed byte limit 與 signature check。產生的本機
+路徑位於 target Agent cwd 下的 `.herdr-discord-bridge/attachments`，並以明確
+指示要求 Codex/agy 使用 image-viewing tool。這是本機檔案傳遞，不是原生
+multimodal input，且要求 Agent 可存取相同 filesystem。不支援的 agent/format
+與下載失敗會回報。成功檔案會保留（目前尚無自動 retention cleanup）；失敗批次
+只會刪除自己新建的 temporary directory。準備期間會保留 terminal，避免並行
+dispatch。
 
-## Documentation and issue lifecycle (mandatory)
+## 文件與 issue 生命週期（強制）
 
-All agents must follow [AGENTS.md](AGENTS.md). Every behavior change must update
-this specification and affected documentation in the same work session.
-New defects, failed tests, user acceptance failures and regressions must be
-recorded in [known issues](docs/known-issues.md), including when no fix is made.
-Reopen recurring issues without deleting previous investigation history.
+所有 agent 都必須遵循 [AGENTS.md](AGENTS.md)。每個行為變更都必須在同一工作
+階段更新本規格與受影響文件。新 defect、failed test、使用者 acceptance failure
+與 regression 必須記錄在 [known issues](docs/known-issues.md)，即使沒有修正也
+一樣要記錄。重新發生的 issue 要保留過往調查歷史，不得刪除後重建。
 
-Record dated evidence, reproduction conditions, confirmed versus suspected
-causes, test commands/results and remaining acceptance steps. Distinguish
-source-fixed, built, running/deployed and live-verified states. Unit tests and
-build success do not close an issue requiring Discord/Herdr/CLI acceptance.
-Keep proposed features separate from implemented behavior and reconcile stale
-or contradictory statements before handoff. Pure documentation changes need
-content/link/diff checks, not an unrelated full code test rerun.
+記錄有日期的 evidence、reproduction condition、已確認與推測的原因、測試指令/
+結果及剩餘 acceptance step。區分 source-fixed、built、running/deployed 與
+live-verified 狀態。Unit test 與 build 成功不能關閉仍需要 Discord/Herdr/CLI
+acceptance 的 issue。提議中的 feature 必須與已實作行為分開，並在交接前調和
+過時或互相矛盾的敘述。純文件變更只需要 content/link/diff check，不需無關的
+完整程式測試重跑。

@@ -306,7 +306,6 @@ export class DiscordAdapter {
         const referenced = await message.fetchReference();
         replyToBot =
           referenced.author.id === this.client.user?.id &&
-          referenced.guildId === message.guildId &&
           referenced.channelId === message.channelId;
       } catch {
         await message.reply(

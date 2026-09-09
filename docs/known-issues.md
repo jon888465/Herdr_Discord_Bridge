@@ -4,8 +4,8 @@
 
 | ID | 問題 | 狀態 | 下一步 |
 | --- | --- | --- | --- |
-| ISSUE-001 | Discord reply 未觸發 bridge | 已修正、待驗收 | 重啟後在 mapped thread 回覆 bot |
-| ISSUE-002 | Discord 圖片未交付 Agent | 已修正、待驗收 | 驗證 Codex／agy 實際讀取圖片 |
+| ISSUE-001 | Discord reply 未觸發 bridge | 重新開啟、待驗收 | 重啟後在 mapped thread 回覆 bot |
+| ISSUE-002 | Discord 圖片未交付 Agent | 重新開啟、待驗收 | 驗證 Codex／agy 實際讀取圖片 |
 | ISSUE-003 | 預覽與 final 未更新 | 已修正、待驗收 | 重啟後驗證 working、preview、final、finished |
 
 2026-09-09 自動化驗證：`npm run check`（typecheck、build、33/33 tests）、`npm run lint`、`git diff --check` 通過。這是前一輪程式驗證紀錄，不代表已做 live Discord 驗收。本輪僅整理文件，未重跑程式測試。
@@ -96,9 +96,9 @@ Discord 圖片附件問題於 2026-09-09 補上本機交付流程，仍需端到
 
 - Reply 根因：requireMention 只檢查訊息文字，未驗證 message.reference。現在同一 guild/channel 回覆本 bot 可免再次 mention；其他 bot 不享有此例外。
 - 純圖片根因：空 content 提前返回，且 dispatch 沒有處理 attachments。現在允許圖片進入 prompt 流程。
-- 附件交付：本機 Codex／agy 使用圖片工具讀取下載檔案，不是原生 multimodal API 注入；仍需確認 Agent sandbox 能讀到該路徑。
+- 附件交付：本機 Codex／agy 使用圖片工具讀取下載檔案，不是原生 multimodal API 注入；附件現在存於目標 Agent cwd 下，降低 CLI sandbox 無法讀取的風險，仍需端到端驗收。
 - 圖片限制：每則最多 4 張 PNG/JPEG/WebP，每張最多 5 MiB；限定 Discord HTTPS CDN，拒絕 redirect，驗證內容簽章；失敗清除當次部分檔案並回報。
-- 成功檔案存於 bridge state 目錄下 attachments/message-*，目前保留供後續問答使用，尚無自動過期清理。管理者需按需求清理。
+- 成功檔案存於目標 Agent 工作目錄下的 .herdr-discord-bridge/attachments/message-*，目前保留供後續問答使用，尚無自動過期清理。管理者需按需求清理。
 - 暫停模式不再繼續處理普通 thread prompts；等待核准時不把圖片當作核准回答。
 - 未新增 mirror/UI 開關；其仍是功能待辦。
 
@@ -107,3 +107,8 @@ Discord 圖片附件問題於 2026-09-09 補上本機交付流程，仍需端到
 驗證（2026-09-09）：npm run check（typecheck、build、35/35 tests）、npm run lint、git diff --check 通過。
 
 狀態：已實作、待驗收。working 顯示已耗時，每十秒刷新；finished 顯示完成時總耗時。測試：`test/progress-time.test.ts` 驗證無內容變動時仍刷新、十秒節流、完成立即更新與秒／分／小時格式。時間從回應追蹤開始計算，包含 blocked 等待；實際 Discord 顯示待重啟後驗收。
+- 下一步驗收：重啟 bridge 後測試純文字 reply、reply 附圖、純圖片、長回覆，確認 Herdr pane 收到 prompt，並確認 Agent 實際能讀圖.
+- 本輪修正：附件改存於目標 Agent cwd 下的 `.herdr-discord-bridge/attachments/message-*`，降低 CLI sandbox 無法讀取的風險；reply 驗證不再依賴被引用訊息的 guildId 欄位.
+- 使用者提供 PNG：檔案存在於 `/home/jones/.local/state/herdr/plugins/herdr-discord-bridge/attachments/message-g0olbv/1.png`，大小 109641 bytes、1057x677。圖片檢視工具受 sandbox 限制未能讀取畫面內容；不可據此宣稱 Agent 已看到圖片.
+- 使用者回報：在 Discord 回覆 bridge／CLI 訊息後，從 CLI 與 Discord 畫面看不到內容被送進 Agent。問題重新開啟，需以實際 reply message、mapped thread、Agent 狀態與 bridge 日誌重現.
+## 2026-09-09 再現紀錄
