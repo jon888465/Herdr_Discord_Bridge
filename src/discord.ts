@@ -104,7 +104,10 @@ export class DiscordAdapter {
 
     this.client.on(
       Events.MessageCreate,
-      (message) => void this.handleMessage(message),
+      (message) =>
+        void this.handleMessage(message).catch((error) =>
+          console.error(`Discord inbound failed: ${safeError(error)}`),
+        ),
     );
     this.client.on(
       Events.InteractionCreate,
@@ -187,7 +190,8 @@ export class DiscordAdapter {
 
   async postOutput(message: Message, content: string): Promise<void> {
     const channel = message.channel as TextChannel | ThreadChannel;
-    for (const chunk of splitDiscordText(content)) await channel.send(chunk);
+    for (const chunk of splitDiscordText(content))
+      await channel.send({ content: chunk, allowedMentions: { parse: [] } });
   }
 
   async postAgentTransition(
@@ -295,14 +299,38 @@ export class DiscordAdapter {
       await this.commandHandler(command.context, command.name, command.args);
       return;
     }
-    if (
-      !this.config.messageContent ||
-      !message.content ||
-      !message.channel.isThread()
-    )
+    if (this.paused || !this.config.messageContent) return;
+    let replyToBot = false;
+    if (message.reference?.messageId) {
+      try {
+        const referenced = await message.fetchReference();
+        replyToBot =
+          referenced.author.id === this.client.user?.id &&
+          referenced.guildId === message.guildId &&
+          referenced.channelId === message.channelId;
+      } catch {
+        await message.reply(
+          "❌ 無法讀取被回覆的訊息；請直接 mention bot 並重新發問。",
+        );
+        return;
+      }
+    }
+    if (!message.channel.isThread()) {
+      if (replyToBot || message.attachments.size)
+        await message.reply(
+          "❌ 請在已綁定 Agent 的 Discord thread 內發問或傳送圖片。",
+        );
       return;
+    }
+    if (!message.content.trim() && !message.attachments.size) return;
     const context = this.contextFor(message, message.channel.id);
     const approval = this.routing.getApprovalForThread(context);
+    if (approval && message.attachments.size) {
+      await message.reply(
+        "❌ Agent 正等待核准；請先回答核准問題，再傳送圖片。",
+      );
+      return;
+    }
     if (approval && this.approvalHandler) {
       try {
         await this.approvalHandler(
@@ -315,7 +343,7 @@ export class DiscordAdapter {
       }
       return;
     }
-    const prompt = this.parsePrompt(message);
+    const prompt = this.parsePrompt(message, replyToBot);
     if (!prompt || !this.promptHandler) return;
     try {
       await this.promptHandler({ message, routing: context }, prompt);
@@ -463,15 +491,17 @@ export class DiscordAdapter {
     };
   }
 
-  private parsePrompt(message: Message): string | null {
-    if (!message.channel.isThread() || !message.content.trim()) return null;
+  private parsePrompt(message: Message, replyToBot = false): string | null {
+    if (!message.channel.isThread()) return null;
     let content = message.content.trim();
     const mention = this.client.user
       ? new RegExp(`<@!?${this.client.user.id}>`, "g")
       : null;
     const mentioned = mention ? mention.test(content) : false;
     if (mention) content = content.replace(mention, "").trim();
-    if (this.config.requireMention && !mentioned) return null;
+    if (this.config.requireMention && !mentioned && !replyToBot) return null;
+    if (!content && message.attachments.size)
+      content = "請檢視附上的圖片並回覆。";
     if (!content || content.startsWith(this.config.commandPrefix)) return null;
     return content;
   }

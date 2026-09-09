@@ -41,3 +41,9 @@
 - [Herdr direct interaction mirror to Discord](docs/pending-features.md):
   explicitly relay direct Herdr prompts and Agent responses to the mapped
   Discord thread to preserve conversation context.
+
+## Project maintenance
+
+All contributors must follow [AGENTS.md](AGENTS.md), including same-session
+issue/spec documentation updates and reopening issues after failed acceptance.
+The current issue and verification ledger is [known issues](docs/known-issues.md).

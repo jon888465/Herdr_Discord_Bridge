@@ -202,18 +202,57 @@ destination. This supports a deliberate transfer after a token/context limit
 without copying the source Agent's full history. The destination becomes the
 active thread Agent only after the handoff prompt is delivered successfully.
 
-Terminal output is ANSI-stripped, control-character filtered, and split below
-Discord's 2,000-character limit at line or word boundaries. Assignment output
-records a pre-prompt snapshot and forwards only the latest response after the
-user prompt. CLI-specific prompt markers and terminal chrome are isolated in
-`src/cli-adapter.ts`; Codex and Antigravity (`agy`) use separate adapters, and
-unknown CLIs use a conservative generic adapter. If no reliable boundary is
-found, historical output is not forwarded. A completed prompt is represented by
-the edited progress message; the default `notifyOn` is `["blocked"]`, so no
-separate `done` notification is sent. Discord command and approval handling can be paused without disconnecting the
-bot with `/herdr discord disable`; `/herdr discord status` and `/herdr discord enable`
-remain available. Only `discord.allowedUserIds` may change this state. The bridge only forwards observed terminal output and
-semantic state; it never claims access to hidden chain-of-thought.
+### Response streaming v1
+
+The progress message shows the latest 1,500 characters of the prompt-scoped
+CLI response, refreshed every ten seconds (on the next stream poll). Elapsed wall time is
+shown after the status even when output is unchanged. The first card and final
+are sent promptly. Final duration is frozen when completion is observed, excluding
+Discord delivery time; blocked waiting time is included. This is polling-based
+rolling preview, not a token stream. State changes remain visible even without
+new text. Progress delivery failure does not prevent final delivery.
+
+For Codex, before dispatch the bridge resolves the exact Herdr agent_session
+ID under CODEX_HOME/sessions (default ~/.codex/sessions) and records the file
+offset. Only subsequent event_msg records are consumed. task_started plus an
+exact user_message match associates a turn; agent_message with phase
+final_answer supplies the answer, and matching task_complete confirms completion.
+Both legacy user_message/agent_message and item_completed envelopes containing
+UserMessage/AgentMessage are supported. Item events must match the active turn_id.
+Public commentary and command-execution status provide preview when terminal
+prompt extraction is unavailable; Reasoning items are ignored.
+Reasoning and commentary records are not used as final. No second Agent is started.
+Missing, ambiguous, inaccessible or incompatible transcripts use the terminal
+fallback. Different per-pane CODEX_HOME settings require the bridge to use the
+same catalog; remote-only session files are not supported.
+
+The terminal fallback retains the longest prompt-scoped observed excerpt.
+It does not claim this excerpt is a complete final or an accumulated transcript.
+Only four unchanged successful reads in idle/done, followed by ten seconds of
+continued settlement, allow fallback completion. blocked, unknown, changing
+output and failed reads reset settlement. A structured completion can finish
+without a successful terminal read. A replaced Agent session stops observation.
+
+Final is sent separately, using Markdown-aware chunks below Discord's content
+limit. finished is shown after all chunks are sent. Missing final is described
+as capture incomplete, never as proof of an empty Agent answer. Partial/failed
+Discord delivery is reported separately. Progress edit failures are isolated.
+No hidden reasoning events are consumed. Terminal preview is still observed CLI
+text and is not a semantic tool-event feed.
+
+This first version does not implement persistent delivery retries, mirror
+commands, an agy structured transcript adapter, or automatic attachment mode.
+Already-sent chunks are not replayed on delivery failure; SDK transport handling
+remains in effect. Monitoring has a 24-hour ceiling. This experimental local
+transcript format is version-dependent and must retain regression fixtures.
+
+Discord command and approval handling can be paused without disconnecting the
+bot with /herdr discord disable; status and enable remain available.
+Only discord.allowedUserIds may change this state. The default notifyOn remains
+blocked, avoiding a duplicate done notification.
+
+See [Chinese response design](docs/response-events-design.zh-TW.md) for the
+longer-term event contract and implementation phases.
 
 ## 6. Blocked and approval flow
 
@@ -266,5 +305,40 @@ mappings, legacy state migration, Agent identity headers, config path safety,
 and a mock newline-delimited Herdr socket for ping/list/read/prompt/wait/cancel
 plus bounded retry. A final diff scan must contain no real credentials, tokens,
 private local config, or runtime state. The plugin manifest must be linkable by
-Herdr and the completed change must be committed and pushed to the requested
-remote.
+Herdr. Commit/push and runtime restart or deployment follow the user's authorization;
+automated checks do not by themselves authorize publication.
+
+## Discord replies and local image delivery (2026-09-09)
+
+An authorized same-channel reply to this bot satisfies the prompt mention gate.
+References are fetched and validated against bot, guild and channel identity.
+Unresolvable references and parent-channel image/reply prompts receive errors;
+the bridge never guesses a cross-thread destination. Existing routing and
+workspace validation still apply. Paused prompts are not dispatched.
+
+Image-only thread messages use a default image-inspection prompt. Up to four
+PNG/JPEG/WebP attachments, each at most 5 MiB, are downloaded from Discord HTTPS
+CDN hosts with no redirects, a timeout, streamed byte limit and signature checks.
+Generated local paths under the bridge state attachments directory are passed
+to Codex/agy with an explicit instruction to use an image-viewing tool.
+This is local file delivery, not native multimodal input, and requires the Agent
+to access the same filesystem. Unsupported agents/formats and failed downloads
+are reported. Successful files are retained (no automatic retention cleanup yet);
+failed batches remove only their own newly created temporary directory.
+The terminal is reserved during preparation to prevent concurrent dispatches.
+
+## Documentation and issue lifecycle (mandatory)
+
+All agents must follow [AGENTS.md](AGENTS.md). Every behavior change must update
+this specification and affected documentation in the same work session.
+New defects, failed tests, user acceptance failures and regressions must be
+recorded in [known issues](docs/known-issues.md), including when no fix is made.
+Reopen recurring issues without deleting previous investigation history.
+
+Record dated evidence, reproduction conditions, confirmed versus suspected
+causes, test commands/results and remaining acceptance steps. Distinguish
+source-fixed, built, running/deployed and live-verified states. Unit tests and
+build success do not close an issue requiring Discord/Herdr/CLI acceptance.
+Keep proposed features separate from implemented behavior and reconcile stale
+or contradictory statements before handoff. Pure documentation changes need
+content/link/diff checks, not an unrelated full code test rerun.

@@ -1,3 +1,12 @@
+import { PROGRESS_UPDATE_MS, formatElapsed } from "./progress-time.js";
+import { prepareImages } from "./attachments.js";
+import { dirname, join } from "node:path";
+import { splitFinalMarkdown } from "./final-format.js";
+import {
+  CodexTranscript,
+  Settlement,
+  rollingPreview,
+} from "./response-stream.js";
 import { loadConfig, statePath } from "./config.js";
 import {
   latestAgentResponse,
@@ -487,9 +496,7 @@ async function modelAgent(
   runtime: Runtime,
 ): Promise<void> {
   const candidates =
-    args.length === 1
-      ? await runtime.herdr.listAgentsWithWorkspaceNames()
-      : [];
+    args.length === 1 ? await runtime.herdr.listAgentsWithWorkspaceNames() : [];
   const request = parseModelRequest(args, candidates);
   const query = request.query;
   const model = request.model;
@@ -572,7 +579,6 @@ export function parseModelRequest(
   }
   return { query: "", model: selector };
 }
-
 
 async function askAgent(
   args: string[],
@@ -810,22 +816,51 @@ async function dispatchPrompt(
   acknowledgement: string,
 ): Promise<void> {
   assertAgentAvailable(agent, runtime);
-  const progress = await runtime.discord.reply(
-    context.message,
-    acknowledgement,
-  );
-  const baselineOutput = await runtime.herdr
-    .readAgent(agent.pane_id, "recent_unwrapped", runtime.config.outputLines)
-    .catch(() => "");
-  await runtime.herdr.promptAgent(agent.pane_id, prompt);
   runtime.activeStreams.add(agent.terminal_id);
-  void streamAgent(agent, progress, runtime, prompt, baselineOutput)
-    .catch((error) =>
-      console.error(`Discord stream failed: ${safeError(error)}`),
+  try {
+    const attachments = [...context.message.attachments.values()];
+    if (attachments.length) {
+      if (
+        !["codex", "agy", "antigravity"].some((kind) =>
+          agent.agent?.toLowerCase().includes(kind),
+        )
+      )
+        throw new Error("此 Agent 尚未支援本機圖片交付。");
+      const paths = await prepareImages(
+        attachments,
+        join(dirname(statePath(runtime.config)), "attachments"),
+      );
+      prompt +=
+        "\n\n使用者附圖（本機檔案）：\n" +
+        paths.map((path) => JSON.stringify(path)).join("\n") +
+        "\n請使用圖片檢視工具讀取這些檔案；若無法讀取，請明確告知，不要假設已看見圖片。";
+    }
+    const progress = await runtime.discord.reply(
+      context.message,
+      acknowledgement,
+    );
+    const baselineOutput = await runtime.herdr
+      .readAgent(agent.pane_id, "recent_unwrapped", runtime.config.outputLines)
+      .catch(() => "");
+    const transcript = await CodexTranscript.connect(agent, prompt);
+    validatePrompt(prompt);
+    await runtime.herdr.promptAgent(agent.pane_id, prompt);
+    void streamAgent(
+      agent,
+      progress,
+      runtime,
+      prompt,
+      baselineOutput,
+      transcript,
     )
-    .finally(
-    () => runtime.activeStreams.delete(agent.terminal_id),
-  );
+      .catch((error) =>
+        console.error(`Discord stream failed: ${safeError(error)}`),
+      )
+      .finally(() => runtime.activeStreams.delete(agent.terminal_id));
+  } catch (error) {
+    runtime.activeStreams.delete(agent.terminal_id);
+    throw error;
+  }
 }
 
 function agentTarget(agent: AgentRecord): {
@@ -965,17 +1000,30 @@ async function resolveContextAgent(
   return agent;
 }
 
-async function streamAgent(
+export async function streamAgent(
   initial: AgentRecord,
   progress: import("discord.js").Message,
   runtime: Runtime,
   prompt: string,
   baselineOutput: string,
+  transcript?: CodexTranscript,
 ): Promise<void> {
   const started = Date.now();
   let lastOutput = "";
-  let sawWorking = false;
-  let settledPolls = 0;
+  let longestOutput = "";
+  let lastCard = "";
+  let lastEdit = started - PROGRESS_UPDATE_MS;
+  let collectingSince = 0;
+  const settlement = new Settlement();
+  const edit = async (content: string): Promise<boolean> => {
+    try {
+      await runtime.discord.editProgress(progress, content);
+      return true;
+    } catch (error) {
+      console.error(`Progress delivery failed: ${safeError(error)}`);
+      return false;
+    }
+  };
   while (Date.now() - started < 86400000) {
     await new Promise((resolve) =>
       setTimeout(resolve, runtime.config.streamIntervalMs),
@@ -988,77 +1036,85 @@ async function streamAgent(
     }
     const current = agents.find(
       (agent) =>
-        agent.terminal_id === initial.terminal_id ||
-        agent.pane_id === initial.pane_id,
+        agent.terminal_id === initial.terminal_id &&
+        JSON.stringify(agent.agent_session) ===
+          JSON.stringify(initial.agent_session),
     );
     if (!current) {
-      await runtime.discord.editProgress(
-        progress,
-        `${agentHeaderFor(initial)}\n⚫ Agent exited or pane closed while the prompt was running.`,
+      await edit(
+        `${agentHeaderFor(initial)}\n⚫ Agent exited or session changed; response capture stopped.`,
       );
       return;
     }
-    if (current.agent_status === "working") sawWorking = true;
+    let readOk = false;
+    let changed = false;
+    try {
+      await transcript?.poll();
+    } catch (error) {
+      console.error(`Transcript capture failed: ${safeError(error)}`);
+    }
     try {
       const output = await runtime.herdr.readAgent(
         current.pane_id,
         "recent_unwrapped",
         Math.max(runtime.config.outputLines, 2000),
       );
-      const latestOutput = latestAgentResponse(
+      const latest = latestAgentResponse(
         current.agent,
         prompt,
         output,
         baselineOutput,
       );
-      if (latestOutput && latestOutput !== lastOutput) {
-        lastOutput = latestOutput;
-        const preview = splitDiscordText(latestOutput, 1650)[0];
-        await runtime.discord.editProgress(
-          progress,
-          `${agentHeaderFor(current)}\n${statusEmoji(current.agent_status)} **${current.agent_status}**\n${codeBlock(preview)}`,
+      readOk = true;
+      changed = latest !== lastOutput;
+      lastOutput = latest;
+      if (latest.length > longestOutput.length) longestOutput = latest;
+    } catch (error) {
+      console.error(`Terminal capture failed: ${safeError(error)}`);
+    }
+    const settled = settlement.observe(current.agent_status, readOk, changed);
+    if (!settled) collectingSince = 0;
+    else if (!collectingSince) collectingSince = Date.now();
+    const status =
+      current.agent_status === "blocked"
+        ? "blocked — waiting for approval/input"
+        : settled
+          ? "collecting final response"
+          : current.agent_status;
+    const card = `${agentHeaderFor(current)}\n${statusEmoji(current.agent_status)} **${status}** · 已耗時 ${formatElapsed(Date.now() - started)}\n${codeBlock(rollingPreview(transcript?.turn.preview || lastOutput) || "Waiting for CLI output…")}`;
+    if (card !== lastCard && Date.now() - lastEdit >= PROGRESS_UPDATE_MS) {
+      const delivered = await edit(card);
+      if (delivered) lastCard = card;
+      lastEdit = Date.now();
+    }
+    const complete =
+      transcript?.turn.completed ||
+      (settled && Date.now() - collectingSince >= 10000);
+    if (complete && current.agent_status !== "blocked") {
+      const elapsed = formatElapsed(Date.now() - started);
+      const final = transcript?.turn.completed ? transcript.turn.final : "";
+      const body =
+        final ||
+        (longestOutput
+          ? `⚠️ Final response unavailable; captured CLI excerpt (may include progress or be incomplete):\n${longestOutput}`
+          : "⚠️ Agent ended, but Bridge could not capture its final response. This is a capture failure, not proof of an empty answer.");
+      try {
+        for (const chunk of splitFinalMarkdown(body))
+          await runtime.discord.postOutput(progress, chunk);
+        await edit(
+          `${agentHeaderFor(current)}\n${final ? "✅ finished — final response delivered" : "⚠️ finished — capture incomplete; diagnostic delivered"} · 總耗時 ${elapsed}`,
+        );
+      } catch (error) {
+        console.error(`Final delivery failed: ${safeError(error)}`);
+        await edit(
+          `${agentHeaderFor(current)}\n⚠️ Agent ended, but Discord delivery failed or was partial. Already delivered chunks were not resent.`,
         );
       }
-    } catch {
-      // The watcher and next stream tick will retry; this does not stop Herdr.
-    }
-    if (current.agent_status === "working") settledPolls = 0;
-    else settledPolls += 1;
-    if (
-      settledPolls >= (sawWorking ? 2 : 4) ||
-      current.agent_status === "blocked"
-    ) {
-      if (!lastOutput) {
-        try {
-          const finalOutput = await runtime.herdr.readAgent(
-            current.pane_id,
-            "recent_unwrapped",
-            Math.max(runtime.config.outputLines, 2000),
-          );
-          lastOutput = latestAgentResponse(
-            current.agent,
-            prompt,
-            finalOutput,
-            baselineOutput,
-          );
-        } catch {
-          // Keep the completion message useful even if the final read fails.
-        }
-      }
-      await runtime.discord.editProgress(
-        progress,
-        `${agentHeaderFor(current)}\n${statusEmoji(current.agent_status)} Prompt finished with **${current.agent_status}**.\nFull response is posted below.`,
-      );
-      await runtime.discord.postOutput(
-        progress,
-        codeBlock(lastOutput || "(no output)"),
-      );
       return;
     }
   }
-  await runtime.discord.editProgress(
-    progress,
-    `${agentHeaderFor(initial)}\n⏱️ Prompt is still running; use "/herdr read <agent>" for the latest output.`,
+  await edit(
+    `${agentHeaderFor(initial)}\n⏱️ Monitoring timed out; use /herdr read for the current CLI output.`,
   );
 }
 

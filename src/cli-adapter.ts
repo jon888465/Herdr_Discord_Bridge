@@ -56,10 +56,24 @@ const genericAdapter = new MarkerCliAdapter([
 export function modelOptionsFor(agentKind: string | undefined): string[] {
   const kind = (agentKind || "").toLowerCase();
   if (kind.includes("codex"))
-    return ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
+    return [
+      "gpt-6-astra",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+      "gpt-5.5",
+      "gpt-5.4-mini",
+    ];
   if (kind.includes("antigravity") || kind === "agy")
     return ["gemini-3.6-flash", "gemini-3.7-flash", "claude-opus-4.6"];
-  return ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
+  return [
+    "gpt-6-astra",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-5.5",
+    "gpt-5.4-mini",
+  ];
 }
 
 export function modelCommandFor(

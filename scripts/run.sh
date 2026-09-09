@@ -29,8 +29,12 @@ case "$mode" in
     exit 2
     ;;
 esac
+is_herdr_server_running() {
+  herdr status server 2>/dev/null | grep -Eq "^status:[[:space:]]*running"
+}
+
 ensure_herdr_server() {
-  if herdr status server >/dev/null 2>&1; then
+  if is_herdr_server_running; then
     return 0
   fi
 
@@ -39,7 +43,7 @@ ensure_herdr_server() {
   nohup herdr server >>"$server_log" 2>&1 </dev/null &
 
   for _ in {1..50}; do
-    if herdr status server >/dev/null 2>&1; then
+    if is_herdr_server_running; then
       echo "Herdr server is ready."
       return 0
     fi
