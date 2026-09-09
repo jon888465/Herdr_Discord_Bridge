@@ -28,6 +28,8 @@
 ## Invariants
 
 - A Team belongs to exactly one Discord thread.
+- Team members in one thread must belong to exactly one workspace; a different workspace is a separate routing context, not the same Team.
+- Team membership mappings persist across bridge restarts; unavailable panes remain stale and are not dispatchable until Herdr reports them again.
 - A Team Task has exactly one Lead and zero or more Participants.
 - The Lead is selected from the active Agent mapping when the task begins.
 - A Team Task never silently changes its Lead or Roster while running.

@@ -14,6 +14,7 @@ import {
   modelOptionsFor,
 } from "./cli-adapter.js";
 import { DiscordAdapter, type CommandContext } from "./discord.js";
+import { startConsole } from "./console.js";
 import {
   agentHeader,
   codeBlock,
@@ -146,6 +147,22 @@ export async function run(): Promise<void> {
     }
   });
   await discord.start();
+  const consoleControl = startConsole(
+    config.discord.commandPrefix,
+    async (command, args, context) => {
+      try {
+        await handleCommand(command, args, context, {
+          config,
+          herdr,
+          routing,
+          discord,
+          activeStreams,
+        });
+      } catch (error) {
+        console.error("❌ " + safeError(error));
+      }
+    },
+  );
 
   const watcher = new AgentWatcher(herdr, config.pollIntervalMs);
   watcher.on("transition", (transition: AgentTransition) => {
@@ -160,10 +177,11 @@ export async function run(): Promise<void> {
   watcher.start();
   installShutdown(() => {
     watcher.stop();
+    consoleControl.stop();
     void discord.stop();
   }, routing);
   console.log(
-    "herdr-discord-bridge: Discord Gateway connected and Herdr watcher started",
+    "herdr-discord-bridge: Discord Gateway connected, Herdr watcher started, pane console ready (type help)",
   );
 }
 
@@ -615,6 +633,10 @@ async function teamCommand(
 ): Promise<void> {
   const action = args.shift()?.toLowerCase();
   switch (action) {
+    case "list":
+    case "members":
+      await teamList(context, runtime);
+      return;
     case "add":
       await teamAdd(args, context, runtime);
       return;
@@ -626,9 +648,41 @@ async function teamCommand(
       return;
     default:
       throw new Error(
-        "usage: /herdr team add|remove <agent-name-or-pane-id> or /herdr team ask <prompt>",
+        "usage: /herdr team list|add|remove <agent-name-or-pane-id> or /herdr team ask <prompt>",
       );
   }
+}
+
+async function teamList(
+  context: CommandContext,
+  runtime: Runtime,
+): Promise<void> {
+  if (!context.routing.threadId)
+    throw new Error("team members can only be viewed inside a Discord thread");
+  const targets = runtime.routing.threadTargets(context.routing);
+  if (targets.length === 0) {
+    await runtime.discord.reply(
+      context.message,
+      "👥 This thread has no Team members. Use /herdr team add <agent> to add one.",
+    );
+    return;
+  }
+  const agents = await runtime.herdr.listAgentsWithWorkspaceNames();
+  const activeTarget = runtime.routing.resolve(context.routing);
+  const active = activeTarget?.paneId;
+  const teamWorkspaceId = activeTarget?.workspaceId || targets[0].workspaceId;
+  const validTargets = targets.filter((target) => target.workspaceId === teamWorkspaceId);
+  const members = validTargets.map((target) => {
+    const agent = agents.find((item) => item.pane_id === target.paneId);
+    const status = agent?.agent_status || "stale";
+    const label = agent ? agentLabel(agent) : target.agentName || "unknown Agent";
+    const workspace = agent?.workspace_name || target.workspaceId;
+    return (target.paneId === active ? "▶" : "•") + " **" + label + "** · " + workspace + " · pane " + (target.paneId || "unavailable") + " · " + status;
+  });
+  await runtime.discord.reply(
+    context.message,
+    "👥 **Team members (" + members.length + ")**\n" + members.join("\n") + "\n\n▶ = active Agent; stale = Herdr 目前找不到此 pane。",
+  );
 }
 
 async function teamAdd(
@@ -647,6 +701,12 @@ async function teamAdd(
     query,
   );
   validateAgentTarget(agent, undefined, runtime.config.allowedWorkspaceIds);
+  const existingTargets = runtime.routing.threadTargets(context.routing);
+  const existingWorkspaces = new Set(existingTargets.map((target) => target.workspaceId));
+  if (existingWorkspaces.size > 0 && (existingWorkspaces.size > 1 || !existingWorkspaces.has(agent.workspace_id)))
+    throw new Error(
+      "all Team members must belong to the same workspace; remove the other workspace members first",
+    );
   runtime.routing.bind(context.routing, agentTarget(agent), {
     activate: false,
   });
@@ -696,6 +756,11 @@ async function teamAsk(
   if (targets.length === 0)
     throw new Error(
       "this thread has no team agents; use /herdr team add first",
+    );
+  const workspaceIds = new Set(targets.map((target) => target.workspaceId));
+  if (workspaceIds.size > 1)
+    throw new Error(
+      "this Team contains multiple workspaces; remove members from other workspaces before using team ask",
     );
   const agents = await runtime.herdr.listAgentsWithWorkspaceNames();
   const failures: string[] = [];
@@ -1267,6 +1332,7 @@ function helpText(prefix: string): string {
     "",
     "**多 Agent 與交接**",
     `\`${prefix} team add <agent>\` / \`${prefix} team remove <agent>\` — 管理 thread participants`,
+    `\`${prefix} team list\` — 查看目前 thread 的 Team 成員、pane 與即時狀態`,
     `\`${prefix} team ask <prompt>\` — 只把這次 prompt 送給所有 participants，不複製完整 history`,
     `\`${prefix} handoff <from> <to> [instruction]\` — 以受限近期輸出摘要交接給另一個 Agent`,
     "",

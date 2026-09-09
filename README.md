@@ -121,6 +121,7 @@ The original prefixed form remains supported:
 /herdr wait <agent-name-or-pane-id>
 /herdr cancel <agent-name-or-pane-id>
 /herdr handoff <from-agent> <to-agent> [instruction]
+/herdr team list
 /herdr team add <agent-name-or-pane-id>
 /herdr team remove <agent-name-or-pane-id>
 /herdr team ask <prompt>
@@ -130,6 +131,7 @@ When `requireMention` is enabled, mention the bot for both forms, for example
 `@bridge agents` or `@bridge /herdr agents`. In a mapped thread, a message
 whose first word is not a known command remains a direct prompt to the active
 Agent.
+The bridge pane also accepts the same command names on stdin. Type commands directly at the `bridge>` prompt (with or without the `/herdr` prefix), for example `agents`, `status`, `use w2:p1`, `ask w2:p1 <prompt>`, `read w2:p1`, `wait w2:p1`, or `cancel w2:p1`. Results and streaming progress are printed back to the pane. Discord thread-only routing commands such as `team add` still require a Discord thread.
 
 ### Selecting an Agent
 

@@ -1,53 +1,52 @@
-# Team Orchestration Specification
+# Team Orchestration 規格
 
-Status: Proposed
+狀態：規劃中，尚未實作。
 
-## 1. Purpose
+## 1. 目的
 
-When a Discord thread has a Team and receives a Team Task, the active Agent
-becomes the Lead. The Lead decomposes the request into child assignments. The
-bridge validates and dispatches those assignments to different Team
-Participants, monitors their Herdr states, collects bounded reports, and asks
-the Lead to synthesize the outcome for the user.
+當 Discord thread 有 Team 且收到 Team Task 時，active Agent 成為 Lead。Lead
+會拆解請求為子任務（Assignment）。Bridge 驗證並將這些 Assignment 分派給不同
+的 Team Participant，監控其 Herdr 狀態，收集有界限的回報，最後要求 Lead
+統整結果並回報使用者。
 
-The desired relationship is:
+預期關係如下：
 
 ```text
-1 Discord user / thread
-        -> 1 Team Task
-        -> 1 Lead + N Participants
-        -> N Assignments
-        -> 1 Synthesis response
+1 位 Discord 使用者／thread
+        -> 1 個 Team Task
+        -> 1 個 Lead + N 個 Participant
+        -> N 個 Assignment
+        -> 1 個 Synthesis 回應
 ```
 
-## 2. Entry point and user experience
+## 2. 入口與使用者體驗
 
-The existing command remains the entry point:
+現有指令仍是入口：
+
+查看目前 Team 成員使用：`@bridge team list` 或 `/herdr team list`。
 
 ```text
 @bridge team ask <task>
 ```
 
-It changes from direct fan-out to orchestration only when the current thread
-has a Team. A thread without a Team keeps the current error and asks the user
-to add participants first.
+只有目前 thread 有 Team 時，這個指令才會從直接 fan-out 改為 orchestration。
+沒有 Team 的 thread 維持目前錯誤行為，要求使用者先加入 participants。
 
-Before starting, the bridge resolves and validates:
+開始前，Bridge 會解析並驗證：
 
-1. the active Agent as Lead;
-2. all Team Participants;
-3. workspace authorization and live pane identity;
-4. that no target has a conflicting active stream.
+1. active Agent 作為 Lead；
+2. 所有 Team Participant；
+3. workspace 授權與 live pane identity；
+4. 沒有 target 存在衝突中的 active stream。
 
-The bridge posts a task receipt containing the Lead, frozen Roster, and task
-ID. Each Assignment receives its own labeled progress message. The final
-message contains the Lead's Synthesis and a compact Assignment summary.
+Bridge 會發布包含 Lead、凍結後 Roster 與 task ID 的 task receipt。每個
+Assignment 都有自己的標示與 progress message。Final message 包含 Lead 的
+Synthesis 與精簡的 Assignment 摘要。
 
-## 3. Planning contract
+## 3. 規劃契約
 
-The Lead receives the user task and a strict planning instruction. It must
-return a machine-readable plan with no more than one assignment per available
-Participant unless the plan explicitly marks an assignment as sequential.
+Lead 會收到使用者任務與嚴格的規劃指示。除非規劃明確標示某 Assignment 必須
+循序執行，否則每個可用 Participant 最多只能分配一個 Assignment。
 
 ```json
 {
@@ -62,72 +61,71 @@ Participant unless the plan explicitly marks an assignment as sequential.
 }
 ```
 
-The bridge, not the Lead, enforces the contract:
+契約由 Bridge 而非 Lead 強制執行：
 
-- assignment IDs are unique;
-- every target is in the frozen Roster and is not the Lead;
-- dependencies reference existing assignments and contain no cycle;
-- instructions are bounded and contain no control characters;
-- each Participant has at most one active assignment at a time;
-- unknown targets or malformed plans fail closed.
+- Assignment ID 必須唯一；
+- 每個 target 必須在凍結後的 Roster 中，且不能是 Lead；
+- dependency 必須引用既有 Assignment，且不可形成循環；
+- instruction 必須有界限，且不得包含控制字元；
+- 每個 Participant 同一時間最多有一個 active Assignment；
+- 不明 target 或格式錯誤的 plan 一律 fail closed。
 
-The Lead may reserve an assignment for itself only in a future extension. In
-the first version it remains the planner, monitor, and synthesizer.
+第一版中 Lead 只能擔任 planner、monitor 與 synthesizer，不能為自己保留
+Assignment；未來版本才可擴充此能力。
 
-## 4. Scheduling and monitoring
+## 4. 排程與監控
 
-Assignments with no unfinished dependencies are dispatched in parallel,
-subject to a configured concurrency limit. The scheduler dispatches newly
-unblocked assignments when dependencies complete.
+沒有未完成 dependency 的 Assignment 會在設定的 concurrency limit 內平行
+dispatch。Dependency 完成後，scheduler 會 dispatch 新解除阻塞的 Assignment。
 
-Herdr state handling:
+Herdr 狀態處理如下：
 
-| Herdr state | Assignment behavior |
+| Herdr 狀態 | Assignment 行為 |
 | --- | --- |
-| `idle` | eligible for dispatch |
-| `working` | running; do not dispatch another assignment |
-| `blocked` | pause assignment and use existing Discord approval flow |
-| `done` / `idle` after work | collect report and mark completed |
-| `unknown` | do not infer success; mark observable failure or require review |
-| missing pane/Agent | mark failed and stop dependent assignments |
+| `idle` | 可供 dispatch |
+| `working` | 執行中；不可再 dispatch 其他 Assignment |
+| `blocked` | 暫停 Assignment，使用既有 Discord approval 流程 |
+| `done`／工作後的 `idle` | 收集 report 並標記 completed |
+| `unknown` | 不推論成功；標記可觀察到的 failure 或要求檢查 |
+| pane／Agent 不存在 | 標記 failed，並停止相依的 Assignment |
 
-The Team Roster is frozen for the task. Adding or removing Discord Team
-members affects the next Team Task only.
+Team Roster 在 task 期間保持凍結。Discord Team 新增或移除成員只影響下一個
+Team Task。
 
-## 5. Synthesis
+## 5. 統整
 
-After all assignments reach a terminal state, the bridge sends the Lead a
-bounded synthesis prompt containing:
+所有 Assignment 進入 terminal state 後，Bridge 會送給 Lead 一個有界限的
+synthesis prompt，包含：
 
-- the original user task;
-- the assignment plan;
-- each Assignment's status and bounded report;
-- failures, blocked work, and skipped dependents;
-- an instruction to distinguish completed facts from assumptions.
+- 原始使用者任務；
+- Assignment plan；
+- 每個 Assignment 的狀態與有界限 report；
+- failure、blocked 工作與被跳過的 dependency；
+- 要求區分已完成事實與推測。
 
-The Lead's response is posted as the final user-facing result. The bridge
-must not claim that failed or skipped assignments completed. If the Lead is
-unavailable, the bridge posts the collected reports and marks synthesis as
-failed rather than silently selecting another Lead.
+Lead 的 response 會作為最終使用者可見結果發布。Bridge 不得宣稱 failed 或
+Team 成員只允許來自同一 workspace；thread routing state 會持久化，重啟後保留成員 mapping。若 pane 或 CLI 未啟動，該成員顯示為 stale 且不可派送。
+skipped Assignment 已完成。若 Lead 無法使用，Bridge 會發布已收集的 reports，
+並將 synthesis 標記為 failed，不得默默選擇另一個 Lead。
 
-## 6. State model
+## 6. 狀態模型
 
 ```text
 planning -> dispatching -> running -> synthesizing -> completed
      |           |            |             |
    failed      failed       failed        failed
-     \\___________ cancelled at user request __________/
+     \___________ 使用者要求取消 cancelled __________/
 ```
 
-Assignment states are independently tracked as `pending`, `running`,
-`blocked`, `completed`, `failed`, or `cancelled`.
+Assignment 狀態獨立追蹤為 `pending`、`running`、`blocked`、`completed`、
+`failed` 或 `cancelled`。
 
-Cancellation stops future dispatches and sends the official Herdr cancel
-operation to running assignments. It does not close panes or stop Herdr.
+取消會停止後續 dispatch，並對執行中的 Assignment 發送官方 Herdr cancel
+operation；不會關閉 pane 或停止 Herdr。
 
-## 7. Persistence and observability
+## 7. 持久化與可觀測性
 
-Each Team Task records at least:
+每個 Team Task 至少記錄：
 
 ```json
 {
@@ -144,27 +142,25 @@ Each Team Task records at least:
 }
 ```
 
-The persisted record is for recovery, status reporting, and audit. It stores
-bounded reports and statuses, not unrestricted terminal history.
+持久化紀錄用於 recovery、狀態回報與 audit。它只儲存有界限的 reports 與
+statuses，不儲存不受限制的 terminal history。
 
-## 8. Safety and non-goals
+## 8. 安全性與非目標
 
-- No automatic workspace, pane, worktree, or Agent creation during a task.
-- No arbitrary shell commands generated by the Lead.
-- No silent reassignment when an Agent is busy, stale, unauthorized, or
-  ambiguous.
-- No simultaneous writes to the same files unless an explicit future policy
-  permits it.
-- No hidden chain-of-thought forwarding; only bounded observed reports.
-- No automatic merge or conflict resolution in the first version.
+- Task 期間不自動建立 workspace、pane、worktree 或 Agent。
+- 不執行由 Lead 產生的任意 shell command。
+- Agent busy、stale、未授權或有歧義時，不靜默重新分派。
+- 除非未來明確政策允許，不同 Assignment 不得同時寫入相同檔案。
+- 不轉發 hidden chain-of-thought，只轉發有界限的 observed reports。
+- 第一版不自動 merge 或處理 conflict。
 
-## 9. Acceptance criteria
+## 9. 驗收條件
 
-- A Team Task uses the active Agent as Lead.
-- The Lead's plan is validated before any child assignment is dispatched.
-- Independent assignments run on distinct Team Participants.
-- Dependent assignments wait for prerequisites.
-- Discord shows task, assignment, blocked, failed, and final synthesis states.
-- A completed task includes every assignment's terminal status.
-- A stale or malformed target cannot receive a prompt.
-- Restart/recovery does not duplicate an assignment or final synthesis.
+- Team Task 使用開始時的 active Agent 作為 Lead。
+- Lead 的 plan 在任何 child Assignment dispatch 前先完成驗證。
+- 獨立 Assignment 在不同 Team Participant 上執行。
+- 相依 Assignment 等待 prerequisite 完成。
+- Discord 顯示 task、assignment、blocked、failed 與 final synthesis 狀態。
+- 完成的 task 包含每個 Assignment 的 terminal status。
+- 過期或格式錯誤的 target 不得收到 prompt。
+- Restart/recovery 不會重複 dispatch Assignment 或重複 final synthesis。

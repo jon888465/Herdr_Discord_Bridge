@@ -7,8 +7,21 @@
 | ISSUE-001 | Discord reply 未觸發 bridge | 重新開啟、待驗收 | 重啟後在 mapped thread 回覆 bot |
 | ISSUE-002 | Discord 圖片未交付 Agent | 重新開啟、待驗收 | 驗證 Codex／agy 實際讀取圖片 |
 | ISSUE-003 | 預覽與 final 未更新 | 已修正、待驗收 | 重啟後驗證 working、preview、final、finished |
+| ISSUE-004 | Team 成員可跨 workspace 混入，且 stale mapping 容易造成誤解 | 已修正、待驗收 | 重啟後確認同 workspace 限制、持久化與 stale 顯示 |
 
 2026-09-09 自動化驗證：`npm run check`（typecheck、build、33/33 tests）、`npm run lint`、`git diff --check` 通過。這是前一輪程式驗證紀錄，不代表已做 live Discord 驗收。本輪僅整理文件，未重跑程式測試。
+## ISSUE-004：Team 成員跨 workspace 與持久化行為
+
+狀態：已修正、待重啟後驗收（2026-09-09）。
+
+使用者觀察到同一 Team 清單混入 x3 與 Herdr_Discord_Bridge，且部分 mapping 顯示 stale。預期 Team 必須限制在同一 workspace，因不同 workspace 不應共享同一份專案協作上下文。
+
+已確認原因：原有 thread route 雖然會持久化，但 `team add` 沒有檢查 workspace；因此跨 workspace mapping 可被保留，重啟後仍會出現。pane 或 CLI 未啟動時，持久化 mapping 仍存在，但 Herdr 查不到 live Agent，應顯示 stale 且不可 dispatch。
+
+修正範圍：新增成員時拒絕不同 workspace；`team list` 只列出 active Team workspace 的成員；`team ask` 遇到歷史跨 workspace mapping 時 fail closed；保留 routing state 讓同一 Team 可跨 bridge 重啟恢復。
+
+驗證：2026-09-09 `npm run typecheck`、`npm test`（35/35）、`npm run lint`、`git diff --check` 通過。尚未完成重啟後 Discord live 驗收；下一步確認同 workspace add、跨 workspace add 被拒絕、重啟後 members 保留，以及未啟動 pane 顯示 stale。
+
 
 ## ISSUE-001：Discord reply does not trigger the bridge
 

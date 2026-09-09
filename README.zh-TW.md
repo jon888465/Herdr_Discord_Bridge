@@ -170,12 +170,14 @@ Agent 完成後，回覆會更新原本的 progress message；預設不會另外
 /herdr wait <agent-name-or-pane-id>
 /herdr cancel <agent-name-or-pane-id>
 /herdr handoff <from-agent> <to-agent> [instruction]
+/herdr team list
 /herdr team add <agent-name-or-pane-id>
 /herdr team remove <agent-name-or-pane-id>
 /herdr team ask <prompt>
 ```
 
 設定 `requireMention` 後，兩種 command 都必須 mention bot，例如 `@bridge agents` 或 `@bridge /herdr agents`。在已 mapping 的 thread 中，普通文字會被當作 active Agent 的 prompt。
+Bridge pane 啟動後也會提供 `bridge>` command prompt；可直接輸入 `agents`、`status`、`use w2:p1`、`ask w2:p1 <prompt>`、`read w2:p1`、`wait w2:p1` 或 `cancel w2:p1`，也可加 `/herdr` 前綴。結果與串流進度會印回 pane；需要 Discord thread context 的 `team add` 等指令仍需在 Discord thread 執行。
 
 ### 選擇 Agent
 

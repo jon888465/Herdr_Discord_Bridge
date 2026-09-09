@@ -100,6 +100,7 @@ thread mapping > user mapping > channel default
 ```
 
 Thread mapping 以 guild、parent channel 與 thread 作為 key。每個 thread route
+Team 成員 mapping 會持久化在 routing state；重啟後會保留原 Team。若對應 pane 或 CLI 尚未啟動，成員保留為 stale，不能 dispatch，待 Herdr 重新回報該 pane 後才可使用。新增 Team 成員時，所有成員必須屬於同一 workspace。
 包含 `activeAgentKey` 與獨立的 Agent mapping：
 
 ```json
@@ -153,11 +154,13 @@ mapping 過期時，一律 fail closed。
 /herdr wait [agent-name-or-pane-id]
 /herdr cancel [agent-name-or-pane-id]
 /herdr handoff <from-agent> <to-agent> [instruction]
+/herdr team list
 /herdr team add <agent-name-or-pane-id>
 /herdr team remove <agent-name-or-pane-id>
 /herdr team ask <prompt>
 ```
 
+Bridge pane 的 stdin 也接受相同指令，可直接輸入不帶 prefix 的 `agents`、`status`、`use w2:p1`、`ask w2:p1 <prompt>`、`read w2:p1`、`wait w2:p1`、`cancel w2:p1`，或使用 `/herdr` prefix。結果與 streaming progress 會印回 pane。需要 Discord thread context 的 Team routing 指令仍只能在 Discord thread 執行。
 `workspaces` 顯示 Herdr 回傳的 label/path、ID 與 agent state。`wk use
 <workspace-id-or-name>` 只會將目前 route 綁定到既有且已授權的 Herdr workspace；
 不會建立 workspace、pane 或 Agent。之後使用 `use`、`target` 或 `assign` 選擇
@@ -168,9 +171,11 @@ Agent。`current` 顯示有效 mapping，並回報過期的 agent/pane 資料。
 message 會直接送給該 Agent，並套用與 `assign` 相同的 allowlist、過期 mapping
 與 busy 檢查。`target` 是向後相容的 alias。`ask` 對指定 Agent 發送一次性
 prompt，並將該 Agent 記錄到 thread，但不改變 active target。`team add` 與
+`team list` 查看目前 thread 的 Team 成員；Team 成員必須屬於同一 workspace，mapping 會持久化；
 `team remove` 管理獨立的 thread participants；`team ask` 只將指定 prompt 送給
-每個 participant，不會廣播 thread 或 terminal history。
+每個同 workspace participant，不會廣播 thread 或 terminal history。
 
+Bridge pane 的 stdin 會使用同一個 command handler；啟動後可在 `bridge>` prompt 輸入指令，輸出與 Discord 相同的 Agent routing 與回應流程。
 `assign` 將目前 thread 或 user 綁定至選定的 workspace/agent，並使用
 `agent.prompt`；正在工作的 Agent 或重複的 active stream 會被視為 busy 而拒絕。
 `read` 使用 `recent_unwrapped`，`wait` 使用 event-driven Herdr wait，
