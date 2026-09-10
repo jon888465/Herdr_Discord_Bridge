@@ -661,6 +661,82 @@ async function askAgent(
   runtime: Runtime,
 ): Promise<void> {
   const localImplicit = context.source === "console" || context.routing.guildId === "local-console";
+  if (localImplicit && args.length > 1) {
+    const localText = args.join(" ").trim();
+    const separator = localText.search(/\s/);
+    const candidate =
+      separator < 0 ? localText : localText.slice(0, separator).trim();
+    let explicit: AgentRecord | undefined;
+    try {
+      explicit = findAgent(
+        await runtime.herdr.listAgentsWithWorkspaceNames(),
+        candidate,
+      );
+    } catch {
+      // An unknown first word remains part of the implicit prompt.
+    }
+    if (explicit) {
+      const explicitPrompt =
+        separator < 0 ? "" : localText.slice(separator).trim();
+      validatePrompt(explicitPrompt);
+      validateAgentTarget(
+        explicit,
+        undefined,
+        runtime.config.allowedWorkspaceIds,
+      );
+      if (explicit.agent_status === "blocked") {
+        await runtime.herdr.sendAgent(explicit.pane_id, explicitPrompt, {
+          retries: 0,
+        });
+      } else {
+        assertAgentAvailable(explicit, runtime);
+        if (explicit.agent?.toLowerCase().includes("codex")) {
+          await dispatchPrompt(
+            explicit,
+            explicitPrompt,
+            context,
+            runtime,
+            `${agentHeaderFor(explicit)}\n📨 Prompt sent to Codex; capturing its final response.`,
+          );
+        } else {
+          await runtime.herdr.promptAgent(explicit.pane_id, explicitPrompt);
+        }
+      }
+      return;
+    }
+  }
+  if (localImplicit && args.length === 1) {
+    const localText = args[0].trim();
+    const separator = localText.search(/\s/);
+    if (separator > 0) {
+      const candidate = localText.slice(0, separator).trim();
+      try {
+        const explicit = findAgent(
+          await runtime.herdr.listAgentsWithWorkspaceNames(),
+          candidate,
+        );
+        const explicitPrompt = localText.slice(separator).trim();
+        validatePrompt(explicitPrompt);
+        validateAgentTarget(
+          explicit,
+          undefined,
+          runtime.config.allowedWorkspaceIds,
+        );
+        if (explicit.agent_status === "blocked") {
+          await runtime.herdr.sendAgent(explicit.pane_id, explicitPrompt, {
+            retries: 0,
+          });
+        } else {
+          assertAgentAvailable(explicit, runtime);
+          await runtime.herdr.promptAgent(explicit.pane_id, explicitPrompt);
+        }
+        return;
+      } catch (error) {
+        if (error instanceof Error && /prompt|authorized|busy|empty|too long|invalid/i.test(error.message))
+          throw error;
+      }
+    }
+  }
   const query = localImplicit ? "" : args.shift()?.trim() || "";
   const prompt = args.join(" ").trim();
   if (!prompt || (!localImplicit && !query)) throw new Error(localImplicit ? "usage: ask <prompt>" : "usage: /herdr ask <agent-name-or-pane-id> <prompt>");
@@ -1398,7 +1474,7 @@ function helpText(prefix: string): string {
 function consoleHelpText(): string {
   return [
     "**Herdr Bridge Console 使用說明**",
-    "在 bridge> 直接輸入指令，不需要 /herdr 或 mention。",
+    "在 bridge> 直接輸入指令，不需要指令前綴或 mention。",
     "",
     "**選擇與查詢**",
     "agent — 列出目前可用 Agent",
@@ -1410,6 +1486,7 @@ function consoleHelpText(): string {
     "",
     "**對話與執行**",
     "ask <prompt> — 對目前選取 Agent 發送新 prompt",
+    "ask <agent-name-or-pane-id> <prompt> — 明確指定 Agent 發送一次 prompt",
     "<未識別指令文字> — 預設視為 ask prompt",
     "read [agent] — 讀取最近輸出",
     "wait [agent] — 等待 Agent 到達穩定狀態",

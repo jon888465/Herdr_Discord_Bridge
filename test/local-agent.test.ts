@@ -279,6 +279,10 @@ test("known control commands stay usable while selected Agent is working or bloc
     }
     await handleCommand("ask", ["Yes"], context, runtime);
     assert.deepEqual(f.sent, [["answer", "w2:p6", "Yes"]]);
+    f.state("idle", "Ready again", 3);
+    runtime.activeStreams.delete("term");
+    await handleCommand("ask", ["w2:p6 Explicit prompt"], context, runtime);
+    assert.deepEqual(f.sent.at(-1), ["prompt", "w2:p6", "Explicit prompt"]);
   } finally {
     routing.flush();
     rmSync(dir, { recursive: true, force: true });

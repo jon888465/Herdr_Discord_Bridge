@@ -151,7 +151,7 @@ mapping 過期時，一律 fail closed。
 /herdr status
 /herdr current
 /herdr use <agent-name-or-pane-id>
-/herdr ask <prompt>（pane 使用目前選定 Agent）；Discord 使用 ask <agent-name-or-pane-id> <prompt>
+/herdr ask <prompt>（pane 使用目前選定 Agent）；pane 也支援 ask <agent-name-or-pane-id> <prompt> 明確指定目標；Discord 使用 ask <agent-name-or-pane-id> <prompt>
 /herdr target <agent-name-or-pane-id>
 /herdr assign <agent-name-or-pane-id> <prompt>
 /herdr read [agent-name-or-pane-id]
