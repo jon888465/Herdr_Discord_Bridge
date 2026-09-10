@@ -1,5 +1,11 @@
 # 待做功能
 
+## 已實作基礎：bridge 本機單 Agent 互動（2026-09-10，待驗收）
+
+`agent use <pane>` 自動開始本機可見畫面觀察；顯示進度／問題，blocked 時可從 bridge 回答，控制指令在各狀態持續可用。這是 40 行／6,000 字元的 terminal snapshot，不是下述完整 Discord mirror。詳見 SPEC「本機選取 Agent 後的互動」及 ISSUE-011。
+
+後續多 Agent 問題須有 task／assignment／question identity 與回覆 UI／排隊；尚未決定是否凍結其他輸出，不自動暫停其他 Agent。Herdr GUI 選擇與 Discord select menu 仍待評估；`focus` 只改畫面焦點，不能作為 routing 選擇的替代。
+
 ## 將 Herdr 內直接互動鏡像轉發到 Discord
 
 狀態：規劃中，尚未實作。
@@ -56,3 +62,76 @@
 - 關閉鏡像後停止轉發，但不停止 Agent 或 Discord bot。
 - 路由缺失、失效、未授權或有歧義時，不廣播內容。
 - 長回應保持可讀，不會僅因需要分成多則訊息，就被顯示為 `no response`。
+
+
+
+
+以下保留早期討論紀錄；其中以 focus 代替 routing 的方案已撤回，現行範圍以文首與 SPEC 為準。
+
+  - Discord：提供 Agent／workspace 的 select menu。
+  - Herdr：使用原生 TUI／CLI 的 herdr agent focus <target> 選擇
+    Agent。
+
+  - 1:1:N Task、mirror、agy 互動都納入同一輪實作與驗收。
+
+  目前調查確認 Herdr 沒有可由 plugin 擴充的瀏覽器式 GUI；因此 Herdr 端
+  會整合原生 TUI focus，而 Discord 端提供真正的點選介面。這項限制與待
+  驗收內容已記錄在 ISSUE-010。
+
+──────────────────────────────────────────────────────────────────────
+
+─ Conversation recap ─────────────────────────────────────────────────
+
+  已確認採用第 3 方案：Discord 使用 Agent/workspace select menu，Herdr
+  使用 `herdr agent focus <target>`，並一併實作與驗收 1:1:N Task、
+  mirror、agy 互動。已知 Herdr 無 plugin 可擴充的瀏覽器 GUI；下一步是
+  完成整合與驗收。
+
+
+› herdr focus在這次題問世要解決什麼問題
+
+
+• herdr focus 在這次需求中不是必要功能。
+
+  它只會把 Herdr TUI 的視覺焦點切到某個 Agent pane，不能解決：
+
+  - 1:1:N Team Task 的 Lead／Participant routing
+  - Discord thread 到 Agent 的 mapping
+  - mirror 到 Discord
+  - agy 追問與使用者回覆
+  - workspace Team 的 active Agent 選擇
+
+  因此這次應區分：
+
+  - 「選擇要派任務的 Agent」：由 Bridge routing／Discord select menu
+    處理。
+
+  - 「讓 Herdr 畫面跳到該 pane」：才使用 herdr focus，屬於可選的 UI
+    convenience。
+
+  我會把 Herdr focus 從必要方案移除，不讓它被誤當成 Team Task 或
+  mirror 的核心依賴。
+
+
+› workspace Team 的 active Agent 選擇 ->這個呢
+
+
+• workspace Team 的 active Agent 選擇 是這次需求的核心，但它不應依賴
+  herdr focus。
+
+  正確分工是：
+
+  - Team 的 active Agent：由 Bridge routing state 保存，例如
+    workspaceTeams[w2].activeAgentKey。
+
+  - Discord 的 agent use w2:p4：只更新目前 Discord thread/user 的
+    active Agent。
+
+  - Pane 的 agent use w2:p4：更新 workspace Team 的 active Agent。
+  - herdr focus：只改 Herdr TUI 顯示焦點，不改 Team，也不改 Discord
+    routing。
+
+  所以 Team Task 開始時，Lead 應從 workspace Team 的 activeAgentKey 讀
+  取；若沒有 active Agent，就拒絕啟動並要求先選擇。 Discord select
+  menu 應更新 Discord route，若要選 workspace Team active Agent，則需
+  要明確的 workspace Team 選擇操作。

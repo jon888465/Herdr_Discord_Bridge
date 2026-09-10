@@ -58,7 +58,7 @@ request。帶有 `error` 的 response 會轉成 typed `HerdrError`；錯誤 log 
 包含 request parameters 或 prompt 文字。每個操作使用新的 bounded connection，
 避免長連線故障使所有 operation 的 multiplexing 一起失效。
 
-Socket failure 最多重試兩次，使用從 `reconnectBaseMs` 開始的 exponential
+一般 socket failure 最多重試兩次；本機 blocked 回答不重試不確定的送達，避免重複回答。一般重試使用從 `reconnectBaseMs` 開始的 exponential
 backoff。Protocol error 不重試。Watcher 在故障後於下一個 interval 繼續，
 因此 socket failure 只會被回報，不會形成 crash loop，也不影響 Herdr pane。
 
@@ -246,6 +246,8 @@ Discord command 與 approval handling 可用 `/herdr discord disable` 暫停，�
 
 ## 6. Blocked 與 approval 流程
 
+Discord 單一 Agent 的 blocked／approval 以 pane、terminal、workspace、thread identity 綁定。本機單 Agent 通道見「本機選取 Agent 後的互動」；Team Task 的多 Agent 問題回覆尚未支援，見 ISSUE-012。
+
 Watcher 以 bounded interval polling `agent.list`，並忽略初始 snapshot。偵測到
 設定的 `blocked` transition 後，讀取 detection snapshot，並將它發送到該 Agent
 所有已映射的 Discord destination。若 destination 已是 mapped thread，就重用該
@@ -340,6 +342,18 @@ acceptance 的 issue。提議中的 feature 必須與已實作行為分開，並
 `bridge>` 預設使用獨立的 `local-console` guild/channel/user routing identity，
 不繼承 Discord user 或 thread 的 active Agent，也不跟隨 Herdr 聚焦 pane。
 本機 `current` 沒有 mapping 時會提示先執行 `agent use <pane ID>`；pane 的 active Agent 以 workspace scope 保存。
+
+### 本機選取 Agent 後的互動（2026-09-10）
+
+`agent use <pane>`（相容 `use agent <pane>`）同時記錄本機選取的 workspace 與該 workspace 的 active Agent，`current`、省略 target 的操作與本機觀察器使用相同目標。Discord user/thread route 維持獨立；明確選定 `thread <ID>` 時才共用該 route。本機來源由獨立 source 欄位識別，不能因共用 Discord routing 而被當作 Discord 訊息。
+
+互動式 `bridge>` 啟動一個單 Agent 觀察器，依 `pollIntervalMs` 讀取所選 Agent 的 `visible` 輸出，最多 40 行／6,000 字元。選取後顯示當前畫面，之後只在文字或狀態改變時重印；idle、working、blocked、done、unknown 均可顯示。每次標示 Agent、workspace、pane、狀態與 terminal snapshot，移除 ANSI／控制字元。這是可見 terminal 節錄，可能含 UI／工具文字，不宣稱完整 transcript、問答邊界或完整 final；不讀隱藏 reasoning 事件、不自動轉發 Discord。切换或關閉後丟棄舊的 in-flight read，失效 identity 停止輸出與送入，須明確重新選取。
+
+本機 `ask <text>` 和非指令文字：保留大小寫與內部空白，idle/done 時送出新 prompt；blocked 時回答已顯示的問題。傳送前重新檢查 workspace allowlist、pane、terminal、Agent kind、session kind/value、blocked 狀態與 state sequence，並比較可見問題畫面；若問題改變或尚未顯示，先顯示後拒絕舊回答，要求重新回答。相同問題只接受一次回答，不重試 socket 不確定送達。缺少 session metadata 時僅能靠 terminal/pane/kind 辨識，無法保證同 terminal 內無 metadata 的 CLI restart 可被偵測；Herdr API 也不提供驗證與送字的原子 question ID 契約。
+
+working/unknown 時一般 prompt 會明確拒絕；`help`、`current`、`agent`、`agent use`、`wk` 等控制指令仍可操作，無須等 blocked。若答案開頭恰為指令，以 `ask <answer>` 明確指定。觀察輸出會重畫 `bridge>` 並保留正在編輯的輸入。`cancel` 是另行明確的 Ctrl-C 操作。單 Agent 本機 `ask` 由持續觀察器顯示結果；既有 Discord dispatch 的 progress/final 路徑不變。
+
+Codex 本機新 prompt 保留既有 transcript final 擷取，另外顯示本機快照；agy 等 CLI 目前使用快照回饋。多 Agent 同時提問的 question ID／排隊／回覆 UI、是否暫停其他 Agent、agy 未被 Herdr 辨識為 blocked 的選單按鍵、直接 pane → Discord mirror 仍待做，不自動暫停其他 Agent 或猜測答案目的地。
 
 本機專用 `threads` 列出已映射且符合 guild/channel/workspace allowlist 的 thread；
 `thread <thread ID>` 明確選定共用路由，`thread off` 回到原本本機路由。

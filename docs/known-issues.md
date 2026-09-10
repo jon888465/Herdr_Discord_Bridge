@@ -8,10 +8,13 @@
 | ISSUE-002 | Discord 圖片未交付 Agent | 重新開啟／待調查 | 取得格式驗證失敗的原始附件與 metadata，重播下載 |
 | ISSUE-003 | 預覽與 final 未更新 | 已修正、待驗收 | 重啟後驗證 metadata 更新與截圖情境 |
 | ISSUE-004 | Team 成員可跨 workspace 混入，且 stale mapping 容易造成誤解 | 已修正、待驗收 | 重啟後確認同 workspace 限制、持久化與 stale 顯示 |
-| ISSUE-005 | 本機 current 顯示未選取 Agent | 已驗收 | 2026-09-10 live 重啟後使用 threads／thread 驗證 |
+| ISSUE-005 | 本機 current 顯示未選取 Agent | 已修正、待驗收 | workspace selection 回歸修正後須重新驗收；先前 shared-thread 驗收歷史保留 |
 | ISSUE-006 | 重啟 bridge 後 pane 所屬 workspace／位置改變 | 已驗收 | 2026-09-10 live topology 驗證完成；後續觀察重啟保留 |
 | ISSUE-007 | 程序啟動未阻止同 bot 重複實例 | 已修正、待驗收 | live 第二實例拒絕仍待驗收 |
 | ISSUE-008 | Discord current／回應仍引用 Herdr 已不存在的舊 pane，且串流回報 session changed | 重新開啟／待調查 | 取得該 Discord thread 的 current 輸出與 bridge 啟動版本；重啟新版後以 live prompt 重現 |
+| ISSUE-010 | 1:1:N orchestration、Discord mirror 與選擇 UI | 待調查 | 本機單 Agent snapshot 已另實作；完整功能仍待做 |
+| ISSUE-011 | 選取 agy 後 bridge 沒顯示追問、無法回答 | 已修正、待驗收 | 本機快照／blocked reply 自動化完成後進行 live agy 驗收 |
+| ISSUE-012 | Team 多 Agent 同時追問缺少問題識別 | 待調查 | 設計 task/assignment/question 綁定與回覆 UI／排隊策略 |
 
 2026-09-09 自動化驗證：`npm run check`（typecheck、build、33/33 tests）、`npm run lint`、`git diff --check` 通過。這是前一輪程式驗證紀錄，不代表已做 live Discord 驗收。本輪僅整理文件，未重跑程式測試。
 ## ISSUE-004：Team 成員跨 workspace 與持久化行為
@@ -154,7 +157,7 @@ Discord 圖片附件問題於 2026-09-09 補上本機交付流程，仍需端到
 
 ## ISSUE-005：本機 current 顯示未選取 Agent
 
-更新日期：2026-09-10。狀態：已驗收（2026-09-10）；新增本機與 Discord 共用 mapping。
+更新日期：2026-09-10。狀態：已修正、待驗收（workspace selection 回歸；見本文件末尾）。2026-09-10 shared-thread 功能的已驗收歷史保留如下。
 
 以下為共用功能加入前的調查歷史；最新實作與驗證見本文件末尾 2026-09-10 交付紀錄。
 
@@ -265,6 +268,64 @@ named pipe；其他 Unix filesystem socket 異常殘留時不自動冒險接管�
 
 ## 2026-09-10 指令與文件同步紀錄
 
-本輪已同步 pane 與 Discord 指令契約：pane 使用 `agent`、`agent use <pane>`、`wk`；Discord mention 支援 `@herdr agent`、`@herdr agent use <pane>`，既有 `agents` 仍相容。Pane 的 `ask <prompt>` 使用 workspace active Agent；pane 內無法辨識的整行輸入預設視為 prompt，Discord 未知指令仍拒絕。Pane Agent selection 以 workspace scope 保存，Discord user/thread mapping 維持獨立。
+本輪已同步 pane 與 Discord 指令契約：pane 使用 `agent`、`agent use <pane>`、`wk`；Discord mention 支援 `@herdr agent`、`@herdr agent use <pane>`，既有 `agents` 仍相容。Pane 的 `ask <prompt>` 使用 workspace active Agent；pane 內無法辨識的整行輸入預設視為 prompt。更正先前說法：Discord 未知 mention 文字在 mapped thread 中仍可能走原有 direct prompt，不是一律拒絕。Pane Agent selection 以 workspace scope 保存，Discord user/thread mapping 維持獨立。
 
 驗證日期 2026-09-10：typecheck、47/47 tests、lint、`git diff --check` 通過。尚未重啟 live bridge；部署後仍需驗證 Discord mention、pane `current`、default ask 與不同 workspace routing。
+
+## ISSUE-010：1:1:N Team Task、mirror 與 Agent 選擇介面尚未完成
+
+更新日期：2026-09-10。狀態：待調查／規劃中。
+
+需求：實作 1 位使用者對 1 個 Lead 與 N 個 Team Participant 的任務討論與執行；同步研究 Herdr 端是否有可點選的 Agent／workspace 選擇介面；以實際任務驗證 Codex／agy，包含 agy 需要向使用者追問或等待回覆的情境，所有失敗與互動中斷都要記錄。
+
+目前狀態：`docs/team-orchestration-spec.md` 與 `docs/team-orchestration-plan.md` 是規格／計畫，repo 尚未實作 task planner、Assignment lifecycle、bounded report、synthesis、task recovery 或 task-level UI。`docs/pending-features.md` 的 Herdr pane → Discord mirror 也仍是規劃中，尚未有 MirrorRoute、output watcher 或去重 relay。
+
+Herdr 能力調查（2026-09-10）：已安裝 CLI 提供 terminal TUI 與 `agent list/get/read/focus/prompt/wait` 等 API；目前未發現 bridge 可使用的瀏覽器式 GUI 或自訂 Agent select widget。若要提供可點選選擇，候選位置是 Discord button/select menu，或使用 Herdr 既有 TUI focus；兩者不能混稱為 Herdr GUI。
+
+未驗證：1:1:N 實際 dispatch、Lead plan、N 個 Assignment、agy blocked／追問／使用者回覆、mirror 去重與 Discord 失敗恢復、任何點選選擇介面。下一步先確認選擇介面放在 Discord 還是 Herdr TUI，再分階段實作 orchestration、mirror、互動測試與驗收紀錄。
+
+## ISSUE-011：agy 單 Agent 追問與 Team Task 多 Agent 互動路由
+
+更新日期：2026-09-10。狀態：已修正、待驗收。以下為先前僅盤點 Discord baseline 的歷史；本輪已實作本機單 Agent 通道，詳見末尾；多 Agent 互動移至 ISSUE-012 追蹤。
+
+單 Agent baseline：Herdr 將單一 Agent 標為 `blocked` 時，Bridge 會在對應 Discord thread 建立 pane／terminal 綁定的 approval；使用者在同一 thread 回覆後，Bridge 驗證 guild、channel、thread、terminal、workspace、pane 與目前 `blocked` 狀態，再送回該 Agent。新版 Herdr 拒絕 `agent.prompt` 時使用官方 `pane.send_input` fallback。這條路徑可涵蓋 agy 需要使用者回答的情境，但尚未完成 agy live end-to-end 驗收。
+
+Team Task 複雜性：同一個 1:1:N 任務可能同時有多個 Agent／Assignment 進入 blocked 或提出問題。僅依 Discord thread 無法判斷使用者回覆的是哪一個問題；若不標示並綁定 task、assignment、Agent、pane、approval/question ID，可能把回答送給錯誤 Agent。也必須決定 blocked 時是否暫停其他 Assignment、是否允許多個問題排隊、Lead 是否代收並轉發，以及使用者明確指定某一問題的語法。未定義前，Team Task 不應直接重用單 Agent 的 thread-level approval。
+
+驗收規劃：先以單一 agy Agent 驗證「blocked → Discord 問題 → 使用者回覆 → agy 繼續 → final」；記錄 approval message、pane identity、重啟／過期／錯誤回覆。之後才設計多 Agent 問題卡片與 assignment-scoped reply。驗證日期與 live bridge／agy 版本需補入本節。
+
+### ISSUE-010 追加觀察（2026-09-10）
+
+使用者實際觀察：目前 bridge pane 與 agy pane 之間的直接互動沒有顯示在 bridge。包含在 agy pane 內直接輸入、agy 的追問／回覆，以及不經 Discord dispatch 的 terminal 對話。
+
+先前判定（保留歷史，本機部分已由下方修正取代）：當時只在自身 dispatch／watcher／approval 流程取得狀態與輸出，尚無 bridge console 觀察器。使用者澄清已選取 agy 的本機互動就是本次應修正範圍，不能只以 Discord mirror 未實作為由結案。
+
+當時下一步：實作單一 pane → bridge／Discord thread 的 opt-in mirror。後續使用者澄清：本機互動應在 agent use 後自動開始，不另要求 mirror 開關；Discord mirror 仍需獨立 opt-in。以下為本次實作與剩餘驗收。
+
+### ISSUE-005／ISSUE-011 本機單 Agent 修正（2026-09-10）
+
+症狀：使用者已切換到 agy，但 bridge 沒顯示追問；先前只驗證 Discord approval，錯誤地以此代表本機通道也具備。使用者要求非 blocked 時也能下控制指令。
+
+已確認根因：本機 agent use 只存 workspace Team active，未同步本機目前 workspace；新 console 隨後 current 無目標。沒有選取後持續觀察的 reader，ask 仍受一般 activeStreams/busy gate 影響而無法當作 blocked 回答。console parser 拆詞並 lower-case 第一個字，普通回答大小寫／空白會被改寫。
+
+重現：`node --test dist/test/local-agent.test.js` 初始 2/2 失敗：agent use → current 回覆 No Agent is selected；`Yes  Use A` 變成 command=yes、args=[Use,A]。補丁後該最小重現通過，另補實際 console handler 與模擬 Herdr 的連續追問測試。測試使用 fixtures，不向使用者真實 agy 送字。
+
+修正：新增 ConsoleAgent，選取即顯示 bounded visible snapshot，輪詢文字／狀態變化、切換丟棄舊 read；回答綁定已顯示 blocked 畫面與 pane/terminal/session/state sequence，送出前重驗；回答不重試不確定 socket 送達，同一問題拒絕重複回答。idle/done 可送新 prompt，working/unknown 仍可操作控制指令。保留輸入內容、重畫 readline 正在編輯的行；source=console 不因共用 thread 而遺失。修正本機 workspace/current 選取及 help，Codex 保留既有 final 擷取。本機假 guild routing 排除在 Discord watcher destination 外。
+
+限制：40 行／6,000 字元快照不代表完整 transcript 或完整 final；沒有讀取隱藏 reasoning record。缺少 session metadata 的同 terminal restart 無法完全辨識；Herdr 目前沒有原子 question-ID 比較後送答 API。agy 特定版本的狀態偵測、只支援方向鍵的 UI 尚待 live 驗收。未確定送達的回答須人工檢查 Agent，不自動重試。
+
+驗證（2026-09-10）：本次 `local-agent.test.js` 的 13/13 項針對性測試通過，涵蓋選取後 current、無須 ask 即顯示各狀態畫面、blocked 回答與下一個問題、問題變更／重複回答拒絕、切換途中不顯示或回答舊問題、working／blocked 控制指令、授權與 session 更換。typecheck、build、lint 與 `git diff --check` 通過。這些是 fixture／handler 驗證，不是 live agy 驗收。
+
+另記非本次互動範圍的檢查結果（2026-09-10）：完整 `npm run check` 為 59/60 通過，ISSUE-007 的入口程序測試達 10 秒逾時，exit code 為 null 而非預期 1；未調整斷言或延長 timeout。單獨重跑 `node --test dist/test/instance-lock.test.js` 為 4/4 通過，逾時根因尚未確認。後續完整重跑被使用者中斷，無完成結果，不列為通過；依使用者要求停止擴大測試範圍。
+
+本輪未重啟／部署、未 commit／push；執行中 bridge 是否載入本輪程式未驗證，舊互動不補送。下一步載入新版後在 bridge 執行 agent use <agy-pane>，驗證當前畫面、進度、blocked 問題、回答、恢復；在 working 與 blocked 分別執行 current／agent／切換，確認可操作且目標正確。live 驗收需記錄 Herdr／agy 版本及畫面證據。
+
+## ISSUE-012：Team 多個 Agent 同時提問的回覆識別
+
+更新日期：2026-09-10。狀態：待調查。
+
+預期／待驗收場景：team ask 下多個 Agent 同時提出不同問題，bridge 必須清楚顯示是哪個 workspace／task／assignment／Agent／question，使用者回覆只能送給所選問題。現有 thread 級 approval 或單一 active Agent 不能證明此流程安全；目前未進行 live 多 Agent 重現，屬已識別設計缺口。
+
+已確認限制：目前無 task/assignment/question 級的回覆佇列與選擇 UI。本輪只實作單一選取 Agent 的本機問答，不更動其他 Agent 狀態。是否暫停其他輸出、允許多問題排隊、由 Lead 代收、跨介面同時回答的互斥與逾時取消，均需後續設計。
+
+修正範圍：本輪僅記錄，未實作 Team 問答。驗證：文件及現有流程盤點；沒有自動化或端到端通過證據。下一步建立兩 Agent 同時 blocked 的 fixture、問題識別／明確 reply 選擇及回覆不串線的驗收。不能把單 Agent 通過視為本項驗收。
