@@ -728,7 +728,17 @@ async function askAgent(
           });
         } else {
           assertAgentAvailable(explicit, runtime);
-          await runtime.herdr.promptAgent(explicit.pane_id, explicitPrompt);
+          if (explicit.agent?.toLowerCase().includes("codex")) {
+            await dispatchPrompt(
+              explicit,
+              explicitPrompt,
+              context,
+              runtime,
+              `${agentHeaderFor(explicit)}\n📨 Prompt sent to Codex; capturing its final response.`,
+            );
+          } else {
+            await runtime.herdr.promptAgent(explicit.pane_id, explicitPrompt);
+          }
         }
         return;
       } catch (error) {
