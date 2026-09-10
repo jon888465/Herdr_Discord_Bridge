@@ -31,7 +31,7 @@ import { RoutingStore } from "./routing.js";
 
 const BUTTON_PREFIX = "hdb.approve.";
 const MODEL_SELECT_PREFIX = "hdb.model.";
-const SHORT_COMMANDS = new Set([
+export const SHORT_COMMANDS = new Set([
   "help",
   "workspaces",
   "wk",
@@ -53,6 +53,7 @@ const SHORT_COMMANDS = new Set([
 ]);
 
 export interface CommandContext {
+  source?: "console";
   message: Message;
   routing: RoutingContext;
 }

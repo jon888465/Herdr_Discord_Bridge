@@ -17,6 +17,7 @@ import {
 } from "./cli-adapter.js";
 import { DiscordAdapter, type CommandContext } from "./discord.js";
 import { startConsole, routeConsoleCommand } from "./console.js";
+import { ConsoleAgent } from "./console-agent.js";
 import {
   agentHeader,
   codeBlock,
@@ -167,6 +168,7 @@ async function startBridge(config: ReturnType<typeof loadConfig>, dryRun: boolea
     await discord.stop();
     throw error;
   }
+  let consoleAgent: ConsoleAgent | undefined;
   const consoleControl = startConsole(
     config.discord.commandPrefix,
     async (command, args, context) => {
@@ -178,19 +180,33 @@ async function startBridge(config: ReturnType<typeof loadConfig>, dryRun: boolea
           routing,
           config,
         );
-        if (!routed) return;
+        if (!routed) {
+          if (command === "thread") consoleAgent?.reset();
+          await consoleAgent?.tick();
+          return;
+        }
         await handleCommand(command, args, routed, {
           config,
           herdr,
           routing,
           discord,
           activeStreams,
+          consoleAgent,
         });
+        await consoleAgent?.tick();
       } catch (error) {
-        console.error("❌ " + safeError(error));
+        consoleControl.print("❌ " + safeError(error));
       }
     },
   );
+
+  if (consoleControl.context) {
+    consoleAgent = new ConsoleAgent(herdr, async () => {
+      const context = await routeConsoleCommand("current", [], consoleControl.context!, routing, config);
+      return context ? effectiveTarget(context, routing) : undefined;
+    }, config.allowedWorkspaceIds, consoleControl.print);
+    consoleAgent.start(config.pollIntervalMs);
+  }
 
   const watcher = new AgentWatcher(herdr, config.pollIntervalMs);
   watcher.on("transition", (transition: AgentTransition) => {
@@ -206,6 +222,7 @@ async function startBridge(config: ReturnType<typeof loadConfig>, dryRun: boolea
   installShutdown(() => {
     watcher.stop();
     consoleControl.stop();
+    consoleAgent?.stop();
     void discord.stop();
   }, routing);
   console.log(
@@ -214,6 +231,7 @@ async function startBridge(config: ReturnType<typeof loadConfig>, dryRun: boolea
 }
 
 interface Runtime {
+  consoleAgent?: ConsoleAgent;
   config: ReturnType<typeof loadConfig>;
   herdr: HerdrClient;
   routing: RoutingStore;
@@ -221,7 +239,7 @@ interface Runtime {
   activeStreams: Set<string>;
 }
 
-async function handleCommand(
+export async function handleCommand(
   command: string,
   args: string[],
   context: CommandContext,
@@ -231,7 +249,7 @@ async function handleCommand(
     case "help":
       await runtime.discord.reply(
         context.message,
-        helpText(runtime.config.discord.commandPrefix),
+        context.source === "console" ? consoleHelpText() : helpText(runtime.config.discord.commandPrefix),
       );
       return;
     case "workspaces":
@@ -251,7 +269,7 @@ async function handleCommand(
         await listAgents(args, context, runtime);
       return;
     case "use":
-      await useAgentOrWorkspace(args, context, runtime);
+      await useAgentOrWorkspace(args[0]?.toLowerCase() === "agent" ? args.slice(1) : args, context, runtime);
       return;
     case "target":
       await targetAgent(args, context, runtime);
@@ -388,6 +406,7 @@ async function useWorkspace(
     );
   const workspace = matches[0];
   const mapping = runtime.routing.bind(context.routing, { workspaceId: workspace.workspace_id });
+  runtime.consoleAgent?.reset();
   await runtime.discord.reply(
     context.message,
     `✅ Routing for this ${context.routing.threadId ? "thread" : "user"} now targets **${workspace.label || workspace.name || workspace.workspace_id}** (\`${mapping.workspaceId}\`). Existing agents were not moved or restarted.`,
@@ -414,10 +433,12 @@ async function bindActiveAgent(
   runtime: Runtime,
 ): Promise<void> {
   validateAgentTarget(agent, undefined, runtime.config.allowedWorkspaceIds);
-  if (context.routing.guildId === "local-console")
+  if (context.routing.guildId === "local-console") {
     runtime.routing.bindWorkspace(agent.workspace_id, agentTarget(agent));
-  else
+    runtime.routing.bind(context.routing, { workspaceId: agent.workspace_id });
+  } else
     runtime.routing.bind(context.routing, agentTarget(agent));
+  runtime.consoleAgent?.reset();
   await runtime.discord.reply(
     context.message,
     `${agentHeaderFor(agent)}\n✅ 目前對話 Agent：**${agentLabel(agent)}**\nWorkspace：\`${agent.workspace_name || agent.workspace_id}\`\nPane：\`${agent.pane_id}\`\n\nSubsequent messages in this ${context.routing.threadId ? "thread" : "user route"} will be sent only to this Agent.`,
@@ -428,9 +449,7 @@ async function currentTarget(
   context: CommandContext,
   runtime: Runtime,
 ): Promise<void> {
-  let mapping = runtime.routing.resolve(context.routing);
-  if (context.routing.guildId === "local-console" && mapping?.workspaceId && !mapping.paneId)
-    mapping = runtime.routing.workspaceActiveTarget(mapping.workspaceId);
+  const mapping = effectiveTarget(context, runtime.routing);
   if (!mapping) {
     await runtime.discord.reply(
       context.message,
@@ -641,11 +660,21 @@ async function askAgent(
   context: CommandContext,
   runtime: Runtime,
 ): Promise<void> {
-  const localImplicit = context.routing.guildId === "local-console";
+  const localImplicit = context.source === "console" || context.routing.guildId === "local-console";
   const query = localImplicit ? "" : args.shift()?.trim() || "";
   const prompt = args.join(" ").trim();
   if (!prompt || (!localImplicit && !query)) throw new Error(localImplicit ? "usage: ask <prompt>" : "usage: /herdr ask <agent-name-or-pane-id> <prompt>");
   validatePrompt(prompt);
+  if (localImplicit && runtime.consoleAgent) {
+    await runtime.consoleAgent.send(prompt, async (selected, text) => {
+      if (selected.agent?.toLowerCase().includes("codex")) {
+        await dispatchPrompt(selected, text, context, runtime, `${agentHeaderFor(selected)}\n📨 Prompt sent to Codex; capturing its final response.`);
+      } else {
+        await runtime.herdr.promptAgent(selected.pane_id, text);
+      }
+    });
+    return;
+  }
   const agent = localImplicit ? await resolveContextAgent("", context, runtime) : findAgent(await runtime.herdr.listAgentsWithWorkspaceNames(), query);
   validateAgentTarget(agent, undefined, runtime.config.allowedWorkspaceIds);
   assertAgentAvailable(agent, runtime);
@@ -1062,10 +1091,7 @@ async function resolveContextAgent(
   context: CommandContext,
   runtime: Runtime,
 ): Promise<AgentRecord> {
-  let mapping = runtime.routing.resolve(context.routing);
-  const effectiveMapping = context.routing.guildId === "local-console" && mapping?.workspaceId && !mapping.paneId
-    ? runtime.routing.workspaceActiveTarget(mapping.workspaceId)
-    : mapping;
+  const effectiveMapping = effectiveTarget(context, runtime.routing);
   const agents = await runtime.herdr.listAgentsWithWorkspaceNames();
   const agent = query
     ? findAgent(agents, query)
@@ -1078,6 +1104,12 @@ async function resolveContextAgent(
     );
   validateAgentTarget(agent, effectiveMapping, runtime.config.allowedWorkspaceIds);
   return agent;
+}
+
+function effectiveTarget(context: CommandContext, routing: RoutingStore): TargetMapping | undefined {
+  const mapping = routing.resolve(context.routing);
+  if (context.routing.guildId !== "local-console" || !mapping) return mapping;
+  return routing.workspaceActiveTarget(mapping.workspaceId) || mapping;
 }
 
 export async function streamAgent(
@@ -1293,6 +1325,7 @@ function mappingsForAgent(
   const matched = mappings
     .filter(
       (mapping) =>
+        mapping.discordGuildId !== "local-console" &&
         mapping.workspaceId === agent.workspace_id &&
         (!mapping.paneId || mapping.paneId === agent.pane_id) &&
         (!mapping.agentName || agentMatches(agent, mapping.agentName)),
@@ -1359,6 +1392,47 @@ function helpText(prefix: string): string {
     "4. 直接 mention bot 後輸入對話內容；訊息只會送給 active Agent。",
     `5. 需要轉交時輸入 \`@bot handoff <from-agent> <to-agent>\`。`,
     "注意：不同 workspace 可能有同名 Agent；這時請使用 pane ID，不要只輸入 codex。",
+  ].join("\n");
+}
+
+function consoleHelpText(): string {
+  return [
+    "**Herdr Bridge Console 使用說明**",
+    "在 bridge> 直接輸入指令，不需要 /herdr 或 mention。",
+    "",
+    "**選擇與查詢**",
+    "agent — 列出目前可用 Agent",
+    "agent use <pane> — 選取 Agent，並開始在 bridge 顯示其可見畫面",
+    "current — 顯示目前選取的 Agent、workspace 與 pane",
+    "status — 檢查 Herdr socket 與 routing",
+    "wk — 列出可用 workspace",
+    "wk use <workspace> — 選取 workspace；不會建立或移動 Agent",
+    "",
+    "**對話與執行**",
+    "ask <prompt> — 對目前選取 Agent 發送新 prompt",
+    "<未識別指令文字> — 預設視為 ask prompt",
+    "read [agent] — 讀取最近輸出",
+    "wait [agent] — 等待 Agent 到達穩定狀態",
+    "cancel [agent] — 送出 Ctrl-C",
+    "model [agent] [model] — 顯示或切換 model",
+    "",
+    "**Team 與交接**",
+    "team list — 列出所有 workspace Team 成員",
+    "team add <agent> | team remove <agent> — 管理目前 workspace Team",
+    "team ask <prompt> — 對目前 workspace Team 發送 prompt",
+    "handoff <from> <to> [instruction] — 以受限近期輸出交接",
+    "",
+    "**共用 Discord routing**",
+    "threads — 列出已映射 thread",
+    "thread <ID> — 共用該 Discord thread 的 active Agent／Team",
+    "thread off — 恢復本機獨立 routing",
+    "",
+    "**本機 Agent 互動**",
+    "選取後會持續顯示 bounded terminal snapshot（最多 40 行／6,000 字元）。",
+    "idle/done 可發送新 prompt；blocked 可直接輸入回答。",
+    "working/unknown 時新 prompt 會被拒絕，但 current、agent、wk、help 等控制指令仍可使用。",
+    "若回答剛好以控制指令開頭，請使用：ask <回答>",
+    "完整 transcript mirror 與 Team 多 Agent 問題回覆識別仍待實作。",
   ].join("\n");
 }
 

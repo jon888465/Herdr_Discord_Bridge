@@ -236,14 +236,14 @@ export class HerdrClient {
   }
 
   /** Deliver an approval to older Herdr versions without bypassing Herdr's API. */
-  async sendAgent(target: string, text: string): Promise<void> {
+  async sendAgent(target: string, text: string, options: RequestOptions = {}): Promise<void> {
     try {
-      await this.request("agent.send", { target, text });
+      await this.request("agent.send", { target, text }, options);
     } catch (error) {
       if (!(error instanceof HerdrError) || !isMissingMethod(error.code))
         throw error;
       try {
-        await this.request("agent.prompt", { target, text });
+        await this.request("agent.prompt", { target, text }, options);
       } catch (promptError) {
         // Herdr 0.8 removed the legacy agent.send method and deliberately
         // rejects agent.prompt while blocked. Its official raw pane API is
@@ -257,7 +257,7 @@ export class HerdrClient {
           pane_id: target,
           text,
           keys: ["enter"],
-        });
+        }, options);
       }
     }
   }

@@ -169,7 +169,9 @@ Agent 完成後，回覆會更新原本的 progress message；預設不會另外
 ```
 
 設定 `requireMention` 後，兩種 command 都必須 mention bot，例如 `@bridge agents` 或 `@bridge /herdr agents`。在已 mapping 的 thread 中，普通文字會被當作 active Agent 的 prompt。
-Bridge pane 啟動後也會提供 `bridge>` command prompt；可直接輸入 `agents`、`status`、`use w2:p1`、`ask <prompt> (使用目前選定 Agent)`、`read w2:p1`、`wait w2:p1` 或 `cancel w2:p1`，也可加 `/herdr` 前綴。結果與串流進度會印回 pane；無法辨識的整行輸入會直接當作 prompt 送給目前選定的 Agent。`team add` 等指令依目前 workspace 操作；若沒有 active Agent，先在 bridge console 執行 `wk use <workspace>`。
+在 `bridge>` 執行 `agent use <pane>` 後，會保存目前 workspace 與 active Agent，並自動顯示該 Agent 的可見畫面、進度與追問。不需另開 mirror 或先進入 blocked。輸出以 Agent／workspace／pane 標示，限制 40 行／6,000 字元，有變化才更新；這是 terminal 節錄，不保證完整歷史或 final，也不自動送到 Discord。
+
+直接輸入 `ask <文字>` 或非指令文字：idle/done 時發問，blocked 時回答 bridge 已顯示的問題。問題已變更或尚未顯示時，先看新問題再回答；同一問題不重複送答。`help`、`current`、`agent`、`agent use`、`wk` 等控制指令在 working／blocked 時仍可用；working/unknown 時不插入新 prompt。答案開頭若是指令名稱，請用 `ask current` 等明確格式。顯示輸出時保留正在編輯的輸入。多 Agent 問題識別／排隊與 Discord mirror 仍待做。
 
 
 `bridge>` 的 Agent 選取以 workspace scope 保存；Discord user／thread mapping 仍各自獨立。請輸入 `agent use <pane ID>` 後再執行 `current`。

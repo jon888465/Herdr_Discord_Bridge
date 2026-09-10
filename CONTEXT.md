@@ -2,8 +2,8 @@
 
 ## Team orchestration
 
-- **Team**: The set of live Herdr Agents attached to one Discord thread for
-  collaborative work. A Team is scoped to that thread and does not imply that
+- **Team**: The set of Herdr Agents attached to one workspace for
+  collaborative work. A Team is scoped to that workspace and does not imply that
   every Agent receives every user message.
 - **Lead**: The Team's active Agent at the moment a Team Task starts. The Lead
   plans the work and produces the final synthesis for the user.
@@ -55,8 +55,11 @@ The current issue and verification ledger is [known issues](docs/known-issues.md
 The local bridge console can explicitly select an existing Discord thread with
 `thread <ID>` (`threads` lists choices). This persists a reference to the same
 thread route, sharing active Agent and Team changes. `thread off` restores the
-independent console route. Output remains local; direct Agent-pane mirroring
-is still pending. Bridge restart preserves other Agent panes and targets tab 1
+independent console route. Selecting an Agent also displays its bounded visible
+terminal snapshots locally and permits replies to its displayed blocked question.
+Controls remain available in every state. Direct Agent-pane mirroring to Discord
+and multi-Agent question correlation are still pending (ISSUE-010 / ISSUE-012).
+Bridge restart preserves other Agent panes and targets tab 1
 within the dedicated workspace named `bridge` (created if absent). Legacy bridge
 panes elsewhere must be explicitly migrated/stopped before restart.
 

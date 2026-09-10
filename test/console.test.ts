@@ -23,7 +23,7 @@ test("pane console accepts plain and prefixed bridge commands", () => {
     parseConsoleCommand("ask w2:p1 inspect the current task", "/herdr"),
     {
       command: "ask",
-      args: ["w2:p1", "inspect", "the", "current", "task"],
+      args: ["w2:p1 inspect the current task"],
     },
   );
   assert.equal(parseConsoleCommand("   ", "/herdr"), null);

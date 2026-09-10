@@ -3,6 +3,7 @@ import type { Config } from "./config.js";
 import readline from "node:readline";
 import type { Message } from "discord.js";
 import type { CommandContext } from "./discord.js";
+import { SHORT_COMMANDS } from "./discord.js";
 
 type ConsoleCommand = {
   command: string;
@@ -20,8 +21,13 @@ export function parseConsoleCommand(
     : text;
   if (!rest) return null;
   const parts = rest.split(/\s+/);
+  const command = parts[0].toLowerCase();
+  if (command === "ask")
+    return { command, args: [rest.slice(parts[0].length).trim()] };
+  if (!SHORT_COMMANDS.has(command) && !["threads", "thread"].includes(command))
+    return { command: "ask", args: [rest] };
   return {
-    command: parts[0].toLowerCase(),
+    command,
     args: parts.slice(1),
   };
 }
@@ -52,6 +58,7 @@ export function createConsoleContext(
     },
   } as unknown as Message;
   return {
+    source: "console",
     message,
     routing: {
       guildId: "local-console",
@@ -69,16 +76,23 @@ export function startConsole(
     context: CommandContext,
   ) => Promise<void>,
   print: (text: string) => void = console.log,
-): { stop: () => void } {
-  if (!process.stdin.isTTY) return { stop: () => undefined };
+): { stop: () => void; print: (text: string) => void; context?: CommandContext } {
+  if (!process.stdin.isTTY) return { stop: () => undefined, print };
   const input = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
     terminal: true,
     prompt: "bridge> ",
   });
-  const context = createConsoleContext(print);
   let closed = false;
+  const display = (text: string) => {
+    if (closed) return;
+    readline.clearLine(process.stdout, 0);
+    readline.cursorTo(process.stdout, 0);
+    print(text);
+    input.prompt(true);
+  };
+  const context = createConsoleContext(display);
   input.on("line", (line) => {
     const parsed = parseConsoleCommand(line, commandPrefix);
     if (!parsed) {
@@ -100,6 +114,8 @@ export function startConsole(
   });
   input.prompt();
   return {
+    print: display,
+    context,
     stop: () => {
       closed = true;
       input.close();

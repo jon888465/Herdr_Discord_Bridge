@@ -134,9 +134,11 @@ When `requireMention` is enabled, mention the bot for both forms, for example
 whose first word is not a known command remains a direct prompt to the active
 Agent.
 
-By default, the `bridge>` console has its own Agent selection, separate from Discord users and threads. If `current` says “No Agent is selected”, run `agents`, then `use <pane ID from the list>`, then `current`. It does not inherit the focused Herdr pane.
+In `bridge>`, run `agent`, then `agent use <pane ID>`, then `current`. Selection saves both the local workspace and its active Agent. Discord user/thread routes stay independent unless you explicitly select a shared `thread <ID>`.
 
-The bridge pane also accepts the same command names on stdin. Type commands directly at the `bridge>` prompt, for example `agents`, `status`, `use w2:p1`, `ask <prompt> (使用目前選定 Agent)`, `read w2:p1`, `wait w2:p1`, or `cancel w2:p1`. Results and streaming progress are printed back to the pane. Any line that is not a recognized control command is sent as a prompt to the selected Agent. `team list` lists all workspace Teams. Other Team commands use the selected Herdr workspace; run `wk use <workspace>` first when needed.
+Selecting an Agent starts local observation automatically: the current visible screen, progress, questions and results appear with Agent/workspace/pane labels. Snapshots are limited to 40 visible lines / 6,000 characters and only reprinted on changes; they are not a complete transcript or guaranteed final answer. They are not automatically sent to Discord.
+
+Type `ask <text>` or ordinary text to the selected Agent. When idle/done it starts a prompt; when blocked it answers the question shown in bridge. Changed or unseen questions must be read and answered again. Duplicate answers are rejected. `help`, `current`, `agent use`, `wk` and other controls remain available while working or blocked; new prompts during working/unknown are rejected. Use `ask current` if the answer itself is a command word. Output preserves the line being edited. `read [agent]`, `wait [agent]`, `cancel [agent]` remain explicit controls. `team list` lists workspace Teams; other Team operations require a workspace. Multiple simultaneous Agent questions and Discord mirroring remain pending.
 
 ### Selecting an Agent
 
