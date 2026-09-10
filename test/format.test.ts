@@ -59,6 +59,9 @@ test("mention-only commands and prefixed commands share the same parser", () => 
   assert.deepEqual(parseCommandText("/herdr agents", "/herdr", true, true), {
     rest: "agents",
   });
+  assert.deepEqual(parseCommandText("current", "/herdr", true, true), { rest: "current" });
+  assert.deepEqual(parseCommandText("agent use w2:p4", "/herdr", true, true), { rest: "agent use w2:p4" });
+  assert.deepEqual(parseCommandText("wk", "/herdr", true, true), { rest: "wk" });
   assert.equal(parseCommandText("agents", "/herdr", false, true), null);
   assert.equal(
     parseCommandText("please inspect auth", "/herdr", true, true),

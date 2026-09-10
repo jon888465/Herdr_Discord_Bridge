@@ -36,6 +36,7 @@ const SHORT_COMMANDS = new Set([
   "workspaces",
   "wk",
   "agents",
+  "agent",
   "status",
   "current",
   "use",

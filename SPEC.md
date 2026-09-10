@@ -23,10 +23,14 @@ Bridge 不是 ACP broker，也不會自行啟動 coding CLI。因此 Discord 斷
 ## 2. 執行環境與設定
 
 Plugin 以 TypeScript 編譯至 `dist/`，由 manifest pane 以
-`node dist/src/index.js` 啟動。本機 restart script 在所有模式下都以 tab 1
+`node dist/src/index.js` 啟動。本機 restart script 在所有模式下都以名為 `bridge` 的專用 workspace 之 tab 1
 為目標：無參數時啟動已安裝 plugin，`-r` 重新建置並連結本機 checkout，
 `-rg` 從 GitHub 重新安裝 `jon888465/Herdr_Discord_Bridge`。它不會聚焦該
-tab，因此後續 Agent pane 會使用呼叫端原本的 tab，不會被隱含放入 tab 1。
+tab，也不搬移其他 Agent pane。依名稱查找 `bridge` workspace，沒有時以專案 cwd
+建立並保留 focus；同名多個時拒絕，不猜測 ID。若其他 workspace 尚有舊 bridge
+pane，停止並列出位置，要求先明確遷移／停止舊 bridge，避免重複 bot 程序。
+選定目標 tab 後，僅關閉該 tab 明確標示 Discord bridge 且無 Agent 的 pane；
+若 bridge 是唯一 pane，先 split 保留 tab。缺少 tab 1 時停止，不關閉 pane。
 Herdr 會注入 `HERDR_SOCKET_PATH` 與 `HERDR_PLUGIN_CONFIG_DIR`；standalone
 執行時也支援文件定義的預設 socket 與 `HERDR_SESSION` 解析方式。
 
@@ -147,7 +151,7 @@ mapping 過期時，一律 fail closed。
 /herdr status
 /herdr current
 /herdr use <agent-name-or-pane-id>
-/herdr ask <agent-name-or-pane-id> <prompt>
+/herdr ask <prompt>（pane 使用目前選定 Agent）；Discord 使用 ask <agent-name-or-pane-id> <prompt>
 /herdr target <agent-name-or-pane-id>
 /herdr assign <agent-name-or-pane-id> <prompt>
 /herdr read [agent-name-or-pane-id]
@@ -160,7 +164,7 @@ mapping 過期時，一律 fail closed。
 /herdr team ask <prompt>
 ```
 
-Bridge pane 的 stdin 也接受相同指令，可直接輸入不帶 prefix 的 `agents`、`status`、`use w2:p1`、`ask w2:p1 <prompt>`、`read w2:p1`、`wait w2:p1`、`cancel w2:p1`，或使用 `/herdr` prefix。結果與 streaming progress 會印回 pane。需要 Discord thread context 的 Team routing 指令仍只能在 Discord thread 執行。
+Bridge pane 的 stdin 也接受相同指令，可直接輸入 `agent`、`agent use w2:p1`、`status`、`ask <prompt>`、`read w2:p1`、`wait w2:p1`、`cancel w2:p1`，或使用 `/herdr` prefix。結果與 streaming progress 會印回 pane。Team routing 指令需要目前已選取的 workspace；Discord thread 只提供 route context，本機可用 `wk use <workspace>` 選取。
 `workspaces` 顯示 Herdr 回傳的 label/path、ID 與 agent state。`wk use
 <workspace-id-or-name>` 只會將目前 route 綁定到既有且已授權的 Herdr workspace；
 不會建立 workspace、pane 或 Agent。之後使用 `use`、`target` 或 `assign` 選擇
@@ -170,8 +174,7 @@ Agent。`current` 顯示有效 mapping，並回報過期的 agent/pane 資料。
 作為 active target，但不送出 prompt。Thread 有 active target 時，普通 user
 message 會直接送給該 Agent，並套用與 `assign` 相同的 allowlist、過期 mapping
 與 busy 檢查。`target` 是向後相容的 alias。`ask` 對指定 Agent 發送一次性
-prompt，並將該 Agent 記錄到 thread，但不改變 active target。`team add` 與
-`team list` 查看目前 thread 的 Team 成員；Team 成員必須屬於同一 workspace，mapping 會持久化；
+prompt，並將該 Agent 記錄到 thread，但不改變 active target。`team list` 列出所有 workspace Teams；`team add`、`team remove` 與 `team ask` 操作目前 workspace 的 Team。Team mapping 會持久化，Discord thread 不是 Team scope；
 `team remove` 管理獨立的 thread participants；`team ask` 只將指定 prompt 送給
 每個同 workspace participant，不會廣播 thread 或 terminal history。
 
@@ -221,7 +224,7 @@ Terminal fallback 保留最長的、限定於 prompt scope 的已觀察摘錄；
 摘錄是完整 final 或累積 transcript。只有在 idle/done 狀態連續四次未變且成功的
 read，再持續 settlement 十秒，才允許 fallback 完成。blocked、unknown、輸出
 變動或 read failure 都會重設 settlement。Structured completion 可在沒有成功
-terminal read 時完成。Agent session 被替換後停止觀察。
+terminal read 時完成。Agent session 被替換後停止觀察；identity 比較 terminal、pane、workspace、agent kind，以及 session 的 kind/value，不以 source、欄位順序或其他 metadata 判斷替換。缺少或無法辨識的 session 不自動認定為新的相同 session。
 
 Final 會獨立發送，使用 Markdown-aware chunks，且不超過 Discord content limit。
 所有 chunks 發送完後才顯示 finished。缺少 final 時會描述為 capture incomplete，
@@ -269,6 +272,17 @@ poll，socket operation 也只有限次重試。Discord 或 Herdr failure 會回
 command 或 process log，不會停止遠端工作。長時間 assignment stream 最長可執行
 24 小時，任何時候都可用 `read` 檢查；當 Herdr 不再回傳 target 時，會回報 pane
 已退出並停止追蹤。
+
+### 同一 bot 的單一實例
+
+正常啟動在讀取 routing state 與 Discord login 前取得本機 IPC 排他鎖，第二個
+相同 bot 實例立即失敗；鎖不依賴 cwd、workspace 或 config directory。以 token
+的 bot ID 建立雜湊 key（無有效 ID 時使用 token 雜湊），不輸出 token；token 輪替
+但 bot ID 相同也互斥。鎖只占用本機 IPC 名稱，不提供 command API 或 HTTP。
+Linux 使用 abstract Unix socket，Windows 使用 named pipe，程序退出由 OS 釋放；
+其他 Unix 使用 temporary-directory socket，異常退出殘留時 fail closed，需確認
+舊程序已退出後清除殘留 socket。不能防止舊版未實作鎖的 bridge 或另一台主機
+重複登入；首次升級仍須處理舊程序。dry-run 不登入 Discord，因此不取得 bot 鎖。
 
 ## 8. 驗證與完成定義
 
@@ -320,3 +334,17 @@ live-verified 狀態。Unit test 與 build 成功不能關閉仍需要 Discord/H
 acceptance 的 issue。提議中的 feature 必須與已實作行為分開，並在交接前調和
 過時或互相矛盾的敘述。純文件變更只需要 content/link/diff check，不需無關的
 完整程式測試重跑。
+
+### 本機 console 選取範圍（2026-09-10）
+
+`bridge>` 預設使用獨立的 `local-console` guild/channel/user routing identity，
+不繼承 Discord user 或 thread 的 active Agent，也不跟隨 Herdr 聚焦 pane。
+本機 `current` 沒有 mapping 時會提示先執行 `agent use <pane ID>`；pane 的 active Agent 以 workspace scope 保存。
+
+本機專用 `threads` 列出已映射且符合 guild/channel/workspace allowlist 的 thread；
+`thread <thread ID>` 明確選定共用路由，`thread off` 回到原本本機路由。
+選取儲存在同一 routing state，重啟後保留；共用模式直接操作該 thread 的 active
+Agent 與 Team，兩邊變更立即反映，不複製 mapping，也不冒用 Discord 使用者。
+每次指令再次檢查 thread 存在與授權，失效時拒絕，不自動挑其他 thread。
+此模式只共用 routing；本機 command 回覆／stream 仍輸出到本機，直接在 Agent
+pane 的對話不會因此鏡像到 Discord。未知 thread 必須先在 Discord 建立 mapping。

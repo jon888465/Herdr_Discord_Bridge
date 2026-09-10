@@ -171,3 +171,18 @@ export function rollingPreview(text: string): string {
   const tail = text.slice(-1500);
   return text.length > tail.length ? `…\n${tail}` : tail;
 }
+
+// Provider/source metadata can change without replacing the underlying session.
+export function sameAgentSession(left: unknown, right: unknown): boolean {
+  if (left == null || right == null) return left == null && right == null;
+  if (typeof left !== "object" || typeof right !== "object") return false;
+  const a = left as { kind?: unknown; value?: unknown };
+  const b = right as { kind?: unknown; value?: unknown };
+  return (
+    (a.kind === "id" || a.kind === "path") &&
+    typeof a.value === "string" &&
+    a.value.length > 0 &&
+    a.kind === b.kind &&
+    a.value === b.value
+  );
+}

@@ -88,11 +88,18 @@ export interface ThreadRoute {
   agents: Record<string, TargetMapping>;
 }
 
+export interface WorkspaceTeam {
+  activeAgentKey?: string;
+  agents: Record<string, TargetMapping>;
+}
+
 export interface PersistedRoutingState {
+  consoleThread?: Omit<RoutingContext, "userId">;
   threadRoutes: Record<string, ThreadRoute>;
   userMappings: Record<string, TargetMapping>;
   channelDefaults: Record<string, TargetMapping>;
   approvals: Record<string, ApprovalRecord>;
+  workspaceTeams?: Record<string, WorkspaceTeam>;
 }
 
 export interface HerdrSnapshot {

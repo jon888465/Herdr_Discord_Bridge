@@ -7,6 +7,7 @@ import type {
   PersistedRoutingState,
   RoutingContext,
   TargetMapping,
+  WorkspaceTeam,
 } from "./types.js";
 
 const EMPTY_STATE: PersistedRoutingState = {
@@ -127,6 +128,48 @@ export class RoutingStore {
     return mapping;
   }
 
+  workspaceTeam(workspaceId: string): WorkspaceTeam {
+    return this.state.workspaceTeams?.[workspaceId] ?? { agents: {} };
+  }
+
+  bindWorkspace(workspaceId: string, target: TargetInput, options: { activate?: boolean } = {}): TargetMapping {
+    const timestamp = this.now().toISOString();
+    const existing = this.state.workspaceTeams ?? (this.state.workspaceTeams = {});
+    const team = existing[workspaceId] ?? { agents: {} };
+    const mapping: TargetMapping = { ...target, workspaceId, discordGuildId: "workspace", discordChannelId: workspaceId, createdAt: timestamp, updatedAt: timestamp };
+    const key = mappingKey(target);
+    const previous = team.agents[key];
+    team.agents[key] = { ...mapping, createdAt: previous?.createdAt ?? timestamp };
+    if (options.activate !== false || !team.activeAgentKey) team.activeAgentKey = key;
+    existing[workspaceId] = team;
+    this.scheduleSave();
+    return team.agents[key];
+  }
+
+  workspaceTeamIds(): string[] {
+    return Object.keys(this.state.workspaceTeams ?? {}).sort();
+  }
+
+  workspaceActiveTarget(workspaceId: string): TargetMapping | undefined {
+    const team = this.state.workspaceTeams?.[workspaceId];
+    return team?.activeAgentKey ? team.agents[team.activeAgentKey] : undefined;
+  }
+
+  workspaceTargets(workspaceId: string): TargetMapping[] {
+    return Object.values(this.state.workspaceTeams?.[workspaceId]?.agents ?? {});
+  }
+
+  removeWorkspaceTarget(workspaceId: string, target: TargetMapping): boolean {
+    const team = this.state.workspaceTeams?.[workspaceId];
+    if (!team) return false;
+    const key = mappingKey(target);
+    if (!team.agents[key]) return false;
+    delete team.agents[key];
+    if (team.activeAgentKey === key) team.activeAgentKey = Object.keys(team.agents)[0];
+    this.scheduleSave();
+    return true;
+  }
+
   threadTargets(context: RoutingContext): TargetMapping[] {
     if (!context.threadId) return [];
     const route =
@@ -228,6 +271,36 @@ export class RoutingStore {
     return changed;
   }
 
+  consoleThread(): Omit<RoutingContext, "userId"> | undefined {
+    return this.state.consoleThread && { ...this.state.consoleThread };
+  }
+
+  selectConsoleThread(threadId?: string): void {
+    if (!threadId) {
+      delete this.state.consoleThread;
+    } else {
+      const matches = this.allMappings().filter(
+        (m) => m.discordThreadId === threadId,
+      );
+      const keys = new Set(
+        matches.map((m) =>
+          threadKey(m.discordGuildId, m.discordChannelId, threadId),
+        ),
+      );
+      if (keys.size !== 1)
+        throw new Error(
+          "Select one existing mapped Discord thread ID; use threads to list them.",
+        );
+      const mapping = matches[0];
+      this.state.consoleThread = {
+        guildId: mapping.discordGuildId,
+        channelId: mapping.discordChannelId,
+        threadId,
+      };
+    }
+    this.flush();
+  }
+
   allMappings(): TargetMapping[] {
     return [
       ...Object.values(this.state.threadRoutes).flatMap((route) =>
@@ -316,9 +389,11 @@ function loadState(filePath: string): PersistedRoutingState {
     }
     return {
       threadRoutes,
+      consoleThread: parsed.consoleThread,
       userMappings: parsed.userMappings ?? {},
       channelDefaults: parsed.channelDefaults ?? {},
       approvals: parsed.approvals ?? {},
+      workspaceTeams: parsed.workspaceTeams ?? {},
     };
   } catch {
     return cloneEmptyState();

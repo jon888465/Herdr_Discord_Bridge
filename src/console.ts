@@ -1,3 +1,5 @@
+import type { RoutingStore } from "./routing.js";
+import type { Config } from "./config.js";
 import readline from "node:readline";
 import type { Message } from "discord.js";
 import type { CommandContext } from "./discord.js";
@@ -36,6 +38,7 @@ export function createConsoleContext(
   };
   const message = {
     author: { id: "local-console", bot: false },
+    attachments: new Map(),
     guildId: null,
     channelId: "local-console",
     channel,
@@ -85,8 +88,7 @@ export function startConsole(
     void onCommand(parsed.command, parsed.args, context)
       .catch((error) =>
         print(
-          "❌ " +
-            (error instanceof Error ? error.message : "unknown error"),
+          "❌ " + (error instanceof Error ? error.message : "unknown error"),
         ),
       )
       .finally(() => {
@@ -115,4 +117,70 @@ function consolePayload(payload: unknown): string {
   )
     return payload.content;
   return "[bridge console: interactive Discord component omitted]";
+}
+
+export async function routeConsoleCommand(
+  command: string,
+  args: string[],
+  context: CommandContext,
+  store: RoutingStore,
+  config: Config,
+): Promise<CommandContext | null> {
+  const allowed = (guild: string, channel: string, workspace: string) =>
+    (!config.discord.allowedGuildIds.length ||
+      config.discord.allowedGuildIds.includes(guild)) &&
+    (!config.discord.allowedChannelIds.length ||
+      config.discord.allowedChannelIds.includes(channel)) &&
+    (!config.allowedWorkspaceIds.length ||
+      config.allowedWorkspaceIds.includes(workspace));
+  const routes = store
+    .allMappings()
+    .filter(
+      (m) =>
+        m.discordThreadId &&
+        allowed(m.discordGuildId, m.discordChannelId, m.workspaceId),
+    );
+  if (command === "threads") {
+    const lines = [
+      ...new Set(
+        routes.map(
+          (m) =>
+            `${m.discordThreadId} · workspace ${m.workspaceId} · channel ${m.discordChannelId}`,
+        ),
+      ),
+    ];
+    await context.message.reply(
+      lines.join("\n") || "No authorized mapped Discord threads.",
+    );
+    return null;
+  }
+  if (command === "thread") {
+    if (args.length !== 1)
+      throw new Error(
+        "usage: thread <thread ID>|off; use threads to list mappings",
+      );
+    if (args[0] !== "off" && !routes.some((m) => m.discordThreadId === args[0]))
+      throw new Error("Unknown or unauthorized mapped thread; use threads.");
+    store.selectConsoleThread(args[0] === "off" ? undefined : args[0]);
+    await context.message.reply(
+      args[0] === "off"
+        ? "Local console routing restored."
+        : `Shared routing: thread ${args[0]}. Console output stays here.`,
+    );
+    return null;
+  }
+  const selected = store.consoleThread();
+  if (!selected || command === "help") return context;
+  if (
+    !routes.some(
+      (m) =>
+        m.discordThreadId === selected.threadId &&
+        m.discordGuildId === selected.guildId &&
+        m.discordChannelId === selected.channelId,
+    )
+  )
+    throw new Error(
+      "Shared thread is unavailable or unauthorized. Select a thread or use thread off.",
+    );
+  return { ...context, routing: { ...selected, userId: "local-console" } };
 }

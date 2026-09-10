@@ -1,3 +1,4 @@
+import { acquireInstanceLock } from "./instance-lock.js";
 import { PROGRESS_UPDATE_MS, formatElapsed } from "./progress-time.js";
 import { prepareImages } from "./attachments.js";
 import { join } from "node:path";
@@ -6,6 +7,7 @@ import {
   CodexTranscript,
   Settlement,
   rollingPreview,
+  sameAgentSession,
 } from "./response-stream.js";
 import { loadConfig, statePath } from "./config.js";
 import {
@@ -14,7 +16,7 @@ import {
   modelOptionsFor,
 } from "./cli-adapter.js";
 import { DiscordAdapter, type CommandContext } from "./discord.js";
-import { startConsole } from "./console.js";
+import { startConsole, routeConsoleCommand } from "./console.js";
 import {
   agentHeader,
   codeBlock,
@@ -45,6 +47,19 @@ import { agentLabel, workspacePath } from "./types.js";
 export async function run(): Promise<void> {
   const config = loadConfig();
   const dryRun = process.argv.includes("--dry-run");
+  if (dryRun) return startBridge(config, true);
+  if (!config.discord.enabled || !config.discord.botToken)
+    throw new Error("Discord is disabled or its bot token is missing in plugin config/env");
+  const release = await acquireInstanceLock(config.discord.botToken);
+  try {
+    await startBridge(config, false);
+  } catch (error) {
+    await release();
+    throw error;
+  }
+}
+
+async function startBridge(config: ReturnType<typeof loadConfig>, dryRun: boolean): Promise<void> {
   const herdr = new HerdrClient(
     undefined,
     config.requestTimeoutMs,
@@ -146,12 +161,25 @@ export async function run(): Promise<void> {
       await discord.reply(context.message, `❌ ${safeError(error)}`);
     }
   });
-  await discord.start();
+  try {
+    await discord.start();
+  } catch (error) {
+    await discord.stop();
+    throw error;
+  }
   const consoleControl = startConsole(
     config.discord.commandPrefix,
     async (command, args, context) => {
       try {
-        await handleCommand(command, args, context, {
+        const routed = await routeConsoleCommand(
+          command,
+          args,
+          context,
+          routing,
+          config,
+        );
+        if (!routed) return;
+        await handleCommand(command, args, routed, {
           config,
           herdr,
           routing,
@@ -210,7 +238,17 @@ async function handleCommand(
       await listWorkspaces(context, runtime);
       return;
     case "wk":
+      if (args.length === 0) {
+        await listWorkspaces(context, runtime);
+        return;
+      }
       await workspaceCommand(args, context, runtime);
+      return;
+    case "agent":
+      if (args[0]?.toLowerCase() === "use")
+        await useAgentOrWorkspace(args.slice(1), context, runtime);
+      else
+        await listAgents(args, context, runtime);
       return;
     case "use":
       await useAgentOrWorkspace(args, context, runtime);
@@ -255,9 +293,11 @@ async function handleCommand(
       await teamCommand(args, context, runtime);
       return;
     default:
-      throw new Error(
-        `unknown command '${command}'. Try ${runtime.config.discord.commandPrefix} help`,
-      );
+      if (context.routing.guildId === "local-console") {
+        await askAgent([command, ...args], context, runtime);
+        return;
+      }
+      throw new Error(`unknown command '${command}'. Try ${runtime.config.discord.commandPrefix} help`);
   }
 }
 
@@ -347,9 +387,7 @@ async function useWorkspace(
       `workspace '${selector}' is ambiguous; use its Herdr workspace id`,
     );
   const workspace = matches[0];
-  const mapping = runtime.routing.bind(context.routing, {
-    workspaceId: workspace.workspace_id,
-  });
+  const mapping = runtime.routing.bind(context.routing, { workspaceId: workspace.workspace_id });
   await runtime.discord.reply(
     context.message,
     `✅ Routing for this ${context.routing.threadId ? "thread" : "user"} now targets **${workspace.label || workspace.name || workspace.workspace_id}** (\`${mapping.workspaceId}\`). Existing agents were not moved or restarted.`,
@@ -376,11 +414,10 @@ async function bindActiveAgent(
   runtime: Runtime,
 ): Promise<void> {
   validateAgentTarget(agent, undefined, runtime.config.allowedWorkspaceIds);
-  runtime.routing.bind(context.routing, {
-    workspaceId: agent.workspace_id,
-    agentName: agentLabel(agent),
-    paneId: agent.pane_id,
-  });
+  if (context.routing.guildId === "local-console")
+    runtime.routing.bindWorkspace(agent.workspace_id, agentTarget(agent));
+  else
+    runtime.routing.bind(context.routing, agentTarget(agent));
   await runtime.discord.reply(
     context.message,
     `${agentHeaderFor(agent)}\n✅ 目前對話 Agent：**${agentLabel(agent)}**\nWorkspace：\`${agent.workspace_name || agent.workspace_id}\`\nPane：\`${agent.pane_id}\`\n\nSubsequent messages in this ${context.routing.threadId ? "thread" : "user route"} will be sent only to this Agent.`,
@@ -391,7 +428,9 @@ async function currentTarget(
   context: CommandContext,
   runtime: Runtime,
 ): Promise<void> {
-  const mapping = runtime.routing.resolve(context.routing);
+  let mapping = runtime.routing.resolve(context.routing);
+  if (context.routing.guildId === "local-console" && mapping?.workspaceId && !mapping.paneId)
+    mapping = runtime.routing.workspaceActiveTarget(mapping.workspaceId);
   if (!mapping) {
     await runtime.discord.reply(
       context.message,
@@ -429,7 +468,7 @@ async function listAgents(
   context: CommandContext,
   runtime: Runtime,
 ): Promise<void> {
-  const mapping = runtime.routing.resolve(context.routing);
+  let mapping = runtime.routing.resolve(context.routing);
   const agents = (await runtime.herdr.listAgentsWithWorkspaceNames()).filter(
     (agent) =>
       runtime.config.allowedWorkspaceIds.length === 0 ||
@@ -560,22 +599,21 @@ async function assignAgent(
       "prompt is empty, contains an invalid character, or is too long",
     );
   const mapping = runtime.routing.resolve(context.routing);
+  const effectiveMapping = context.routing.guildId === "local-console" && mapping?.workspaceId && !mapping.paneId
+    ? runtime.routing.workspaceActiveTarget(mapping.workspaceId)
+    : mapping;
   const agent = findAgent(
     await runtime.herdr.listAgentsWithWorkspaceNames(),
     query,
   );
-  validateAgentTarget(agent, mapping, runtime.config.allowedWorkspaceIds);
-  const target = runtime.routing.bind(context.routing, {
-    workspaceId: agent.workspace_id,
-    agentName: agentLabel(agent),
-    paneId: agent.pane_id,
-  });
+  validateAgentTarget(agent, effectiveMapping, runtime.config.allowedWorkspaceIds);
+  runtime.routing.bind(context.routing, agentTarget(agent));
   await dispatchPrompt(
     agent,
     prompt,
     context,
     runtime,
-    `${agentHeaderFor(agent)}\n📨 Assigned prompt to **${target.agentName || query}**. Herdr is running the prompt.`,
+    `${agentHeaderFor(agent)}\n📨 Assigned prompt to **${agentLabel(agent)}**. Herdr is running the prompt.`,
   );
 }
 export function parseModelRequest(
@@ -603,27 +641,16 @@ async function askAgent(
   context: CommandContext,
   runtime: Runtime,
 ): Promise<void> {
-  const query = args.shift()?.trim();
+  const localImplicit = context.routing.guildId === "local-console";
+  const query = localImplicit ? "" : args.shift()?.trim() || "";
   const prompt = args.join(" ").trim();
-  if (!query || !prompt)
-    throw new Error("usage: /herdr ask <agent-name-or-pane-id> <prompt>");
+  if (!prompt || (!localImplicit && !query)) throw new Error(localImplicit ? "usage: ask <prompt>" : "usage: /herdr ask <agent-name-or-pane-id> <prompt>");
   validatePrompt(prompt);
-  const agent = findAgent(
-    await runtime.herdr.listAgentsWithWorkspaceNames(),
-    query,
-  );
+  const agent = localImplicit ? await resolveContextAgent("", context, runtime) : findAgent(await runtime.herdr.listAgentsWithWorkspaceNames(), query);
   validateAgentTarget(agent, undefined, runtime.config.allowedWorkspaceIds);
   assertAgentAvailable(agent, runtime);
-  runtime.routing.bind(context.routing, agentTarget(agent), {
-    activate: false,
-  });
-  await dispatchPrompt(
-    agent,
-    prompt,
-    context,
-    runtime,
-    `${agentHeaderFor(agent)}\n📨 One-shot prompt sent to **${agentLabel(agent)}**. The active thread Agent was not changed.`,
-  );
+  if (!localImplicit) runtime.routing.bind(context.routing, agentTarget(agent), { activate: false });
+  await dispatchPrompt(agent, prompt, context, runtime, agentHeaderFor(agent) + "\n📨 One-shot prompt sent to **" + agentLabel(agent) + "**. The active thread Agent was not changed.");
 }
 
 async function teamCommand(
@@ -653,36 +680,34 @@ async function teamCommand(
   }
 }
 
+async function teamWorkspaceId(context: CommandContext, runtime: Runtime): Promise<string> {
+  let mapping = runtime.routing.resolve(context.routing);
+  if (mapping?.workspaceId) return mapping.workspaceId;
+  throw new Error("select a workspace first with /herdr wk use <workspace>");
+}
+
 async function teamList(
   context: CommandContext,
   runtime: Runtime,
 ): Promise<void> {
-  if (!context.routing.threadId)
-    throw new Error("team members can only be viewed inside a Discord thread");
-  const targets = runtime.routing.threadTargets(context.routing);
-  if (targets.length === 0) {
-    await runtime.discord.reply(
-      context.message,
-      "👥 This thread has no Team members. Use /herdr team add <agent> to add one.",
-    );
+  const agents = await runtime.herdr.listAgentsWithWorkspaceNames();
+  const active = runtime.routing.resolve(context.routing)?.paneId;
+  const workspaceIds = runtime.routing.workspaceTeamIds();
+  if (workspaceIds.length === 0) {
+    await runtime.discord.reply(context.message, "👥 No workspace Teams configured. Use /herdr team add <agent> after selecting a workspace.");
     return;
   }
-  const agents = await runtime.herdr.listAgentsWithWorkspaceNames();
-  const activeTarget = runtime.routing.resolve(context.routing);
-  const active = activeTarget?.paneId;
-  const teamWorkspaceId = activeTarget?.workspaceId || targets[0].workspaceId;
-  const validTargets = targets.filter((target) => target.workspaceId === teamWorkspaceId);
-  const members = validTargets.map((target) => {
-    const agent = agents.find((item) => item.pane_id === target.paneId);
-    const status = agent?.agent_status || "stale";
-    const label = agent ? agentLabel(agent) : target.agentName || "unknown Agent";
-    const workspace = agent?.workspace_name || target.workspaceId;
-    return (target.paneId === active ? "▶" : "•") + " **" + label + "** · " + workspace + " · pane " + (target.paneId || "unavailable") + " · " + status;
+  const sections = workspaceIds.map((workspaceId) => {
+    const members = runtime.routing.workspaceTargets(workspaceId).map((target) => {
+      const agent = agents.find((item) => item.pane_id === target.paneId);
+      const status = agent?.agent_status || "stale";
+      const label = agent ? agentLabel(agent) : target.agentName || "unknown Agent";
+      const workspace = agent?.workspace_name || workspaceId;
+      return `${target.paneId === active ? "▶" : "•"} **${label}** · ${workspace} · pane ${target.paneId || "unavailable"} · ${status}`;
+    });
+    return `**Workspace ${workspaceId}**\n${members.join("\n")}`;
   });
-  await runtime.discord.reply(
-    context.message,
-    "👥 **Team members (" + members.length + ")**\n" + members.join("\n") + "\n\n▶ = active Agent; stale = Herdr 目前找不到此 pane。",
-  );
+  await runtime.discord.reply(context.message, "👥 **Workspace Teams**\n\n" + sections.join("\n\n"));
 }
 
 async function teamAdd(
@@ -690,10 +715,7 @@ async function teamAdd(
   context: CommandContext,
   runtime: Runtime,
 ): Promise<void> {
-  if (!context.routing.threadId)
-    throw new Error(
-      "team participants must be configured inside a Discord thread",
-    );
+  const workspaceId = await teamWorkspaceId(context, runtime);
   const query = args.join(" ").trim();
   if (!query) throw new Error("usage: /herdr team add <agent-name-or-pane-id>");
   const agent = findAgent(
@@ -701,15 +723,13 @@ async function teamAdd(
     query,
   );
   validateAgentTarget(agent, undefined, runtime.config.allowedWorkspaceIds);
-  const existingTargets = runtime.routing.threadTargets(context.routing);
+  const existingTargets = runtime.routing.workspaceTargets(workspaceId);
   const existingWorkspaces = new Set(existingTargets.map((target) => target.workspaceId));
   if (existingWorkspaces.size > 0 && (existingWorkspaces.size > 1 || !existingWorkspaces.has(agent.workspace_id)))
     throw new Error(
       "all Team members must belong to the same workspace; remove the other workspace members first",
     );
-  runtime.routing.bind(context.routing, agentTarget(agent), {
-    activate: false,
-  });
+  runtime.routing.bindWorkspace(workspaceId, agentTarget(agent), { activate: false });
   await runtime.discord.reply(
     context.message,
     `${agentHeaderFor(agent)}\n👥 Added **${agentLabel(agent)}** to this thread. The active Agent was not changed.`,
@@ -721,25 +741,21 @@ async function teamRemove(
   context: CommandContext,
   runtime: Runtime,
 ): Promise<void> {
-  if (!context.routing.threadId)
-    throw new Error(
-      "team participants must be configured inside a Discord thread",
-    );
+  const workspaceId = await teamWorkspaceId(context, runtime);
   const query = args.join(" ").trim().toLowerCase();
-  if (!query)
-    throw new Error("usage: /herdr team remove <agent-name-or-pane-id>");
+  if (!query) throw new Error("usage: /herdr team remove <agent-name-or-pane-id>");
   const target = runtime.routing
-    .threadTargets(context.routing)
+    .workspaceTargets(workspaceId)
     .find(
       (item) =>
         item.paneId?.toLowerCase() === query ||
         item.agentName?.toLowerCase() === query,
     );
-  if (!target) throw new Error(`thread agent '${query}' was not found`);
-  runtime.routing.removeThreadTarget(context.routing, target);
+  if (!target) throw new Error(`workspace agent '${query}' was not found`);
+  runtime.routing.removeWorkspaceTarget(workspaceId, target);
   await runtime.discord.reply(
     context.message,
-    `${agentHeader(target.agentName || "unknown Agent", target.workspaceId, target.paneId || "unknown pane")}\n👋 Removed **${target.agentName || target.paneId}** from this thread's Agent set.`,
+    `${agentHeader(target.agentName || "unknown Agent", target.workspaceId, target.paneId || "unknown pane")}\n👋 Removed **${target.agentName || target.paneId}** from this workspace Team.`,
   );
 }
 
@@ -748,20 +764,12 @@ async function teamAsk(
   context: CommandContext,
   runtime: Runtime,
 ): Promise<void> {
-  if (!context.routing.threadId)
-    throw new Error("team ask must be used inside a Discord thread");
+  const workspaceId = await teamWorkspaceId(context, runtime);
   const prompt = args.join(" ").trim();
   validatePrompt(prompt);
-  const targets = runtime.routing.threadTargets(context.routing);
+  const targets = runtime.routing.workspaceTargets(workspaceId);
   if (targets.length === 0)
-    throw new Error(
-      "this thread has no team agents; use /herdr team add first",
-    );
-  const workspaceIds = new Set(targets.map((target) => target.workspaceId));
-  if (workspaceIds.size > 1)
-    throw new Error(
-      "this Team contains multiple workspaces; remove members from other workspaces before using team ask",
-    );
+    throw new Error("this workspace has no team agents; use /herdr team add first");
   const agents = await runtime.herdr.listAgentsWithWorkspaceNames();
   const failures: string[] = [];
   await Promise.all(
@@ -1054,18 +1062,21 @@ async function resolveContextAgent(
   context: CommandContext,
   runtime: Runtime,
 ): Promise<AgentRecord> {
-  const mapping = runtime.routing.resolve(context.routing);
+  let mapping = runtime.routing.resolve(context.routing);
+  const effectiveMapping = context.routing.guildId === "local-console" && mapping?.workspaceId && !mapping.paneId
+    ? runtime.routing.workspaceActiveTarget(mapping.workspaceId)
+    : mapping;
   const agents = await runtime.herdr.listAgentsWithWorkspaceNames();
   const agent = query
     ? findAgent(agents, query)
-    : mapping?.paneId
-      ? agents.find((item) => item.pane_id === mapping.paneId)
+    : effectiveMapping?.paneId
+      ? agents.find((item) => item.pane_id === effectiveMapping.paneId)
       : undefined;
   if (!agent)
     throw new Error(
       "no live Agent target; specify an Agent name/pane id or set one with /herdr use",
     );
-  validateAgentTarget(agent, mapping, runtime.config.allowedWorkspaceIds);
+  validateAgentTarget(agent, effectiveMapping, runtime.config.allowedWorkspaceIds);
   return agent;
 }
 
@@ -1106,8 +1117,10 @@ export async function streamAgent(
     const current = agents.find(
       (agent) =>
         agent.terminal_id === initial.terminal_id &&
-        JSON.stringify(agent.agent_session) ===
-          JSON.stringify(initial.agent_session),
+        agent.pane_id === initial.pane_id &&
+        agent.workspace_id === initial.workspace_id &&
+        agent.agent === initial.agent &&
+        sameAgentSession(agent.agent_session, initial.agent_session),
     );
     if (!current) {
       await edit(
@@ -1335,6 +1348,9 @@ function helpText(prefix: string): string {
     `\`${prefix} team list\` — 查看目前 thread 的 Team 成員、pane 與即時狀態`,
     `\`${prefix} team ask <prompt>\` — 只把這次 prompt 送給所有 participants，不複製完整 history`,
     `\`${prefix} handoff <from> <to> [instruction]\` — 以受限近期輸出摘要交接給另一個 Agent`,
+    "",
+    "**本機 bridge 共用路由**",
+    "在 bridge> 輸入 threads 列出已映射 thread；thread <ID> 共用 active Agent／Team；thread off 恢復本機獨立路由。選取會保存；本機輸出仍在 pane。",
     "",
     "**推薦流程**",
     "1. 在 Discord 建立 thread。",

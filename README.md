@@ -81,11 +81,13 @@ Use the restart script in one of three modes:
 
 If the Herdr server is not running, `run.sh` starts the headless server and waits for its socket before continuing; you do not need to type `herdr` first, and the script does not stop an existing Herdr server.
 
-All modes close existing Discord bridge panes and keep tab 1 dedicated to the
-bridge. If tab 1 already contains Agent panes, they are moved to a reusable
-`Agents` tab before the bridge is opened. The script does not focus the bridge
-pane or the Agents tab, so subsequent Agent panes are not implicitly placed in
-tab 1. The script does not modify the plugin configuration or Discord token.
+All modes place the bridge in tab 1 of a dedicated workspace named `bridge`.
+The script reuses that workspace or creates it with the project cwd and
+`--no-focus`; duplicate names are rejected. Other Agent panes stay in place.
+If an old bridge still runs in another workspace, the script reports its pane
+ID and stops: explicitly move or stop that old bridge before restarting.
+Only labelled non-Agent bridge panes in the dedicated tab are replaced.
+The script does not modify the plugin configuration or Discord token.
 
 Fill in the bot token and explicit guild/channel/user allowlists in `config.json`
 or use environment variables. Never commit that file. Discord Message Content
@@ -111,7 +113,7 @@ The original prefixed form remains supported:
 /herdr status
 /herdr current
 /herdr use <agent-name-or-pane-id>
-/herdr ask <agent-name-or-pane-id> <prompt>
+/herdr ask <prompt>（pane 使用目前選定 Agent）；Discord 使用 ask <agent-name-or-pane-id> <prompt>
 /herdr target <agent-name-or-pane-id>
 /herdr assign <agent-name-or-pane-id> <prompt>
 /herdr model <model>
@@ -131,7 +133,10 @@ When `requireMention` is enabled, mention the bot for both forms, for example
 `@bridge agents` or `@bridge /herdr agents`. In a mapped thread, a message
 whose first word is not a known command remains a direct prompt to the active
 Agent.
-The bridge pane also accepts the same command names on stdin. Type commands directly at the `bridge>` prompt (with or without the `/herdr` prefix), for example `agents`, `status`, `use w2:p1`, `ask w2:p1 <prompt>`, `read w2:p1`, `wait w2:p1`, or `cancel w2:p1`. Results and streaming progress are printed back to the pane. Discord thread-only routing commands such as `team add` still require a Discord thread.
+
+By default, the `bridge>` console has its own Agent selection, separate from Discord users and threads. If `current` says “No Agent is selected”, run `agents`, then `use <pane ID from the list>`, then `current`. It does not inherit the focused Herdr pane.
+
+The bridge pane also accepts the same command names on stdin. Type commands directly at the `bridge>` prompt, for example `agents`, `status`, `use w2:p1`, `ask <prompt> (使用目前選定 Agent)`, `read w2:p1`, `wait w2:p1`, or `cancel w2:p1`. Results and streaming progress are printed back to the pane. Any line that is not a recognized control command is sent as a prompt to the selected Agent. `team list` lists all workspace Teams. Other Team commands use the selected Herdr workspace; run `wk use <workspace>` first when needed.
 
 ### Selecting an Agent
 
@@ -230,3 +235,14 @@ npm run build
 
 See [SPEC.md](./SPEC.md) for the protocol, security model, routing semantics,
 failure behavior, and acceptance criteria.
+
+### Share Discord routing with the bridge console
+
+In `bridge>`, run `threads`, then `thread <thread ID from the list>`, then
+`current`. Both interfaces now share the same active Agent and Team; `use`
+and Team changes apply to that workspace and are visible from any authorized Discord thread routed to it. Selection survives bridge restarts.
+Use `thread off` to restore independent console routing. Unknown or
+unauthorized threads are rejected. Console replies stay in the pane;
+this does not enable direct Agent conversation mirroring to Discord.
+
+Normal startup rejects a second local instance for the same Discord bot before login. The lock is independent of workspace and config directory. Linux releases it even after a crash. Older bridge builds without this lock must still be stopped during the first upgrade.

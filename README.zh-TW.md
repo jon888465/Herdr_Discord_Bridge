@@ -70,15 +70,7 @@ herdr plugin pane open \
 
 如果 Herdr server 尚未啟動，`run.sh` 會先自動啟動 headless server 並等待 socket ready，再執行 bridge 重建流程；不需要先手動輸入 `herdr`，也不會停止既有 Herdr server。
 
-三種模式都會讓 tab 1 專門給 Discord bridge 使用。如果 tab 1 已有其他 Agent pane，script 會建立或重用 `Agents` tab 並將它們搬過去；bridge 與 Agents tab 都不會被 focus，因此之後開啟的 Agent 不會被放到 tab 1。它不會修改 plugin 設定或 Discord token。
-
-```text
-./scripts/run.sh       # 只啟動，不 rebuild 或 reinstall
-./scripts/run.sh -r    # npm ci、build，並執行本地 checkout
-./scripts/run.sh -rg   # 從 GitHub 重新安裝 main 並啟動
-```
-
-三種模式都會找出並關閉既有 Discord bridge pane，使用 tab 1 的既有 pane 作為 split target，最後將新的 bridge pane 開在 tab 1。script 不會 focus bridge，因此之後開啟的其他 Agent pane 不會因重建流程被帶到 tab 1。它不會修改 plugin 設定或 Discord token。
+三種模式固定使用名為 `bridge` 的專用 workspace 之 tab 1；不存在時以專案 cwd 建立並保留 focus，同名多個則拒絕。其他 Agent pane 留在原位置。若其他 workspace 仍有舊 bridge，script 會列出 pane ID 並停止，需先明確搬移或停止舊 bridge，避免兩個 bot 程序同時執行。只替換專用 tab 中明確標示且無 Agent 的 bridge pane，不修改 plugin 設定或 Discord token。
 
 若要手動執行：
 
@@ -161,7 +153,7 @@ Agent 完成後，回覆會更新原本的 progress message；預設不會另外
 /herdr status
 /herdr current
 /herdr use <agent-name-or-pane-id>
-/herdr ask <agent-name-or-pane-id> <prompt>
+/herdr ask <prompt>（pane 使用目前選定 Agent）；Discord 使用 ask <agent-name-or-pane-id> <prompt>
 /herdr target <agent-name-or-pane-id>
 /herdr assign <agent-name-or-pane-id> <prompt>
 /herdr model <model>
@@ -177,7 +169,10 @@ Agent 完成後，回覆會更新原本的 progress message；預設不會另外
 ```
 
 設定 `requireMention` 後，兩種 command 都必須 mention bot，例如 `@bridge agents` 或 `@bridge /herdr agents`。在已 mapping 的 thread 中，普通文字會被當作 active Agent 的 prompt。
-Bridge pane 啟動後也會提供 `bridge>` command prompt；可直接輸入 `agents`、`status`、`use w2:p1`、`ask w2:p1 <prompt>`、`read w2:p1`、`wait w2:p1` 或 `cancel w2:p1`，也可加 `/herdr` 前綴。結果與串流進度會印回 pane；需要 Discord thread context 的 `team add` 等指令仍需在 Discord thread 執行。
+Bridge pane 啟動後也會提供 `bridge>` command prompt；可直接輸入 `agents`、`status`、`use w2:p1`、`ask <prompt> (使用目前選定 Agent)`、`read w2:p1`、`wait w2:p1` 或 `cancel w2:p1`，也可加 `/herdr` 前綴。結果與串流進度會印回 pane；無法辨識的整行輸入會直接當作 prompt 送給目前選定的 Agent。`team add` 等指令依目前 workspace 操作；若沒有 active Agent，先在 bridge console 執行 `wk use <workspace>`。
+
+
+`bridge>` 的 Agent 選取以 workspace scope 保存；Discord user／thread mapping 仍各自獨立。請輸入 `agent use <pane ID>` 後再執行 `current`。
 
 ### 選擇 Agent
 
@@ -206,3 +201,13 @@ npm run build
 ```
 
 主要 output adapter 位於 `src/cli-adapter.ts`，Discord/Herdr routing 主流程位於 `src/main.ts`。
+
+### Discord 與 bridge console 共用 mapping
+
+在 `bridge>` 依序輸入 `threads`、`thread <清單中的 thread ID>`、`current`。
+之後兩邊共用同一份 active Agent；Team 以 workspace 為 scope，任何授權 Discord thread 都能看到同一 Team。
+選取會保存，重啟後仍有效。輸入 `thread off` 回到本機獨立路由。
+未知或未授權 thread 會拒絕。本機回覆仍輸出在 pane；這不會啟用 Agent pane
+直接對話的 Discord 鏡像功能。
+
+正常啟動會在登入 Discord 前拒絕同一 bot 的第二個本機實例，鎖不依賴 workspace 或 config directory；Linux 即使異常退出也會釋放。舊版沒有此鎖，首次升級仍需先處理舊 bridge 程序。

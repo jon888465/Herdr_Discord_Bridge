@@ -59,70 +59,60 @@ ensure_herdr_server() {
 
 ensure_herdr_server
 
-echo "Finding existing Discord bridge panes..."
-mapfile -t bridge_panes < <(
-  herdr pane list | jq -r ".result.panes[] | select(.label == \"Discord bridge\" or .terminal_title == \"Discord bridge\" or .terminal_title_stripped == \"Discord bridge\" or ((.cwd // \"\") | test(\"herdr-discord-bridge-\"))) | .pane_id"
-)
+# Resolve the destination before closing a pane: closing the last pane can
+# remove a tab and make a global "first tab 1" lookup select another workspace.
+# Only an explicitly labelled non-Agent pane is eligible for replacement.
+workspace_json="$(herdr workspace list)"
+mapfile -t bridge_workspaces < <(printf "%s" "$workspace_json" | jq -r '.result.workspaces[] | select(.label == "bridge" or .name == "bridge") | .workspace_id')
+if [[ ${#bridge_workspaces[@]} -gt 1 ]]; then
+  echo "Multiple workspaces named bridge; resolve duplicate names first. No panes were closed." >&2
+  exit 1
+fi
+workspace_id="${bridge_workspaces[0]:-}"
+panes_json="$(herdr pane list)"
+if [[ -z "$workspace_id" ]]; then
+  echo "Creating dedicated bridge workspace..."
+  workspace_result="$(herdr workspace create --label bridge --cwd "$project_dir" --no-focus)"
+  workspace_id="$(printf "%s" "$workspace_result" | jq -r '.result.workspace.workspace_id // empty')"
+  if [[ -z "$workspace_id" ]]; then
+    echo "Could not identify the bridge workspace; no panes were closed." >&2
+    exit 1
+  fi
+  panes_json="$(herdr pane list)"
+fi
+legacy_bridges="$(printf "%s" "$panes_json" | jq -r --arg wk "$workspace_id" '.result.panes[] | select(.workspace_id != $wk and (.agent // "") == "" and (.label == "Discord bridge" or .terminal_title == "Discord bridge" or .terminal_title_stripped == "Discord bridge")) | .pane_id')"
+if [[ -n "$legacy_bridges" ]]; then
+  echo "Existing bridge panes outside the dedicated workspace: $legacy_bridges" >&2
+  echo "Move or stop those bridge panes explicitly before restarting. No panes were changed." >&2
+  exit 1
+fi
+tab_json="$(herdr tab list)"
+mapfile -t target_tabs < <(printf "%s" "$tab_json" | jq -r --arg wk "$workspace_id" '.result.tabs[] | select(.workspace_id == $wk and .number == 1) | .tab_id')
+if [[ ${#target_tabs[@]} != 1 ]]; then
+  echo "Could not find exactly one tab 1 in workspace $workspace_id; no panes were closed." >&2
+  exit 1
+fi
+tab_id="${target_tabs[0]}"
+mapfile -t bridge_panes < <(printf "%s" "$panes_json" | jq -r --arg tab "$tab_id" '.result.panes[] | select(.tab_id == $tab and (.agent // "") == "" and (.label == "Discord bridge" or .terminal_title == "Discord bridge" or .terminal_title_stripped == "Discord bridge")) | .pane_id')
+target_pane="$(printf "%s" "$panes_json" | jq -r --arg tab "$tab_id" '[.result.panes[] | select(.tab_id == $tab) | select((.agent // "") != "" or (.label != "Discord bridge" and .terminal_title != "Discord bridge" and .terminal_title_stripped != "Discord bridge"))][0].pane_id // empty')"
+if [[ -z "$target_pane" ]]; then
+  # Preserve tab 1 if its only pane is the old bridge.
+  if [[ ${#bridge_panes[@]} == 0 ]]; then
+    echo "No target pane in tab 1; no panes were closed." >&2
+    exit 1
+  fi
+  split_result="$(herdr pane split "${bridge_panes[0]}" --direction right --no-focus)"
+  target_pane="$(printf "%s" "$split_result" | jq -r '.result.pane.pane_id // empty')"
+fi
+if [[ -z "$target_pane" ]]; then
+  echo "Could not prepare a target in tab 1; no panes were closed." >&2
+  exit 1
+fi
 for pane_id in "${bridge_panes[@]}"; do
-  [[ -n "$pane_id" ]] || continue
-  echo "Closing pane $pane_id..."
+  echo "Closing bridge pane $pane_id..."
   herdr pane close "$pane_id"
 done
 
-tab_json="$(herdr tab list)"
-tab_id="$(printf "%s" "$tab_json" | jq -r '.result.tabs[] | select(.number == 1) | .tab_id' | head -n1)"
-workspace_id="$(printf "%s" "$tab_json" | jq -r --arg tab "$tab_id" '.result.tabs[] | select(.tab_id == $tab) | .workspace_id' | head -n1)"
-target_pane="$(herdr pane list | jq -r --arg tab "$tab_id" '.result.panes[] | select(.tab_id == $tab) | .pane_id' | head -n1)"
-if [[ -z "$tab_id" || -z "$workspace_id" || -z "$target_pane" ]]; then
-  echo "Could not find tab 1 and a target pane for the Discord bridge." >&2
-  exit 1
-fi
-
-# Keep tab 1 dedicated to the Discord bridge. Move existing Agent panes to a
-# separate Agents tab so they do not share the bridge tab.
-agent_panes="$(herdr agent list | jq -r --arg tab "$tab_id" '.result.agents[]? | select(.tab_id == $tab) | .pane_id' | sed 's/^ //')"
-target_pane=""
-while IFS= read -r pane_id; do
-  [[ -n "$pane_id" ]] || continue
-  if ! grep -Fxq "$pane_id" <<< "$agent_panes"; then
-    target_pane="$pane_id"
-    break
-  fi
-done < <(herdr pane list | jq -r --arg tab "$tab_id" '.result.panes[]? | select(.tab_id == $tab) | .pane_id')
-if [[ -z "$target_pane" ]]; then
-  first_pane="$(herdr pane list | jq -r --arg tab "$tab_id" '.result.panes[]? | select(.tab_id == $tab) | .pane_id' | head -n1)"
-  split_result="$(herdr pane split "$first_pane" --direction right --no-focus)"
-  target_pane="$(printf "%s" "$split_result" | jq -r ".result.pane.pane_id // empty")"
-fi
-if [[ -z "$target_pane" ]]; then
-  echo "Could not prepare a shell target in tab 1." >&2
-  exit 1
-fi
-move_panes=()
-while IFS= read -r pane_id; do
-  [[ -n "$pane_id" && "$pane_id" != "$target_pane" ]] || continue
-  move_panes+=("$pane_id")
-done < <(herdr pane list | jq -r --arg tab "$tab_id" '.result.panes[]? | select(.tab_id == $tab) | .pane_id')
-if [[ ${#move_panes[@]} -gt 0 ]]; then
-  agents_tab_id="$(printf "%s" "$tab_json" | jq -r --arg tab "$tab_id" '.result.tabs[]? | select(.label == "Agents" and .tab_id != $tab) | .tab_id' | head -n1)"
-  agents_root_pane=""
-  if [[ -z "$agents_tab_id" ]]; then
-    agents_result="$(herdr tab create --workspace "$workspace_id" --label Agents --no-focus)"
-    printf "%s\n" "$agents_result"
-    agents_tab_id="$(printf "%s" "$agents_result" | jq -r ".result.tab.tab_id // empty")"
-    agents_root_pane="$(printf "%s" "$agents_result" | jq -r ".result.root_pane.pane_id // empty")"
-  else
-    agents_root_pane="$(herdr pane list | jq -r --arg tab "$agents_tab_id" '.result.panes[]? | select(.tab_id == $tab) | .pane_id' | head -n1)"
-  fi
-  if [[ -z "$agents_tab_id" || -z "$agents_root_pane" ]]; then
-    echo "Could not prepare the Agents tab." >&2
-    exit 1
-  fi
-  for pane_id in "${move_panes[@]}"; do
-    echo "Moving pane $pane_id to Agents tab..."
-    herdr pane move "$pane_id" --tab "$agents_tab_id" --split right --target-pane "$agents_root_pane" --no-focus
-  done
-fi
 if [[ "$mode" == "-r" ]]; then
   echo "Linking local plugin..."
   herdr plugin unlink "$plugin_id" 2>/dev/null || true
