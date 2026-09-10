@@ -12,3 +12,13 @@ test("latestAgentResponse keeps a long Codex response intact", () => {
     response.trim(),
   );
 });
+
+test("latestAgentResponse uses the OpenCode prompt boundary", () => {
+  const prompt = "inspect the bridge";
+  const output = `before\n> ${prompt}\nOpenCode response\n`;
+
+  assert.equal(
+    latestAgentResponse("opencode", prompt, output, "before"),
+    "OpenCode response",
+  );
+});

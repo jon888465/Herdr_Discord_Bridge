@@ -232,7 +232,7 @@ Final 會獨立發送，使用 Markdown-aware chunks，且不超過 Discord cont
 Progress edit failure 與 final delivery 隔離。Bridge 不會消費 hidden reasoning
 event；terminal preview 仍是被觀察到的 CLI text，不是 semantic tool-event feed。
 
-第一版不實作 persistent delivery retries、mirror commands、agy structured
+第一版不實作 persistent delivery retries、mirror commands、agy／OpenCode structured
 transcript adapter 或 automatic attachment mode。已送出的 chunks 在 delivery
 failure 時不會重播；SDK transport handling 仍有效。Monitoring 上限為 24 小時。
 此實驗性本機 transcript format 依版本而異，必須保留 regression fixtures。

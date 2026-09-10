@@ -128,6 +128,7 @@ command 由 CLI adapter 處理，避免 Codex、Antigravity（`agy`）與其他 
 
 - Codex：`› prompt`
 - Antigravity / `agy`：`> prompt`
+- OpenCode：`> prompt`
 - 未知 CLI：使用保守的通用 adapter
 
 model/path 等 terminal UI metadata 會被過濾。如果找不到可靠的 prompt 邊界，bridge 不會把整份歷史 snapshot 當作回覆轉送。

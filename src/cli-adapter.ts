@@ -44,6 +44,7 @@ class MarkerCliAdapter implements CliOutputAdapter {
 
 const codexAdapter = new MarkerCliAdapter(["› ", "❯ "]);
 const antigravityAdapter = new MarkerCliAdapter(["> "]);
+const opencodeAdapter = new MarkerCliAdapter(["> "]);
 const genericAdapter = new MarkerCliAdapter([
   "› ",
   "❯ ",
@@ -94,6 +95,7 @@ export function latestAgentResponse(
 
 function adapterFor(agentKind: string | undefined): CliOutputAdapter {
   const kind = (agentKind || "").toLowerCase();
+  if (kind.includes("opencode")) return opencodeAdapter;
   if (kind.includes("antigravity") || kind === "agy") return antigravityAdapter;
   if (kind.includes("codex")) return codexAdapter;
   return genericAdapter;
