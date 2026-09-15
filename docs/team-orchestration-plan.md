@@ -1,6 +1,24 @@
 # Team Orchestration 實作計畫
 
-狀態：規劃中，尚未實作。
+狀態：第一階段 vertical slice 已實作；持久化、recovery、取消與完整 blocked
+互動仍待實作。
+
+2026-09-11 交接後已完成 ISSUE-013／014 原始碼修正與 targeted tests；完整
+repository 檢查及 live Discord／Herdr 驗收仍待完成。Herdr CLI／A2A 方法、
+版本差異與驗收清單見 [修正交接](team-orchestration-issues-013-014-handoff.md)。
+
+目前已完成：`team ask` 會由 thread active Agent 擔任 Lead，要求 JSON
+Assignment plan，驗證 Worker roster／dependency，透過 Herdr `agent.prompt`、
+`agent.wait`、`agent.read` 執行 Worker，收集 bounded report，再由 Lead 產生
+synthesis。此流程目前以記憶體中的單次 task lifecycle 運作，尚未持久化 task
+或提供 restart recovery。
+
+2026-09-11：ISSUE-013 重啟後再次失敗，已重現 Codex JSON 字串終端折行。
+planning 加入相符 Codex transcript final 優先與終端折行 fallback；驗證
+紀錄以 `known-issues.md` 為準，仍需新 build 的 live dispatch／synthesis 驗收。
+
+分派與等待的行為契約已寫入規格的「Herdr 分派與等待契約」；流程圖位於
+[`docs/team-orchestration-flow.drawio`](./team-orchestration-flow.drawio)。
 
 本計畫實作 [Team Orchestration 規格](./team-orchestration-spec.md)，且不改變
 現有 single-Agent routing 語意。

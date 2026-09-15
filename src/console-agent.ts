@@ -97,11 +97,7 @@ export class ConsoleAgent {
   }
 
   private show(agent: AgentRecord, text: string): void {
-    if (
-      this.shown?.text === text &&
-      this.shown.status === agent.agent_status &&
-      this.shown.seq === agent.state_change_seq
-    )
+    if (this.shown?.text === text && this.shown.status === agent.agent_status)
       return;
     this.print(
       `${agentHeader(agentLabel(agent), agent.workspace_id, agent.pane_id)}\n[${agent.agent_status}] Terminal snapshot (last 40 visible lines)\n${text || "(no visible output)"}${agent.agent_status === "blocked" ? "\nWaiting for your answer: ask <answer>. Control commands remain available." : ""}`,

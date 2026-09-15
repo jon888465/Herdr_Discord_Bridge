@@ -18,6 +18,7 @@ test("HerdrClient speaks newline-delimited JSON for the supported operations", a
       const request = JSON.parse(buffer.slice(0, newline)) as {
         id: string;
         method: string;
+        params?: { wait?: unknown };
       };
       const results: Record<string, unknown> = {
         ping: { type: "pong" },
@@ -39,7 +40,18 @@ test("HerdrClient speaks newline-delimited JSON for the supported operations", a
           ],
         },
         "agent.read": { read: { text: "observed output" } },
-        "agent.prompt": { accepted: true },
+        "agent.prompt": request.params?.wait
+          ? {
+              agent: {
+                terminal_id: "term-1",
+                agent: "codex",
+                agent_status: "done",
+                workspace_id: "w1",
+                tab_id: "w1:t1",
+                pane_id: "w1:p1",
+              },
+            }
+          : { accepted: true },
         "agent.send": { accepted: true },
         "agent.wait": {
           agent: {
@@ -69,6 +81,11 @@ test("HerdrClient speaks newline-delimited JSON for the supported operations", a
   assert.equal((await client.listAgents())[0].pane_id, "w1:p1");
   assert.equal(await client.readAgent("w1:p1"), "observed output");
   await client.promptAgent("w1:p1", "safe JSON text");
+  assert.equal(
+    (await client.promptAgentAndWait("w1:p1", "safe JSON text", 1000))
+      ?.agent_status,
+    "done",
+  );
   await client.sendAgent("w1:p1", "approval");
   assert.equal((await client.waitAgent("w1:p1"))?.agent_status, "done");
   await client.cancelAgent("w1:p1");

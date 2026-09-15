@@ -188,8 +188,11 @@ mention when `requireMention` is enabled. Each thread stores its active Agent
 and can retain additional independent Agent mappings with `team add`; those
 mappings are not automatically given the thread's full history.
 
-`/herdr team ask ...` deliberately sends only the supplied prompt to each
-participant. It does not copy the Discord thread or terminal history. Use
+`/herdr team ask ...` starts the first orchestration flow: the thread's active
+Agent plans bounded Assignments, Herdr dispatches them to Team participants, and
+the Lead synthesizes their bounded reports. It does not copy the Discord thread
+or terminal history. Task persistence, restart recovery, cancellation, and
+interactive blocked-Assignment continuation are not implemented yet. Use
 `/herdr handoff <from> <to>` when a CLI reaches a token/context limit. Handoff
 reads only a bounded recent output window (`handoffLines` and
 `handoffMaxChars`), redacts common credential formats, posts a concise bounded

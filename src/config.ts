@@ -35,6 +35,7 @@ const DEFAULTS: Config = {
   pollIntervalMs: 2000,
   requestTimeoutMs: 5000,
   reconnectBaseMs: 250,
+  // Team planning、Worker assignment、Lead synthesis 共用的單階段等待上限：15 分鐘。
   approvalTimeoutMs: 900000,
   outputLines: 500,
   handoffLines: 40,

@@ -76,7 +76,11 @@ export function startConsole(
     context: CommandContext,
   ) => Promise<void>,
   print: (text: string) => void = console.log,
-): { stop: () => void; print: (text: string) => void; context?: CommandContext } {
+): {
+  stop: () => void;
+  print: (text: string) => void;
+  context?: CommandContext;
+} {
   if (!process.stdin.isTTY) return { stop: () => undefined, print };
   const input = readline.createInterface({
     input: process.stdin,

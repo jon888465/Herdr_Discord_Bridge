@@ -1,22 +1,168 @@
 # Known Issues
 
-維護規則見 [AGENTS.md](../AGENTS.md)。最後整理：2026-09-10。
+維護規則見 [AGENTS.md](../AGENTS.md)。最後整理：2026-09-11。
 
-| ID | 問題 | 狀態 | 下一步 |
-| --- | --- | --- | --- |
-| ISSUE-001 | Discord reply 未觸發 bridge | 重新開啟、待驗收 | 重啟後在 mapped thread 回覆 bot |
-| ISSUE-002 | Discord 圖片未交付 Agent | 重新開啟／待調查 | 取得格式驗證失敗的原始附件與 metadata，重播下載 |
-| ISSUE-003 | 預覽與 final 未更新 | 已修正、待驗收 | 重啟後驗證 metadata 更新與截圖情境 |
-| ISSUE-004 | Team 成員可跨 workspace 混入，且 stale mapping 容易造成誤解 | 已修正、待驗收 | 重啟後確認同 workspace 限制、持久化與 stale 顯示 |
-| ISSUE-005 | 本機 current 顯示未選取 Agent | 已修正、待驗收 | workspace selection 回歸修正後須重新驗收；先前 shared-thread 驗收歷史保留 |
-| ISSUE-006 | 重啟 bridge 後 pane 所屬 workspace／位置改變 | 已驗收 | 2026-09-10 live topology 驗證完成；後續觀察重啟保留 |
-| ISSUE-007 | 程序啟動未阻止同 bot 重複實例 | 已修正、待驗收 | live 第二實例拒絕仍待驗收 |
-| ISSUE-008 | Discord current／回應仍引用 Herdr 已不存在的舊 pane，且串流回報 session changed | 重新開啟／待調查 | 取得該 Discord thread 的 current 輸出與 bridge 啟動版本；重啟新版後以 live prompt 重現 |
-| ISSUE-010 | 1:1:N orchestration、Discord mirror 與選擇 UI | 待調查 | 本機單 Agent snapshot 已另實作；完整功能仍待做 |
-| ISSUE-011 | 選取 agy 後 bridge 沒顯示追問、無法回答 | 已修正、待驗收 | 本機快照／blocked reply 自動化完成後進行 live agy 驗收 |
-| ISSUE-012 | Team 多 Agent 同時追問缺少問題識別 | 待調查 | 設計 task/assignment/question 綁定與回覆 UI／排隊策略 |
+| ID        | 問題                                                                            | 狀態             | 下一步                                                                                                              |
+| --------- | ------------------------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------- |
+| ISSUE-001 | Discord reply 未觸發 bridge                                                     | 重新開啟、待驗收 | 重啟後在 mapped thread 回覆 bot                                                                                     |
+| ISSUE-002 | Discord 圖片未交付 Agent                                                        | 重新開啟／待調查 | 取得格式驗證失敗的原始附件與 metadata，重播下載                                                                     |
+| ISSUE-003 | 預覽與 final 未更新                                                             | 已修正、待驗收   | 重啟後驗證 metadata 更新與截圖情境                                                                                  |
+| ISSUE-004 | Team 成員可跨 workspace 混入，且 stale mapping 容易造成誤解                     | 已修正、待驗收   | 重啟後確認同 workspace 限制、持久化與 stale 顯示                                                                    |
+| ISSUE-005 | 本機 current 顯示未選取 Agent                                                   | 已修正、待驗收   | workspace selection 回歸修正後須重新驗收；先前 shared-thread 驗收歷史保留                                           |
+| ISSUE-006 | 重啟 bridge 後 pane 所屬 workspace／位置改變                                    | 已驗收           | 2026-09-10 live topology 驗證完成；後續觀察重啟保留                                                                 |
+| ISSUE-007 | 程序啟動未阻止同 bot 重複實例                                                   | 已修正、待驗收   | live 第二實例拒絕仍待驗收                                                                                           |
+| ISSUE-008 | Discord current／回應仍引用 Herdr 已不存在的舊 pane，且串流回報 session changed | 重新開啟／待調查 | 取得該 Discord thread 的 current 輸出與 bridge 啟動版本；重啟新版後以 live prompt 重現                              |
+| ISSUE-010 | 1:1:N orchestration、Discord mirror 與選擇 UI                                   | 修正中／待驗收   | orchestration 第一階段已實作；持久化、recovery、blocked continuation、mirror 與 UI 仍待做                           |
+| ISSUE-011 | 選取 agy 後 bridge 沒顯示追問、無法回答                                         | 已修正、待驗收   | 本機快照／blocked reply 自動化完成後進行 live agy 驗收                                                              |
+| ISSUE-012 | Team 多 Agent 同時追問缺少問題識別                                              | 待調查           | 設計 task/assignment/question 綁定與回覆 UI／排隊策略                                                               |
+| ISSUE-013 | Lead plan 解析失敗或誤取 planning prompt 中的範例 JSON                          | 已修正、待驗收   | 重啟新版 bridge，以新 team ask 驗證 plan 不取 prompt／歷史，兩 Worker 均收到正確 Assignment                         |
+| ISSUE-014 | 未等 Worker 完成本次任務便以歷史輸出標記 done 並進入統整                        | 重新開啟／待驗收 | 載入本次修正後重啟 bridge，驗證 atomic prompt wait 的 done 回傳可直接產生本次報告，且所有 Worker 完成後才 synthesis |
 
 2026-09-09 自動化驗證：`npm run check`（typecheck、build、33/33 tests）、`npm run lint`、`git diff --check` 通過。這是前一輪程式驗證紀錄，不代表已做 live Discord 驗收。本輪僅整理文件，未重跑程式測試。
+
+## ISSUE-013：Team ask 的 Lead JSON plan 解析失敗
+
+狀態：已修正、待驗收（2026-09-11）。先前折行修正及自動化測試紀錄保留；本次原始碼修正已完成，live 驗收仍未完成。
+
+最新進度（同時適用 ISSUE-014）：新增 fixture，已重現 prompt echo
+誤派及舊 report 誤標 done。共用 turn 接收器等部分補丁已套用，
+`npm run build && node --test --test-name-pattern='ISSUE-01' dist/test/team-orchestration.test.js`
+由 0/2 變為 2/2 通過（2026-09-11）。另以兩個不同完成時間 Worker 驗證
+14/14 targeted tests 通過（含 Herdr `agent.prompt` wait socket fixture）。
+這確認程式缺陷已在測試 seam 修正，不證明原事件的 Herdr 內部時序。
+本次 `npm run check` 於 2026-09-11 為 72/73；唯一失敗是既有
+`instance-lock.test.js` 真實入口測試 10 秒 timeout，預期 exit code `1`、
+實際為 `null`。此失敗不在本次 orchestration 變更範圍；不得把完整 check
+稱為全通過，且需在交付報告保留。
+使用者提供的 CLI／A2A 方法、Herdr 0.8.0 核對與中斷點見
+[修正交接](team-orchestration-issues-013-014-handoff.md)。以下保留先前只記錄階段的歷史。
+
+### 2026-09-11 誤取範例計畫、提前統整
+
+Task：`task-05f771d6-7b47-48de-afed-900f8c2c060e`；原問題：
+「討問1:1:N目前功能與實做問題」。Lead 為 Codex，可用 Workers 為 agy
+`w2:p6`、OpenCode `w2:p8`。使用者提供的訊息中，planning 與 synthesis
+指令接連出現，實際 plan 為 `short-id / w2:p6 / boundedtask`，與 prompt
+範例一致，沒有針對原問題的實質拆解；無 OpenCode Assignment。
+僅使用一個 Worker 本身不構成錯誤，問題在於計畫缺乏本次 Lead 產出的證據。
+
+預期：只接受本次 Lead 完成的真實規劃，不能把 prompt 的示範 JSON 或
+歷史內容當成 plan。未取得有效規劃時不得啟動 Worker 或 synthesis。
+本次實際抓取範例的程式路徑與時序尚未確認，不能把推測列為已證實根因。
+Worker 未等待／歷史 report 問題另見 ISSUE-014。
+
+本輪處理：僅重新開啟並記錄，未修程式。2026-09-11 驗證方式為核對
+使用者提供的 task、plan、report 與補充觀察；未新增或執行程式測試。
+先前同日 70/70 是修正前述折行案例的歷史結果，未涵蓋本次失敗。
+下一步：建立只有 prompt 範例、Lead 尚未回覆的 fixture，確認不會 dispatch；
+再驗證真實 Lead final 到達後才採用其計畫。此次執行 build／session／wait
+時間戳尚未取得，不再以舊程序推定原因。本輪未 build、重啟、部署或補送。
+
+## ISSUE-014：未等待 Worker 完成並回報，就進入 Lead 統整
+
+更新日期：2026-09-14。狀態：重新開啟／待驗收。先前修正雖有 targeted tests，新的 live 回報顯示 Herdr prompt stalled 後仍可能晚到 marker report，故不能沿用已修正狀態。
+
+使用者可見症狀：在上述 Task 中，任務丟給 Agent 後，Lead 沒有等 Agent
+結束並回報就開始統整。提供的 synthesis payload 將 agy Assignment 標記
+`done`，但 report 是先前 GUI／mirror 討論、`commit` 指令與提交紀錄、
+舊測試 13/13 及工作樹 clean 宣稱，缺少本次 Assignment 的完成證據。
+這些舊宣稱不能算本次測試、提交或完成結果。
+
+預期：每個已分派 Assignment 都必須有與本次 dispatch 對應的完成狀態及
+新 report，Lead 才能作完成統整。blocked／failed 可以形成清楚標示的
+partial synthesis，但仍在工作、只有舊 idle/done、舊輸出或空 report 時，
+不得冒充完成。不能只因呼叫過 agent.wait 就認定已等到本次任務結束。
+
+重現環境／證據：使用者提供 Task
+`task-05f771d6-7b47-48de-afed-900f8c2c060e` 的 synthesis payload，並明確
+回報未等待 Worker 結束；Lead Codex、Worker agy `w2:p6`，另一可用 Worker
+為 OpenCode `w2:p8`。尚無當時 dispatch／wait／read 時間戳與狀態轉換紀錄。
+
+根因：除先前的重複 wait 缺陷外，已確認 Herdr `agent_prompt_stalled` 只代表 5 秒內
+沒有觀察到 lifecycle change，不等於 prompt 未送達。舊流程收到 stalled 就直接 failed，
+因此晚到且已包含本次 marker 的 Worker report 不會再被讀取，Lead 也無法可靠 synthesis。
+
+修正範圍：`runTeamTurn()` 遇到 `agent_prompt_stalled` 不重送 prompt，改以本次
+唯一 marker 繼續 bounded wait／read；prompt 內新增 taskId、phase、assignmentId、pane、
+session 與 begin／end marker debug context。新增回歸測試覆蓋 stalled 後仍取得 Worker report。
+尚未重啟／部署、未 commit／push；執行中 bridge 版本未查證，失敗 task 不會自動補送。
+
+下一步與驗收：建立「dispatch 後暫時仍 idle、稍後 working、最後完成」及
+「read 只有歷史內容」回歸；證明 Worker 未完成時沒有 synthesis prompt，
+完成後僅收本次 report。以兩個不同完成時間的 Worker 驗證 Lead 等待所有
+必要回報，並涵蓋 blocked／failed partial synthesis。需保存各階段時間戳、
+Task／Assignment／pane identity；真實 Discord／Herdr 驗收仍待完成。
+
+## ISSUE-013 先前修正與驗證歷史
+
+### 2026-09-11 重啟後再次失敗
+
+使用者確認已重新編譯並重啟 bridge，Task
+`task-cd7ab775-9723-4840-9239-3a803076c52d` 仍在 Lead planning 回報
+`Lead did not return a JSON Assignment plan`；Codex 畫面有 JSON，但 agy
+`w2:p6`／OpenCode `w2:p8` 未收到任務。先前以舊 process 解釋本次失敗
+沒有依據，撤回該判斷。
+
+重現與已確認根因：將使用者貼出的 Codex 折行形式帶入 `runTeamTask`，
+`analyze-` 與 `spec`、中文 instruction 被拆成實際換行並帶兩欄縮排。
+JSON 字串不允許未跳脫換行；原 parser 直接 JSON.parse，所有 read-source
+fallback 都可能遇到相同問題。獨立 parser 比較也確認折行失敗、移除折行
+成功，不需要 adapter 或等待時序變化即可重現。未取得失敗當下原始 socket
+response，不能排除該次還有完成狀態過早等因素。
+
+修正範圍：planning dispatch 前連接既有 CodexTranscript，優先消費精確
+prompt／turn 對應且 task_complete 的 final，避開 terminal 寬度影響。
+終端 fallback 僅對 Codex、strict parse 失敗時，消除字串內換行與兩欄
+continuation 縮排；保留原有空白與 JSON 跳脫，非 Codex／結構化 final
+仍嚴格解析。損壞外層 JSON 的子 Assignment 不再被誤認為 plan。
+Worker roster／dependency 驗證仍在 dispatch 前執行。
+
+2026-09-11 驗證：`npm run build && node --test --test-name-pattern='wrapped Codex' dist/test/team-orchestration.test.js`
+修正前 0/1 通過，錯誤文字與使用者回報一致；修正後
+`node --test dist/test/team-orchestration.test.js` 第一輪 6/6 通過，包含
+兩 Worker dispatch 與 synthesis。最終 `npm run check` 通過（typecheck、
+build、70/70 tests，其中 orchestration 8/8）；`npm run lint` 與
+`git diff --check` 通過。新增測試包含 CRLF、跳脫與既有空白、部分 Assignment
+折行，以及實際暫存 session JSONL → matching final → Worker dispatch。
+測試使用隔離 fixture，並非 live Discord／Herdr 驗收。
+
+限制與下一步：terminal fallback 無法還原終端已丟失的空白，需優先使用
+結構化 transcript；尚未改變既有 agent.wait 完成契約。本輪未重啟／部署、
+未 commit／push；checkout build 不代表執行中 bridge 已載入本輪修正。
+失敗 task 不會因後來出現 JSON 自動恢復或補送。需載入本輪 build 後以新的
+team ask 驗證 Discord／bridge pane → 兩 Worker → Lead synthesis。
+
+### 使用者可見症狀
+
+從 Discord 或 bridge pane 執行 `team ask` 後，收到：
+`❌ Lead did not return a JSON Assignment plan`。
+
+### 2026-09-10 根因（歷史）
+
+已確認 orchestration planning 直接將 `agent.read recent_unwrapped` 的整段
+transcript 傳給 `parseAssignmentPlan`，沒有保存 prompt 前的 baseline，也沒有
+透過 CLI adapter 擷取本次 Lead 回覆。Discord 與 bridge pane 雖然入口不同，兩者
+最後都會進入同一個 `runTeamTask`，因此會同時受影響。這不是 Team roster 或
+Worker dispatch 本身的錯誤。
+
+### 修正
+
+planning 現在會先讀取 Lead baseline，送出 planning prompt 後再次讀取 transcript，
+再使用 `latestAgentResponse` 擷取本次 Codex／agy／OpenCode 回覆；若 adapter 沒有
+辨識到邊界，才 fallback 到 transcript parser。若 `recent_unwrapped` 沒有包含本次
+回覆，會依序嘗試 Herdr 的 `recent`、`visible`、`detection` read source。新增回歸
+測試覆蓋「舊 transcript + 本次 Codex JSON 回覆」與「recent_unwrapped 缺少回覆」
+情境。
+
+### 驗證
+
+2026-09-10：`npm run build` 通過；
+`node --test dist/test/team-orchestration.test.js` 通過（5/5），包含 Discord／
+bridge 共用 planning seam 的 transcript 與 read-source fallback regression。
+當時執行中的 bridge process（`node dist/src/index.js`）在該次 fallback 修正前
+啟動；尚未重啟，因此尚未完成 Discord 與 bridge pane live 驗收，舊執行程序不會
+自動載入本次修改。
+
 ## ISSUE-004：Team 成員跨 workspace 與持久化行為
 
 狀態：已修正、待重啟後驗收（2026-09-09）。
@@ -28,7 +174,6 @@
 修正範圍：新增成員時拒絕不同 workspace；`team list` 只列出 active Team workspace 的成員；`team ask` 遇到歷史跨 workspace mapping 時 fail closed；保留 routing state 讓同一 Team 可跨 bridge 重啟恢復。
 
 驗證：2026-09-09 `npm run typecheck`、`npm test`（35/35）、`npm run lint`、`git diff --check` 通過。尚未完成重啟後 Discord live 驗收；下一步確認同 workspace add、跨 workspace add 被拒絕、重啟後 members 保留，以及未啟動 pane 顯示 stale。
-
 
 ## ISSUE-001：Discord reply does not trigger the bridge
 
@@ -120,7 +265,6 @@ contentType 與下載 response 建立重播，再判定是格式宣告不符、�
 - 驗證執行中可見最新內容、結束後 final 獨立送達、失敗時明確顯示原因。
 - blocked 不提前結案；來源或傳送失敗不使後續問題永久失去回應。
 
-
 ### 已確認根因與修正（2026-09-07）
 
 目前 Codex session 使用 event_msg/item_completed，內含 UserMessage、AgentMessage；
@@ -148,12 +292,13 @@ Discord 圖片附件問題於 2026-09-09 補上本機交付流程，仍需端到
 驗證（2026-09-09）：npm run check（typecheck、build、35/35 tests）、npm run lint、git diff --check 通過。
 
 狀態：已實作、待驗收。working 顯示已耗時，每十秒刷新；finished 顯示完成時總耗時。測試：`test/progress-time.test.ts` 驗證無內容變動時仍刷新、十秒節流、完成立即更新與秒／分／小時格式。時間從回應追蹤開始計算，包含 blocked 等待；實際 Discord 顯示待重啟後驗收。
+
 - 下一步驗收：重啟 bridge 後測試純文字 reply、reply 附圖、純圖片、長回覆，確認 Herdr pane 收到 prompt，並確認 Agent 實際能讀圖.
 - 本輪修正：附件改存於目標 Agent cwd 下的 `.herdr-discord-bridge/attachments/message-*`，降低 CLI sandbox 無法讀取的風險；reply 驗證不再依賴被引用訊息的 guildId 欄位.
 - 使用者提供 PNG：檔案存在於 `/home/jones/.local/state/herdr/plugins/herdr-discord-bridge/attachments/message-g0olbv/1.png`，大小 109641 bytes、1057x677。圖片檢視工具受 sandbox 限制未能讀取畫面內容；不可據此宣稱 Agent 已看到圖片.
 - 使用者回報：在 Discord 回覆 bridge／CLI 訊息後，從 CLI 與 Discord 畫面看不到內容被送進 Agent。問題重新開啟，需以實際 reply message、mapped thread、Agent 狀態與 bridge 日誌重現.
-## 2026-09-09 再現紀錄
 
+## 2026-09-09 再現紀錄
 
 ## ISSUE-005：本機 current 顯示未選取 Agent
 
@@ -181,7 +326,6 @@ Discord thread 的選取不會自動套用到本機 console。
 目前僅有單次提示，尚無可判定選取功能故障的重現流程；未操作執行中的 bridge、
 未部署或重啟，未完成 CLI／Discord 端到端驗收。
 
-
 ## 2026-09-10 截圖與重新調查
 
 - ISSUE-002：使用者提供 `test/1.png`（43,202 bytes）與 `test/2.png`（228,454 bytes）。以 `node --input-type=module` 呼叫 checkout build 的 `prepareImages`，用兩張原始 bytes 作為 mocked fetch response、宣告 `image/png`，兩張均通過簽章檢查並寫入成功；測試暫存已清除。未取得原 Discord 附件 metadata 或 HTTP response，格式錯誤根因仍待調查，不能宣稱修復。
@@ -203,7 +347,6 @@ Discord thread 的選取不會自動套用到本機 console。
 修正範圍：鎖定專用 bridge workspace／tab 後才重開 bridge，停止自動搬移其他 Agent；不恢復或搬動 live pane。未重啟／部署，未完成 live 驗收。
 下一步：取得原啟動方式後確認 live 驗收與是否需要恢復布局，不能自動猜測原位置。
 
-
 ## 2026-09-10 交付紀錄
 
 - ISSUE-003：以 session kind/value 比較穩定 identity，忽略 source／欄位順序等 metadata；仍要求 terminal、pane、workspace 與 Agent kind 相符，真正更換 session 或移動 workspace 時停止。regression 原先 final=[]，修正後送出 answer。沒有原事件的前後 snapshot，截圖情境仍需驗收；不將所有提前停止視為已解決。
@@ -213,13 +356,11 @@ Discord thread 的選取不會自動套用到本機 console。
 - 驗證日期 2026-09-10：`npm run check` 通過（typecheck、build、40/40 tests）；`npm run lint`、`bash -n scripts/run.sh`、`git diff --check` 通過。重啟測試使用假的 Herdr CLI，沒有操作 live pane；圖片兩張原始 bytes 重播通過，但未驗證 Discord HTTP metadata。
 - 發布／驗收：原始碼已修改、checkout 已 build；未 commit、push、重啟或部署。執行中的 bridge 仍是先前程序，不能使用本輪新指令直到載入新 build。Discord／Herdr／CLI live 驗收未完成；舊訊息不會自動補送。驗收需確認雙向 use／Team 變更、重啟保留 thread 選取、final 送達，以及非 bridge pane identity／位置不變。
 
-
 ### 2026-09-10 固定 bridge workspace
 
 使用者指定 bridge 固定放在名為 `bridge` 的 workspace。已將腳本與文件改為此契約，取代本輪早期「呼叫端 workspace」方案；Team 仍屬於 Discord thread／目標專案 workspace，不移到 bridge workspace。
 自動核准審查拒絕過跨所有 workspace 關閉舊 bridge 的修改，該修改未執行。安全替代實作僅替換專用 workspace 的 bridge pane；其他 workspace 偵測到舊 bridge 時先停止，不進行關閉／搬移。目前已知舊 bridge 為 w2:p5，本輪未遷移／重啟，首次使用新腳本前需明確處理該 pane。
 新增專用 workspace 已存在、首次建立、同名歧義、舊 bridge 位於別處的隔離 regression。首次建立 fixture 一度誤放尚不存在的 bridge pane，2026-09-10 targeted 結果為 3 通過／1 失敗；修正 fixture 後 `npm run check` 通過（43/43），lint、shell syntax、diff check 通過。
-
 
 ## ISSUE-007：同一 bot 重複啟動缺少程序防護
 
@@ -242,7 +383,6 @@ named pipe；其他 Unix filesystem socket 異常殘留時不自動冒險接管�
 新版本不能據此排除舊程序；首次遷移仍須處理 w2:p5。未重啟或部署。
 驗證（2026-09-10）：targeted lock tests 初次 3/3 通過；補上真實 CLI 入口測試後 `npm run check` 通過（typecheck、build、47/47），`npm run lint`、`bash -n scripts/run.sh`、`git diff --check` 通過。CLI 入口測試使用假 token 且先由測試取得鎖，確認 exit code=1、未讀寫 routing 檔、未連線 Herdr／Discord。
 下一步：驗收升級後第二次啟動立即失敗與正常重啟。
-
 
 最新交付狀態（2026-09-10）：全部原始碼與文件更新完成、checkout build 與 47/47 自動化測試通過。仍已完成 live 重啟／遷移：關閉 w2:p5，建立 bridge workspace w4，啟動新版 bridge w4:p2 並顯示 Discord Gateway connected；w1:p1E、w1:pM、w2:p4 保留。ISSUE-002 格式錯誤與 ISSUE-003 截圖事件仍待 Discord 端到端驗收；ISSUE-007 live 第二實例拒絕仍待驗收。
 
@@ -274,15 +414,18 @@ named pipe；其他 Unix filesystem socket 異常殘留時不自動冒險接管�
 
 ## ISSUE-010：1:1:N Team Task、mirror 與 Agent 選擇介面尚未完成
 
-更新日期：2026-09-10。狀態：待調查／規劃中。
+更新日期：2026-09-10。狀態：修正中／待驗收。第一階段 orchestration 已實作；
+完整 persistence、recovery、blocked continuation、mirror 與 UI 仍未完成。
 
 需求：實作 1 位使用者對 1 個 Lead 與 N 個 Team Participant 的任務討論與執行；同步研究 Herdr 端是否有可點選的 Agent／workspace 選擇介面；以實際任務驗證 Codex／agy，包含 agy 需要向使用者追問或等待回覆的情境，所有失敗與互動中斷都要記錄。
 
-目前狀態：`docs/team-orchestration-spec.md` 與 `docs/team-orchestration-plan.md` 是規格／計畫，repo 尚未實作 task planner、Assignment lifecycle、bounded report、synthesis、task recovery 或 task-level UI。`docs/pending-features.md` 的 Herdr pane → Discord mirror 也仍是規劃中，尚未有 MirrorRoute、output watcher 或去重 relay。
+目前狀態：repo 已實作第一階段 task planner、Assignment lifecycle、bounded Worker report 與 Lead synthesis；`team ask` 會透過 Herdr `agent.prompt`／`agent.wait`／`agent.read` 執行。尚未實作 task persistence、restart recovery、cancel、heartbeat cleanup、blocked Assignment 的互動續接或 task-level UI。`docs/pending-features.md` 的 Herdr pane → Discord mirror 也仍是規劃中，尚未有 MirrorRoute、output watcher 或去重 relay。
+
+2026-09-10 targeted evidence：`test/team-orchestration.test.ts` 3/3 通過，涵蓋獨立 Assignment 平行 dispatch、非 roster Worker plan 拒絕，以及 blocked Worker 保留 task blocked 並由 Lead 產生 partial synthesis。`npm run build`、`npm run lint`、相關 Markdown Prettier check、Draw.io XML parse 與 `git diff --check` 通過。這些是 fake Herdr／Discord seam 測試，尚未完成 live Discord／Herdr 驗收；本輪沒有重跑完整測試套件。
 
 Herdr 能力調查（2026-09-10）：已安裝 CLI 提供 terminal TUI 與 `agent list/get/read/focus/prompt/wait` 等 API；目前未發現 bridge 可使用的瀏覽器式 GUI 或自訂 Agent select widget。若要提供可點選選擇，候選位置是 Discord button/select menu，或使用 Herdr 既有 TUI focus；兩者不能混稱為 Herdr GUI。
 
-未驗證：1:1:N 實際 dispatch、Lead plan、N 個 Assignment、agy blocked／追問／使用者回覆、mirror 去重與 Discord 失敗恢復、任何點選選擇介面。下一步先確認選擇介面放在 Discord 還是 Herdr TUI，再分階段實作 orchestration、mirror、互動測試與驗收紀錄。
+未驗證：Discord／Herdr live 的 1:1:N dispatch、Lead plan 實際品質、agy／OpenCode blocked／追問／使用者回覆、task recovery、mirror 去重與 Discord 失敗恢復、任何點選選擇介面。下一步補 task persistence／recovery 與 blocked Assignment question identity，再進行 live orchestration 驗收。
 
 ## ISSUE-011：agy 單 Agent 追問與 Team Task 多 Agent 互動路由
 
@@ -310,11 +453,11 @@ Team Task 複雜性：同一個 1:1:N 任務可能同時有多個 Agent／Assign
 
 重現：`node --test dist/test/local-agent.test.js` 初始 2/2 失敗：agent use → current 回覆 No Agent is selected；`Yes  Use A` 變成 command=yes、args=[Use,A]。補丁後該最小重現通過，另補實際 console handler 與模擬 Herdr 的連續追問測試。測試使用 fixtures，不向使用者真實 agy 送字。
 
-修正：新增 ConsoleAgent，選取即顯示 bounded visible snapshot，輪詢文字／狀態變化、切換丟棄舊 read；回答綁定已顯示 blocked 畫面與 pane/terminal/session/state sequence，送出前重驗；回答不重試不確定 socket 送達，同一問題拒絕重複回答。idle/done 可送新 prompt，working/unknown 仍可操作控制指令。保留輸入內容、重畫 readline 正在編輯的行；source=console 不因共用 thread 而遺失。修正本機 workspace/current 選取及 help，並恢復 bridge pane 原本完整中文分類 help（不顯示 Discord 前綴）。Pane 也支援 `ask <agent-name-or-pane-id> <prompt>`；明確指定 Codex 會走既有 response capture，避免只送出 prompt 而沒有 bridge 回應。Codex 保留既有 final 擷取。本機假 guild routing 排除在 Discord watcher destination 外。
+修正：新增 ConsoleAgent，選取即顯示 bounded visible snapshot，輪詢文字／狀態變化、切換丟棄舊 read；新增 `agent detach` 停止本機 observer，不停止 Agent 或清除 routing，之後可用 `agent use <pane>` 重新 attach。回答綁定已顯示 blocked 畫面與 pane/terminal/session/state sequence，送出前重驗；回答不重試不確定 socket 送達，同一問題拒絕重複回答。idle/done 可送新 prompt，working/unknown 仍可操作控制指令。保留輸入內容、重畫 readline 正在編輯的行；source=console 不因共用 thread 而遺失。修正本機 workspace/current 選取及 help，並恢復 bridge pane 原本完整中文分類 help（不顯示 Discord 前綴）。Pane 也支援 `ask <agent-name-or-pane-id> <prompt>`；明確指定 Codex 會走既有 response capture，避免只送出 prompt 而沒有 bridge 回應。Codex 保留既有 final 擷取。本機假 guild routing 排除在 Discord watcher destination 外。
 
 限制：40 行／6,000 字元快照不代表完整 transcript 或完整 final；沒有讀取隱藏 reasoning record。缺少 session metadata 的同 terminal restart 無法完全辨識；Herdr 目前沒有原子 question-ID 比較後送答 API。agy 特定版本的狀態偵測、只支援方向鍵的 UI 尚待 live 驗收。未確定送達的回答須人工檢查 Agent，不自動重試。
 
-驗證（2026-09-10）：本次 `local-agent.test.js` 的 13/13 項針對性測試通過，涵蓋選取後 current、無須 ask 即顯示各狀態畫面、blocked 回答與下一個問題、問題變更／重複回答拒絕、切換途中不顯示或回答舊問題、working／blocked 控制指令、授權與 session 更換。typecheck、build、lint 與 `git diff --check` 通過。這些是 fixture／handler 驗證，不是 live agy 驗收。
+驗證（2026-09-10）：本次 `local-agent.test.js` 的 14/14 項針對性測試通過，涵蓋選取後 current、無須 ask 即顯示各狀態畫面、`agent detach` 停止 observer、`agent use <pane>` 恢復、blocked 回答與下一個問題、問題變更／重複回答拒絕、切換途中不顯示或回答舊問題、working／blocked 控制指令、授權與 session 更換。typecheck、build、lint 與 `git diff --check` 通過。這些是 fixture／handler 驗證，不是 live agy 驗收。
 
 另記非本次互動範圍的檢查結果（2026-09-10）：完整 `npm run check` 為 59/60 通過，ISSUE-007 的入口程序測試達 10 秒逾時，exit code 為 null 而非預期 1；未調整斷言或延長 timeout。單獨重跑 `node --test dist/test/instance-lock.test.js` 為 4/4 通過，逾時根因尚未確認。後續完整重跑被使用者中斷，無完成結果，不列為通過；依使用者要求停止擴大測試範圍。
 

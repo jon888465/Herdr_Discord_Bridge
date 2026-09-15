@@ -2,6 +2,9 @@
 
 ## Team orchestration
 
+- **1:1:N Multi-Agent Task**: One Human, one Discord thread/task context, and N
+  Herdr or CLI Agents. The thread has one Lead as the sole formal reporting
+  window; Workers execute bounded Assignments and report evidence to the Lead.
 - **Team**: The set of Herdr Agents attached to one workspace for
   collaborative work. A Team is scoped to that workspace and does not imply that
   every Agent receives every user message.
@@ -37,8 +40,17 @@
   identity.
 - Missing, stale, unauthorized, or ambiguous Agent targets fail closed.
 - Reports are bounded observed output; hidden chain-of-thought is never shared.
+- The first orchestration implementation of `team ask` now asks the Lead for a
+  validated Assignment plan, dispatches bounded work through Herdr, collects
+  Worker reports, and asks the Lead for synthesis. Task persistence, restart
+  recovery, cancellation, and interactive blocked-Assignment continuation are
+  still pending.
 
 ## Pending feature index
+
+- [ISSUE-013/014 handoff and Herdr delegation methods](docs/team-orchestration-issues-013-014-handoff.md):
+  user-provided CLI/A2A approaches, installed Herdr 0.8.0 findings, unfinished
+  response-correlation patch, and remaining verification after the user-requested pause.
 
 - [Herdr direct interaction mirror to Discord](docs/pending-features.md):
   explicitly relay direct Herdr prompts and Agent responses to the mapped

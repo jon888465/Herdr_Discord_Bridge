@@ -132,15 +132,31 @@ export class RoutingStore {
     return this.state.workspaceTeams?.[workspaceId] ?? { agents: {} };
   }
 
-  bindWorkspace(workspaceId: string, target: TargetInput, options: { activate?: boolean } = {}): TargetMapping {
+  bindWorkspace(
+    workspaceId: string,
+    target: TargetInput,
+    options: { activate?: boolean } = {},
+  ): TargetMapping {
     const timestamp = this.now().toISOString();
-    const existing = this.state.workspaceTeams ?? (this.state.workspaceTeams = {});
+    const existing =
+      this.state.workspaceTeams ?? (this.state.workspaceTeams = {});
     const team = existing[workspaceId] ?? { agents: {} };
-    const mapping: TargetMapping = { ...target, workspaceId, discordGuildId: "workspace", discordChannelId: workspaceId, createdAt: timestamp, updatedAt: timestamp };
+    const mapping: TargetMapping = {
+      ...target,
+      workspaceId,
+      discordGuildId: "workspace",
+      discordChannelId: workspaceId,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
     const key = mappingKey(target);
     const previous = team.agents[key];
-    team.agents[key] = { ...mapping, createdAt: previous?.createdAt ?? timestamp };
-    if (options.activate !== false || !team.activeAgentKey) team.activeAgentKey = key;
+    team.agents[key] = {
+      ...mapping,
+      createdAt: previous?.createdAt ?? timestamp,
+    };
+    if (options.activate !== false || !team.activeAgentKey)
+      team.activeAgentKey = key;
     existing[workspaceId] = team;
     this.scheduleSave();
     return team.agents[key];
@@ -156,7 +172,9 @@ export class RoutingStore {
   }
 
   workspaceTargets(workspaceId: string): TargetMapping[] {
-    return Object.values(this.state.workspaceTeams?.[workspaceId]?.agents ?? {});
+    return Object.values(
+      this.state.workspaceTeams?.[workspaceId]?.agents ?? {},
+    );
   }
 
   removeWorkspaceTarget(workspaceId: string, target: TargetMapping): boolean {
@@ -165,7 +183,8 @@ export class RoutingStore {
     const key = mappingKey(target);
     if (!team.agents[key]) return false;
     delete team.agents[key];
-    if (team.activeAgentKey === key) team.activeAgentKey = Object.keys(team.agents)[0];
+    if (team.activeAgentKey === key)
+      team.activeAgentKey = Object.keys(team.agents)[0];
     this.scheduleSave();
     return true;
   }

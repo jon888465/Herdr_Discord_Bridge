@@ -50,6 +50,39 @@ test("selecting agy from a fresh console makes current resolve it", async () => 
   }
 });
 
+test("agent detach stops the local pane observer without cancelling the Agent", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "bridge-detach-"));
+  const output: string[] = [];
+  const context = createConsoleContext((text) => output.push(text));
+  let stopped = false;
+  const runtime = {
+    routing: new RoutingStore(join(dir, "state.json")),
+    config: { allowedWorkspaceIds: [], discord: { commandPrefix: "/herdr" } },
+    activeStreams: new Set(),
+    consoleAgent: {
+      stop: () => {
+        stopped = true;
+      },
+    },
+    herdr: {},
+    discord: {
+      reply: async (_message: unknown, text: string) => {
+        output.push(text);
+      },
+    },
+  } as unknown as Parameters<typeof handleCommand>[3];
+
+  try {
+    await handleCommand("agent", ["detach"], context, runtime);
+
+    assert.equal(stopped, true);
+    assert.match(output.at(-1)!, /detached/i);
+  } finally {
+    runtime.routing.flush();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("console prompts preserve case and whitespace, controls remain commands", () => {
   assert.deepEqual(parseConsoleCommand("Yes  Use A", "/herdr"), {
     command: "ask",
@@ -128,6 +161,9 @@ test("selected agy displays idle, working, blocked and final snapshots without a
   const f = fixture();
   await f.session.tick();
   assert.match(f.output.at(-1)!, /Ready/);
+  await f.session.tick();
+  assert.equal(f.output.length, 1);
+  f.state("idle", "Ready", 2);
   await f.session.tick();
   assert.equal(f.output.length, 1);
   for (const [status, text] of [
@@ -229,11 +265,16 @@ test("switching during answer validation neither sends nor displays old question
   f.state("blocked", "Old question");
   await f.session.tick();
   let resolve!: (s: string) => void;
-  f.port.readAgent = async () => new Promise<string>((r) => { resolve = r; });
+  f.port.readAgent = async () =>
+    new Promise<string>((r) => {
+      resolve = r;
+    });
   const pending = f.session.send("Yes");
   while (!resolve) await Promise.resolve();
   const before = f.output.length;
-  f.select("w2:p7"); f.session.reset(); resolve("Old question");
+  f.select("w2:p7");
+  f.session.reset();
+  resolve("Old question");
   await assert.rejects(pending, /no longer current/);
   assert.deepEqual(f.sent, []);
   assert.equal(f.output.length, before);

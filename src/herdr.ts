@@ -235,8 +235,47 @@ export class HerdrClient {
     }
   }
 
+  /** Atomically submit a normal prompt and wait for this prompt's first settled lifecycle. */
+  async promptAgentAndWait(
+    target: string,
+    text: string,
+    timeoutMs: number,
+  ): Promise<AgentRecord | undefined> {
+    try {
+      const result = await this.request<{ agent?: AgentRecord }>(
+        "agent.prompt",
+        {
+          target,
+          text,
+          // Herdr 在同一個 agent.prompt request 內等待本次 prompt 的 settled lifecycle。
+          wait: {
+            until: ["idle", "done", "blocked"],
+            timeout_ms: timeoutMs,
+          },
+        },
+        // Socket request 多保留 5 秒處理協定／傳輸開銷；不是 Agent 工作時間。
+        { timeoutMs: timeoutMs + 5000, retries: 0 },
+      );
+      return result.agent;
+    } catch (error) {
+      if (!(error instanceof HerdrError) || !isMissingMethod(error.code))
+        throw error;
+      await this.promptAgent(target, text);
+      // 舊版 Herdr 沒有 prompt(wait)，才拆成發送後再等待。
+      return this.waitAgent(
+        target,
+        ["idle", "done", "blocked", "unknown"],
+        timeoutMs,
+      );
+    }
+  }
+
   /** Deliver an approval to older Herdr versions without bypassing Herdr's API. */
-  async sendAgent(target: string, text: string, options: RequestOptions = {}): Promise<void> {
+  async sendAgent(
+    target: string,
+    text: string,
+    options: RequestOptions = {},
+  ): Promise<void> {
     try {
       await this.request("agent.send", { target, text }, options);
     } catch (error) {
@@ -253,11 +292,15 @@ export class HerdrClient {
           promptError.code !== "agent_blocked"
         )
           throw promptError;
-        await this.request("pane.send_input", {
-          pane_id: target,
-          text,
-          keys: ["enter"],
-        }, options);
+        await this.request(
+          "pane.send_input",
+          {
+            pane_id: target,
+            text,
+            keys: ["enter"],
+          },
+          options,
+        );
       }
     }
   }
@@ -267,6 +310,8 @@ export class HerdrClient {
     until: string[] = ["idle", "done", "blocked"],
     timeoutMs = 120000,
   ): Promise<AgentRecord | undefined> {
+    // 直接呼叫 agent.wait 時的 Herdr lifecycle timeout；orchestration 會傳入
+    // approvalTimeoutMs，而非使用此處的 120 秒預設值。
     const result = await this.request<{ agent?: AgentRecord }>(
       "agent.wait",
       {

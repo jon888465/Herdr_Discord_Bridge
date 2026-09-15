@@ -64,16 +64,16 @@ backoff。Protocol error 不重試。Watcher 在故障後於下一個 interval �
 
 Client 使用下列官方方法：
 
-| Bridge 操作 | Herdr method |
-| --- | --- |
-| health | `ping` |
-| workspaces | `workspace.list`，以 `session.snapshot` fallback |
-| agents | `agent.list` |
-| output | `agent.read` |
-| assign | `agent.prompt`，以 legacy `agent.send` fallback |
+| Bridge 操作   | Herdr method                                                                     |
+| ------------- | -------------------------------------------------------------------------------- |
+| health        | `ping`                                                                           |
+| workspaces    | `workspace.list`，以 `session.snapshot` fallback                                 |
+| agents        | `agent.list`                                                                     |
+| output        | `agent.read`                                                                     |
+| assign        | `agent.prompt`，以 legacy `agent.send` fallback                                  |
 | blocked reply | 相容 legacy 的 `agent.send`，以 `agent.prompt` 與官方 `pane.send_input` fallback |
-| wait | `agent.wait` |
-| cancel | `agent.send_keys`，傳送 `ctrl+c` |
+| wait          | `agent.wait`                                                                     |
+| cancel        | `agent.send_keys`，傳送 `ctrl+c`                                                 |
 
 ID 一律複製自 Herdr JSON response。Bridge 不會預測 workspace 或 pane ID，也
 不接受 filesystem path 作為 workspace selector。`agent.prompt` 與
@@ -164,7 +164,7 @@ mapping 過期時，一律 fail closed。
 /herdr team ask <prompt>
 ```
 
-Bridge pane 的 stdin 也接受相同指令，可直接輸入 `agent`、`agent use w2:p1`、`status`、`ask <prompt>`、`read w2:p1`、`wait w2:p1`、`cancel w2:p1`，或使用 `/herdr` prefix。結果與 streaming progress 會印回 pane。Team routing 指令需要目前已選取的 workspace；Discord thread 只提供 route context，本機可用 `wk use <workspace>` 選取。
+Bridge pane 的 stdin 也接受相同指令，可直接輸入 `agent`、`agent use w2:p1`、`agent detach`、`status`、`ask <prompt>`、`read w2:p1`、`wait w2:p1`、`cancel w2:p1`，或使用 `/herdr` prefix。`agent detach` 只停止 bridge 對目前 Agent 的本機畫面 observer，不停止／取消 Agent，也不清除 routing；要恢復顯示輸入 `agent use <pane>`。結果與 streaming progress 會印回 pane。Team routing 指令需要目前已選取的 workspace；Discord thread 只提供 route context，本機可用 `wk use <workspace>` 選取。
 `workspaces` 顯示 Herdr 回傳的 label/path、ID 與 agent state。`wk use
 <workspace-id-or-name>` 只會將目前 route 綁定到既有且已授權的 Herdr workspace；
 不會建立 workspace、pane 或 Agent。之後使用 `use`、`target` 或 `assign` 選擇
@@ -175,8 +175,33 @@ Agent。`current` 顯示有效 mapping，並回報過期的 agent/pane 資料。
 message 會直接送給該 Agent，並套用與 `assign` 相同的 allowlist、過期 mapping
 與 busy 檢查。`target` 是向後相容的 alias。`ask` 對指定 Agent 發送一次性
 prompt，並將該 Agent 記錄到 thread，但不改變 active target。`team list` 列出所有 workspace Teams；`team add`、`team remove` 與 `team ask` 操作目前 workspace 的 Team。Team mapping 會持久化，Discord thread 不是 Team scope；
-`team remove` 管理獨立的 thread participants；`team ask` 只將指定 prompt 送給
-每個同 workspace participant，不會廣播 thread 或 terminal history。
+`team remove` 管理獨立的 thread participants；`team ask` 會以目前 thread 的
+active Agent 作為 Lead，先要求 Lead 產生受驗證的 Assignment plan，再透過 Herdr
+將 bounded 子任務送給同 workspace Workers，收集報告後要求 Lead synthesis。它
+不會廣播完整 thread 或 terminal history；task persistence、restart recovery、
+cancel 與 blocked Assignment 的後續互動仍未完成。
+
+Lead planning 對 Codex 優先讀取 dispatch 前連接的本機 transcript，以相符
+prompt／turn 且 task_complete 的 final 解析 plan。無可用 final 時使用 CLI
+read-source fallback；Codex 終端 JSON 僅在 strict parse 失敗時消除字串內
+換行與兩欄 continuation 縮排，保留 JSON 跳脫與既有空白。終端已丟失的
+空白無法保證還原；非 Codex 與結構化 final 不套用此恢復。所有 plan 仍須
+通過 roster／dependency 驗證才可分派，失敗 task 不自動補送。
+
+2026-09-11 live 驗收仍有缺口（ISSUE-013／ISSUE-014）：出現採用 prompt
+範例 plan、未等 Worker 完成就以歷史輸出統整的回報。驗收要求為 plan 與
+report 均對應本次任務；不得僅憑 idle/done 或歷史文字判定完成。必要
+Assignment 未完成時不得作完成統整，blocked／failed 的 partial synthesis
+須明確標示。上述要求尚未通過本次 live 驗收。
+
+2026-09-11 修正：planning、Worker、synthesis 已改接共用 turn
+接收器；structured final 需對應本次 prompt／turn，terminal fallback 需有
+本次隨機 begin/end 標記與 settled 狀態，不再接受任意 transcript JSON。
+prompt 先描述 end 再描述 begin，避免 echo 構成完整回覆；逾時／空報告不標
+完成。Herdr client 使用 `agent.prompt` 的內嵌 wait options，舊版 fallback
+到 prompt 加 wait。Targeted orchestration／Herdr 測試 14/14 通過；完整
+驗證與 live 驗收仍未完成，
+詳見 [修正交接](docs/team-orchestration-issues-013-014-handoff.md)。
 
 Bridge pane 的 stdin 會使用同一個 command handler；啟動後可在 `bridge>` prompt 輸入指令，輸出與 Discord 相同的 Agent routing 與回應流程。
 `assign` 將目前 thread 或 user 綁定至選定的 workspace/agent，並使用

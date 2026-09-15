@@ -174,7 +174,6 @@ Agent 完成後，回覆會更新原本的 progress message；預設不會另外
 
 直接輸入 `ask <文字>` 或非指令文字：idle/done 時發問，blocked 時回答 bridge 已顯示的問題。問題已變更或尚未顯示時，先看新問題再回答；同一問題不重複送答。`help`、`current`、`agent`、`agent use`、`wk` 等控制指令在 working／blocked 時仍可用；working/unknown 時不插入新 prompt。答案開頭若是指令名稱，請用 `ask current` 等明確格式。顯示輸出時保留正在編輯的輸入。多 Agent 問題識別／排隊與 Discord mirror 仍待做。
 
-
 `bridge>` 的 Agent 選取以 workspace scope 保存；Discord user／thread mapping 仍各自獨立。請輸入 `agent use <pane ID>` 後再執行 `current`。
 
 ### 選擇 Agent
