@@ -24,7 +24,10 @@ export function parseConsoleCommand(
   const command = parts[0].toLowerCase();
   if (command === "ask")
     return { command, args: [rest.slice(parts[0].length).trim()] };
-  if (!SHORT_COMMANDS.has(command) && !["threads", "thread"].includes(command))
+  if (
+    !SHORT_COMMANDS.has(command) &&
+    !["threads", "thread", "attach", "detach", "watch"].includes(command)
+  )
     return { command: "ask", args: [rest] };
   return {
     command,
@@ -89,6 +92,24 @@ export function startConsole(
     prompt: "bridge> ",
   });
   let closed = false;
+  let menu:
+    | {
+        profiles: string[];
+        selected: Set<string>;
+        resolve: (ids: string[] | undefined) => void;
+      }
+    | undefined;
+  const renderMenu = () => {
+    if (!menu) return;
+    print(
+      menu.profiles
+        .map(
+          (id, i) => `${i + 1}. [${menu!.selected.has(id) ? "x" : " "}] ${id}`,
+        )
+        .join("\n"),
+    );
+    print("輸入編號切換勾選（可用空白分隔）；done 儲存，cancel 取消。");
+  };
   const display = (text: string) => {
     if (closed) return;
     readline.clearLine(process.stdout, 0);
@@ -97,7 +118,44 @@ export function startConsole(
     input.prompt(true);
   };
   const context = createConsoleContext(display);
+  context.selectProfiles = async (profiles, selected) => {
+    if (menu) throw new Error("Agent selection is already open");
+    if (!profiles.length) throw new Error("No Agent profiles configured");
+    return new Promise((resolve) => {
+      menu = { profiles, selected: new Set(selected), resolve };
+      input.setPrompt("team select> ");
+      renderMenu();
+      input.prompt();
+    });
+  };
   input.on("line", (line) => {
+    if (menu) {
+      const text = line.trim();
+      if (text === "done" || text === "cancel") {
+        const current = menu;
+        menu = undefined;
+        input.setPrompt("bridge> ");
+        current.resolve(text === "done" ? [...current.selected] : undefined);
+      } else {
+        const indexes = text.split(/\s+/).map(Number);
+        if (
+          !text ||
+          indexes.some(
+            (i) => !Number.isInteger(i) || i < 1 || i > menu!.profiles.length,
+          )
+        )
+          print("請輸入清單內的編號、done 或 cancel。");
+        else
+          for (const i of new Set(indexes)) {
+            const id = menu.profiles[i - 1];
+            if (menu.selected.has(id)) menu.selected.delete(id);
+            else menu.selected.add(id);
+          }
+        renderMenu();
+      }
+      input.prompt();
+      return;
+    }
     const parsed = parseConsoleCommand(line, commandPrefix);
     if (!parsed) {
       input.prompt();
@@ -115,6 +173,8 @@ export function startConsole(
   });
   input.on("close", () => {
     closed = true;
+    menu?.resolve(undefined);
+    menu = undefined;
   });
   input.prompt();
   return {

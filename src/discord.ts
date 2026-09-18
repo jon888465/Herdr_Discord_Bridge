@@ -54,6 +54,10 @@ export const SHORT_COMMANDS = new Set([
 
 export interface CommandContext {
   source?: "console";
+  selectProfiles?: (
+    profiles: string[],
+    selected: string[],
+  ) => Promise<string[] | undefined>;
   message: Message;
   routing: RoutingContext;
 }

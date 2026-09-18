@@ -10,7 +10,9 @@ import {
   rollingPreview,
   sameAgentSession,
 } from "./response-stream.js";
-import { loadConfig, statePath } from "./config.js";
+import { AgentPool } from "./agent-pool.js";
+import { runTeamTurn } from "./team-turn.js";
+import { loadConfig, statePath, stateDirectory } from "./config.js";
 import {
   latestAgentResponse,
   modelCommandFor,
@@ -83,6 +85,12 @@ async function startBridge(
     config.approvalTimeoutMs,
   );
   const activeStreams = new Set<string>();
+  const pool = new AgentPool(
+    join(stateDirectory(), "agent-pool.json"),
+    config.agentProfiles || [],
+    herdr,
+    config.allowedWorkspaceIds,
+  );
 
   if (!(await herdr.ping())) {
     throw new Error(
@@ -126,6 +134,7 @@ async function startBridge(
         routing,
         discord,
         activeStreams,
+        pool,
       });
     } catch (error) {
       await discord.reply(context.message, `❌ ${safeError(error)}`);
@@ -164,6 +173,7 @@ async function startBridge(
         routing,
         discord,
         activeStreams,
+        pool,
       });
     } catch (error) {
       await discord.reply(context.message, `❌ ${safeError(error)}`);
@@ -188,7 +198,10 @@ async function startBridge(
           config,
         );
         if (!routed) {
-          if (command === "thread") consoleAgent?.reset();
+          if (command === "thread") {
+            consoleAgent?.setMode("conversation");
+            consoleAgent?.reset();
+          }
           await consoleAgent?.tick();
           return;
         }
@@ -198,6 +211,7 @@ async function startBridge(
           routing,
           discord,
           activeStreams,
+          pool,
           consoleAgent,
         });
         await consoleAgent?.tick();
@@ -249,6 +263,7 @@ async function startBridge(
 }
 
 interface Runtime {
+  pool?: AgentPool;
   consoleAgent?: ConsoleAgent;
   config: ReturnType<typeof loadConfig>;
   herdr: HerdrClient;
@@ -281,6 +296,30 @@ export async function handleCommand(
         return;
       }
       await workspaceCommand(args, context, runtime);
+      return;
+    case "attach":
+    case "watch":
+      if (context.source !== "console" || !runtime.consoleAgent)
+        throw new Error("attach/watch are available in the bridge console");
+      const inspected = await resolveContextAgent(
+        args.join(" ").trim(),
+        context,
+        runtime,
+      );
+      runtime.consoleAgent.inspect(
+        { workspaceId: inspected.workspace_id, paneId: inspected.pane_id },
+        command,
+        runtime.config.pollIntervalMs,
+      );
+      await runtime.discord.reply(
+        context.message,
+        command === "attach"
+          ? "Terminal inspector: bounded visible snapshots (40 lines / 6000 characters)."
+          : "Watching Agent state changes.",
+      );
+      return;
+    case "detach":
+      await detachConsoleAgent(args, context, runtime);
       return;
     case "agent":
       if (args[0]?.toLowerCase() === "detach") {
@@ -437,8 +476,11 @@ async function useWorkspace(
   const mapping = runtime.routing.bind(context.routing, {
     workspaceId: workspace.workspace_id,
   });
-  runtime.consoleAgent?.reset();
-  runtime.consoleAgent?.start(runtime.config.pollIntervalMs);
+  if (context.source === "console") {
+    runtime.consoleAgent?.reset();
+    runtime.consoleAgent?.setMode("conversation");
+    runtime.consoleAgent?.start(runtime.config.pollIntervalMs);
+  }
   await runtime.discord.reply(
     context.message,
     `✅ Routing for this ${context.routing.threadId ? "thread" : "user"} now targets **${workspace.label || workspace.name || workspace.workspace_id}** (\`${mapping.workspaceId}\`). Existing agents were not moved or restarted.`,
@@ -469,8 +511,11 @@ async function bindActiveAgent(
     runtime.routing.bindWorkspace(agent.workspace_id, agentTarget(agent));
     runtime.routing.bind(context.routing, { workspaceId: agent.workspace_id });
   } else runtime.routing.bind(context.routing, agentTarget(agent));
-  runtime.consoleAgent?.reset();
-  runtime.consoleAgent?.start(runtime.config.pollIntervalMs);
+  if (context.source === "console") {
+    runtime.consoleAgent?.reset();
+    runtime.consoleAgent?.setMode("conversation");
+    runtime.consoleAgent?.start(runtime.config.pollIntervalMs);
+  }
   await runtime.discord.reply(
     context.message,
     `${agentHeaderFor(agent)}\n✅ 目前對話 Agent：**${agentLabel(agent)}**\nWorkspace：\`${agent.workspace_name || agent.workspace_id}\`\nPane：\`${agent.pane_id}\`\n\nSubsequent messages in this ${context.routing.threadId ? "thread" : "user route"} will be sent only to this Agent.`,
@@ -484,14 +529,14 @@ async function detachConsoleAgent(
 ): Promise<void> {
   if (context.source !== "console")
     throw new Error("agent detach is only available in the bridge pane");
-  if (args.length)
-    throw new Error("usage: agent detach; restore with agent use <pane>");
+  if (args.length) throw new Error("usage: detach; inspect with attach <pane>");
   if (!runtime.consoleAgent)
     throw new Error("bridge pane observer is unavailable");
-  runtime.consoleAgent.stop();
+  runtime.consoleAgent.setMode("conversation");
+  runtime.consoleAgent.start(runtime.config.pollIntervalMs);
   await runtime.discord.reply(
     context.message,
-    "✅ Detached local Agent pane observer. The Agent keeps running and routing is unchanged. Restore with `agent use <pane>`.",
+    "✅ Detached local Agent pane observer. The Agent keeps running and routing is unchanged. Inspect with `attach <pane>`.",
   );
 }
 
@@ -719,93 +764,36 @@ async function askAgent(
 ): Promise<void> {
   const localImplicit =
     context.source === "console" || context.routing.guildId === "local-console";
-  if (localImplicit && args.length > 1) {
-    const localText = args.join(" ").trim();
-    const separator = localText.search(/\s/);
-    const candidate =
-      separator < 0 ? localText : localText.slice(0, separator).trim();
-    let explicit: AgentRecord | undefined;
-    try {
-      explicit = findAgent(
-        await runtime.herdr.listAgentsWithWorkspaceNames(),
-        candidate,
-      );
-    } catch {
-      // An unknown first word remains part of the implicit prompt.
-    }
-    if (explicit) {
-      const explicitPrompt =
-        separator < 0 ? "" : localText.slice(separator).trim();
-      validatePrompt(explicitPrompt);
+  if (localImplicit) {
+    const text = args.join(" ").trim();
+    const separator = text.search(/\s/);
+    const candidate = separator < 0 ? "" : text.slice(0, separator);
+    const agents = await runtime.herdr.listAgentsWithWorkspaceNames();
+    if (candidate && agents.some((agent) => agentMatches(agent, candidate))) {
+      const explicit = findAgent(agents, candidate);
+      const prompt = text.slice(separator).trim();
+      validatePrompt(prompt);
       validateAgentTarget(
         explicit,
         undefined,
         runtime.config.allowedWorkspaceIds,
       );
       if (explicit.agent_status === "blocked") {
-        await runtime.herdr.sendAgent(explicit.pane_id, explicitPrompt, {
-          retries: 0,
-        });
-      } else {
-        assertAgentAvailable(explicit, runtime);
-        if (explicit.agent?.toLowerCase().includes("codex")) {
-          await dispatchPrompt(
-            explicit,
-            explicitPrompt,
-            context,
-            runtime,
-            `${agentHeaderFor(explicit)}\n📨 Prompt sent to Codex; capturing its final response.`,
+        const selected = effectiveTarget(context, runtime.routing);
+        if (!runtime.consoleAgent || selected?.paneId !== explicit.pane_id)
+          throw new Error(
+            "select this Agent and read its question before answering",
           );
-        } else {
-          await runtime.herdr.promptAgent(explicit.pane_id, explicitPrompt);
-        }
-      }
-      return;
-    }
-  }
-  if (localImplicit && args.length === 1) {
-    const localText = args[0].trim();
-    const separator = localText.search(/\s/);
-    if (separator > 0) {
-      const candidate = localText.slice(0, separator).trim();
-      try {
-        const explicit = findAgent(
-          await runtime.herdr.listAgentsWithWorkspaceNames(),
-          candidate,
-        );
-        const explicitPrompt = localText.slice(separator).trim();
-        validatePrompt(explicitPrompt);
-        validateAgentTarget(
+        await runtime.consoleAgent.send(prompt);
+      } else
+        await dispatchPrompt(
           explicit,
-          undefined,
-          runtime.config.allowedWorkspaceIds,
+          prompt,
+          context,
+          runtime,
+          `${agentHeaderFor(explicit)}\nWorking…`,
         );
-        if (explicit.agent_status === "blocked") {
-          await runtime.herdr.sendAgent(explicit.pane_id, explicitPrompt, {
-            retries: 0,
-          });
-        } else {
-          assertAgentAvailable(explicit, runtime);
-          if (explicit.agent?.toLowerCase().includes("codex")) {
-            await dispatchPrompt(
-              explicit,
-              explicitPrompt,
-              context,
-              runtime,
-              `${agentHeaderFor(explicit)}\n📨 Prompt sent to Codex; capturing its final response.`,
-            );
-          } else {
-            await runtime.herdr.promptAgent(explicit.pane_id, explicitPrompt);
-          }
-        }
-        return;
-      } catch (error) {
-        if (
-          error instanceof Error &&
-          /prompt|authorized|busy|empty|too long|invalid/i.test(error.message)
-        )
-          throw error;
-      }
+      return;
     }
   }
   const query = localImplicit ? "" : args.shift()?.trim() || "";
@@ -819,17 +807,13 @@ async function askAgent(
   validatePrompt(prompt);
   if (localImplicit && runtime.consoleAgent) {
     await runtime.consoleAgent.send(prompt, async (selected, text) => {
-      if (selected.agent?.toLowerCase().includes("codex")) {
-        await dispatchPrompt(
-          selected,
-          text,
-          context,
-          runtime,
-          `${agentHeaderFor(selected)}\n📨 Prompt sent to Codex; capturing its final response.`,
-        );
-      } else {
-        await runtime.herdr.promptAgent(selected.pane_id, text);
-      }
+      await dispatchPrompt(
+        selected,
+        text,
+        context,
+        runtime,
+        `${agentHeaderFor(selected)}\nWorking…`,
+      );
     });
     return;
   }
@@ -861,6 +845,46 @@ async function teamCommand(
 ): Promise<void> {
   const action = args.shift()?.toLowerCase();
   switch (action) {
+    case "pool":
+    case "select": {
+      const workspace = await teamWorkspaceId(context, runtime);
+      if (!runtime.pool) throw new Error("Agent pool unavailable");
+      if (action === "select" && !args.length && context.selectProfiles) {
+        const selected = await context.selectProfiles(
+          runtime.pool.profiles.map((p) => p.id),
+          runtime.pool.members(workspace),
+        );
+        if (selected) runtime.pool.selectAll(workspace, selected);
+      }
+      if (action === "select" && args.length) {
+        if (args.length !== 2 || !["on", "off"].includes(args[1]))
+          throw new Error("usage: team select <profile> on|off");
+        runtime.pool.select(workspace, args[0], args[1] === "on");
+      }
+      await runtime.discord.reply(
+        context.message,
+        `Team ${workspace} Agent Pool\n${await runtime.pool.describe(workspace)}\nSelect: team select <profile> on|off; existing session: team bind <profile> <pane>`,
+      );
+      return;
+    }
+    case "bind": {
+      if (args.length !== 2 || !runtime.pool)
+        throw new Error("usage: team bind <profile> <pane>");
+      const workspace = await teamWorkspaceId(context, runtime);
+      const agent = findAgent(
+        await runtime.herdr.listAgentsWithWorkspaceNames(),
+        args[1],
+      );
+      validateAgentTarget(agent, undefined, runtime.config.allowedWorkspaceIds);
+      if (runtime.activeStreams.has(agent.terminal_id))
+        throw new Error("Agent is busy");
+      runtime.pool.bind(workspace, args[0], agent);
+      await runtime.discord.reply(
+        context.message,
+        `Bound ${args[0]} to ${agent.pane_id}. Existing CLI model must match the profile; binding does not change it.`,
+      );
+      return;
+    }
     case "list":
     case "members":
       await teamList(context, runtime);
@@ -886,7 +910,14 @@ async function teamWorkspaceId(
   runtime: Runtime,
 ): Promise<string> {
   let mapping = runtime.routing.resolve(context.routing);
-  if (mapping?.workspaceId) return mapping.workspaceId;
+  if (mapping?.workspaceId) {
+    if (
+      runtime.config.allowedWorkspaceIds.length &&
+      !runtime.config.allowedWorkspaceIds.includes(mapping.workspaceId)
+    )
+      throw new Error("workspace is not authorized");
+    return mapping.workspaceId;
+  }
   throw new Error("select a workspace first with /herdr wk use <workspace>");
 }
 
@@ -896,7 +927,18 @@ async function teamList(
 ): Promise<void> {
   const agents = await runtime.herdr.listAgentsWithWorkspaceNames();
   const active = runtime.routing.resolve(context.routing)?.paneId;
-  const workspaceIds = runtime.routing.workspaceTeamIds();
+  const workspaceIds = [
+    ...new Set([
+      ...runtime.routing.workspaceTeamIds(),
+      ...(runtime.routing.resolve(context.routing)?.workspaceId
+        ? [runtime.routing.resolve(context.routing)!.workspaceId]
+        : []),
+    ]),
+  ].filter(
+    (id) =>
+      !runtime.config.allowedWorkspaceIds.length ||
+      runtime.config.allowedWorkspaceIds.includes(id),
+  );
   if (workspaceIds.length === 0) {
     await runtime.discord.reply(
       context.message,
@@ -904,20 +946,22 @@ async function teamList(
     );
     return;
   }
-  const sections = workspaceIds.map((workspaceId) => {
-    const members = runtime.routing
-      .workspaceTargets(workspaceId)
-      .map((target) => {
-        const agent = agents.find((item) => item.pane_id === target.paneId);
-        const status = agent?.agent_status || "stale";
-        const label = agent
-          ? agentLabel(agent)
-          : target.agentName || "unknown Agent";
-        const workspace = agent?.workspace_name || workspaceId;
-        return `${target.paneId === active ? "▶" : "•"} **${label}** · ${workspace} · pane ${target.paneId || "unavailable"} · ${status}`;
-      });
-    return `**Workspace ${workspaceId}**\n${members.join("\n")}`;
-  });
+  const sections = await Promise.all(
+    workspaceIds.map(async (workspaceId) => {
+      const members = runtime.routing
+        .workspaceTargets(workspaceId)
+        .map((target) => {
+          const agent = agents.find((item) => item.pane_id === target.paneId);
+          const status = agent?.agent_status || "stale";
+          const label = agent
+            ? agentLabel(agent)
+            : target.agentName || "unknown Agent";
+          const workspace = agent?.workspace_name || workspaceId;
+          return `${target.paneId === active ? "▶" : "•"} **${label}** · ${workspace} · pane ${target.paneId || "unavailable"} · ${status}`;
+        });
+      return `**Workspace ${workspaceId}**\n${members.join("\n")}${runtime.pool ? "\n" + (await runtime.pool.describe(workspaceId)) : ""}`;
+    }),
+  );
   await runtime.discord.reply(
     context.message,
     "👥 **Workspace Teams**\n\n" + sections.join("\n\n"),
@@ -932,11 +976,22 @@ async function teamAdd(
   const workspaceId = await teamWorkspaceId(context, runtime);
   const query = args.join(" ").trim();
   if (!query) throw new Error("usage: /herdr team add <agent-name-or-pane-id>");
+  if (query.startsWith("profile:")) {
+    if (!runtime.pool) throw new Error("Agent pool unavailable");
+    runtime.pool.select(workspaceId, query.slice(8), true);
+    await runtime.discord.reply(
+      context.message,
+      `Enabled ${query} for Team ${workspaceId}; starts only when assigned.`,
+    );
+    return;
+  }
   const agent = findAgent(
     await runtime.herdr.listAgentsWithWorkspaceNames(),
     query,
   );
   validateAgentTarget(agent, undefined, runtime.config.allowedWorkspaceIds);
+  if (agent.workspace_id !== workspaceId)
+    throw new Error("all Team members must belong to the same workspace");
   const existingTargets = runtime.routing.workspaceTargets(workspaceId);
   const existingWorkspaces = new Set(
     existingTargets.map((target) => target.workspaceId),
@@ -953,7 +1008,7 @@ async function teamAdd(
   });
   await runtime.discord.reply(
     context.message,
-    `${agentHeaderFor(agent)}\n👥 Added **${agentLabel(agent)}** to this thread. The active Agent was not changed.`,
+    `${agentHeaderFor(agent)}\n👥 Added **${agentLabel(agent)}** to this workspace Team. The active Agent was not changed.`,
   );
 }
 
@@ -966,6 +1021,15 @@ async function teamRemove(
   const query = args.join(" ").trim().toLowerCase();
   if (!query)
     throw new Error("usage: /herdr team remove <agent-name-or-pane-id>");
+  if (query.startsWith("profile:")) {
+    if (!runtime.pool) throw new Error("Agent pool unavailable");
+    runtime.pool.select(workspaceId, query.slice(8), false);
+    await runtime.discord.reply(
+      context.message,
+      `Disabled ${query}; its session keeps running.`,
+    );
+    return;
+  }
   const target = runtime.routing
     .workspaceTargets(workspaceId)
     .find(
@@ -990,10 +1054,6 @@ async function teamAsk(
   const prompt = args.join(" ").trim();
   validatePrompt(prompt);
   const targets = runtime.routing.workspaceTargets(workspaceId);
-  if (targets.length === 0)
-    throw new Error(
-      "this workspace has no team agents; use /herdr team add first",
-    );
   const agents = await runtime.herdr.listAgentsWithWorkspaceNames();
   const activeRoute = runtime.routing.resolve(context.routing);
   const leadTarget =
@@ -1017,30 +1077,87 @@ async function teamAsk(
       validateAgentTarget(agent, target, runtime.config.allowedWorkspaceIds);
       return agent;
     });
-  if (workers.length === 0)
-    throw new Error("Team Task requires at least one Worker besides the Lead");
+  workers.push(...(runtime.pool?.roster(workspaceId) || []));
+  assertAgentAvailable(lead, runtime);
 
   const taskId = `task-${randomUUID()}`;
   await runtime.discord.reply(
     context.message,
     `${agentHeaderFor(lead)}\n🧭 **1:1:N Team Task accepted** · \`${taskId}\`\nLead: **${agentLabel(lead)}**\nWorkers: ${workers.map(agentLabel).join(", ")}`,
   );
-  const result = await runTeamTask(
-    {
-      taskId,
-      prompt,
-      lead,
-      workers,
-      // 將設定的 timeout 傳給 Lead planning、每個 Worker 與 Lead synthesis。
-      timeoutMs: runtime.config.approvalTimeoutMs,
-    },
-    runtime.herdr,
-    (event) => void reportOrchestrationEvent(event, context, runtime),
-  );
-  await runtime.discord.reply(
-    context.message,
-    `${agentHeaderFor(lead)}\n${result.state === "completed" ? "✅ **Team Task completed**" : result.state === "failed" ? "❌ **Team Task failed — partial synthesis**" : "⏸️ **Team Task blocked — partial synthesis**"} · \`${taskId}\`\n\n${result.synthesis || "(no synthesis)"}`,
-  );
+  const reserved = new Set<string>();
+  const reserve = (agent: AgentRecord) => {
+    if (!reserved.has(agent.terminal_id)) {
+      assertAgentAvailable(agent, runtime);
+      runtime.activeStreams.add(agent.terminal_id);
+      reserved.add(agent.terminal_id);
+    }
+  };
+  reserve(lead);
+  const workerOwners = new Map<string, string>();
+  try {
+    const result = await runTeamTask(
+      {
+        taskId,
+        prompt,
+        lead,
+        workers,
+        replan: true,
+        acquireWorker: async (target) => {
+          const acquired = target.pane_id.startsWith("profile:")
+            ? await runtime.pool!.acquire(
+                workspaceId,
+                target.pane_id.slice(8),
+                lead,
+                taskId,
+              )
+            : {
+                agent: (
+                  await runtime.herdr.listAgentsWithWorkspaceNames()
+                ).find(
+                  (a) =>
+                    a.pane_id === target.pane_id &&
+                    a.terminal_id === target.terminal_id &&
+                    a.agent === target.agent &&
+                    a.workspace_id === target.workspace_id &&
+                    sameAgentSession(a.agent_session, target.agent_session),
+                ),
+                continuity: "unknown",
+              };
+          if (!acquired.agent)
+            throw new Error("Worker session changed or exited");
+          if (
+            acquired.agent.pane_id === lead.pane_id ||
+            acquired.agent.workspace_id !== workspaceId
+          )
+            throw new Error("invalid Worker target");
+          const owner = workerOwners.get(acquired.agent.terminal_id);
+          if (owner && owner !== target.pane_id)
+            throw new Error(
+              "multiple roster entries refer to the same Worker session",
+            );
+          workerOwners.set(acquired.agent.terminal_id, target.pane_id);
+          reserve(acquired.agent);
+          return { agent: acquired.agent, continuity: acquired.continuity };
+        },
+        // 將設定的 timeout 傳給 Lead planning、每個 Worker 與 Lead synthesis。
+        timeoutMs: runtime.config.approvalTimeoutMs,
+      },
+      runtime.herdr,
+      (event) => {
+        void reportOrchestrationEvent(event, context, runtime).catch((error) =>
+          console.error(safeError(error)),
+        );
+      },
+    );
+    await runtime.discord.reply(
+      context.message,
+      `${agentHeaderFor(lead)}\n${result.state === "completed" ? "✅ **Team Task completed**" : result.state === "failed" ? "❌ **Team Task failed — partial synthesis**" : "⏸️ **Team Task blocked — partial synthesis**"} · \`${taskId}\`\n\n${result.synthesis || "(no synthesis)"}`,
+    );
+  } finally {
+    runtime.pool?.release(taskId);
+    for (const terminal of reserved) runtime.activeStreams.delete(terminal);
+  }
 }
 
 async function reportOrchestrationEvent(
@@ -1051,7 +1168,7 @@ async function reportOrchestrationEvent(
   const messages: Record<OrchestrationEvent["type"], string | undefined> = {
     task_started: `🧭 Team Task \`${event.taskId}\` started.`,
     plan_requested: `📋 Lead is planning Team Task \`${event.taskId}\`.`,
-    assignment_started: `🔄 Assignment \`${event.assignmentId}\` started on \`${event.paneId}\`.`,
+    assignment_started: `🔄 Assignment \`${event.assignmentId}\` started on \`${event.paneId}\` · ${event.detail || "session unknown"}.`,
     assignment_blocked: `⏸️ Assignment \`${event.assignmentId}\` is blocked on \`${event.paneId}\`: ${event.detail || "input required"}`,
     assignment_completed: `✅ Assignment \`${event.assignmentId}\` completed on \`${event.paneId}\`.`,
     assignment_failed: `❌ Assignment \`${event.assignmentId}\` failed: ${event.detail || "unknown failure"}`,
@@ -1181,6 +1298,32 @@ async function dispatchPrompt(
       context.message,
       acknowledgement,
     );
+    if (context.source === "console") {
+      void runTeamTurn(
+        agent,
+        prompt,
+        runtime.herdr,
+        runtime.config.approvalTimeoutMs,
+        runtime.config.outputLines,
+        undefined,
+        () => undefined,
+      )
+        .then(async (result) => {
+          await runtime.discord.reply(
+            context.message,
+            `${agentHeaderFor(agent)}\n${result.text}`,
+          );
+        })
+        .catch(async (error) => {
+          await runtime.discord.reply(
+            context.message,
+            `⚠️ Response capture incomplete: ${safeError(error)}. Use read/attach to inspect the Agent.`,
+          );
+        })
+        .catch((error) => console.error(safeError(error)))
+        .finally(() => runtime.activeStreams.delete(agent.terminal_id));
+      return;
+    }
     const baselineOutput = await runtime.herdr
       .readAgent(agent.pane_id, "recent_unwrapped", runtime.config.outputLines)
       .catch(() => "");
@@ -1645,7 +1788,12 @@ function consoleHelpText(): string {
     "",
     "**選擇與查詢**",
     "agent — 列出目前可用 Agent",
-    "agent use <pane> — 選取／重新 attach Agent，並開始在 bridge 顯示其可見畫面",
+    "agent use <pane> — 選取對話目標，不顯示 CLI 畫面",
+    "attach <pane> — 開啟終端快照檢視（40 行／6000 字元）",
+    "watch <pane> — 只顯示狀態變化；detach 回到對話",
+    "team pool / team select — 檢視／勾選可用 Agent profiles",
+    "team select <profile> on|off — 啟用／停用 profile",
+    "team bind <profile> <pane> — 重用已存在的 CLI session",
     "agent detach — 停止 bridge 顯示目前 Agent；不停止 Agent、不取消 routing",
     "current — 顯示目前選取的 Agent、workspace 與 pane",
     "status — 檢查 Herdr socket 與 routing",
@@ -1673,7 +1821,7 @@ function consoleHelpText(): string {
     "thread off — 恢復本機獨立 routing",
     "",
     "**本機 Agent 互動**",
-    "選取後會持續顯示 bounded terminal snapshot（最多 40 行／6,000 字元）。",
+    "預設只顯示本次回答；blocked 問題以有界快照顯示。attach 才顯示一般 CLI 畫面。",
     "idle/done 可發送新 prompt；blocked 可直接輸入回答。",
     "working/unknown 時新 prompt 會被拒絕，但 current、agent、wk、help 等控制指令仍可使用。",
     "若回答剛好以控制指令開頭，請使用：ask <回答>",
