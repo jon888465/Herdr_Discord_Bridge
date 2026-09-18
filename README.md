@@ -1,6 +1,6 @@
 # Herdr Discord Bridge
 
-Drive coding agents that are already running in Herdr panes from Discord. The
+Drive coding agents in Herdr panes from Discord, with optional Team profiles for on-demand persistent CLI startup. The
 bridge uses Discord's outbound Gateway WebSocket and Herdr's local socket; it
 does not expose a public HTTP endpoint and does not replace Herdr's PTY/runtime.
 
@@ -136,7 +136,7 @@ Agent.
 
 In `bridge>`, run `agent`, then `agent use <pane ID>`, then `current`. Selection saves both the local workspace and its active Agent. Discord user/thread routes stay independent unless you explicitly select a shared `thread <ID>`.
 
-Selecting an Agent starts local observation automatically: the current visible screen, progress, questions and results appear with Agent/workspace/pane labels. Snapshots are limited to 40 visible lines / 6,000 characters and only reprinted on changes; they are not a complete transcript or guaranteed final answer. They are not automatically sent to Discord.
+Selecting an Agent keeps the console in conversation mode: only the current request's correlated answer is delivered. `attach [pane]` explicitly inspects bounded terminal snapshots (40 visible lines / 6,000 characters); `watch [pane]` shows status changes; `detach` returns to conversation mode. Inspection does not change the conversation target. Blocked questions remain visible and replyable. This is not native PTY attachment or a complete terminal stream, and it does not mirror Discord.
 
 Type `ask <text>` or ordinary text to the selected Agent. When idle/done it starts a prompt; when blocked it answers the question shown in bridge. Changed or unseen questions must be read and answered again. Duplicate answers are rejected. `help`, `current`, `agent use`, `wk` and other controls remain available while working or blocked; new prompts during working/unknown are rejected. Use `ask current` if the answer itself is a command word. Output preserves the line being edited. `read [agent]`, `wait [agent]`, `cancel [agent]` remain explicit controls. `team list` lists workspace Teams; other Team operations require a workspace. Multiple simultaneous Agent questions and Discord mirroring remain pending.
 
@@ -185,12 +185,9 @@ For a continuing one-to-one conversation, create a Discord thread and run
 `/herdr use <agent-name-or-pane-id>` once. Subsequent ordinary messages in
 that thread are sent only to the active Agent. The bridge requires an explicit
 mention when `requireMention` is enabled. Each thread stores its active Agent
-and can retain additional independent Agent mappings with `team add`; those
-mappings are not automatically given the thread's full history.
+and can retain additional Agent mappings. `team add` manages workspace Team members; members are not automatically given the thread's full history.
 
-`/herdr team ask ...` starts the first orchestration flow: the thread's active
-Agent plans bounded Assignments, Herdr dispatches them to Team participants, and
-the Lead synthesizes their bounded reports. It does not copy the Discord thread
+`/herdr team ask ...` lets the selected Lead plan bounded Assignments, dispatch to live members or enabled profiles, and decide follow-up work from their reports before verification and synthesis. It can also choose no Workers and handle the task directly. It does not copy the Discord thread
 or terminal history. Task persistence, restart recovery, cancellation, and
 interactive blocked-Assignment continuation are not implemented yet. Use
 `/herdr handoff <from> <to>` when a CLI reaches a token/context limit. Handoff
@@ -215,7 +212,7 @@ The bridge uses one Discord bot token for all Herdr Agents. Agent sessions stay
 in Herdr; switching or handing off only changes routing and does not reset the
 source pane. No full Discord or CLI history is copied to another Agent.
 
-For prompt replies, the bridge records the terminal snapshot before sending the
+For Discord single-Agent prompt replies, the bridge records the terminal snapshot before sending the
 prompt and forwards only output after that prompt. CLI-specific prompt markers
 and terminal chrome are handled by adapters in `src/cli-adapter.ts`; Codex,
 Antigravity (`agy`), and OpenCode have separate adapters, while unknown CLIs use
@@ -251,3 +248,21 @@ unauthorized threads are rejected. Console replies stay in the pane;
 this does not enable direct Agent conversation mirroring to Discord.
 
 Normal startup rejects a second local instance for the same Discord bot before login. The lock is independent of workspace and config directory. Linux releases it even after a crash. Older bridge builds without this lock must still be stopped during the first upgrade.
+
+## Agent profiles and quiet console
+
+Define `agentProfiles` in the plugin config (see [config.example.jsonc](config.example.jsonc)). Profiles configure CLI kind, optional model/arguments and capabilities; no model name is assumed valid for your account.
+
+```text
+agent use <lead-pane>
+team pool
+team select
+team bind helper <existing-worker-pane>
+team ask <task>
+attach <worker-pane>
+detach
+```
+
+`team select` opens a numbered checkbox list in the bridge pane: enter numbers to toggle, `done` to save, `cancel` to cancel. Discord uses `team select <profile> on|off`. Binding is optional: an unbound selected profile starts only when the Lead assigns it work. Use `team add profile:<id>` / `team remove profile:<id>` as explicit aliases.
+
+Existing sessions require explicit binding and retain their CLI context. New or unidentified sessions receive the original task and bounded reports, without claiming complete context recovery. Release and Team removal preserve the process. Startup failures with uncertain delivery require inspection and explicit binding before retrying; panes are not automatically closed. See [architecture, limits and acceptance](docs/agent-pool-console.md).

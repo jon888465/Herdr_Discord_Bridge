@@ -67,8 +67,7 @@ The current issue and verification ledger is [known issues](docs/known-issues.md
 The local bridge console can explicitly select an existing Discord thread with
 `thread <ID>` (`threads` lists choices). This persists a reference to the same
 thread route, sharing active Agent and Team changes. `thread off` restores the
-independent console route. Selecting an Agent also displays its bounded visible
-terminal snapshots locally and permits replies to its displayed blocked question.
+independent console route. Selecting an Agent keeps the console in conversation mode. Explicit `attach` displays bounded visible terminal snapshots; `watch` displays state changes. Blocked questions remain visible and replyable in every mode.
 Controls remain available in every state. Direct Agent-pane mirroring to Discord
 and multi-Agent question correlation are still pending (ISSUE-010 / ISSUE-012).
 Bridge restart preserves other Agent panes and targets tab 1
@@ -78,3 +77,9 @@ panes elsewhere must be explicitly migrated/stopped before restart.
 Normal startup acquires a local OS-owned IPC lock for the Discord bot before
 routing state is read or Discord connects. It prevents duplicate new-version
 instances; legacy processes without the lock still require explicit migration.
+
+## Agent profiles and sessions
+
+- [Agent Pool and console separation](docs/agent-pool-console.md): 2026-09-18 implementation of per-workspace profile permissions, lazy persistent CLI startup, explicit existing-session binding, session continuity checks, dynamic Lead replanning, and console selection/inspection modes.
+- Profiles are definitions, sessions hold CLI context, panes host processes. Removing a profile from a Team does not stop its session.
+- Team roster may contain live mappings and enabled profiles; only selected profiles start. Lead may choose zero Workers. Tasks still have no restart recovery.

@@ -120,7 +120,7 @@ command 由 CLI adapter 處理，避免 Codex、Antigravity（`agy`）與其他 
 放在 tab 1 但不 focus；保留原本的 active tab，之後開啟的其他 Agent pane 就不會
 因為重建流程被帶到 tab 1。
 
-## 回覆擷取行為
+## Discord 單 Agent 回覆擷取行為
 
 每次收到 prompt 時，bridge 會先記錄 Herdr terminal snapshot，然後只轉送該 prompt 之後產生的最新回覆，不會重送 prompt 以前的歷史內容。
 
@@ -170,7 +170,7 @@ Agent 完成後，回覆會更新原本的 progress message；預設不會另外
 ```
 
 設定 `requireMention` 後，兩種 command 都必須 mention bot，例如 `@bridge agents` 或 `@bridge /herdr agents`。在已 mapping 的 thread 中，普通文字會被當作 active Agent 的 prompt。
-在 `bridge>` 執行 `agent use <pane>` 後，會保存目前 workspace 與 active Agent，並自動顯示該 Agent 的可見畫面、進度與追問。不需另開 mirror 或先進入 blocked。輸出以 Agent／workspace／pane 標示，限制 40 行／6,000 字元，有變化才更新；這是 terminal 節錄，不保證完整歷史或 final，也不自動送到 Discord。
+在 `bridge>` 執行 `agent use <pane>` 後，只保存對話目標，不自動刷出 CLI 畫面。本次發問只顯示相符的回答；`attach [pane]` 才顯示終端快照（40 行／6,000 字元），`watch [pane]` 顯示狀態變化，`detach` 回對話模式。檢視其他 pane 不改對話目標。blocked 問題仍會顯示並可回答。attach 是有界快照 inspector，不是完整 stdout/stderr 或原生 PTY attach；不自動送往 Discord。
 
 直接輸入 `ask <文字>` 或非指令文字：idle/done 時發問，blocked 時回答 bridge 已顯示的問題。問題已變更或尚未顯示時，先看新問題再回答；同一問題不重複送答。`help`、`current`、`agent`、`agent use`、`wk` 等控制指令在 working／blocked 時仍可用；working/unknown 時不插入新 prompt。答案開頭若是指令名稱，請用 `ask current` 等明確格式。顯示輸出時保留正在編輯的輸入。多 Agent 問題識別／排隊與 Discord mirror 仍待做。
 
@@ -213,3 +213,24 @@ npm run build
 直接對話的 Discord 鏡像功能。
 
 正常啟動會在登入 Discord 前拒絕同一 bot 的第二個本機實例，鎖不依賴 workspace 或 config directory；Linux 即使異常退出也會釋放。舊版沒有此鎖，首次升級仍需先處理舊 bridge 程序。
+
+## 可用 Agent 池與動態分工
+
+在 plugin `config.json` 加入 `agentProfiles`（見 [設定範例](config.example.jsonc)），定義 CLI kind、可選的 model／args 及 capabilities。模型名稱需符合你的 CLI 與帳號。
+
+```text
+agent use <lead-pane>
+team pool
+team select
+team bind helper <已存在的-worker-pane>
+team ask <任務>
+attach <worker-pane>
+detach
+```
+
+`team select` 在 bridge pane 顯示編號勾選清單：輸入編號切換，`done` 儲存，`cancel` 取消；Discord 用 `team select <profile> on|off`。也可使用 `team add/remove profile:<id>`。
+`team bind` 是重用既有 CLI 的選擇性步驟；未綁定的 profile 只有在 Lead 實際分派時才開 pane／啟動長駐 CLI。
+Lead 自行決定角色、是否委派，以及依報告追加工作，無固定 coding pipeline；也可以不使用 Worker。
+
+釋放任務租用或移出 Team 不會停止 CLI。Bridge 會核對 session identity，不能確認時不宣稱 context 延續；新 session 收到原任務與有界報告。
+啟動送達不確定時不重試開 pane，需檢查後明確 bind。完整操作、限制與驗收見 [Agent Pool 與 console 架構](docs/agent-pool-console.md)。

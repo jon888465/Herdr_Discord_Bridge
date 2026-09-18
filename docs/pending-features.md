@@ -1,12 +1,10 @@
 # 待做功能
 
-## 已實作基礎：bridge 本機單 Agent 互動（2026-09-10，待驗收）
+## 已實作基礎：Agent Pool 與安靜 console（2026-09-18，待驗收）
 
-`agent use <pane>` 自動開始本機可見畫面觀察；`agent detach` 可停止 observer，
-不停止 Agent、不取消 routing，之後再次 `agent use <pane>` 即可恢復。顯示進度／
-問題，blocked 時可從 bridge 回答，控制指令在各狀態持續可用。這是 40 行／6,000
-字元的 terminal snapshot，不是下述完整 Discord mirror。詳見 SPEC「本機選取 Agent
-後的互動」及 ISSUE-011。
+`use` 只選取對話目標；本機 `ask` 顯示本次明確回答，`attach` 才顯示有界終端快照，`watch` 顯示狀態，`detach` 回對話。blocked 問題通知與驗證保留。
+`team select` 可勾選尚未啟動的 Agent profiles；Lead 按需分派、重用 session 或啟動 CLI，並依報告決定下一輪。詳見 [使用與架構](agent-pool-console.md)。
+這不是下述 Discord mirror；原生全串流 PTY attach、task restart recovery 與完整 event bus 仍未實作。
 
 後續多 Agent 問題須有 task／assignment／question identity 與回覆 UI／排隊；尚未決定是否凍結其他輸出，不自動暫停其他 Agent。Herdr GUI 選擇與 Discord select menu 仍待評估；`focus` 只改畫面焦點，不能作為 routing 選擇的替代。
 

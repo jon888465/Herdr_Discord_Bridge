@@ -13,7 +13,7 @@ Discord Gateway（outbound WebSocket）
         -> 該 pane 中已經執行的 CLI
 ```
 
-Bridge 不是 ACP broker，也不會自行啟動 coding CLI。因此 Discord 斷線不會
+Bridge 不是 ACP broker；Team 可透過明確啟用的 Agent profile，按需建立 pane 並啟動長駐 CLI。一般 use/ask 不會自行啟動 CLI。Discord 斷線不會
 停止 agent。Bridge 也不會開啟 HTTP listener 或 public endpoint。
 
 設計遵循 Herdr 文件中的 plugin v1 manifest 與 socket API，以及
@@ -164,7 +164,7 @@ mapping 過期時，一律 fail closed。
 /herdr team ask <prompt>
 ```
 
-Bridge pane 的 stdin 也接受相同指令，可直接輸入 `agent`、`agent use w2:p1`、`agent detach`、`status`、`ask <prompt>`、`read w2:p1`、`wait w2:p1`、`cancel w2:p1`，或使用 `/herdr` prefix。`agent detach` 只停止 bridge 對目前 Agent 的本機畫面 observer，不停止／取消 Agent，也不清除 routing；要恢復顯示輸入 `agent use <pane>`。結果與 streaming progress 會印回 pane。Team routing 指令需要目前已選取的 workspace；Discord thread 只提供 route context，本機可用 `wk use <workspace>` 選取。
+Bridge pane 的 stdin 也接受相同指令，可直接輸入 `agent`、`agent use w2:p1`、`agent detach`、`status`、`ask <prompt>`、`read w2:p1`、`wait w2:p1`、`cancel w2:p1`，或使用 `/herdr` prefix。`agent detach`（相容 `detach`）回到安靜對話模式，保留 blocked 問題通知，不停止／取消 Agent，也不清除 routing；要顯示終端快照輸入 `attach <pane>`。結果與 streaming progress 會印回 pane。Team routing 指令需要目前已選取的 workspace；Discord thread 只提供 route context，本機可用 `wk use <workspace>` 選取。
 `workspaces` 顯示 Herdr 回傳的 label/path、ID 與 agent state。`wk use
 <workspace-id-or-name>` 只會將目前 route 綁定到既有且已授權的 Herdr workspace；
 不會建立 workspace、pane 或 Agent。之後使用 `use`、`target` 或 `assign` 選擇
@@ -175,9 +175,9 @@ Agent。`current` 顯示有效 mapping，並回報過期的 agent/pane 資料。
 message 會直接送給該 Agent，並套用與 `assign` 相同的 allowlist、過期 mapping
 與 busy 檢查。`target` 是向後相容的 alias。`ask` 對指定 Agent 發送一次性
 prompt，並將該 Agent 記錄到 thread，但不改變 active target。`team list` 列出所有 workspace Teams；`team add`、`team remove` 與 `team ask` 操作目前 workspace 的 Team。Team mapping 會持久化，Discord thread 不是 Team scope；
-`team remove` 管理獨立的 thread participants；`team ask` 會以目前 thread 的
+`team remove` 管理 workspace Team 成員；`team ask` 會以目前 thread 的
 active Agent 作為 Lead，先要求 Lead 產生受驗證的 Assignment plan，再透過 Herdr
-將 bounded 子任務送給同 workspace Workers，收集報告後要求 Lead synthesis。它
+將 bounded 子任務送給同 workspace Workers，收集報告後讓 Lead 決定後續 Assignment，空計畫才進入直接處理／驗證／synthesis；失敗或 blocked 則只做 partial synthesis。它
 不會廣播完整 thread 或 terminal history；task persistence、restart recovery、
 cancel 與 blocked Assignment 的後續互動仍未完成。
 
@@ -223,6 +223,8 @@ Agent。
 
 ### Response streaming v1
 
+本節描述 Discord 單 Agent 回覆；本機 console 使用後述明確回答通道。
+
 Progress message 顯示 prompt scope CLI response 的最新 1,500 個字元，並每十秒
 （下一次 stream poll）重新整理。即使輸出沒有變化，status 後仍會顯示經過的
 wall time。第一張 card 與 final 會即時送出。Final duration 在觀察到完成時
@@ -240,7 +242,7 @@ envelope。Item event 必須符合 active `turn_id`。當 terminal prompt extrac
 無法使用時，公開的 commentary 與 command-execution status 可提供 preview；
 Reasoning item 會忽略。
 
-Reasoning 與 commentary record 不會作為 final。Bridge 不會啟動第二個 Agent。
+Reasoning 與 commentary record 不會作為 final。回覆擷取不會另啟 Agent；Team profile 啟動是獨立的明確授權流程。
 Transcript 缺少、不明確、無法存取或格式不相容時，使用 terminal fallback。每個
 pane 不同的 `CODEX_HOME` 必須使用相同 catalog；不支援只存在遠端的 session
 file。
@@ -372,13 +374,13 @@ acceptance 的 issue。提議中的 feature 必須與已實作行為分開，並
 
 `agent use <pane>`（相容 `use agent <pane>`）同時記錄本機選取的 workspace 與該 workspace 的 active Agent，`current`、省略 target 的操作與本機觀察器使用相同目標。Discord user/thread route 維持獨立；明確選定 `thread <ID>` 時才共用該 route。本機來源由獨立 source 欄位識別，不能因共用 Discord routing 而被當作 Discord 訊息。
 
-互動式 `bridge>` 啟動一個單 Agent 觀察器，依 `pollIntervalMs` 讀取所選 Agent 的 `visible` 輸出，最多 40 行／6,000 字元。選取後顯示當前畫面，之後只在文字或狀態改變時重印；idle、working、blocked、done、unknown 均可顯示。每次標示 Agent、workspace、pane、狀態與 terminal snapshot，移除 ANSI／控制字元。這是可見 terminal 節錄，可能含 UI／工具文字，不宣稱完整 transcript、問答邊界或完整 final；不讀隱藏 reasoning 事件、不自動轉發 Discord。切换或關閉後丟棄舊的 in-flight read，失效 identity 停止輸出與送入，須明確重新選取。
+互動式 `bridge>` 的 `use` 只選對話目標，預設不印 CLI 畫面。`attach [pane]` 明確開啟 terminal inspector（40 行／6,000 字元 visible snapshot，不是原生 PTY attach 或完整 stdout/stderr）；`watch [pane]` 只印狀態變化；`detach` 回對話模式。blocked 問題在三種模式都以有界快照顯示，以保留安全回答驗證。這些模式只在本機顯示，不 mirror Discord。切換目標／模式時丟棄舊 read；選取新目標回到對話模式。attach/watch 檢視目標獨立於對話目標；模式切換不清除已回答問題的去重紀錄。
 
 本機 `ask <text>` 和非指令文字：保留大小寫與內部空白，idle/done 時送出新 prompt；blocked 時回答已顯示的問題。傳送前重新檢查 workspace allowlist、pane、terminal、Agent kind、session kind/value、blocked 狀態與 state sequence，並比較可見問題畫面；若問題改變或尚未顯示，先顯示後拒絕舊回答，要求重新回答。相同問題只接受一次回答，不重試 socket 不確定送達。缺少 session metadata 時僅能靠 terminal/pane/kind 辨識，無法保證同 terminal 內無 metadata 的 CLI restart 可被偵測；Herdr API 也不提供驗證與送字的原子 question ID 契約。
 
-working/unknown 時一般 prompt 會明確拒絕；`help`、`current`、`agent`、`agent use`、`wk` 等控制指令仍可操作，無須等 blocked。若答案開頭恰為指令，以 `ask <answer>` 明確指定。觀察輸出會重畫 `bridge>` 並保留正在編輯的輸入。`cancel` 是另行明確的 Ctrl-C 操作。單 Agent 本機 `ask` 由持續觀察器顯示結果；既有 Discord dispatch 的 progress/final 路徑不變。
+working/unknown 時一般 prompt 會明確拒絕；`help`、`current`、`agent`、`agent use`、`wk` 等控制指令仍可操作，無須等 blocked。若答案開頭恰為指令，以 `ask <answer>` 明確指定。觀察輸出會重畫 `bridge>` 並保留正在編輯的輸入。`cancel` 是另行明確的 Ctrl-C 操作。本機新 prompt 使用與 Team 相同的 runTeamTurn 接收器，優先相符 Codex transcript final，否則僅接受本次隨機 marker 內的完整回覆；不把任意 CLI 片段當回答。blocked 時保留擷取直到回答後完成或逾時。既有 Discord 單 Agent progress/final 路徑不變。
 
-Codex 本機新 prompt 保留既有 transcript final 擷取，另外顯示本機快照；agy 等 CLI 目前使用快照回饋。多 Agent 同時提問的 question ID／排隊／回覆 UI、是否暫停其他 Agent、agy 未被 Herdr 辨識為 blocked 的選單按鍵、直接 pane → Discord mirror 仍待做，不自動暫停其他 Agent 或猜測答案目的地。
+各 CLI 的本機回答使用上述共同回覆流程；agy 等 CLI 需遵守 marker 格式，無可靠回覆時明示 capture incomplete，可用 read/attach 診斷。多 Agent 同時提問的 question ID／排隊／回覆 UI、是否暫停其他 Agent、agy 未被 Herdr 辨識為 blocked 的選單按鍵、直接 pane → Discord mirror 仍待做，不自動暫停其他 Agent 或猜測答案目的地。
 
 本機專用 `threads` 列出已映射且符合 guild/channel/workspace allowlist 的 thread；
 `thread <thread ID>` 明確選定共用路由，`thread off` 回到原本本機路由。
@@ -387,3 +389,29 @@ Agent 與 Team，兩邊變更立即反映，不複製 mapping，也不冒用 Dis
 每次指令再次檢查 thread 存在與授權，失效時拒絕，不自動挑其他 thread。
 此模式只共用 routing；本機 command 回覆／stream 仍輸出到本機，直接在 Agent
 pane 的對話不會因此鏡像到 Discord。未知 thread 必須先在 Discord 建立 mapping。
+
+## Agent Pool 與動態 Lead 分工（2026-09-18）
+
+詳見 [使用與架構](docs/agent-pool-console.md)。Profile、session、pane 與 conversation 分開管理。
+`config.json.agentProfiles` 定義 id/kind/model/modelFlag/args/capabilities，最多 64 個，不預設任何模型名稱。
+Codex modelFlag 預設 -m，Claude 預設 --model；其他 CLI 指定 model 時需明確 modelFlag。args 直接經 socket 傳給 agent.start，不經 shell。
+
+`team pool`／`team list` 顯示設定與啟動狀態；本機 `team select` 提供編號勾選、done 儲存、cancel 取消。
+Discord 或非互動情境使用 `team select <profile> on|off`。`team add/remove profile:<id>` 也是明確的啟用／停用形式，既有 live pane 語法保留。
+`team bind <profile> <pane>` 明確採用同 workspace、相符 kind、idle/done 的既有 session；不變更其模型，操作者應先確認模型設定。
+Team profile 授權及 session identity 原子寫入 state directory 的 agent-pool.json；與 routing.json 的 live mapping 分開。
+
+Lead 仍由已選取的 live Agent 擔任。可不委派而直接完成工作；不固定 planner/coder/reviewer/tester 角色。
+規劃的 workerPaneId 相容既有 pane ID，亦接受 roster 中的 profile:<id>。只有選中的 profile 才 acquire。
+沒有綁定 session 時 split Lead pane（同 workspace/cwd、focus=false），使用官方 agent.start 啟動長駐 CLI。
+不以 one-shot exec 取代 session，不任意接管未綁定 pane。release 只釋放任務租用，不關閉 pane 或 CLI。
+連線失敗時 split/start 不重試；啟動前先記錄 uncertain，需人工檢查並 bind，避免重啟後重複建立。
+
+重用前核對 workspace、pane、terminal、kind 與 session identity；busy/blocked、identity 改變、profile 設定變更均拒絕。
+已消失的綁定 session 可另建新 pane；同 pane 被替換則需明確 bind。缺少 session metadata 時回報 unknown，不能聲稱 context 延續。
+新 Worker prompt 包含原任務、當前 Assignment、過往有界報告與 continuity；不複製 hidden reasoning，也不保證重建完整 context。
+
+同一 bridge 內以 terminal reservation 及 profile lease 防止不同任務搶用；同 Worker 每波最多一個 Assignment。
+完成一輪後 Lead 可再規劃，最多 8 次 planning、每次 16 個 Assignment、總計 64 個；ID 跨輪唯一，相依關係限當輪。
+blocked/failed 結束後續規劃並回報 partial synthesis；達輪數上限明示未完成。Task persistence/recovery、跨 bridge 排他、Team 多問題續接仍未實作。
+這些自動化檢查不代表真實 Discord／Herdr／CLI 已驗收；部署狀態以 known-issues 為準。

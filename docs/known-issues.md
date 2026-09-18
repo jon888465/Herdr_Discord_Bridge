@@ -1,6 +1,6 @@
 # Known Issues
 
-維護規則見 [AGENTS.md](../AGENTS.md)。最後整理：2026-09-11。
+維護規則見 [AGENTS.md](../AGENTS.md)。最後整理：2026-09-18。
 
 | ID        | 問題                                                                            | 狀態             | 下一步                                                                                                              |
 | --------- | ------------------------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------- |
@@ -10,13 +10,16 @@
 | ISSUE-004 | Team 成員可跨 workspace 混入，且 stale mapping 容易造成誤解                     | 已修正、待驗收   | 重啟後確認同 workspace 限制、持久化與 stale 顯示                                                                    |
 | ISSUE-005 | 本機 current 顯示未選取 Agent                                                   | 已修正、待驗收   | workspace selection 回歸修正後須重新驗收；先前 shared-thread 驗收歷史保留                                           |
 | ISSUE-006 | 重啟 bridge 後 pane 所屬 workspace／位置改變                                    | 已驗收           | 2026-09-10 live topology 驗證完成；後續觀察重啟保留                                                                 |
-| ISSUE-007 | 程序啟動未阻止同 bot 重複實例                                                   | 已修正、待驗收   | live 第二實例拒絕仍待驗收                                                                                           |
+| ISSUE-007 | 程序啟動未阻止同 bot 重複實例                                                   | 重新開啟／待調查 | 2026-09-18 完整套件入口逾時再現；核對負載與 startup 時序，live 第二實例拒絕仍待驗收                                                                                           |
 | ISSUE-008 | Discord current／回應仍引用 Herdr 已不存在的舊 pane，且串流回報 session changed | 重新開啟／待調查 | 取得該 Discord thread 的 current 輸出與 bridge 啟動版本；重啟新版後以 live prompt 重現                              |
 | ISSUE-010 | 1:1:N orchestration、Discord mirror 與選擇 UI                                   | 修正中／待驗收   | orchestration 第一階段已實作；持久化、recovery、blocked continuation、mirror 與 UI 仍待做                           |
 | ISSUE-011 | 選取 agy 後 bridge 沒顯示追問、無法回答                                         | 已修正、待驗收   | 本機快照／blocked reply 自動化完成後進行 live agy 驗收                                                              |
 | ISSUE-012 | Team 多 Agent 同時追問缺少問題識別                                              | 待調查           | 設計 task/assignment/question 綁定與回覆 UI／排隊策略                                                               |
 | ISSUE-013 | Lead plan 解析失敗或誤取 planning prompt 中的範例 JSON                          | 已修正、待驗收   | 重啟新版 bridge，以新 team ask 驗證 plan 不取 prompt／歷史，兩 Worker 均收到正確 Assignment                         |
 | ISSUE-014 | 未等 Worker 完成本次任務便以歷史輸出標記 done 並進入統整                        | 重新開啟／待驗收 | 載入本次修正後重啟 bridge，驗證 atomic prompt wait 的 done 回傳可直接產生本次報告，且所有 Worker 完成後才 synthesis |
+
+| ISSUE-015 | Team 僅能加入已啟動 pane，缺少 profile 與 session lifecycle | 修正中 | 完整檢查後驗收 lazy start／重用／Lead 動態分工 |
+| ISSUE-016 | use 自動刷 CLI 畫面，console 對話與終端檢視混在一起 | 修正中 | 完整檢查後驗收安靜對話與獨立 attach/watch |
 
 2026-09-09 自動化驗證：`npm run check`（typecheck、build、33/33 tests）、`npm run lint`、`git diff --check` 通過。這是前一輪程式驗證紀錄，不代表已做 live Discord 驗收。本輪僅整理文件，未重跑程式測試。
 
@@ -364,7 +367,9 @@ Discord thread 的選取不會自動套用到本機 console。
 
 ## ISSUE-007：同一 bot 重複啟動缺少程序防護
 
-更新日期：2026-09-10。狀態：已修正、待驗收。
+更新日期：2026-09-18。狀態：重新開啟／待調查。完整套件再現入口子程序 10 秒逾時，尚不能確認為 lock 缺陷或啟動負載問題；先前修正與驗證歷史保留，最新證據見文末。
+
+以下為 2026-09-10 修正歷史（當時狀態：已修正、待驗收）。
 使用者指出同一 bridge 不應能啟動兩個。預期第二個相同 bot 的本機實例在讀取
 routing state 與 Discord login 前失敗，不能僅依賴重啟腳本檢查 pane。
 
@@ -472,3 +477,39 @@ Team Task 複雜性：同一個 1:1:N 任務可能同時有多個 Agent／Assign
 已確認限制：目前無 task/assignment/question 級的回覆佇列與選擇 UI。本輪只實作單一選取 Agent 的本機問答，不更動其他 Agent 狀態。是否暫停其他輸出、允許多問題排隊、由 Lead 代收、跨介面同時回答的互斥與逾時取消，均需後續設計。
 
 修正範圍：本輪僅記錄，未實作 Team 問答。驗證：文件及現有流程盤點；沒有自動化或端到端通過證據。下一步建立兩 Agent 同時 blocked 的 fixture、問題識別／明確 reply 選擇及回覆不串線的驗收。不能把單 Agent 通過視為本項驗收。
+
+## ISSUE-015：Agent Profile／Pool 與長駐 session 分離
+
+更新日期：2026-09-18。狀態：修正中。
+症狀／需求：分享對話要求 Team 可選尚未啟動的 Agent，Lead 自由分工，重用同一 session 保留 context。原 team add 只解析 live agent.list。
+預期：勾選 profile 不啟動，只有本次計畫選中的 profile 才 acquire；session identity 不明時不可宣稱上下文延續，不固定 coding pipeline。
+重現／環境：本機 TypeScript 原始碼檢查；Herdr 已安裝 binary 的 agent/pane help、api schema 與 pane layout 唯讀核對。未派送真實任務。
+已確認根因：Team 只有 pane mapping，無 profile registry、session binding 與 acquire lifecycle；Lead 只有單輪 plan→synthesis。
+修正範圍：AgentPool、config、Herdr pane.layout/split/agent.start、Team 勾選／bind、租用與 terminal reservation、多輪 Lead planning、零 Worker、原任務與有界報告 handoff。原始需求與使用見 [架構文件](agent-pool-console.md)。
+驗證（2026-09-18）：第一輪 targeted 執行 35/36，失敗為 ISSUE-014 fixture 依賴既有 synthesis 提示文字；已保留該辨識文字並加入新行為要求，未降低等待順序斷言。此數字是中途結果，最終驗證另記。
+未驗證：真實 CLI 模型／cwd／啟動、連續兩輪同 session、Discord 選取、重啟後重用。Task recovery、多問題續接、跨 bridge 租用尚未實作。
+下一步：完成下方自動化檢查，再載入新版進行 live 驗收。
+
+## ISSUE-016：Console use／attach／response 分離
+
+更新日期：2026-09-18。狀態：修正中。
+使用者可見症狀：use Lead 後持續印 CLI UI／工具文字，難以辨識對 bridge 下的指令與回答；原本必須 detach。
+預期：use 只選對話目標；attach/watch 明確檢視且不改送話目標；console 新 prompt 只呈現本次明確回答；blocked 問題仍可安全回答。
+重現／環境：分享對話使用者回報及 src/main.ts／console-agent.ts；目前沒有新的 live 畫面證據。
+已確認根因：bindActiveAgent 自動啟用快照 observer，非 Codex 本機問答只依靠快照輸出；selection 與 observation 綁在一起。
+修正範圍：conversation／attach／watch 模式、獨立 inspector、同一 turn 接收器、跨 CLI marker final、blocked 後繼續等待、保留問題 identity 驗證。順帶移除 debug context 中重複 begin/end，避免 echo 被辨識成回覆框。
+驗證（2026-09-18）：第一輪本機模式／問題回覆 fixtures 通過（上述 35/36 中包含 16 項 local-agent 測試）；完整與新增 handler/receiver 測試待下方最終紀錄。
+未驗證：真實 readline 勾選／多語言 CLI 畫面、agy marker 遵循、模型追問後完整回答；attach 仍是 40 行／6,000 字元快照，非原生完整 PTY stream。
+下一步：載入新版驗證 use 不刷畫面、attach Worker 後 ask 仍送 Lead、blocked 問題與回答。
+
+本輪原始碼已修改；build／最終驗證尚在執行。未重啟／部署、未 commit／push、未修改真實設定，執行中的 bridge 未驗證載入新程式；舊任務／訊息不自動補送。既有 ISSUE-011 的先前自動快照契約保留作歷史，本輪 use 行為以 SPEC 與 ISSUE-016 為準。
+
+### 2026-09-18 中途完整檢查與 ISSUE-007 重現
+
+`npm run typecheck`、`npm test` 內的 build 通過；完整 `npm test` 為 **89/90**。唯一失敗是 ISSUE-007 的 `the real entrypoint rejects a duplicate before contacting Herdr or Discord`：子程序在 10 秒內未結束，exit code 為 null，預期 1。不能把這次完整套件列為全通過；此現象延續 2026-09-11 的紀錄，負載／module startup 時序的確切根因仍未確認，未修改 timeout 或斷言。
+
+差異檢查另發現 ISSUE-016 模式切換若重設 observer identity，會一併清除 blocked 回答去重；已改為只取消舊讀取、不清除已回答問題，並新增 regression。Inspector 的 blocked 提示明示先 use 該 Agent 才能回答，避免誤導使用者把 Worker 答案送到 Lead。以下最終驗證需涵蓋此最新修正。
+
+### 2026-09-18 勾選介面隔離 smoke test
+
+在真實 PTY 執行只載入 startConsole 的假 profile harness，輸入 `team select` → `1 2` → `done`，清單從 helper 未勾／reviewer 已勾變成 helper 已勾／reviewer 未勾，輸出 `SELECTION_RESULT=["helper"]`，程序 exit 0。此項驗證 readline 勾選／儲存互動，不是 Discord／Herdr／CLI 端到端驗收；未連線外部服務或啟動真實 Agent。
