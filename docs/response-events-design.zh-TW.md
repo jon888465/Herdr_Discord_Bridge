@@ -246,3 +246,7 @@ Discord 一般訊息 content 上限為 2,000 字元。切段需預留標題、�
 ## 2026-09-09 狀態耗時更新
 
 working 後顯示已耗時，streaming 每 10 秒刷新（於下一次輪詢送出）。首張狀態卡與 final 不必等待十秒週期。finished 後顯示總耗時，從本輪回應追蹤開始計算至觀察到完成，包含 blocked 等待，不含 final 的 Discord 傳送時間。保留既有資料收集輪詢頻率，避免因畫面刷新變慢而漏掉來源資料。待重啟後實際 Discord 驗收。
+
+## 2026-09-18 本機 conversation view
+
+本機 console 預設不 render CLI progress/terminal excerpt。一般 ask 與 Team 共用 runTeamTurn：相符 structured final 或本次 marker 回覆才是回答；擷取失敗明示 incomplete。`attach` 為明確的有界快照 inspector，`watch` 顯示狀態；blocked 問題保留。這不表示上文完整 event bus、持久化 outbox 或原生 PTY attach 已完成。Discord 單 Agent 的既有 rolling preview 保留。

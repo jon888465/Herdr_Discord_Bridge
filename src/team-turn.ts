@@ -26,6 +26,7 @@ export async function runTeamTurn(
   timeoutMs: number,
   lines: number,
   context?: TeamTurnContext,
+  onBlocked?: () => void,
 ): Promise<{ state: "done" | "blocked"; text: string; terminal: boolean }> {
   const nonce = randomBytes(16).toString("hex");
   const begin = `BRIDGE_BEGIN_${nonce}`;
@@ -49,19 +50,11 @@ export async function runTeamTurn(
         " agent=" +
         (agent.agent || "unknown") +
         " session=" +
-        sessionKey(agent) +
-        " begin=" +
-        begin +
-        " end=" +
-        end
+        sessionKey(agent)
       : "Debug context: paneId=" +
         agent.pane_id +
         " agent=" +
-        (agent.agent || "unknown") +
-        " begin=" +
-        begin +
-        " end=" +
-        end,
+        (agent.agent || "unknown"),
   ].join("\n");
   const baseline = new Map<ReadSource, string>();
   for (const source of sources) {
@@ -86,7 +79,7 @@ export async function runTeamTurn(
     // Do not resend: continue reading this turn's unique marker envelope.
     promptStalled = true;
   }
-  if (promptSettled && promptSettled.agent_status === "blocked")
+  if (!onBlocked && promptSettled && promptSettled.agent_status === "blocked")
     return {
       state: "blocked",
       text: "Agent is blocked; no completed report for this request",
@@ -118,6 +111,12 @@ export async function runTeamTurn(
         `Agent identity changed while waiting for ${agent.pane_id}`,
       );
     lastStatus = current.agent_status;
+    if (lastStatus === "blocked" && onBlocked) {
+      onBlocked();
+      current = undefined;
+      await delay(Math.min(100, Math.max(1, deadline - Date.now())));
+      continue;
+    }
     if (lastStatus === "blocked")
       return {
         state: "blocked",

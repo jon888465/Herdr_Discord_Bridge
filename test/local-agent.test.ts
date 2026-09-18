@@ -60,9 +60,10 @@ test("agent detach stops the local pane observer without cancelling the Agent", 
     config: { allowedWorkspaceIds: [], discord: { commandPrefix: "/herdr" } },
     activeStreams: new Set(),
     consoleAgent: {
-      stop: () => {
-        stopped = true;
+      setMode: (mode: string) => {
+        stopped = mode === "conversation";
       },
+      start: () => {},
     },
     herdr: {},
     discord: {
@@ -138,6 +139,7 @@ function fixture() {
     ["w2"],
     (text) => output.push(text),
   );
+  session.setMode("attach");
   return {
     session,
     output,
@@ -320,10 +322,6 @@ test("known control commands stay usable while selected Agent is working or bloc
     }
     await handleCommand("ask", ["Yes"], context, runtime);
     assert.deepEqual(f.sent, [["answer", "w2:p6", "Yes"]]);
-    f.state("idle", "Ready again", 3);
-    runtime.activeStreams.delete("term");
-    await handleCommand("ask", ["w2:p6 Explicit prompt"], context, runtime);
-    assert.deepEqual(f.sent.at(-1), ["prompt", "w2:p6", "Explicit prompt"]);
   } finally {
     routing.flush();
     rmSync(dir, { recursive: true, force: true });
@@ -369,4 +367,43 @@ test("normal submit callback preserves existing capture path but blocked uses an
   await f.session.send("answer", submit);
   assert.deepEqual(submitted, ["prompt"]);
   assert.deepEqual(f.sent, [["answer", "w2:p6", "answer"]]);
+});
+
+test("conversation mode suppresses CLI snapshots while retaining blocked questions and replies", async () => {
+  const f = fixture();
+  f.session.setMode("conversation");
+  await f.session.tick();
+  f.state("working", "CLI tools and UI must stay in the Agent pane");
+  await f.session.tick();
+  assert.deepEqual(f.output, []);
+  f.state("blocked", "May I continue?", 3);
+  await f.session.tick();
+  assert.match(f.output.at(-1)!, /May I continue/);
+  await f.session.send("yes");
+  assert.equal(f.sent.length, 1);
+});
+
+test("watch shows state only; returning to conversation does not disable sending", async () => {
+  const f = fixture();
+  f.session.setMode("watch");
+  await f.session.tick();
+  assert.match(f.output.at(-1)!, /idle/);
+  assert.doesNotMatch(f.output.at(-1)!, /Ready/);
+  const before = f.output.length;
+  await f.session.tick();
+  assert.equal(f.output.length, before);
+  f.session.setMode("conversation");
+  await f.session.send("follow up");
+  assert.deepEqual(f.sent, [["prompt", "w2:p6", "follow up"]]);
+});
+
+test("changing display mode does not allow answering the same blocked question twice", async () => {
+  const f = fixture();
+  f.state("blocked", "Confirm?");
+  await f.session.tick();
+  await f.session.send("yes");
+  f.session.setMode("conversation");
+  await f.session.tick();
+  await assert.rejects(f.session.send("yes"), /already sent/);
+  assert.equal(f.sent.length, 1);
 });

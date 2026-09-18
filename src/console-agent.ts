@@ -12,6 +12,37 @@ type Selection = Pick<TargetMapping, "workspaceId" | "paneId">;
 
 /** Local visible snapshots of one selected pane, not a transcript or Discord relay. */
 export class ConsoleAgent {
+  private inspector?: ConsoleAgent;
+
+  inspect(
+    selection: Selection,
+    mode: "attach" | "watch",
+    intervalMs: number,
+  ): void {
+    this.inspector?.stop();
+    const pinnedSelection = { ...selection };
+    this.inspector = new ConsoleAgent(
+      this.herdr,
+      async () => pinnedSelection,
+      this.allowed,
+      this.print,
+      false,
+    );
+    this.inspector.setMode(mode);
+    this.inspector.start(intervalMs);
+  }
+
+  private mode: "conversation" | "attach" | "watch" = "conversation";
+  private lastStatus = "";
+
+  setMode(mode: "conversation" | "attach" | "watch"): void {
+    this.inspector?.stop();
+    this.inspector = undefined;
+    this.mode = mode;
+    this.epoch++;
+    this.lastStatus = "";
+  }
+
   private timer?: ReturnType<typeof setInterval>;
   private polling = false;
   private sending = false;
@@ -28,6 +59,7 @@ export class ConsoleAgent {
     private readonly selected: () => Promise<Selection | undefined>,
     private readonly allowed: string[],
     private readonly print: (text: string) => void,
+    private readonly interactive = true,
   ) {}
 
   start(intervalMs: number): void {
@@ -39,6 +71,8 @@ export class ConsoleAgent {
   }
 
   stop(): void {
+    this.inspector?.stop();
+    this.inspector = undefined;
     this.stopped = true;
     clearInterval(this.timer);
     this.timer = undefined;
@@ -48,6 +82,7 @@ export class ConsoleAgent {
   reset(): void {
     this.epoch++;
     this.key = "";
+    this.lastStatus = "";
     this.pinned = undefined;
     this.shown = undefined;
     this.consumedQuestion = "";
@@ -100,7 +135,7 @@ export class ConsoleAgent {
     if (this.shown?.text === text && this.shown.status === agent.agent_status)
       return;
     this.print(
-      `${agentHeader(agentLabel(agent), agent.workspace_id, agent.pane_id)}\n[${agent.agent_status}] Terminal snapshot (last 40 visible lines)\n${text || "(no visible output)"}${agent.agent_status === "blocked" ? "\nWaiting for your answer: ask <answer>. Control commands remain available." : ""}`,
+      `${agentHeader(agentLabel(agent), agent.workspace_id, agent.pane_id)}\n[${agent.agent_status}] Terminal snapshot (last 40 visible lines)\n${text || "(no visible output)"}${agent.agent_status === "blocked" ? (this.interactive ? "\nWaiting for your answer: ask <answer>. Control commands remain available." : `\nInspection only. Select this Agent with use ${agent.pane_id} before answering.`) : ""}`,
     );
     this.shown = {
       text,
@@ -116,6 +151,17 @@ export class ConsoleAgent {
     try {
       const agent = await this.target();
       if (!agent) return;
+      if (this.mode !== "attach" && agent.agent_status !== "blocked") {
+        if (this.mode === "watch" && this.lastStatus !== agent.agent_status)
+          this.print(
+            `${agentLabel(agent)} · ${agent.workspace_id} · ${agent.pane_id} · ${agent.agent_status}`,
+          );
+        this.lastStatus = agent.agent_status;
+        this.shown = undefined;
+        this.consumedQuestion = "";
+        this.lastError = "";
+        return;
+      }
       const epoch = this.epoch;
       const text = await this.snapshot(agent);
       const current = await this.target();
