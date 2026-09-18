@@ -25,6 +25,10 @@ Worker dispatch、bounded Worker report 與 Lead synthesis。尚未有 task pers
 restart recovery、cancel command、heartbeat cleanup 或 blocked Worker 的後續
 問答路由；因此本文件的完整 contract 仍不是全部可用功能。
 
+## 2026-09-18 已實作擴充
+
+Profile pool、lazy acquire/session continuity、Lead 多輪 replanning 與本機 console 分離見 [架構與操作](agent-pool-console.md)。固定 phase 是協定步驟，並不固定業務角色。零 Worker 可直接由 Lead 執行；最多 8 輪，partial synthesis 不代表完成。
+
 ## 角色
 
 ### Human
@@ -36,7 +40,7 @@ restart recovery、cancel command、heartbeat cleanup 或 blocked Worker 的後�
 
 - 由目前 Discord thread 的 active Agent 擔任。
 - 分析總任務並拆分成可獨立執行的子任務。
-- 將子任務分配給現有 Team members。
+- 依任務動態決定角色，分配給已選取的 live members 或 Agent profiles；可直接處理而不委派。
 - 維護 task、owner、status、dependency 與 blocker。
 - 監控 Worker 的 `working`／`done`／`blocked` 狀態。
 - 收集 Worker 回報，驗證結果後統整回報 Human。
@@ -82,7 +86,7 @@ restart recovery、cancel command、heartbeat cleanup 或 blocked Worker 的後�
    無可用 final 時，Lead 回到 `idle`／`done` 後，Bridge 使用
    `agent.read(target, source=recent_unwrapped, lines=N)` 取得 transcript，並依
    Lead CLI adapter 擷取本次回覆，再解析 bounded plan。若 adapter 無法辨識邊界，
-   才 fallback 到 transcript 中的 JSON object；最後驗證 Assignment ID、Worker
+   僅接受本次隨機 marker 內的完整回覆，不解析任意 transcript JSON；最後驗證 Assignment ID、Worker
    roster、dependency 與 cycle。
    Codex 終端 fallback 的 strict JSON parse 失敗時，可消除字串內換行與
    兩欄 continuation 縮排；不變更既有空白／跳脫，也不對結構化 final 或

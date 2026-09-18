@@ -135,3 +135,7 @@ prompt。
 4. Blocked Assignment 應暫停整個 task，還是允許獨立 Assignment 繼續？
 5. Final synthesis 是否只能在所有 Assignment 結束後發布，或允許使用者要求
    partial report？
+
+## 2026-09-18 實作增量
+
+已加入 Agent Pool、session identity persistence、按需啟動／重用、Lead 多輪規劃與零 Worker 直接處理；詳見 [架構與操作](agent-pool-console.md)。本機增加勾選介面與 use/attach/watch 分离。Task persistence、recovery、cancel、Team 多問題續接等上述未完成階段保持待做；session binding 持久化不能代替 task recovery。

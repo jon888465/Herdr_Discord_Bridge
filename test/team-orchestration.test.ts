@@ -601,3 +601,120 @@ test("planning falls back when recent_unwrapped omits the current response", asy
 
   assert.equal(result.plan.assignments[0].id, "inspect");
 });
+
+test("Lead dynamically chooses follow-up work and only acquires selected profiles", async () => {
+  const prompts: Array<[string, string]> = [];
+  const acquired: string[] = [];
+  let round = 0;
+  const profile = {
+    ...workerA,
+    pane_id: "profile:helper",
+    terminal_id: "profile:helper",
+  };
+  const unused = {
+    ...workerB,
+    pane_id: "profile:unused",
+    terminal_id: "profile:unused",
+  };
+  const port: OrchestrationPort = {
+    async promptAgent(target, text) {
+      if (text.includes("Do not modify files while planning")) round++;
+      prompts.push([target, text]);
+    },
+    async waitAgent(target) {
+      return {
+        ...(target === lead.pane_id ? lead : workerA),
+        agent_status: "done",
+      };
+    },
+    async readAgent(target) {
+      const prompt = latestPrompt(prompts, target);
+      if (!prompt) return "history";
+      const body =
+        target !== lead.pane_id
+          ? `report for round ${round}`
+          : prompt.includes("Do not modify files while planning")
+            ? JSON.stringify({
+                assignments:
+                  round < 3
+                    ? [
+                        {
+                          id: `step-${round}`,
+                          workerPaneId: profile.pane_id,
+                          instruction:
+                            round === 1 ? "Inspect" : "Fix the finding",
+                        },
+                      ]
+                    : [],
+              })
+            : "Verified final answer";
+      return framed(prompt, body);
+    },
+  };
+  const result = await runTeamTask(
+    {
+      taskId: "dynamic",
+      prompt: "Fix and verify",
+      lead,
+      workers: [profile, unused],
+      replan: true,
+      timeoutMs: 500,
+      acquireWorker: async (worker) => {
+        acquired.push(worker.pane_id);
+        return {
+          agent: workerA,
+          continuity: acquired.length === 1 ? "new-session" : "same-session",
+        };
+      },
+    },
+    port,
+    () => {},
+  );
+  assert.equal(result.state, "completed");
+  assert.deepEqual(acquired, ["profile:helper", "profile:helper"]);
+  assert.equal(result.reports.length, 2);
+  const followup = prompts.filter(
+    ([target]) => target === workerA.pane_id,
+  )[1][1];
+  assert.match(followup, /same-session/);
+  assert.match(followup, /report for round 1/);
+  assert.match(followup, /Original task: Fix and verify/);
+  assert.equal(result.synthesis, "Verified final answer");
+});
+
+test("Lead may perform a task directly with no Worker or pane creation", async () => {
+  const prompts: Array<[string, string]> = [];
+  const result = await runTeamTask(
+    {
+      taskId: "direct",
+      prompt: "Explain",
+      lead,
+      workers: [],
+      replan: true,
+      timeoutMs: 500,
+    },
+    {
+      async promptAgent(target, text) {
+        prompts.push([target, text]);
+      },
+      async waitAgent() {
+        return { ...lead, agent_status: "done" };
+      },
+      async readAgent() {
+        const prompt = latestPrompt(prompts, lead.pane_id);
+        return prompt
+          ? framed(
+              prompt,
+              prompt.includes("Do not modify files while planning")
+                ? '{"assignments":[]}'
+                : "Direct answer",
+            )
+          : "history";
+      },
+    },
+    () => {},
+  );
+  assert.equal(result.synthesis, "Direct answer");
+  assert.equal(prompts.length, 2);
+  assert.ok(prompts.every(([target]) => target === lead.pane_id));
+});
