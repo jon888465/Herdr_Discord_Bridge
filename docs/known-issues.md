@@ -20,6 +20,7 @@
 
 | ISSUE-015 | Team 僅能加入已啟動 pane，缺少 profile 與 session lifecycle | 修正中 | 完整檢查後驗收 lazy start／重用／Lead 動態分工 |
 | ISSUE-016 | use 自動刷 CLI 畫面，console 對話與終端檢視混在一起 | 修正中 | 完整檢查後驗收安靜對話與獨立 attach/watch |
+| ISSUE-017 | quota 耗盡時缺少跨 CLI session 交接流程 | 已修正、待驗收 | Skill 靜態檢查完成；待真實跨 CLI 接手驗收 |
 
 2026-09-09 自動化驗證：`npm run check`（typecheck、build、33/33 tests）、`npm run lint`、`git diff --check` 通過。這是前一輪程式驗證紀錄，不代表已做 live Discord 驗收。本輪僅整理文件，未重跑程式測試。
 
@@ -513,3 +514,30 @@ Team Task 複雜性：同一個 1:1:N 任務可能同時有多個 Agent／Assign
 ### 2026-09-18 勾選介面隔離 smoke test
 
 在真實 PTY 執行只載入 startConsole 的假 profile harness，輸入 `team select` → `1 2` → `done`，清單從 helper 未勾／reviewer 已勾變成 helper 已勾／reviewer 未勾，輸出 `SELECTION_RESULT=["helper"]`，程序 exit 0。此項驗證 readline 勾選／儲存互動，不是 Discord／Herdr／CLI 端到端驗收；未連線外部服務或啟動真實 Agent。
+
+## ISSUE-017：跨 CLI quota 交接缺少可攜流程
+
+更新日期：2026-09-18。狀態：已修正、待驗收。
+
+症狀／需求：來源 Agent 接近 quota 上限或已不能回答時，希望由其他 CLI 復原指定 session，包含 AGY。現有 bridge handoff 只有近期有界 terminal output，不保證保留原始目標、決策及未完成工作。
+
+預期：原生可讀歷史優先、portable checkpoint fallback，接手核對實際檔案並繼續；不依賴來源再次推論，不宣稱完整模型上下文或 quota 移轉。
+
+重現／環境：使用者分享對話、src/main.ts handoffAgent／SPEC／AgentPool 文件唯讀盤點；本機 agy --help 與官方 CLI 文件核對。未讀取真實私人 session，未發送真實 Agent prompt。
+
+已確認根因／限制：bridge handoff 僅 agent.read recent_unwrapped、預設 40 行／6,000 字元，沒有 portable session recovery protocol。AGY help 的 resume／print format 不證明具備通用歷史 export；自動 skill 搜尋位置亦非所有 CLI 共用。
+
+修正範圍：新增 skills/session-handoff 的 SKILL.md、來源 adapter 指引與 HANDOFF.md 範本；docs/session-handoff.md 比較與用法，同步 README 雙語、SPEC、CONTEXT。無 Bridge runtime 變更、無 quota watcher 或自動切換。
+
+驗證（2026-09-18）：
+
+- `python3 /home/jones/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/session-handoff` 通過。
+- `node_modules/.bin/prettier --check 'skills/session-handoff/**/*.md' docs/session-handoff.md` 通過。
+- `python3` inline 本機 Markdown 連結檢查：9 個相關檔案、37 個相對路徑均存在。以 `tempfile.TemporaryDirectory`／`shutil.copytree` 隔離複製整個 skill，再執行 quick_validate 並確認內部附件皆位於複製目錄，通過；未安裝到 home。
+- `git diff --check` 通過；人工核對 prepare／takeover、quota 已耗盡、identity 歧義、過期檔案與 writer ownership 分支，以及 bridge handoff 原始碼比較。這是靜態審查，不是真實 CLI 行為測試。
+
+標準 apply_patch 讀取既有文件受環境 bwrap namespace 錯誤阻擋，改用已授權 shell 的檔案更新完成；非 skill 執行測試失敗。比較時另確認本機 console effectiveTarget 優先 workspace active target，故文件要求 handoff 後以 current 核對，不將 dispatch 成功等同所有介面已切換；本輪不更動 routing。
+
+未驗證：所有真實跨 CLI session 接手、AGY 原生歷史可讀性、CLI 自動 discovery、來源耗盡時與並行 writer 的實際操作。沒有重跑 Bridge build／unit tests；無原始碼修改、未重啟／部署，執行中 bridge 未驗證，舊訊息不補送。未全域安裝、未 commit／push。
+
+下一步：依 docs/session-handoff.md 驗收矩陣記錄實際 CLI 版本／ID／工作樹與接手結果；尚未有全 CLI 原生相容或 live 接手成功證據。

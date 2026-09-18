@@ -195,6 +195,12 @@ reads only a bounded recent output window (`handoffLines` and
 `handoffMaxChars`), redacts common credential formats, posts a concise bounded
 summary, and sends that summary to the destination Agent.
 
+For native session recovery across CLIs and checkpoints before quota exhaustion,
+ask your CLI to read the standalone [session-handoff skill](skills/session-handoff/SKILL.md).
+Copy the whole skill directory for manual installation; discovery paths vary by CLI.
+See [usage and the Bridge comparison](docs/session-handoff.md). This agent workflow
+has no automatic quota watcher or failover; live cross-CLI acceptance is pending.
+
 Agent replies and progress messages are labeled with Agent, Workspace, and
 Pane. A typical Discord thread therefore looks like:
 

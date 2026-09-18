@@ -415,3 +415,16 @@ Lead 仍由已選取的 live Agent 擔任。可不委派而直接完成工作；
 完成一輪後 Lead 可再規劃，最多 8 次 planning、每次 16 個 Assignment、總計 64 個；ID 跨輪唯一，相依關係限當輪。
 blocked/failed 結束後續規劃並回報 partial synthesis；達輪數上限明示未完成。Task persistence/recovery、跨 bridge 排他、Team 多問題續接仍未實作。
 這些自動化檢查不代表真實 Discord／Herdr／CLI 已驗收；部署狀態以 known-issues 為準。
+
+## Session handoff skill（2026-09-18）
+
+`skills/session-handoff/` 是獨立可攜技能，不改變 Bridge 的 bounded handoff、routing、AgentPool 或 quota 行為。流程契約：
+
+- Prepare 在可見 quota 警告、使用者要求或明確門檻時保存 checkpoint；無訊號時 quota 記 unknown，不把 context 剩餘量當 account quota。
+- Takeover 以確切來源 identity／workspace 選擇可讀原生歷史，依序 fallback 到本機匯出、checkpoint＋專案證據、終端摘錄。來源已無額度時不要求它再次推論。
+- 覆蓋 Claude Code、Codex CLI、Copilot CLI、Antigravity CLI、OpenCode 與其他 CLI 的共通流程；各版本原生歷史可讀性不保證，AGY 不等同 Gemini CLI。
+- 接手核對實際工作樹、HEAD、修改、授權與驗證證據，標記缺漏，不移轉 hidden reasoning／credentials。跨機器不假設 uncommitted files 已同步。
+- Checkpoint-only 不代表來源停止；真正 takeover 在重疊寫入前確認 ownership，保存接收紀錄。Markdown 不是原子鎖，也不會自動停止 process。
+- Skill 目錄可單獨複製；手動讀取 SKILL.md 為共通入口，各 CLI 自動發現位置與 slash 語法分開處理。
+
+本次僅 Markdown skill／文件，依 AGENTS.md 驗證 frontmatter、附件連結、內容一致性與 diff，不需重跑未改動的 Bridge 程式測試。真實來源→目的地接手（含 AGY 雙向）、quota 耗盡、歧義 identity、過期封包與其他 writer 情境另列 live 驗收，未通過不得宣稱全 CLI 原生相容。詳見 [用法與比較](docs/session-handoff.md)及 ISSUE-017。

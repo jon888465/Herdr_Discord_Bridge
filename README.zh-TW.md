@@ -4,6 +4,11 @@
 
 [English](README.md) | 繁體中文
 
+Agent quota 快用完時，可請 CLI 讀取 [session-handoff skill](skills/session-handoff/SKILL.md)
+保存交接資訊，或由另一 CLI 復原指定 session。整個目錄可稍後手動安裝。
+詳見[用法及與 bridge handoff 的差異](docs/session-handoff.md)。
+目前無自動 quota 監控／切換，真實跨 CLI 驗收仍待完成。
+
 ## 安裝與啟動
 
 從 GitHub 安裝並啟用 plugin：

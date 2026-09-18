@@ -80,6 +80,8 @@ instances; legacy processes without the lock still require explicit migration.
 
 ## Agent profiles and sessions
 
+- [Cross-CLI session handoff](docs/session-handoff.md): portable [skill](skills/session-handoff/SKILL.md), native-history-first recovery and quota checkpoints; comparison with bounded Bridge handoff. No automatic quota failover; live acceptance tracked in ISSUE-017.
+
 - [Agent Pool and console separation](docs/agent-pool-console.md): 2026-09-18 implementation of per-workspace profile permissions, lazy persistent CLI startup, explicit existing-session binding, session continuity checks, dynamic Lead replanning, and console selection/inspection modes.
 - Profiles are definitions, sessions hold CLI context, panes host processes. Removing a profile from a Team does not stop its session.
 - Team roster may contain live mappings and enabled profiles; only selected profiles start. Lead may choose zero Workers. Tasks still have no restart recovery.
