@@ -12,6 +12,22 @@
     "requireMention": true,
     "commandPrefix": "/herdr",
   },
+  // Profiles are definitions, not running panes. Enable them per workspace with team select.
+  // Model names must be supported by your installed CLI/account; no model is forced here.
+  "agentProfiles": [
+    {
+      "id": "helper",
+      "kind": "codex",
+      "args": [],
+      "capabilities": ["implementation", "analysis"],
+    },
+    {
+      "id": "reviewer",
+      "kind": "codex",
+      "args": [],
+      "capabilities": ["review"],
+    },
+  ],
   "notifyOn": ["blocked"],
   "allowedWorkspaceIds": [],
   "pollIntervalMs": 2000,

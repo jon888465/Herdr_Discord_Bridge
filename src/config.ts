@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { validateProfiles, type AgentProfile } from "./agent-pool.js";
 import os from "node:os";
 import path from "node:path";
 import type { AgentStatus } from "./types.js";
@@ -15,6 +16,7 @@ export interface DiscordConfig {
 }
 
 export interface Config {
+  agentProfiles?: AgentProfile[];
   notifyOn: AgentStatus[];
   pollIntervalMs: number;
   requestTimeoutMs: number;
@@ -183,6 +185,7 @@ export function loadConfig(): Config {
   const cfg: Config = {
     ...DEFAULTS,
     ...source,
+    agentProfiles: validateProfiles(source.agentProfiles),
     notifyOn: stringArray(source.notifyOn, DEFAULTS.notifyOn),
     pollIntervalMs: positiveInt(
       source.pollIntervalMs,

@@ -1,4 +1,5 @@
 import net from "node:net";
+import type { AgentProfile } from "./agent-pool.js";
 import os from "node:os";
 import path from "node:path";
 import type {
@@ -200,6 +201,88 @@ export class HerdrClient {
       workspace_name:
         agent.workspace_name || this.workspaceNameCache.get(agent.workspace_id),
     }));
+  }
+
+  async startProfile(
+    lead: AgentRecord,
+    profile: AgentProfile,
+    name: string,
+    onPane: (paneId: string) => void,
+    onStarting?: () => void,
+  ): Promise<AgentRecord> {
+    const liveLead = (await this.listAgents()).find(
+      (a) =>
+        a.pane_id === lead.pane_id &&
+        a.terminal_id === lead.terminal_id &&
+        a.workspace_id === lead.workspace_id,
+    );
+    if (!liveLead) throw new Error("Lead pane is stale; cannot create Worker");
+    const cwd = liveLead.cwd || liveLead.foreground_cwd;
+    if (!cwd)
+      throw new Error(
+        "Lead cwd unavailable; refusing to start Worker in an unrelated directory",
+      );
+    const layout = await this.request<{
+      layout: {
+        panes: Array<{
+          pane_id: string;
+          rect: { width: number; height: number };
+        }>;
+      };
+    }>("pane.layout", { pane_id: liveLead.pane_id });
+    const rect = layout.layout?.panes.find(
+      (p) => p.pane_id === liveLead.pane_id,
+    )?.rect;
+    if (!rect) throw new Error("Lead pane geometry unavailable");
+    const direction =
+      rect.width >= 120 && rect.width >= rect.height * 2 ? "right" : "down";
+    if (
+      (direction === "right" && rect.width < 80) ||
+      (direction === "down" && rect.height < 16)
+    )
+      throw new Error(
+        "Lead pane is too small to split; arrange the workspace or bind an existing session",
+      );
+    onStarting?.();
+    const result = await this.request<{
+      pane: { pane_id: string; workspace_id: string };
+    }>(
+      "pane.split",
+      {
+        target_pane_id: liveLead.pane_id,
+        workspace_id: liveLead.workspace_id,
+        direction,
+        cwd,
+        focus: false,
+      },
+      { retries: 0 },
+    );
+    const pane = result.pane;
+    if (!pane?.pane_id || pane.workspace_id !== lead.workspace_id)
+      throw new Error("pane split returned unexpected workspace/identity");
+    onPane(pane.pane_id);
+    await this.request(
+      "agent.start",
+      {
+        pane_id: pane.pane_id,
+        name,
+        kind: profile.kind,
+        args: [
+          ...(profile.args || []),
+          ...(profile.model ? [profile.modelFlag!, profile.model] : []),
+        ],
+        timeout_ms: 30000,
+      },
+      { retries: 0, timeoutMs: 35000 },
+    );
+    const agent = (await this.listAgentsWithWorkspaceNames()).find(
+      (a) => a.pane_id === pane.pane_id,
+    );
+    if (!agent)
+      throw new Error(
+        `started Agent not visible in ${pane.pane_id}; inspect before retrying`,
+      );
+    return agent;
   }
 
   async sendInput(target: string, text: string): Promise<void> {
