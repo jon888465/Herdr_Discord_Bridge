@@ -466,4 +466,16 @@ Timeout 沿用原 turn 上限；取消等待 in-flight reply；重啟將待處�
 - Codex 支援 exact-ID/cwd 公開 event_msg；其他 CLI 以 Bridge public-export-v1 或 checkpoint/artifact fallback。AGY／Gemini 分開，不读取 hidden reasoning，缺漏明示 partial。
 - 一般 prompt 與 legacy fallback retries=0；已收到明確 method-not-found 才走相容方法，不重試不明送達。
 - Active Team 須先依既有 lifecycle 結束／取消；不替換 frozen Lead／roster。舊 bounded `handoff <from> <to>` 功能保留但不能繞過 runtime／Team reservation。
-- Phase 4 Quota / Failover Manager 尚未實作；不自動切帳號、provider，不改憑證，也不宣稱 quota 移轉。
+- Phase 4 沿用本契約，見下方；不自動切帳號、不改憑證，也不宣稱 quota 移轉。
+
+## Phase 4 Quota / Failover Manager（2026-09-20）
+
+完整契約與 live checklist：[Quota / Failover Manager](docs/quota-failover-manager.md)，ISSUE-020。
+
+- `quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds]` 保存 exact session、來源操作者、observation time／TTL；`quota status [pane]` 查詢。無來源量測時保持 unknown，不把 context 或時間推算為 account quota。
+- `failover arm <source> <candidate1,candidate2> <goal-and-constraints>` 持久保存授權候選優先序及任務；來源 limited/exhausted 明確 report 自動觸發 checkpoint，不呼叫來源模型。
+- `failover run <id> confirm-source-stopped` 才開始派送：選第一個新鮮 available、不同 budget group、exact settled candidate；同池衝突拒絕。沿用 Phase 3 repo／dirty／receipt 驗證，accept ownership 後 continue；成功後更新目前指令 context route。
+- `failover status [id]`／`cancel <id>` 查詢／釋放。Discord policy 限原 context、console 限 workspace；quota observations 為授權 workspace 共享，但不洩漏其他 context policy 回覆。
+- schema v1 atomic after-image journal，先保存 intent；checkpointing/running 重啟 blocked，不 replay。不明送達／驗證後失敗不自動再選別人；quota 過期不自動 reset；無候選保留 ready。
+- 第一版為明確 operator observation adapter；沒有 provider API watcher、credentials/account rotation、自動啟動 CLI、百分比／reset 推測或 active Team roster replacement。候選能力及真實額度池歸屬由操作者確認。
+- 兩個 journals 可能於崩潰邊界不同步，需查 linked handoff，不能假報完成或重送。完整 suite／live gate 狀態見 ISSUE-020；原始碼通過不代表實機驗收。

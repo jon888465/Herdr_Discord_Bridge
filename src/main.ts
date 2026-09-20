@@ -33,6 +33,11 @@ import type { OrchestrationEvent } from "./team-orchestration.js";
 import { TeamTaskEngine } from "./team-task-engine.js";
 import { SessionHandoffRuntime } from "./session-handoff.js";
 import { HandoffStore, renderHandoff } from "./handoff-store.js";
+import {
+  QuotaFailoverManager,
+  QuotaFailoverStore,
+  type QuotaState,
+} from "./quota-failover.js";
 import { TeamTaskStore } from "./team-task-store.js";
 import {
   AgentWatcher,
@@ -172,6 +177,13 @@ async function startBridge(
       ),
   );
   await handoffs.reconcile();
+  const failover = new QuotaFailoverManager(
+    new QuotaFailoverStore(join(stateDirectory(), "quota-failover.json")),
+    handoffs,
+    () => herdr.listAgentsWithWorkspaceNames(),
+    config.allowedWorkspaceIds,
+  );
+  failover.reconcile();
 
   discord.onCommand(async (context, command, args) => {
     try {
@@ -184,6 +196,7 @@ async function startBridge(
         pool,
         tasks,
         handoffs,
+        failover,
       });
     } catch (error) {
       await discord.reply(context.message, `❌ ${safeError(error)}`);
@@ -237,6 +250,7 @@ async function startBridge(
         pool,
         tasks,
         handoffs,
+        failover,
       });
     } catch (error) {
       await discord.reply(context.message, `❌ ${safeError(error)}`);
@@ -277,6 +291,7 @@ async function startBridge(
           pool,
           tasks,
           handoffs,
+          failover,
           consoleAgent,
         });
         await consoleAgent?.tick();
@@ -329,6 +344,7 @@ async function startBridge(
 }
 
 interface Runtime {
+  failover?: QuotaFailoverManager;
   handoffs?: SessionHandoffRuntime;
   tasks?: TeamTaskEngine;
   pool?: AgentPool;
@@ -437,6 +453,10 @@ export async function handleCommand(
       return;
     case "cancel":
       await cancelAgent(args, context, runtime);
+      return;
+    case "quota":
+    case "failover":
+      await quotaFailoverCommand(command, args, context, runtime);
       return;
     case "handoff":
       await handoffCommand(args, context, runtime);
@@ -1340,6 +1360,133 @@ async function reportOrchestrationEvent(
   if (message) await runtime.discord.reply(context.message, message);
 }
 
+async function quotaFailoverCommand(
+  command: "quota" | "failover",
+  args: string[],
+  context: CommandContext,
+  runtime: Runtime,
+): Promise<void> {
+  const manager = runtime.failover;
+  if (!manager) throw new Error("Quota / Failover Manager unavailable");
+  const workspace = await teamWorkspaceId(context, runtime);
+  const origin = {
+    guildId: context.routing.guildId,
+    channelId: context.routing.channelId,
+    threadId: context.routing.threadId,
+  };
+  const accessible = (p: ReturnType<typeof manager.store.get>) =>
+    p.source.workspace_id === workspace &&
+    (context.source === "console" ||
+      (p.origin.guildId === origin.guildId &&
+        p.origin.channelId === origin.channelId &&
+        p.origin.threadId === origin.threadId));
+  const resolve = (agents: AgentRecord[], query: string) => {
+    const agent = findAgent(agents, query);
+    validateAgentTarget(agent, undefined, runtime.config.allowedWorkspaceIds);
+    if (agent.workspace_id !== workspace)
+      throw new Error("agent belongs to another workspace");
+    return agent;
+  };
+  const describe = (p: ReturnType<typeof manager.store.get>) =>
+    `${p.id} · ${p.state}\n${p.source.pane_id} → ${p.destination?.pane_id ?? p.candidates.map((c) => c.pane_id).join(", ")}\nCheckpoint: ${p.checkpointId ?? "pending quota signal"}\n${p.detail ?? "Waiting for an explicit limited/exhausted quota report."}`;
+  const reply = (text: string) => runtime.discord.reply(context.message, text);
+  const action = args[0]?.toLowerCase();
+  if (command === "quota") {
+    const agents = await runtime.herdr.listAgentsWithWorkspaceNames();
+    if (action === "status" && args.length <= 2) {
+      const selected = args[1]
+        ? [resolve(agents, args[1])]
+        : agents.filter((a) => a.workspace_id === workspace);
+      await reply(
+        selected
+          .map((a) => {
+            const q = manager.quota(a);
+            return `${a.pane_id} · ${q?.state ?? "unknown (missing/stale observation)"}${q ? ` · budget ${q.group} · operator ${q.reportedBy}\nObserved ${q.observedAt}; expires ${q.expiresAt}` : ""}`;
+          })
+          .join("\n\n") || "No live sessions in this workspace.",
+      );
+      return;
+    }
+    if (
+      action !== "report" ||
+      args.length < 4 ||
+      args.length > 5 ||
+      !["available", "limited", "exhausted", "unknown"].includes(args[2])
+    )
+      throw new Error(
+        "usage: quota status [pane] | quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds:30–3600]",
+      );
+    const agent = resolve(agents, args[1]);
+    const policies = await manager.report(
+      agent,
+      args[2] as QuotaState,
+      args[3],
+      context.routing.userId,
+      args[4] === undefined ? 900 : Number(args[4]),
+    );
+    await reply(
+      `Quota observation saved for ${agent.pane_id}: ${args[2]} (operator report; no provider quota measurement).` +
+        policies
+          .filter(accessible)
+          .map((p) => `\n\n${describe(p)}`)
+          .join(""),
+    );
+    return;
+  }
+  if (action === "arm") {
+    if (args.length < 4)
+      throw new Error(
+        "usage: failover arm <source> <candidate1,candidate2> <goal-and-constraints>",
+      );
+    const agents = await runtime.herdr.listAgentsWithWorkspaceNames();
+    const source = resolve(agents, args[1]);
+    const candidates = args[2].split(",").map((q) => resolve(agents, q));
+    await reply(
+      describe(
+        manager.arm(source, candidates, args.slice(3).join(" "), origin),
+      ),
+    );
+    return;
+  }
+  const policy = args[1] ? manager.store.get(args[1]) : undefined;
+  if (policy && !accessible(policy))
+    throw new Error("failover belongs to another workspace or Discord context");
+  if (action === "status" && args.length <= 2) {
+    const policies = policy
+      ? [policy]
+      : manager.store.read().policies.filter(accessible);
+    await reply(policies.map(describe).join("\n\n") || "No failover policies.");
+    return;
+  }
+  if (
+    action === "run" &&
+    policy &&
+    args.length === 3 &&
+    args[2] === "confirm-source-stopped"
+  ) {
+    await reply(
+      `Starting ${policy.id}; verifying a fresh eligible candidate and repository before continuation.`,
+    );
+    const result = await manager.run(policy.id, context.routing.userId, true);
+    if (result.state === "completed" && result.destination)
+      runtime.routing.bind(context.routing, agentTarget(result.destination));
+    const handoff = result.checkpointId
+      ? runtime.handoffs?.store.get(result.checkpointId)
+      : undefined;
+    await reply(
+      `${describe(result)}${handoff?.result ? `\n\n${handoff.result}` : ""}`,
+    );
+    return;
+  }
+  if (action === "cancel" && policy && args.length === 2) {
+    await reply(describe(await manager.cancel(policy.id)));
+    return;
+  }
+  throw new Error(
+    "usage: failover status [id] | failover run <id> confirm-source-stopped | failover cancel <id> (confirm source/background writers are stopped before run)",
+  );
+}
+
 async function handoffCommand(
   args: string[],
   context: CommandContext,
@@ -2059,6 +2206,8 @@ function helpText(prefix: string): string {
     `\`${prefix} team ask <prompt>\` — 建立持久化任務，由 Lead 動態分工`,
     `\`${prefix} team questions <task-id>\` / \`${prefix} team reply <task-id> <question-id> <answer>\` — 指定問題回答`,
     `\`${prefix} team status [task-id]\` / \`${prefix} team cancel <task-id>\` — 查看／取消任務`,
+    `\`${prefix} quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds]\` — 明確額度回報；quota status 查詢`,
+    `\`${prefix} failover arm <source> <candidate1,candidate2> <goal>\` → \`failover run <id> confirm-source-stopped\` — 確認停止後自動選擇候選並驗證切換；status/cancel 可查詢／取消`,
     `\`${prefix} handoff checkpoint <source> <goal>\` → \`handoff verify <id> <destination> confirm-source-stopped\` → \`handoff accept <id>\` → \`handoff continue <id>\` — 持久化交接；status/packet/cancel 可查詢／釋放`,
     `\`${prefix} handoff <from> <to> [instruction]\` — 以受限近期輸出摘要交接給另一個 Agent`,
     "",
@@ -2111,6 +2260,9 @@ function consoleHelpText(): string {
     "team questions <task-id> — 列出多 Agent 問題與狀態",
     "team reply <task-id> <question-id> <answer> — 回答指定問題",
     "team cancel <task-id> — 停止任務派送並取消仍 active 的工作",
+    "quota status [pane] / quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds] — 明確額度回報",
+    "failover arm <source> <candidate1,candidate2> <goal-and-constraints> — 保存候選優先序與任務",
+    "failover status [id] / failover run <id> confirm-source-stopped / failover cancel <id> — 檢視／驗證切換／取消",
     "handoff checkpoint <source> <goal> — 保存可驗證的交接 checkpoint",
     "handoff checkpoint-file <source> <relative-export> <goal> — 加入 public-export-v1",
     "handoff status [id] / handoff packet <id> — 查看交接紀錄",

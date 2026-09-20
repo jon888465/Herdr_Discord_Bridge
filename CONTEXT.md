@@ -80,7 +80,7 @@ instances; legacy processes without the lock still require explicit migration.
 
 ## Agent profiles and sessions
 
-- [Cross-CLI session handoff](docs/session-handoff.md): portable [skill](skills/session-handoff/SKILL.md), native-history-first recovery and quota checkpoints; comparison with bounded Bridge handoff. No automatic quota failover; live acceptance tracked in ISSUE-017.
+- [Cross-CLI session handoff](docs/session-handoff.md): portable [skill](skills/session-handoff/SKILL.md), native-history-first recovery and quota checkpoints; comparison with bounded Bridge handoff. The standalone skill has no quota watcher; Bridge Phase 4 uses explicit observations below. Live skill acceptance is tracked in ISSUE-017.
 
 - [Agent Pool and console separation](docs/agent-pool-console.md): 2026-09-18 implementation of per-workspace profile permissions, lazy persistent CLI startup, explicit existing-session binding, session continuity checks, dynamic Lead replanning, and console selection/inspection modes.
 - Profiles are definitions, sessions hold CLI context, panes host processes. Removing a profile from a Team does not stop its session.
@@ -96,4 +96,8 @@ instances; legacy processes without the lock still require explicit migration.
 
 ## Session Handoff Runtime
 
-[Phase 3](docs/session-handoff-runtime.md): persistent checkpoint registry and derived HANDOFF packets, public session adapters, repository acceptance, explicit ownership transfer and continuation. Same local workspace/worktree, operator-attested stopped writers, no live Team roster replacement; restart quarantines rather than replays. ISSUE-019 records tests and remaining live acceptance. Phase 4 Quota / Failover Manager remains unimplemented.
+[Phase 3](docs/session-handoff-runtime.md): persistent checkpoint registry and derived HANDOFF packets, public session adapters, repository acceptance, explicit ownership transfer and continuation. Same local workspace/worktree, operator-attested stopped writers, no live Team roster replacement; restart quarantines rather than replays. ISSUE-019 records tests and remaining live acceptance. Phase 4 builds on these gates; see below.
+
+## Quota / Failover Manager
+
+[Phase 4](docs/quota-failover-manager.md): explicit operator quota observations with TTL and shared-budget groups; ordered frozen candidate policy, quota-triggered checkpoint and operator-confirmed verify/accept/continue chain. Durable intents, no retry/cascade after unknown delivery, restart quarantine, exact session/worktree acceptance. No provider quota watcher or credential/account switching. ISSUE-020 separates source/fixture evidence from pending live acceptance.

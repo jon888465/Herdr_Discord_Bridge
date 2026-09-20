@@ -89,4 +89,4 @@ handoff checkpoint-file <source-pane> <relative-export.json> <goal-and-constrain
 4. verify／continue response loss、timeout、blocked、cancel／restart，保持 quarantine，不重送副作用。
 5. 原動態 Team、多問題回覆、ISSUE-014、conversation／attach／watch 回歸。
 
-未包含 Phase 4 Quota / Failover Manager：沒有自動 quota 偵測、目的地 provider 額度判斷、帳戶切換或自動 failover；不改登入與憑證。未部署／重啟使用者 Bridge；fixture 不等於 live acceptance。
+Phase 3 本身不包含額度選擇；[Phase 4 Quota / Failover Manager](quota-failover-manager.md) 現已串接明確 operator observations 與驗證切換。沒有 provider quota 自動偵測或帳戶切換；不改登入與憑證。未部署／重啟使用者 Bridge；fixture 不等於 live acceptance。

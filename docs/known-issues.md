@@ -21,6 +21,7 @@
 | ISSUE-015 | Team 僅能加入已啟動 pane，缺少 profile 與 session lifecycle | 修正中 | 完整檢查後驗收 lazy start／重用／Lead 動態分工 |
 | ISSUE-016 | use 自動刷 CLI 畫面，console 對話與終端檢視混在一起 | 修正中 | 完整檢查後驗收安靜對話與獨立 attach/watch |
 | ISSUE-017 | quota 耗盡時缺少跨 CLI session 交接流程 | 已修正、待驗收 | Skill 靜態檢查完成；待真實跨 CLI 接手驗收 |
+| ISSUE-020 | Phase 4 Quota / Failover Manager | 已修正、待驗收 | 明確 quota 回報與驗證切換 fixtures 完成；provider watcher 未實作，IPC 全套／live 待驗 |
 | ISSUE-019 | Phase 3 Session Handoff Runtime | 已修正、待驗收 | checkpoint／ownership／receipt fixtures 完成；live 與 IPC 全套待驗 |
 | ISSUE-018 | Phase 1 Durable Task Engine、restart reconciliation 與 whole-team cancellation | 已修正、待驗收 | targeted fixtures 通過；完整套件受 socket EPERM 阻擋，需一般環境重跑及 live 驗收 |
 
@@ -608,3 +609,30 @@ Phase 1 當時未包含 Phase 2 question queue／blocked continuation；2026-09-
 限制／未驗證：只支援同機同 workspace／canonical Git tree；active Team 先結束／取消，不改 frozen roster。Codex native adapter 支援特定公開 event_msg；其他 CLI 為明確 public-export-v1／checkpoint fallback，不宣稱原生 DB 相容。Ignored files／submodule／外部資料與背景 writer 不在完整自動驗證範圍，submodule 明確拒絕。驗證提示不是 OS read-only sandbox，外部 writer 仍有競態。Phase 4 尚未於本 commit 實作；不改帳戶或憑證。
 
 下一步：允許 IPC 的環境重跑 npm test，再依架構文件驗收 AGY/OpenCode、Codex/native fallback、quota 已耗盡、兩端版本／session、dirty preservation、真正 receiving receipt、cancel/restart。未部署／重啟使用者 Bridge，running version 未核對；fixture 不代表 live 驗收。
+
+
+## ISSUE-020：Phase 4 Quota / Failover Manager
+
+更新日期：2026-09-20。狀態：已修正、待驗收；完整測試 gate 受本機 IPC 權限限制。
+
+症狀／已確認根因：Phase 3 可明確交接，但沒有額度 observation registry、候選 policy 或從限額訊號到 checkpoint／驗證續作的協調層。不同 CLI 可能共用同一耗盡額度池；不能只按 CLI 名称或假設經過時間就有額度。
+
+預期／修正：新增 `src/quota-failover.ts`，atomic schema-v1 quota/policy after-image journal、session-scoped TTL observations、ordered frozen候選、共享 budget group 衝突防護、來源 limited/exhausted report 自動 checkpoint。`failover run ... confirm-source-stopped` 選可用候選後串接 Phase 3 verify/accept/continue，成功更新目前 route。main／Discord／console 加入 quota/report/status、failover/arm/status/run/cancel；保持 context scope、active Team／ownership guards。Restart quarantine、先保存 intent、不明派送不重試／cascade。完整契約、命令與限制見 [Phase 4](quota-failover-manager.md)。
+
+第一版使用操作者回報；沒有 provider API／背景 quota watcher，不推算百分比或 reset，也不改帳號／憑證。候選能力與 budget-group 歸屬由使用者確認；不能將本版描述為全自動 provider 額度偵測。
+
+驗證環境：隔離 Linux Node runner、fake Herdr/Discord／clock、temporary state/Git；沒有呼叫真實模型或使用者 session。新 `test/quota-failover.test.ts` 27 項加 Phase 3 fixture 中 1 項完整串接，共新增 28 項。
+
+### 自動化紀錄（2026-09-20）
+
+- 中途 typecheck：測試誤用不存在的 `parseConsoleLine` export（TS2305）；改用既有 `parseConsoleCommand`，未改 parser 行為。
+- 第一批 Phase 3/4：52/52 通過；後續補上 restart 保留 armed/ready、跨 Discord context 回報遮蔽及 workspace 限制。
+- 最終 `npm run typecheck`、`npm run build`、`npm run lint` PASS（49 TypeScript files）。
+- Targeted：`node --test dist/test/quota-failover.test.js dist/test/session-handoff.test.js dist/test/team-questions.test.js dist/test/team-task-engine.test.js dist/test/team-orchestration.test.js dist/test/agent-pool.test.js dist/test/console-conversation.test.js dist/test/local-agent.test.js` **133/133 PASS**。
+- 涵蓋：先持久化再副作用、unknown/stale/時鐘倒退、同 pool／衝突、來源已可用、候選換 identity／busy、ordered fallback、checkpoint失敗、quota 在 verify/accept 期间過期、停止聲明、並行 run/cancel、unknown delivery 不重送／不換第二個、原子保存失敗、schema/immutable fields、restart quarantine、command scope／route。整合 fixture 執行真正 SessionHandoffRuntime，檢查 receipt／ownership／两次目的地 prompt 與 dirty 檔案保留。
+- 完整 compiled suite：`node --test --test-timeout=15000 dist/test/*.test.js` **182 項：176 pass、5 fail、1 cancelled**（exit 1）。兩項 Herdr socket fixtures、三項 instance-lock fixtures 因本機 listen EPERM／無法取得 lock 失敗，killed-owner fixture 15 秒逾時 cancelled。這次 build 與全套 runner 分開執行；沒有把限時套件稱為原始 npm test 通過。未修改受阻 fixtures。
+- 本次程式／文件格式與 diff 檢查通過；新文件的本機連結均存在。
+
+限制／下一步：在允許本機 IPC 的開發環境重跑原始 npm test，再依架構文件進行真實跨 CLI／quota／Discord scope／restart／ownership 驗收。額度觀察可能於下一次呼叫耗盡，不能保證 destination 有實際餘額；檔案改變需重新 checkpoint。Failover／handoff 分開 journal，崩潰邊界可能留下 orphan checkpoint 或最後狀態不同步，需人工查 evidence，不自動 replay。無 retention/compaction、跨程序 writer lock、provider-specific adapter、自動能力探測、mid-turn Team migration。Phase 3 的同機同工作樹、submodule 拒絕、ignored/external 不涵蓋與外部 writer 競態仍在。
+
+原始碼／build 完成；未 merge main、未部署／重啟使用者 Bridge，running version 未核對，舊訊息／工作不補送。Fixture 不能當成 live 驗收；既有 ISSUE-007/014 等狀態不因此關閉。

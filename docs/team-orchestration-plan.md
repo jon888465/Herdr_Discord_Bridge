@@ -36,10 +36,14 @@
 
 詳見 [Phase 3 契約與驗收](session-handoff-runtime.md)、ISSUE-019。
 
-## Phase 4：Quota / Failover Manager（未實作）
+## Phase 4：Quota / Failover Manager（原始碼已實作，待驗收）
 
-- quota／狀態觸發 checkpoint、目的地能力與額度選擇、經驗證的 failover policy。
-- 本輪不自動切換帳戶、provider 或啟動未知 CLI；handoff 不重設 quota。
+- operator quota observations、有效期與 shared budget group，unknown/stale 保守拒絕。
+- frozen candidate allowlist／優先序、limited/exhausted report 觸發 checkpoint、stopped-writer 確認後自動選擇並 verify → accept → continue。
+- durable intent／restart quarantine、不明送達不 cascade retry；指令／scope／routing 整合。
+- 尚無 provider telemetry watcher、能力自動探測、credentials/account rotation 或未知 CLI 啟動；handoff 不重設 quota。
+
+詳見 [Phase 4 契約與驗收](quota-failover-manager.md)、ISSUE-020。
 
 ## 其他後續提案（未實作）
 
