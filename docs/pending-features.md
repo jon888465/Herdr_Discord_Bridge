@@ -10,7 +10,7 @@ Phase 2 已實作 task／assignment／question identity 與文字指令回覆／
 
 ## Phase 1–4 之後的剩餘工作（2026-09-20）
 
-- 真實 Discord／Herdr／CLI 驗收、允許 IPC 環境的完整 suite；新增 [CI](ci.md) 追蹤，結果見 ISSUE-021。
+- 真實 Discord／Herdr／CLI 驗收；原始完整 suite 已在 [CI](ci.md) 的 Ubuntu／macOS 通過，結果見 ISSUE-021，不再是未完成 gate。
 - Discord Agent/workspace 選單；問題按鈕／modal 已完成原始碼（ISSUE-012）。
 - 下述 opt-in pane → Discord mirror、durable delivery retry；尚未開啟或實作轉發。
 - Phase 4 provider-specific quota telemetry、目的地能力自動探測；目前只有明確 operator observations。不自動更換帳號／credentials。

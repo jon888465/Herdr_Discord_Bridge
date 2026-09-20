@@ -1,6 +1,6 @@
 # Team Orchestration 實作計畫
 
-更新：2026-09-20。此文件以目前增量取代早期 vertical-slice 提案；歷史驗證保留於 known-issues。
+更新：2026-09-20。此文件以目前增量取代早期 vertical-slice 提案；歷史驗證保留於 known-issues。Phase 1–4 及問題 modal 的完整 fixture gate 已於 Ubuntu／macOS CI 通過（ISSUE-021），各 phase 的 live 驗收仍待完成。
 
 ## Phase 1：Durable Task Engine
 

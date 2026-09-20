@@ -104,4 +104,4 @@ instances; legacy processes without the lock still require explicit migration.
 
 ## Automated validation and entrypoints
 
-[CI and startup](docs/ci.md): Ubuntu/macOS Node 22 full-suite workflow, standalone npm/bin entrypoints aligned with dist/src/index.js. ISSUE-021 tracks local IPC limits and exact remote CI evidence; a draft PR does not merge/deploy or authorize live model work.
+[CI and startup](docs/ci.md): Ubuntu/macOS Node 22 full-suite workflow, standalone npm/bin entrypoints aligned with dist/src/index.js. ISSUE-021 records the original full-suite pass on Ubuntu (206/206) and macOS (205 pass, one existing Linux-only skip) on 2026-09-20, plus the fixed macOS restart-script mapfile incompatibility; a draft PR does not merge/deploy or authorize live model work.

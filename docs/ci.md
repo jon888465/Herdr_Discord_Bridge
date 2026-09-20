@@ -20,4 +20,8 @@ TypeScript `rootDir: "."` 產生 `dist/src/index.js`；原 package.json 的 bin/
 
 ## 第一輪 CI 發現的 macOS 問題
 
-2026-09-20 Ubuntu 原始完整套件206/206通過；macOS2項 restart fixtures 因系統 Bash 不提供 mapfile 失敗（詳見 ISSUE-006/021）。run.sh 改用 jq JSON選取與 read loop，維持專用 bridge workspace／tab 與不碰其他 Agent 的限制；修正後結果另記。這是腳本實際相容性修正，不以改 CI shell 或跳過測試規避問題。
+2026-09-20 Ubuntu 原始完整套件206/206通過；macOS2項 restart fixtures 因系統 Bash 不提供 mapfile 失敗（詳見 ISSUE-006/021）。run.sh 改用 jq JSON選取與 read loop，維持專用 bridge workspace／tab 與不碰其他 Agent 的限制；修正後 Ubuntu206/206、macOS205pass/1既有平台skip；兩個完整 jobs 都成功。這是腳本實際相容性修正，不以改 CI shell 或跳過測試規避問題。
+
+## 已核對結果
+
+[Run35509147934](https://github.com/jon888465/Herdr_Discord_Bridge/actions/runs/35509147934) 驗證 code commit `0bc5bda28b9dc9cf906875679d3122f31580873f`（2026-09-20）。Ubuntu Node22.23.2：206/206；macOS26 arm64 同 Node：205pass、1個既有 Linux-only skip，0fail。兩邊 typecheck/lint/build 都通過，原始 npm test gate 通過。最後 Markdown 結果更新未改程式且未另重跑；live 驗收仍是獨立待辦。
