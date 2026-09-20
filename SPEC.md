@@ -58,7 +58,7 @@ request。帶有 `error` 的 response 會轉成 typed `HerdrError`；錯誤 log 
 包含 request parameters 或 prompt 文字。每個操作使用新的 bounded connection，
 避免長連線故障使所有 operation 的 multiplexing 一起失效。
 
-一般 socket failure 最多重試兩次；Ctrl-C 取消與本機 blocked 回答不重試不確定的送達，避免重複回答。一般重試使用從 `reconnectBaseMs` 開始的 exponential
+一般唯讀 socket failure 最多重試兩次；prompt（含 legacy fallback）、Ctrl-C 取消與本機 blocked 回答不重試不確定的送達，避免重複回答。一般重試使用從 `reconnectBaseMs` 開始的 exponential
 backoff。Protocol error 不重試。Watcher 在故障後於下一個 interval 繼續，
 因此 socket failure 只會被回報，不會形成 crash loop，也不影響 Herdr pane。
 
@@ -452,3 +452,18 @@ Discord 限 task 原 guild/channel/thread、console 限目前 workspace，沿用
 有問題時 task blocked，回答後恢復 planning/running/synthesizing；不能把 pending 問題當成完成報告。
 Timeout 沿用原 turn 上限；取消等待 in-flight reply；重啟將待處理問題標 unknown 且不允許 replay。
 新 journal v2 向前讀 v1，未知版本 fail closed；不支援舊版直接讀取 v2 或自動恢復舊 turn。
+
+## Phase 3 Session Handoff Runtime（2026-09-20）
+
+契約與 live 驗收：[Session Handoff Runtime](docs/session-handoff-runtime.md)，ISSUE-019。
+
+- versioned checkpoint registry、來源／目的 session identity、original goal、task artifacts、public evidence、repo／HEAD／branch／dirty fingerprint、owner／receipt／journal。
+- `handoff checkpoint <source> <goal>` 與 `checkpoint-file <source> <relative-export> <goal>` 不呼叫來源模型；`status [id]`、`packet <id>` 可檢視。
+- `verify <id> <destination> confirm-source-stopped` 需操作者確認來源／背景 writer 已停止，兩端為同 workspace／同 Git tree 的已知 settled sessions。整個 workspace 在交接期間拒絕其他 Bridge dispatch；外部 writer 仍需人工控管。
+- 目的地只做唯讀復原，回傳相符 receipt；Bridge 前後核對實際 filesystem。`accept <id>` 才持久移交 ownership／切换該 context route；`continue <id>` 才派送後續工作，使用 ISSUE-014 receiver。
+- `cancel <id>` 僅釋放 settled 交接，不送 Ctrl-C 或殺 CLI；restart、timeout、blocked、未知送達保留 blocked/quarantine，不 replay。
+- 新 runtime 同機同工作樹，拒絕 submodule、不包含 ignored files／外部資料，Git／untracked 尺寸上限詳見文件。
+- Codex 支援 exact-ID/cwd 公開 event_msg；其他 CLI 以 Bridge public-export-v1 或 checkpoint/artifact fallback。AGY／Gemini 分開，不读取 hidden reasoning，缺漏明示 partial。
+- 一般 prompt 與 legacy fallback retries=0；已收到明確 method-not-found 才走相容方法，不重試不明送達。
+- Active Team 須先依既有 lifecycle 結束／取消；不替換 frozen Lead／roster。舊 bounded `handoff <from> <to>` 功能保留但不能繞過 runtime／Team reservation。
+- Phase 4 Quota / Failover Manager 尚未實作；不自動切帳號、provider，不改憑證，也不宣稱 quota 移轉。

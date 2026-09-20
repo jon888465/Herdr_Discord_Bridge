@@ -93,3 +93,7 @@ instances; legacy processes without the lock still require explicit migration.
 ## Team Questions
 
 [Phase 2 question queue](docs/team-question-queue.md): durable question identities, explicit workspace/task/question replies, original turn continuation, cross-interface deduplication, conservative restart invalidation. Schema v2 reads v1. ISSUE-012 tracks fixture evidence separately from live acceptance.
+
+## Session Handoff Runtime
+
+[Phase 3](docs/session-handoff-runtime.md): persistent checkpoint registry and derived HANDOFF packets, public session adapters, repository acceptance, explicit ownership transfer and continuation. Same local workspace/worktree, operator-attested stopped writers, no live Team roster replacement; restart quarantines rather than replays. ISSUE-019 records tests and remaining live acceptance. Phase 4 Quota / Failover Manager remains unimplemented.

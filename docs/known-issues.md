@@ -1,6 +1,6 @@
 # Known Issues
 
-維護規則見 [AGENTS.md](../AGENTS.md)。最後整理：2026-09-19。
+維護規則見 [AGENTS.md](../AGENTS.md)。最後整理：2026-09-20。
 
 | ID        | 問題                                                                            | 狀態             | 下一步                                                                                                              |
 | --------- | ------------------------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------- |
@@ -21,6 +21,7 @@
 | ISSUE-015 | Team 僅能加入已啟動 pane，缺少 profile 與 session lifecycle | 修正中 | 完整檢查後驗收 lazy start／重用／Lead 動態分工 |
 | ISSUE-016 | use 自動刷 CLI 畫面，console 對話與終端檢視混在一起 | 修正中 | 完整檢查後驗收安靜對話與獨立 attach/watch |
 | ISSUE-017 | quota 耗盡時缺少跨 CLI session 交接流程 | 已修正、待驗收 | Skill 靜態檢查完成；待真實跨 CLI 接手驗收 |
+| ISSUE-019 | Phase 3 Session Handoff Runtime | 已修正、待驗收 | checkpoint／ownership／receipt fixtures 完成；live 與 IPC 全套待驗 |
 | ISSUE-018 | Phase 1 Durable Task Engine、restart reconciliation 與 whole-team cancellation | 已修正、待驗收 | targeted fixtures 通過；完整套件受 socket EPERM 阻擋，需一般環境重跑及 live 驗收 |
 
 2026-09-09 自動化驗證：`npm run check`（typecheck、build、33/33 tests）、`npm run lint`、`git diff --check` 通過。這是前一輪程式驗證紀錄，不代表已做 live Discord 驗收。本輪僅整理文件，未重跑程式測試。
@@ -587,3 +588,23 @@ Phase 1 recovery 保存並核對任務，不自動 resume/replay。Recovered act
 Phase 1 當時未包含 Phase 2 question queue／blocked continuation；2026-09-20 已由 ISSUE-012 接續。仍無 journal retention／compaction／migration、跨 bot state-directory writer lock 或 durable Discord delivery retry。Windows rename／power-loss、真實 CLI session continuity、兩 Worker 取消、restart reconciliation、lazy start／reuse 與 conversation/attach/watch 需依架構文件 live 驗收。
 
 原始碼與 build 已完成；本輪沒有部署／重啟使用者 Bridge，執行中版本未核對，舊任務／訊息不補送。Unit fixtures 不等於 Discord／Herdr／CLI end-to-end acceptance。ISSUE-010 的 durable 部分由本項接續，ISSUE-012 追蹤 Phase 2 與剩餘 live 驗收；ISSUE-014、015、016 live 狀態不因本轮 fixture 通過而改為已驗收。
+
+## ISSUE-019：Phase 3 Session Handoff Runtime
+
+更新日期：2026-09-20。狀態：已修正、待驗收；完整測試 gate 受本機 IPC 權限限制。
+
+症狀／根因：既有 handoff 僅傳送有界 terminal output，session-handoff skill 尚未成為 runtime；缺乏持久 checkpoint、repository acceptance、ownership transfer 與 receiving receipt。原分期（2026-09-19）Phase 3 為 Session Handoff Runtime，Phase 4 為 Quota / Failover Manager。
+
+修正：新增 handoff-evidence/store、session-handoff runtime 與測試；整合 main 指令／ownership guards、現有 runTeamTurn 與 bundled skill。保存版本化 after-image journal、derived HANDOFF.md、exact source session、原 goal、task artifacts、公開 evidence、repo HEAD／branch／staged／unstaged／untracked fingerprint。verify → accept → continue 明確分離；未知／失敗／restart 轉 blocked，無 automatic replay。Herdr legacy prompt fallback 改 retries=0，防止 acknowledgement 遺失後重複工作。完整契約見 [Phase 3](session-handoff-runtime.md)。
+
+驗證環境：隔離 Linux Node runner、temporary Git repositories／state、fake Herdr／Discord；沒有呼叫真實模型或操作使用者 session。
+
+- `npm run typecheck`、`npm run build`、`npm run lint` PASS（47 TS files）。
+- 首批新測試 22/22；擴大後中途 103/104，唯一失敗是 fixture 以隨機檔案排序第一筆當成目前 checkpoint。改依 prompt 中 handoff ID 讀取正確 journal，保留「派送前已持久化」斷言。
+- 最終 targeted：`node --test dist/test/session-handoff.test.js dist/test/team-questions.test.js dist/test/team-task-engine.test.js dist/test/team-orchestration.test.js dist/test/agent-pool.test.js dist/test/console-conversation.test.js dist/test/local-agent.test.js`：**105/105**，含 **26 項 Phase 3 tests**。涵蓋流程、原子失敗、未知 schema、immutable fields、dirty bytes／HEAD／branch／index／nested cwd、session replacement、active Team／worker、錯誤 receipt、驗證期間寫檔、並行操作、restart quarantine、explicit export、Codex exact-ID／公開 channel filtering、context guard、legacy retry。
+- `timeout --signal=INT 30s npm test`：build PASS；Herdr socket fixtures 失敗、instance-lock 等待無法自然完成，30 秒停止 exit 124，無完整總數。
+- 完整限時 suite：`node --test --test-timeout=15000 dist/test/*.test.js` 最終 **154 項：148 pass、5 fail、1 cancelled**（exit1）；5 fail 為既有兩項 Herdr socket 與三項 instance-lock 的 EPERM，1 cancelled 為 killed-owner fixture 15 秒逾時。不能把限時 runner 或 targeted 等同完整 gate 通過。
+
+限制／未驗證：只支援同機同 workspace／canonical Git tree；active Team 先結束／取消，不改 frozen roster。Codex native adapter 支援特定公開 event_msg；其他 CLI 為明確 public-export-v1／checkpoint fallback，不宣稱原生 DB 相容。Ignored files／submodule／外部資料與背景 writer 不在完整自動驗證範圍，submodule 明確拒絕。驗證提示不是 OS read-only sandbox，外部 writer 仍有競態。Phase 4 尚未於本 commit 實作；不改帳戶或憑證。
+
+下一步：允許 IPC 的環境重跑 npm test，再依架構文件驗收 AGY/OpenCode、Codex/native fallback、quota 已耗盡、兩端版本／session、dirty preservation、真正 receiving receipt、cancel/restart。未部署／重啟使用者 Bridge，running version 未核對；fixture 不代表 live 驗收。
