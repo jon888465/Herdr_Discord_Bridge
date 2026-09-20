@@ -188,7 +188,7 @@ mention when `requireMention` is enabled. Each thread stores its active Agent
 and can retain additional Agent mappings. `team add` manages workspace Team members; members are not automatically given the thread's full history.
 
 `/herdr team ask ...` lets the selected Lead plan bounded Assignments, dispatch to live members or enabled profiles, and decide follow-up work from their reports before verification and synthesis. It can also choose no Workers and handle the task directly. It does not copy the Discord thread
-or terminal history. Tasks now persist across restarts; `team status [task-id]` shows saved state and `team cancel <task-id>` cancels the whole task. Restart reconciliation never automatically redispatches; uncertain sessions remain blocked/cancelling for inspection. Interactive blocked Assignments use `team questions <task-id>` and `team reply <task-id> <question-id> <answer>`. See [Phase 2 behavior and limits](docs/team-question-queue.md). See [durable task behavior and limits](docs/durable-task-engine.md). Use
+or terminal history. Tasks now persist across restarts; `team status [task-id]` shows saved state and `team cancel <task-id>` cancels the whole task. Restart reconciliation never automatically redispatches; uncertain sessions remain blocked/cancelling for inspection. Interactive blocked Assignments use `team questions <task-id>` and `team reply <task-id> <question-id> <answer>`. Discord pending-question cards also offer an answer button and blank modal (4,000 characters); text replies remain available. See [Phase 2 behavior and limits](docs/team-question-queue.md). See [durable task behavior and limits](docs/durable-task-engine.md). Use
 `/herdr handoff <from> <to>` when a CLI reaches a token/context limit. Handoff
 reads only a bounded recent output window (`handoffLines` and
 `handoffMaxChars`), redacts common credential formats, posts a concise bounded
@@ -281,3 +281,7 @@ Use `handoff checkpoint <source> <goal>`, then `handoff verify <id> <destination
 Use `failover arm <source> <candidate1,candidate2> <goal-and-constraints>` to authorize an ordered set of existing sessions. Report observations with `quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds]`. A source limited/exhausted report prepares a checkpoint without calling its model. After stopping source/background writers, `failover run <id> confirm-source-stopped` chooses a fresh available candidate on a different budget, verifies recovery and repository state, transfers ownership, then continues. `quota status`, `failover status [id]`, and `failover cancel <id>` inspect or release policies.
 
 This version uses operator reports, not provider quota APIs. Expired/unknown/shared-budget-conflicting observations cannot authorize a destination. No account/credential rotation or automatic retry after uncertain dispatch. See [commands, journal behavior, limitations and live acceptance](docs/quota-failover-manager.md).
+
+### Validation and standalone startup
+
+After `npm run build`, `npm start`, `npm run dry-run` and the packaged `herdr-discord-bridge` bin use `dist/src/index.js`. [CI](docs/ci.md) runs the original full suite on Ubuntu/macOS Node 22; read ISSUE-021 for actual run results. CI and fixture success do not replace live Discord/Herdr/CLI acceptance.

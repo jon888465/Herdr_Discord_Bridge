@@ -6,7 +6,18 @@
 `team select` 可勾選尚未啟動的 Agent profiles；Lead 按需分派、重用 session 或啟動 CLI，並依報告決定下一輪。詳見 [使用與架構](agent-pool-console.md)。
 這不是下述 Discord mirror；原生全串流 PTY attach、task 自動 resume 與完整 event bus 仍未實作；Phase 1 已提供 [durable state／restart reconciliation](durable-task-engine.md)。
 
-Phase 2 已實作 task／assignment／question identity 與文字指令回覆／排隊，不中斷其他 Agent；點選 UI 待做，見 [問題佇列](team-question-queue.md)。Herdr GUI 選擇與 Discord select menu 仍待評估；`focus` 只改畫面焦點，不能作為 routing 選擇的替代。
+Phase 2 已實作 task／assignment／question identity 與文字指令回覆／排隊，不中斷其他 Agent；Discord 問題的按鈕／modal 已接上同一 durable reply；Agent/workspace 選單待做，見 [問題佇列](team-question-queue.md)。Herdr GUI 選擇與 Discord select menu 仍待評估；`focus` 只改畫面焦點，不能作為 routing 選擇的替代。
+
+## Phase 1–4 之後的剩餘工作（2026-09-20）
+
+- 真實 Discord／Herdr／CLI 驗收、允許 IPC 環境的完整 suite；新增 [CI](ci.md) 追蹤，結果見 ISSUE-021。
+- Discord Agent/workspace 選單；問題按鈕／modal 已完成原始碼（ISSUE-012）。
+- 下述 opt-in pane → Discord mirror、durable delivery retry；尚未開啟或實作轉發。
+- Phase 4 provider-specific quota telemetry、目的地能力自動探測；目前只有明確 operator observations。不自動更換帳號／credentials。
+- 非 Codex 原生歷史 adapters；目前為 explicit public-export-v1／checkpoint fallback。
+- Journal retention/compaction、schema migrations、跨程序 state-directory lock、有證據的 task resume；不能盲目 replay。
+
+各項尚未實作或待驗收的範圍不得因 targeted tests 通過而標為全部完成。
 
 ## 將 Herdr 內直接互動鏡像轉發到 Discord
 

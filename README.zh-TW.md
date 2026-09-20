@@ -245,7 +245,7 @@ Lead 自行決定角色、是否委派，以及依報告追加工作，無固定
 `team ask <prompt>` 保存任務、Lead/session、凍結 roster、Assignment、事件與報告。
 `team status [task-id]` 查看目前 workspace 的持久狀態；`team cancel <task-id>` 取消整個任務。Discord 使用 `/herdr` 前綴。
 重啟後先核對 pane/session，標示 blocked/recoverable 或 unknown，不自動重送工作。取消只使用既有 Ctrl-C，確認停止後才 cancelled；不確定時保留 cancelling 與 reservation，不關閉 CLI。
-Team 多 Agent 問題使用 `team questions <task-id>` 查詢、`team reply <task-id> <question-id> <answer>` 回答。詳見 [Phase 2 行為與限制](docs/team-question-queue.md)。一般單 Agent 問答不會繞過 Team reservation。
+Team 多 Agent 問題使用 `team questions <task-id>` 查詢、`team reply <task-id> <question-id> <answer>` 回答。Discord pending 問題卡片另有「回答這個問題」按鈕與空白視窗（4,000 字元），文字回覆保留。詳見 [Phase 2 行為與限制](docs/team-question-queue.md)。一般單 Agent 問答不會繞過 Team reservation。
 詳見 [架構、操作限制與 live 驗收](docs/durable-task-engine.md)及 ISSUE-018。
 
 ### 持久化 Session Handoff（Phase 3）
@@ -257,3 +257,7 @@ Team 多 Agent 問題使用 `team questions <task-id>` 查詢、`team reply <tas
 `failover arm <source> <candidate1,candidate2> <goal-and-constraints>` 保存任務與候選優先序；`quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds]` 記錄明確額度觀察。來源 limited/exhausted 會先建立 checkpoint，不呼叫來源模型。確認來源／背景 writer 停止後，`failover run <id> confirm-source-stopped` 選擇不同額度池且有新鮮 available 回報的目的地，驗證復原／工作樹、移交 ownership 再續作。`quota status`、`failover status [id]`／`cancel <id>` 可查詢／釋放。
 
 第一版採操作者回報，沒有 provider quota API。過期、unknown、同額度池或衝突觀察不准派送；不改帳號／憑證，不重試不明送達。詳見 [完整指令、journal、限制及驗收](docs/quota-failover-manager.md)。
+
+### 驗證與 standalone 啟動
+
+`npm run build` 後，`npm start`、`npm run dry-run` 與 packaged `herdr-discord-bridge` bin 均使用 `dist/src/index.js`。[CI](docs/ci.md) 在 Ubuntu／macOS Node 22 執行原始完整套件；實際結果見 ISSUE-021。CI／fixture 通過仍不能代替 Discord／Herdr／CLI 的 live 驗收。

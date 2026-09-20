@@ -21,6 +21,7 @@
 | ISSUE-015 | Team 僅能加入已啟動 pane，缺少 profile 與 session lifecycle | 修正中 | 完整檢查後驗收 lazy start／重用／Lead 動態分工 |
 | ISSUE-016 | use 自動刷 CLI 畫面，console 對話與終端檢視混在一起 | 修正中 | 完整檢查後驗收安靜對話與獨立 attach/watch |
 | ISSUE-017 | quota 耗盡時缺少跨 CLI session 交接流程 | 已修正、待驗收 | Skill 靜態檢查完成；待真實跨 CLI 接手驗收 |
+| ISSUE-021 | 完整 CI 缺口與 npm/bin 啟動路徑錯誤 | 已修正、待驗收 | 新增 Ubuntu/macOS workflow；推送後核對實際 CI，live 仍待驗 |
 | ISSUE-020 | Phase 4 Quota / Failover Manager | 已修正、待驗收 | 明確 quota 回報與驗證切換 fixtures 完成；provider watcher 未實作，IPC 全套／live 待驗 |
 | ISSUE-019 | Phase 3 Session Handoff Runtime | 已修正、待驗收 | checkpoint／ownership／receipt fixtures 完成；live 與 IPC 全套待驗 |
 | ISSUE-018 | Phase 1 Durable Task Engine、restart reconciliation 與 whole-team cancellation | 已修正、待驗收 | targeted fixtures 通過；完整套件受 socket EPERM 阻擋，需一般環境重跑及 live 驗收 |
@@ -491,7 +492,7 @@ Team Task 複雜性：同一個 1:1:N 任務可能同時有多個 Agent／Assign
 - 原始 `npm test` build 通過，但 socket fixtures 無法 listen，instance-lock 子程序卡住；人工停止 exit 130，無完整總數，不列全通過。
 - 完整限時 compiled suite：`node --test --test-timeout=15000 dist/test/*.test.js`：**128 項，122 pass、5 fail、1 cancelled**。5 fail 為既有兩個 Herdr socket／三個 instance-lock fixtures（EPERM），1 為 killed-owner fixture 15 秒 timeout。未更改 socket 斷言或宣稱 live 故障／成功。
 
-限制／下一步：在允許 IPC 的環境重跑原始 npm test，並依 Phase 2 文件完成 Discord／console 兩 Worker、Lead synthesis／零 Worker 提問、多輪相同問題、回答途中取消與 restart live 驗收。Herdr 缺少原子 question compare-and-send，外部手動 pane 操作仍有競態；無 session metadata 或完全相同画面且無新 sequence 的問題不猜測。未提供點選 UI、restart 自動 resume、durable Discord retry、方向鍵選單或非 blocked 偵測。Timeout 包含使用者等待，不延長原 turn 期限。Journal 仍需後續 retention/compaction。
+限制／下一步：在允許 IPC 的環境重跑原始 npm test，並依 Phase 2 文件完成 Discord／console 兩 Worker、Lead synthesis／零 Worker 提問、多輪相同問題、回答途中取消與 restart live 驗收。Herdr 缺少原子 question compare-and-send，外部手動 pane 操作仍有競態；無 session metadata 或完全相同画面且無新 sequence 的問題不猜測。Phase 2 初版當時未提供點選 UI（後續增量見下方）、restart 自動 resume、durable Discord retry、方向鍵選單或非 blocked 偵測。Timeout 包含使用者等待，不延長原 turn 期限。Journal 仍需後續 retention/compaction。
 
 原始碼／build 已完成；未部署、未重啟使用者 Bridge，執行中版本未核對，舊訊息不補送。自動化不等於 live Herdr／Discord／CLI 驗收。ISSUE-014／015／016／018 不因此標成已驗收。
 
@@ -636,3 +637,28 @@ Phase 1 當時未包含 Phase 2 question queue／blocked continuation；2026-09-
 限制／下一步：在允許本機 IPC 的開發環境重跑原始 npm test，再依架構文件進行真實跨 CLI／quota／Discord scope／restart／ownership 驗收。額度觀察可能於下一次呼叫耗盡，不能保證 destination 有實際餘額；檔案改變需重新 checkpoint。Failover／handoff 分開 journal，崩潰邊界可能留下 orphan checkpoint 或最後狀態不同步，需人工查 evidence，不自動 replay。無 retention/compaction、跨程序 writer lock、provider-specific adapter、自動能力探測、mid-turn Team migration。Phase 3 的同機同工作樹、submodule 拒絕、ignored/external 不涵蓋與外部 writer 競態仍在。
 
 原始碼／build 完成；未 merge main、未部署／重啟使用者 Bridge，running version 未核對，舊訊息／工作不補送。Fixture 不能當成 live 驗收；既有 ISSUE-007/014 等狀態不因此關閉。
+
+
+## ISSUE-012 後續：Discord 問題按鈕／modal
+
+更新日期：2026-09-20。狀態：已修正、待驗收；不取代前述 Phase 2 歷史。
+
+症狀／根因：多 Agent 問題目前只能複製 task/question ID 用文字答題，手機使用不便；缺少保留原問題身分的點選入口。
+
+修正：Discord 通知／team questions 的 pending 問題卡加入「回答這個問題」與 blank modal；先呈現完整有界 snapshot，禁 mentions。隨機 once-only ticket 綁點選者及原 context，最多 256／10 分鐘／不超過問題 expiry。提交前消耗 ticket，callback 再核對 task origin、workspace、取消／restart，再走既有 durable engine live session/snapshot/sequence 檢查。不是單 Agent 的自動 continue approval，不替換 roster。未知送達不重試；Discord 確認失敗不改稱 Agent 送答失敗。詳見 [問題契約](team-question-queue.md)。
+
+驗證（2026-09-20，Linux Node 24.19.0、fake Discord/Herdr）：新增 22 項 UI tests 加 1 項真實 TeamTaskEngine fixture 整合。涵蓋長卡片／mentions、空白視窗、正確點選者、scope／unauthorized、過期／paused／restart、兩次並行提交、cancel／answered／unknown、超長／空答案、modal/ack 失敗、session snapshot 改變與 console/UI 共用去重。初輪 UI/相關測試 44/44 PASS，後增 acknowledgement failure regression。最終 targeted 162/162 PASS，typecheck/build/lint PASS（51 TypeScript files）。沒有呼叫真實 Discord 或模型。
+
+下一步／未驗證：真實 iOS Discord modal、兩 Worker/兩操作者交錯回答、timeout/restart、live session replacement；Agent/workspace select menu、CLI 方向鍵、mirror 仍待做。沒有部署／重啟／補送舊通知；既有按鈕僅於點選時再驗證，完成後不會自動編輯所有舊卡片。表單 answers 上限 4,000 字元，文字 reply 仍 12,000。
+
+## ISSUE-021：完整 CI 與 standalone 啟動入口
+
+更新日期：2026-09-20。狀態：已修正、待驗收；遠端 CI 待推送後收集。
+
+症狀／已確認根因：本地完整套件因 IPC listen EPERM 無法通過，repo 未配置 remote CI；另 package.json 的 npm start/dry-run/bin 指向 dist/index.js，tsconfig 實際產出 dist/src/index.js，將導致 MODULE_NOT_FOUND。
+
+修正：新增 Ubuntu/macOS Node 22 GitHub Actions 原始完整測試；維持 IPC assertion、無 skip／timeout 放寬，job 10 分鐘上限。修正 scripts/bin 與 lockfile、加 Node shebang。新增入口 fixture 以明確 disabled Discord 設定驗證 npm start/bin 都抵達真實 startup validation；不使用 credentials／網路。文件見 [CI](ci.md)。
+
+本機驗證（2026-09-20）：typecheck/build/lint PASS（51 TS files），targeted 162/162 PASS；完整 compiled suite `node --test --test-timeout=15000 dist/test/*.test.js` 為 **206：200 pass、5 fail、1 cancelled**，exit1。失敗為相同 2 Herdr socket + 3 instance-lock fixtures（EPERM/無 lock），killed-owner fixture 15 秒 cancelled。未降低 assertion；原始 npm test gate 尚未通過。新增共 24 tests（22 UI、1 engine 整合、1 entrypoint）。格式／diff／文件連結待提交前核對。
+
+下一步：推送 followup-team-question-ui-ci，建立以 phase4-quota-failover-manager 為 base 的 draft PR，收集兩個平台實際 run/job/log；若遠端失敗，保留錯誤並修正可重現問題。沒有 merge main、部署／重啟 live Bridge。CI 原始碼與 fixture 檢查不等於實際 Discord／Herdr／CLI 驗收。

@@ -15,6 +15,18 @@ Discord 使用 `/herdr` 前綴。問題通知包含 task、assignment（Lead 則
 
 Console 必須選取 task 的 workspace；Discord 除既有 guild/channel/user allowlist 外，還必須符合 task 建立時的 guild/channel/thread。Console 可在該 workspace 以明確 task/question ID 回答 Discord task。更換 active Agent 或 attach/watch 不改變問題目的地。普通 ask、thread approval 與 pane cancel 不得繞過 Team reservation。回覆保留大小寫與內部空白，長度 1–12,000 字元。
 
+## Discord 點選回答（2026-09-20 後續增量）
+
+新問題通知與 `team questions` 查詢中，仍 pending／未過期的問題會附「回答這個問題」按鈕；長問題先發完所有片段，最後一段才放按鈕。先閱讀問題內容，點選後在空白回答視窗輸入答案並提交；不預填 continue、不代為批准工具操作。Console 仍使用文字指令。
+
+視窗最多 4,000 字元，保留大小寫、換行與內部空白；更長的答案使用 `team reply`（上限 12,000）。送答結果僅對操作者顯示，不把答案再公開貼回 Discord；task journal 的狀態仍是權威。問題卡片停用 mentions，避免 snapshot 觸發通知。
+
+按鈕先核對本 bot 卡片、guild/channel/user allowlist、task 原 context、選取 workspace、pending／expiry／取消／recovery 狀態。表單使用隨機一次性 ticket，綁定點選者及原 guild/channel/thread、task/question；最多 256 份、10 分鐘或問題到期取較早者。取消視窗不會通知 Bridge，ticket 於到期清理；滿額時可使用文字指令或稍候。Bridge 暫停時不接受提交；重啟使所有未提交視窗失效。
+
+提交前先消耗 ticket，再經同一 TeamTaskEngine.reply 核對實際 session／blocked／snapshot／sequence，持久化 sending 後單次送字。重複提交、別人的表單、跨 thread、已回答／unknown／過期問題拒絕。不同表單與 console 文字回答仍由 engine 去重。送答後 Discord 確認訊息失敗不會重送答案；以 `team questions/status` 核對。已送出的舊按鈕不自動修改，但點選時重新驗證而不誤送。
+
+這是 Discord 問題按鈕／modal，不是 Agent/workspace 選单、Herdr GUI 或 CLI 方向鍵選擇。Live 測試還需確認手機視窗、兩個操作者與逾時、重啟、回覆時 session 改變。
+
 ## 狀態與續接
 
 - 同一 task 最多保存 128 個歷史問題，可有多個 pending questions，依開啟順序保存；可任意選擇問題回答，不採「最新問題」猜測。
@@ -31,7 +43,7 @@ Console 必須選取 task 的 workspace；Discord 除既有 guild/channel/user a
 
 新寫入使用 schema v2，可讀取 v1 並於下一次 mutation 升級；v1 optional origin/questions 可缺省。未知版本拒絕啟動；舊 Phase 1 binary 無法讀取 v2，不支援直接降版。問題 identity／歷史不可刪改，狀態轉移會驗證。
 
-重啟將 pending/sending 問題標 unknown，保留畫面與 identity 供查詢，但不恢復舊等待函式或自動送答。原 Phase 1 session quarantine／人工核對與取消規則不變；不宣稱重啟後可繼續原 turn。未實作 Discord durable delivery retry、按鈕/select UI、journal compaction、多 bot 共用 state writer lock、方向鍵選單或 CLI 未回報 blocked 的追問。
+重啟將 pending/sending 問題標 unknown，保留畫面與 identity 供查詢，但不恢復舊等待函式或自動送答。原 Phase 1 session quarantine／人工核對與取消規則不變；不宣稱重啟後可繼續原 turn。未實作 Discord durable delivery retry、Agent/workspace select UI、journal compaction、多 bot 共用 state writer lock、方向鍵選單或 CLI 未回報 blocked 的追問。
 
 ## Live 驗收
 

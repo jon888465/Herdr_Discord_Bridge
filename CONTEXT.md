@@ -92,7 +92,7 @@ instances; legacy processes without the lock still require explicit migration.
 
 ## Team Questions
 
-[Phase 2 question queue](docs/team-question-queue.md): durable question identities, explicit workspace/task/question replies, original turn continuation, cross-interface deduplication, conservative restart invalidation. Schema v2 reads v1. ISSUE-012 tracks fixture evidence separately from live acceptance.
+[Phase 2 question queue](docs/team-question-queue.md): durable question identities, explicit workspace/task/question replies plus scoped Discord button/modal answers, original turn continuation, cross-interface deduplication, conservative restart invalidation. Schema v2 reads v1. ISSUE-012 tracks fixture evidence separately from live acceptance.
 
 ## Session Handoff Runtime
 
@@ -101,3 +101,7 @@ instances; legacy processes without the lock still require explicit migration.
 ## Quota / Failover Manager
 
 [Phase 4](docs/quota-failover-manager.md): explicit operator quota observations with TTL and shared-budget groups; ordered frozen candidate policy, quota-triggered checkpoint and operator-confirmed verify/accept/continue chain. Durable intents, no retry/cascade after unknown delivery, restart quarantine, exact session/worktree acceptance. No provider quota watcher or credential/account switching. ISSUE-020 separates source/fixture evidence from pending live acceptance.
+
+## Automated validation and entrypoints
+
+[CI and startup](docs/ci.md): Ubuntu/macOS Node 22 full-suite workflow, standalone npm/bin entrypoints aligned with dist/src/index.js. ISSUE-021 tracks local IPC limits and exact remote CI evidence; a draft PR does not merge/deploy or authorize live model work.

@@ -22,7 +22,7 @@ Bridge 不是 ACP broker；Team 可透過明確啟用的 Agent profile，按需�
 
 ## 2. 執行環境與設定
 
-Plugin 以 TypeScript 編譯至 `dist/`，由 manifest pane 以
+Plugin 以 TypeScript 編譯至 `dist/`；npm start／dry-run／packaged bin 與 manifest 均使用 `dist/src/index.js`，bin 有 Node shebang。由 manifest pane 以
 `node dist/src/index.js` 啟動。本機 restart script 在所有模式下都以名為 `bridge` 的專用 workspace 之 tab 1
 為目標：無參數時啟動已安裝 plugin，`-r` 重新建置並連結本機 checkout，
 `-rg` 從 GitHub 重新安裝 `jon888465/Herdr_Discord_Bridge`。它不會聚焦該
@@ -314,6 +314,8 @@ Linux 使用 abstract Unix socket，Windows 使用 named pipe，程序退出由 
 
 ## 8. 驗證與完成定義
 
+Repository 必須通過下列指令。另由 [CI](docs/ci.md) 在 Ubuntu／macOS Node 22 執行原始完整套件，不跳過 IPC fixtures；CI 結果與真實 CLI 驗收分開记录。
+
 Repository 必須通過：
 
 ```text
@@ -379,7 +381,7 @@ acceptance 的 issue。提議中的 feature 必須與已實作行為分開，並
 
 working/unknown 時一般 prompt 會明確拒絕；`help`、`current`、`agent`、`agent use`、`wk` 等控制指令仍可操作，無須等 blocked。若答案開頭恰為指令，以 `ask <answer>` 明確指定。觀察輸出會重畫 `bridge>` 並保留正在編輯的輸入。`cancel` 是另行明確的 Ctrl-C 操作。本機新 prompt 使用與 Team 相同的 runTeamTurn 接收器，優先相符 Codex transcript final，否則僅接受本次隨機 marker 內的完整回覆；不把任意 CLI 片段當回答。blocked 時保留擷取直到回答後完成或逾時。既有 Discord 單 Agent progress/final 路徑不變。
 
-各 CLI 的本機回答使用上述共同回覆流程；agy 等 CLI 需遵守 marker 格式，無可靠回覆時明示 capture incomplete，可用 read/attach 診斷。多 Agent question ID／排隊／明確 reply 已實作；其他 Worker 不因提問被中斷。點選 UI、agy 未被 Herdr 辨識為 blocked 的選單按鍵、直接 pane → Discord mirror 仍待做。
+各 CLI 的本機回答使用上述共同回覆流程；agy 等 CLI 需遵守 marker 格式，無可靠回覆時明示 capture incomplete，可用 read/attach 診斷。多 Agent question ID／排隊／明確 reply 已實作；其他 Worker 不因提問被中斷。Agent/workspace 選單 UI、agy 未被 Herdr 辨識為 blocked 的選單按鍵、直接 pane → Discord mirror 仍待做。
 
 本機專用 `threads` 列出已映射且符合 guild/channel/workspace allowlist 的 thread；
 `thread <thread ID>` 明確選定共用路由，`thread off` 回到原本本機路由。
@@ -447,6 +449,7 @@ Lead 仍由已選取的 live Agent 擔任。可不委派而直接完成工作；
 行為契約與 live 驗收見 [Team question queue](docs/team-question-queue.md)。
 `team questions <task-id>` 查詢有界問題卡片；`team reply <task-id> <question-id> <answer>` 僅回答指定問題。
 Discord 限 task 原 guild/channel/thread、console 限目前 workspace，沿用既有授權。
+Discord pending 問題另有「回答這個問題」按鈕與空白 modal（最多 4,000 字元），原文字 reply 仍為 12,000。表單隨機 ticket 綁定點選者／task／question／origin，最長 10 分鐘且不超過問題期限，最多 256 份；提交前消耗，送答仍經同一 durable engine。暫停／restart／過期／已答／換 context 拒絕，不預填批准答案、不重送未知送達。卡片不觸發 mentions；送答成功與 Discord 確認失敗分開回報。
 問題保存 session／assignment／phase／sequence／snapshot fingerprint；送答前再核對、持久化 sending、不重試不明送達。
 同 wave Worker 繼續工作，不固定 Lead 分工；blocked Assignment 回 working/done、原 turn 保留 response correlation。
 有問題時 task blocked，回答後恢復 planning/running/synthesizing；不能把 pending 問題當成完成報告。

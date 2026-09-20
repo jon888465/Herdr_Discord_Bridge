@@ -18,7 +18,7 @@
 
 ## Phase 2：多 Agent blocked continuation（已實作，待 live 驗收）
 
-- task／assignment／question identity、durable 問題佇列與明確文字指令；點選 UI 未實作。
+- task／assignment／question identity、durable 問題佇列與明確文字指令；Discord 問題按鈕／modal 已實作，Agent/workspace 選單仍待做。
 - 精確 reply routing、過期／重複回答防護、blocked 後繼續排程。
 - 其他同 wave Worker 繼續；原有 wave barrier 保留。取消等待 in-flight answer，重啟問題 unknown、不自動送答。
 

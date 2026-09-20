@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -11,7 +12,11 @@ import {
   ThreadChannel,
   TextChannel,
   StringSelectMenuBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
 } from "discord.js";
+import type { TeamQuestion } from "./team-task-store.js";
 import type { DiscordConfig } from "./config.js";
 import {
   agentHeader,
@@ -31,6 +36,21 @@ import { RoutingStore } from "./routing.js";
 
 const BUTTON_PREFIX = "hdb.approve.";
 const MODEL_SELECT_PREFIX = "hdb.model.";
+const QUESTION_PREFIX = "hdb.tq.";
+const ANSWER_PREFIX = "hdb.tqa.";
+type QuestionHandler = (
+  context: RoutingContext,
+  taskId: string,
+  questionId: string,
+  answer?: string,
+) => Promise<TeamQuestion>;
+interface AnswerTicket {
+  context: RoutingContext;
+  taskId: string;
+  questionId: string;
+  expiresAt: number;
+}
+
 export const SHORT_COMMANDS = new Set([
   "help",
   "workspaces",
@@ -93,6 +113,8 @@ export class DiscordAdapter {
   private promptHandler: PromptHandler | null = null;
   private modelSelectHandler: ModelSelectHandler | null = null;
   private paused = false;
+  private questionHandler: QuestionHandler | null = null;
+  private answerTickets = new Map<string, AnswerTicket>();
 
   constructor(
     private readonly config: DiscordConfig,
@@ -119,7 +141,10 @@ export class DiscordAdapter {
     );
     this.client.on(
       Events.InteractionCreate,
-      (interaction) => void this.handleInteraction(interaction),
+      (interaction) =>
+        void this.handleInteraction(interaction).catch((error) =>
+          console.error(`Discord interaction failed: ${safeError(error)}`),
+        ),
     );
   }
 
@@ -137,6 +162,45 @@ export class DiscordAdapter {
 
   onModelSelect(handler: ModelSelectHandler): void {
     this.modelSelectHandler = handler;
+  }
+
+  onTeamQuestion(handler: QuestionHandler): void {
+    this.questionHandler = handler;
+  }
+
+  async postTeamQuestion(
+    message: Message,
+    taskId: string,
+    question: TeamQuestion,
+    workspaceId: string,
+  ): Promise<void> {
+    const content = `❓ Team Task ${taskId} · workspace ${workspaceId} · ${question.assignmentId ?? question.phase} · ${question.agent.agent ?? "Agent"} · ${question.agent.pane_id}\n${question.id} · ${question.state}\n${question.snapshot}\nteam reply ${taskId} ${question.id} <answer>`;
+    const chunks = splitDiscordText(content);
+    const id = `${QUESTION_PREFIX}${taskId}.${question.id}`;
+    if (
+      id.length > 100 ||
+      !/^[\w-]+$/.test(taskId) ||
+      !/^[\w-]+$/.test(question.id)
+    )
+      throw new Error("invalid Team question component identity");
+    const pending =
+      question.state === "pending" &&
+      Date.parse(question.expiresAt) > Date.now();
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(id)
+        .setLabel("回答這個問題")
+        .setStyle(ButtonStyle.Primary),
+    );
+    for (const [index, content] of chunks.entries()) {
+      const options = {
+        content,
+        allowedMentions: { parse: [] as never[] },
+        components: index === chunks.length - 1 && pending ? [row] : [],
+      };
+      if (index === 0) await message.reply(options);
+      else await (message.channel as TextChannel | ThreadChannel).send(options);
+    }
   }
 
   isPaused(): boolean {
@@ -361,11 +425,24 @@ export class DiscordAdapter {
 
   private async handleInteraction(interaction: Interaction): Promise<void> {
     if (this.paused) {
-      if (interaction.isButton() || interaction.isStringSelectMenu())
+      if (
+        interaction.isButton() ||
+        interaction.isStringSelectMenu() ||
+        interaction.isModalSubmit()
+      )
         await interaction.reply({
           content: "⏸️ Discord command handling is paused.",
           ephemeral: true,
         });
+      return;
+    }
+    if (
+      (interaction.isButton() &&
+        interaction.customId.startsWith(QUESTION_PREFIX)) ||
+      (interaction.isModalSubmit() &&
+        interaction.customId.startsWith(ANSWER_PREFIX))
+    ) {
+      await this.handleTeamQuestionInteraction(interaction);
       return;
     }
     if (
@@ -465,6 +542,133 @@ export class DiscordAdapter {
         content: `❌ Could not deliver approval: ${safeError(error)}`,
         ephemeral: true,
       });
+    }
+  }
+
+  private async handleTeamQuestionInteraction(
+    interaction: Interaction,
+  ): Promise<void> {
+    if (!interaction.isButton() && !interaction.isModalSubmit()) return;
+    const channel = interaction.channel;
+    const parentId = channel?.isThread()
+      ? channel.parentId
+      : interaction.channelId;
+    if (
+      !interaction.guildId ||
+      !channel ||
+      !parentId ||
+      !this.isAllowed(interaction.guildId, parentId, interaction.user.id)
+    ) {
+      await interaction.reply({
+        content: "⛔ You are not authorized to answer this Team question.",
+        ephemeral: true,
+      });
+      return;
+    }
+    const context: RoutingContext = {
+      guildId: interaction.guildId,
+      channelId: parentId,
+      threadId: channel.isThread() ? channel.id : undefined,
+      userId: interaction.user.id,
+    };
+    const now = Date.now();
+    for (const [id, ticket] of this.answerTickets)
+      if (ticket.expiresAt <= now) this.answerTickets.delete(id);
+    let deliveredQuestion: string | undefined;
+    try {
+      if (!this.questionHandler)
+        throw new Error("Team question replies are unavailable");
+      if (interaction.isButton()) {
+        if (interaction.message.author.id !== this.client.user?.id)
+          throw new Error("question card is not from this bridge");
+        const ids = interaction.customId
+          .slice(QUESTION_PREFIX.length)
+          .split(".");
+        if (ids.length !== 2 || ids.some((id) => !/^[\w-]{1,45}$/.test(id)))
+          throw new Error("invalid question card");
+        const question = await this.questionHandler(context, ids[0], ids[1]);
+        if (
+          question.state !== "pending" ||
+          Date.parse(question.expiresAt) <= Date.now()
+        )
+          throw new Error(
+            "question is no longer pending; refresh team questions",
+          );
+        if (this.answerTickets.size >= 256)
+          throw new Error(
+            "too many open answer forms; close or wait for existing forms to expire",
+          );
+        const id = ANSWER_PREFIX + randomUUID();
+        this.answerTickets.set(id, {
+          context,
+          taskId: ids[0],
+          questionId: ids[1],
+          expiresAt: Math.min(
+            Date.parse(question.expiresAt),
+            Date.now() + 600000,
+          ),
+        });
+        const input = new TextInputBuilder()
+          .setCustomId("answer")
+          .setLabel("閱讀問題卡片後，輸入要送給 Agent 的回答")
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(true)
+          .setMinLength(1)
+          .setMaxLength(4000);
+        try {
+          await interaction.showModal(
+            new ModalBuilder()
+              .setCustomId(id)
+              .setTitle("回答 Team 問題")
+              .addComponents(
+                new ActionRowBuilder<TextInputBuilder>().addComponents(input),
+              ),
+          );
+        } catch (error) {
+          this.answerTickets.delete(id);
+          throw error;
+        }
+        return;
+      }
+      const ticket = this.answerTickets.get(interaction.customId);
+      if (!ticket || JSON.stringify(ticket.context) !== JSON.stringify(context))
+        throw new Error(
+          "answer form is expired, already used, or belongs to another user/context; reopen the question card",
+        );
+      // Consume before the first await: a duplicate interaction can never send twice.
+      this.answerTickets.delete(interaction.customId);
+      const answer = interaction.fields.getTextInputValue("answer");
+      if (!answer.trim() || answer.length > 4000)
+        throw new Error(
+          "answer must contain 1–4000 characters; use team reply for longer answers",
+        );
+      await interaction.deferReply({ ephemeral: true });
+      await this.questionHandler(
+        context,
+        ticket.taskId,
+        ticket.questionId,
+        answer,
+      );
+      deliveredQuestion = ticket.questionId;
+      await interaction.editReply({
+        content: `✅ Answer delivered for ${ticket.questionId}; waiting for the original turn's report.`,
+        allowedMentions: { parse: [] },
+      });
+    } catch (error) {
+      const content = deliveredQuestion
+        ? `Answer was delivered for ${deliveredQuestion}; Discord confirmation failed. Check team questions/status before taking further action.`
+        : `❌ Team answer could not be confirmed: ${safeError(error)}`;
+      if (interaction.deferred || interaction.replied)
+        await interaction.editReply({
+          content,
+          allowedMentions: { parse: [] },
+        });
+      else
+        await interaction.reply({
+          content,
+          ephemeral: true,
+          allowedMentions: { parse: [] },
+        });
     }
   }
 

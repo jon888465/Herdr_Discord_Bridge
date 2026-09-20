@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TeamTaskStore } from "../src/team-task-store.js";
 import { TeamTaskEngine } from "../src/team-task-engine.js";
-import { handleCommand } from "../src/main.js";
+import { handleCommand, handleTeamQuestionAnswer } from "../src/main.js";
 import { RoutingStore } from "../src/routing.js";
 import { createConsoleContext } from "../src/console.js";
 import { parseConsoleCommand } from "../src/console.js";
@@ -486,6 +486,73 @@ test("report completion cannot release reservations while answer acknowledgement
     await reply;
     assert.equal((await f.done).state, "completed");
     assert.equal(f.streams.size, 0);
+  } finally {
+    await f.engine.cancel("task");
+    await f.done;
+    f.close();
+  }
+});
+
+test("question modal callback uses durable reply validation and original Discord scope", async () => {
+  const f = fixture();
+  try {
+    await until(() => f.store.get("task").questions?.length === 2);
+    const routing = new RoutingStore(join(f.dir, "ui-routing.json"));
+    const context = {
+      guildId: "g",
+      channelId: "thread-a",
+      threadId: "thread-a",
+      userId: "user",
+    };
+    routing.bind(context, { workspaceId: "w" });
+    const runtime = {
+      tasks: f.engine,
+      routing,
+      config: { allowedWorkspaceIds: ["w"] },
+    } as unknown as Parameters<typeof handleTeamQuestionAnswer>[4];
+    const q = f.store.get("task").questions![0];
+    assert.equal(
+      (
+        await handleTeamQuestionAnswer(
+          context,
+          "task",
+          q.id,
+          undefined,
+          runtime,
+        )
+      ).snapshot,
+      q.snapshot,
+    );
+    const wrong = { ...context, threadId: "other" };
+    routing.bind(wrong, { workspaceId: "w" });
+    await assert.rejects(
+      handleTeamQuestionAnswer(wrong, "task", q.id, undefined, runtime),
+      /originating/,
+    );
+    f.snapshots.set(q.agent.pane_id, "new question");
+    await assert.rejects(
+      handleTeamQuestionAnswer(context, "task", q.id, "old answer", runtime),
+      /changed/,
+    );
+    assert.equal(f.answers.length, 0);
+    f.snapshots.set(q.agent.pane_id, q.snapshot);
+    await handleTeamQuestionAnswer(
+      context,
+      "task",
+      q.id,
+      "Yes  Use A",
+      runtime,
+    );
+    assert.equal(f.answers[0], `${q.agent.pane_id}:Yes  Use A`);
+    await assert.rejects(
+      handleTeamQuestionAnswer(context, "task", q.id, "again", runtime),
+      /replyable/,
+    );
+    routing.bind(context, { workspaceId: "other" });
+    await assert.rejects(
+      handleTeamQuestionAnswer(context, "task", q.id, undefined, runtime),
+      /workspace/,
+    );
   } finally {
     await f.engine.cancel("task");
     await f.done;
