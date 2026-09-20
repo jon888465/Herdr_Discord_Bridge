@@ -17,3 +17,7 @@ Workflow 只需 contents:read，checkout 不保留 credentials，不使用 Disco
 TypeScript `rootDir: "."` 產生 `dist/src/index.js`；原 package.json 的 bin/start/dry-run 卻指向不存在的 `dist/index.js`。已統一 npm scripts／bin／lockfile 至實際路徑，並在 src/index.ts 加上 Node shebang，與 Herdr manifest 使用同一入口。
 
 入口測試在臨時設定中明確停用 Discord，確認 npm start 與 packaged bin 到達正確設定驗證並以 exit 1 回報 disabled；不連線 Discord、Herdr 或使用真實 token。這只測試入口可達與啟動拒絕，不代表 dry-run watcher 或 live Bridge 已運行。
+
+## 第一輪 CI 發現的 macOS 問題
+
+2026-09-20 Ubuntu 原始完整套件206/206通過；macOS2項 restart fixtures 因系統 Bash 不提供 mapfile 失敗（詳見 ISSUE-006/021）。run.sh 改用 jq JSON選取與 read loop，維持專用 bridge workspace／tab 與不碰其他 Agent 的限制；修正後結果另記。這是腳本實際相容性修正，不以改 CI shell 或跳過測試規避問題。

@@ -63,6 +63,12 @@ console.log(JSON.stringify({result}));
         .map((line) => JSON.parse(line) as string[]);
       if (scenario === "ambiguous" || scenario === "legacy") {
         assert.notEqual(run.status, 0);
+        assert.match(
+          run.stderr,
+          scenario === "ambiguous"
+            ? /Multiple workspaces named bridge/
+            : /Existing bridge panes outside/,
+        );
         assert.ok(
           !calls.some((args) => ["close", "move", "create"].includes(args[1])),
         );

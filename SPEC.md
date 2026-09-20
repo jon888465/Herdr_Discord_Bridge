@@ -29,7 +29,7 @@ Plugin 以 TypeScript 編譯至 `dist/`；npm start／dry-run／packaged bin 與
 tab，也不搬移其他 Agent pane。依名稱查找 `bridge` workspace，沒有時以專案 cwd
 建立並保留 focus；同名多個時拒絕，不猜測 ID。若其他 workspace 尚有舊 bridge
 pane，停止並列出位置，要求先明確遷移／停止舊 bridge，避免重複 bot 程序。
-選定目標 tab 後，僅關閉該 tab 明確標示 Discord bridge 且無 Agent 的 pane；
+腳本使用相容 macOS 系統 Bash 的 jq 選取與 read loop，不依賴 Bash4 mapfile。選定目標 tab 後，僅關閉該 tab 明確標示 Discord bridge 且無 Agent 的 pane；
 若 bridge 是唯一 pane，先 split 保留 tab。缺少 tab 1 時停止，不關閉 pane。
 Herdr 會注入 `HERDR_SOCKET_PATH` 與 `HERDR_PLUGIN_CONFIG_DIR`；standalone
 執行時也支援文件定義的預設 socket 與 `HERDR_SESSION` 解析方式。

@@ -15,3 +15,7 @@ Next action: inspect whether branch commit/push/draft PR already happened. If no
 Other known backlog: real Discord/Herdr/CLI acceptance, Agent/workspace select menu, opt-in pane mirror, durable delivery retry, provider quota telemetry, non-Codex native adapters, journal retention/compaction and cross-process writer lock, proven task resume. These are not silently completed by the question UI. Do not switch credentials/accounts or assume CLI quota reset.
 
 Receiver pending. Verify source stopped and actual HEAD/dirty files before overlapping writes. Record receiving identity and evidence separately; this packet is not an ownership lock.
+
+## Delivery / CI continuation (2026-09-20)
+
+Initial UI/entrypoint/CI commit is local8478feb / remotee7b9118e48c463df4a2b75cc6c457e909c61e9a4, identical treee845091e438a3c251e87982778ab12df752b272d. Draft PRhttps://github.com/jon888465/Herdr_Discord_Bridge/pull/1 targets Phase4. Run35508981385: Ubuntu206/206 PASS; macOS203pass/2fail/1existing Linux-only skip. Actual mac failure: run.sh uses mapfile absent from system Bash. Source now fixes script using jq arrays/read loop and strengthens refusal reasons in existing restart tests; no real Herdr used. Next: commit/push this fix preserving scripts/run.sh Git mode100755, rerun both CI jobs, record final evidence. Do not misdiagnose the CI failure as socket EPERM; IPC tests passed on hosted runners.
