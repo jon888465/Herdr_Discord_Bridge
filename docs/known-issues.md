@@ -9,21 +9,22 @@
 | ISSUE-003 | 預覽與 final 未更新                                                             | 已修正、待驗收   | 重啟後驗證 metadata 更新與截圖情境                                                                                  |
 | ISSUE-004 | Team 成員可跨 workspace 混入，且 stale mapping 容易造成誤解                     | 已修正、待驗收   | 重啟後確認同 workspace 限制、持久化與 stale 顯示                                                                    |
 | ISSUE-005 | 本機 current 顯示未選取 Agent                                                   | 已修正、待驗收   | workspace selection 回歸修正後須重新驗收；先前 shared-thread 驗收歷史保留                                           |
-| ISSUE-006 | 重啟 bridge 後 pane 所屬 workspace／位置改變                                    | 已驗收           | 2026-09-10 live topology 驗證完成；後續觀察重啟保留                                                                 |
-| ISSUE-007 | 程序啟動未阻止同 bot 重複實例                                                   | 重新開啟／待調查 | 2026-09-18 完整套件入口逾時再現；核對負載與 startup 時序，live 第二實例拒絕仍待驗收                                 |
+| ISSUE-006 | 重啟 bridge 後 pane 所屬 workspace／位置改變                                    | 已修正、待驗收   | 2026-09-20 macOS mapfile 相容性已修正、CI 通過；live 待驗                                                                 |
+| ISSUE-007 | 程序啟動未阻止同 bot 重複實例                                                   | 重新開啟／待調查 | 2026-09-20 兩平台 CI duplicate-entrypoint 通過；先前 10 秒逾時根因未定，live 待驗收                                 |
 | ISSUE-008 | Discord current／回應仍引用 Herdr 已不存在的舊 pane，且串流回報 session changed | 重新開啟／待調查 | 取得該 Discord thread 的 current 輸出與 bridge 啟動版本；重啟新版後以 live prompt 重現                              |
-| ISSUE-010 | 1:1:N orchestration、Discord mirror 與選擇 UI                                   | 修正中／待驗收   | Phase 1 durable task／reconciliation／cancel 已實作見 ISSUE-018；blocked continuation、mirror 與 UI 仍待做          |
+| ISSUE-010 | 1:1:N orchestration、Discord mirror 與選擇 UI                                   | 修正中／待驗收   | Phase 1–4 與問題按鈕已實作；Agent/workspace 選單、mirror、live 仍待做          |
 | ISSUE-011 | 選取 agy 後 bridge 沒顯示追問、無法回答                                         | 已修正、待驗收   | 本機快照／blocked reply 自動化完成後進行 live agy 驗收                                                              |
-| ISSUE-012 | Team 多 Agent 同時提問識別                                                      | 已修正、待驗收   | Phase 2 durable questions/reply 已實作；IPC 完整測試與 live 驗收仍受阻／待做                                        |
+| ISSUE-012 | Team 多 Agent 同時提問識別                                                      | 已修正、待驗收   | durable questions/reply 與 modal 已實作；完整 CI 見 ISSUE-021，live 待验                                        |
 | ISSUE-013 | Lead plan 解析失敗或誤取 planning prompt 中的範例 JSON                          | 已修正、待驗收   | 重啟新版 bridge，以新 team ask 驗證 plan 不取 prompt／歷史，兩 Worker 均收到正確 Assignment                         |
 | ISSUE-014 | 未等 Worker 完成本次任務便以歷史輸出標記 done 並進入統整                        | 重新開啟／待驗收 | 載入本次修正後重啟 bridge，驗證 atomic prompt wait 的 done 回傳可直接產生本次報告，且所有 Worker 完成後才 synthesis |
 
-| ISSUE-015 | Team 僅能加入已啟動 pane，缺少 profile 與 session lifecycle | 修正中 | 完整檢查後驗收 lazy start／重用／Lead 動態分工 |
-| ISSUE-016 | use 自動刷 CLI 畫面，console 對話與終端檢視混在一起 | 修正中 | 完整檢查後驗收安靜對話與獨立 attach/watch |
+| ISSUE-015 | Team 僅能加入已啟動 pane，缺少 profile 與 session lifecycle | 已修正、待驗收 | 完整 CI 見 ISSUE-021；lazy start／重用／Lead 動態分工 live 待驗 |
+| ISSUE-016 | use 自動刷 CLI 畫面，console 對話與終端檢視混在一起 | 已修正、待驗收 | 完整 CI 見 ISSUE-021；安靜對話／attach/watch live 待驗 |
 | ISSUE-017 | quota 耗盡時缺少跨 CLI session 交接流程 | 已修正、待驗收 | Skill 靜態檢查完成；待真實跨 CLI 接手驗收 |
-| ISSUE-020 | Phase 4 Quota / Failover Manager | 已修正、待驗收 | 明確 quota 回報與驗證切換 fixtures 完成；provider watcher 未實作，IPC 全套／live 待驗 |
-| ISSUE-019 | Phase 3 Session Handoff Runtime | 已修正、待驗收 | checkpoint／ownership／receipt fixtures 完成；live 與 IPC 全套待驗 |
-| ISSUE-018 | Phase 1 Durable Task Engine、restart reconciliation 與 whole-team cancellation | 已修正、待驗收 | targeted fixtures 通過；完整套件受 socket EPERM 阻擋，需一般環境重跑及 live 驗收 |
+| ISSUE-021 | 完整 CI 缺口與 npm/bin 啟動路徑錯誤 | 已修正、待驗收 | Ubuntu206/206、macOS205pass/1平台skip；原始完整 gate 通過，live 待驗 |
+| ISSUE-020 | Phase 4 Quota / Failover Manager | 已修正、待驗收 | 明確 quota 回報與切換 fixtures／完整 CI 通過；provider watcher 未實作、live 待驗 |
+| ISSUE-019 | Phase 3 Session Handoff Runtime | 已修正、待驗收 | checkpoint／ownership／receipt 與完整 CI 通過；live 待驗 |
+| ISSUE-018 | Phase 1 Durable Task Engine、restart reconciliation 與 whole-team cancellation | 已修正、待驗收 | 完整 CI 已於 ISSUE-021 通過；本機仍限制 IPC，live 驗收待做 |
 
 2026-09-09 自動化驗證：`npm run check`（typecheck、build、33/33 tests）、`npm run lint`、`git diff --check` 通過。這是前一輪程式驗證紀錄，不代表已做 live Discord 驗收。本輪僅整理文件，未重跑程式測試。
 
@@ -491,7 +492,7 @@ Team Task 複雜性：同一個 1:1:N 任務可能同時有多個 Agent／Assign
 - 原始 `npm test` build 通過，但 socket fixtures 無法 listen，instance-lock 子程序卡住；人工停止 exit 130，無完整總數，不列全通過。
 - 完整限時 compiled suite：`node --test --test-timeout=15000 dist/test/*.test.js`：**128 項，122 pass、5 fail、1 cancelled**。5 fail 為既有兩個 Herdr socket／三個 instance-lock fixtures（EPERM），1 為 killed-owner fixture 15 秒 timeout。未更改 socket 斷言或宣稱 live 故障／成功。
 
-限制／下一步：在允許 IPC 的環境重跑原始 npm test，並依 Phase 2 文件完成 Discord／console 兩 Worker、Lead synthesis／零 Worker 提問、多輪相同問題、回答途中取消與 restart live 驗收。Herdr 缺少原子 question compare-and-send，外部手動 pane 操作仍有競態；無 session metadata 或完全相同画面且無新 sequence 的問題不猜測。未提供點選 UI、restart 自動 resume、durable Discord retry、方向鍵選單或非 blocked 偵測。Timeout 包含使用者等待，不延長原 turn 期限。Journal 仍需後續 retention/compaction。
+限制／下一步：在允許 IPC 的環境重跑原始 npm test，並依 Phase 2 文件完成 Discord／console 兩 Worker、Lead synthesis／零 Worker 提問、多輪相同問題、回答途中取消與 restart live 驗收。Herdr 缺少原子 question compare-and-send，外部手動 pane 操作仍有競態；無 session metadata 或完全相同画面且無新 sequence 的問題不猜測。Phase 2 初版當時未提供點選 UI（後續增量見下方）、restart 自動 resume、durable Discord retry、方向鍵選單或非 blocked 偵測。Timeout 包含使用者等待，不延長原 turn 期限。Journal 仍需後續 retention/compaction。
 
 原始碼／build 已完成；未部署、未重啟使用者 Bridge，執行中版本未核對，舊訊息不補送。自動化不等於 live Herdr／Discord／CLI 驗收。ISSUE-014／015／016／018 不因此標成已驗收。
 
@@ -636,3 +637,53 @@ Phase 1 當時未包含 Phase 2 question queue／blocked continuation；2026-09-
 限制／下一步：在允許本機 IPC 的開發環境重跑原始 npm test，再依架構文件進行真實跨 CLI／quota／Discord scope／restart／ownership 驗收。額度觀察可能於下一次呼叫耗盡，不能保證 destination 有實際餘額；檔案改變需重新 checkpoint。Failover／handoff 分開 journal，崩潰邊界可能留下 orphan checkpoint 或最後狀態不同步，需人工查 evidence，不自動 replay。無 retention/compaction、跨程序 writer lock、provider-specific adapter、自動能力探測、mid-turn Team migration。Phase 3 的同機同工作樹、submodule 拒絕、ignored/external 不涵蓋與外部 writer 競態仍在。
 
 原始碼／build 完成；未 merge main、未部署／重啟使用者 Bridge，running version 未核對，舊訊息／工作不補送。Fixture 不能當成 live 驗收；既有 ISSUE-007/014 等狀態不因此關閉。
+
+
+## ISSUE-012 後續：Discord 問題按鈕／modal
+
+更新日期：2026-09-20。狀態：已修正、待驗收；不取代前述 Phase 2 歷史。
+
+症狀／根因：多 Agent 問題目前只能複製 task/question ID 用文字答題，手機使用不便；缺少保留原問題身分的點選入口。
+
+修正：Discord 通知／team questions 的 pending 問題卡加入「回答這個問題」與 blank modal；先呈現完整有界 snapshot，禁 mentions。隨機 once-only ticket 綁點選者及原 context，最多 256／10 分鐘／不超過問題 expiry。提交前消耗 ticket，callback 再核對 task origin、workspace、取消／restart，再走既有 durable engine live session/snapshot/sequence 檢查。不是單 Agent 的自動 continue approval，不替換 roster。未知送達不重試；Discord 確認失敗不改稱 Agent 送答失敗。詳見 [問題契約](team-question-queue.md)。
+
+驗證（2026-09-20，Linux Node 24.19.0、fake Discord/Herdr）：新增 22 項 UI tests 加 1 項真實 TeamTaskEngine fixture 整合。涵蓋長卡片／mentions、空白視窗、正確點選者、scope／unauthorized、過期／paused／restart、兩次並行提交、cancel／answered／unknown、超長／空答案、modal/ack 失敗、session snapshot 改變與 console/UI 共用去重。初輪 UI/相關測試 44/44 PASS，後增 acknowledgement failure regression。最終 targeted 162/162 PASS，typecheck/build/lint PASS（51 TypeScript files）。沒有呼叫真實 Discord 或模型。
+
+下一步／未驗證：真實 iOS Discord modal、兩 Worker/兩操作者交錯回答、timeout/restart、live session replacement；Agent/workspace select menu、CLI 方向鍵、mirror 仍待做。沒有部署／重啟／補送舊通知；既有按鈕僅於點選時再驗證，完成後不會自動編輯所有舊卡片。表單 answers 上限 4,000 字元，文字 reply 仍 12,000。
+
+## ISSUE-021：完整 CI 與 standalone 啟動入口
+
+更新日期：2026-09-20。狀態：已修正、待驗收；原始完整 CI 已通過，實際 Bridge live 驗收仍待完成。
+
+症狀／已確認根因：本地完整套件因 IPC listen EPERM 無法通過，repo 未配置 remote CI；另 package.json 的 npm start/dry-run/bin 指向 dist/index.js，tsconfig 實際產出 dist/src/index.js，將導致 MODULE_NOT_FOUND。
+
+修正：新增 Ubuntu/macOS Node 22 GitHub Actions 原始完整測試；維持 IPC assertion、無 skip／timeout 放寬，job 10 分鐘上限。修正 scripts/bin 與 lockfile、加 Node shebang。新增入口 fixture 以明確 disabled Discord 設定驗證 npm start/bin 都抵達真實 startup validation；不使用 credentials／網路。文件見 [CI](ci.md)。
+
+本機驗證（2026-09-20）：typecheck/build/lint PASS（51 TS files），targeted 162/162 PASS；完整 compiled suite `node --test --test-timeout=15000 dist/test/*.test.js` 為 **206：200 pass、5 fail、1 cancelled**，exit1。失敗為相同 2 Herdr socket + 3 instance-lock fixtures（EPERM/無 lock），killed-owner fixture 15 秒 cancelled。未降低 assertion；原始 npm test gate 尚未通過。新增共 24 tests（22 UI、1 engine 整合、1 entrypoint）。格式／diff／64 個本機文件連結檢查通過。
+
+下一步：推送 followup-team-question-ui-ci，建立以 phase4-quota-failover-manager 為 base 的 draft PR，收集兩個平台實際 run/job/log；若遠端失敗，保留錯誤並修正可重現問題。沒有 merge main、部署／重啟 live Bridge。CI 原始碼與 fixture 檢查不等於實際 Discord／Herdr／CLI 驗收。
+
+
+### ISSUE-021 / ISSUE-006：第一輪遠端 CI 與 macOS 修正
+
+2026-09-20，[CI run 35508981385](https://github.com/jon888465/Herdr_Discord_Bridge/actions/runs/35508981385)，PR #1，code head e7b9118e48c463df4a2b75cc6c457e909c61e9a4（local8478feb，tree e845091e438a3c251e87982778ab12df752b272d）。Ubuntu Node22 原始 npm test **206/206 PASS**，typecheck/build/lint 通過；先前本機 EPERM 的 socket 與 duplicate-instance fixtures 在此環境通過。
+
+macOS26 arm64／Node22.23.2：原始套件 **206 total、203 pass、2 fail、0 cancelled、1 skipped**；skip 是既有 Linux-only killed-owner test。兩項失敗均為 restart existing/create：`scripts/run.sh: line 66: mapfile: command not found`，exit127。ISSUE-006 的 2026-09-10 live topology 驗收歷史保留，但本次 macOS script compatibility 重新開啟／修正，不能沿用全部已驗收。
+
+已確認根因：run.sh 使用 Bash4 mapfile，而 CI 的系統 Bash 無此 builtin；非 Herdr API 或 Agent pane 改動。改為 jq JSON 陣列計數／明確選取 workspace/tab，pane清單以 Bash相容 read loop 讀取。保留重名拒絕、legacy bridge 拒絕、先選 tab 再關閉、只替換無 Agent 的專用 bridge pane、空清單不關閉。既有 ambiguous/legacy fixtures 加驗證正確拒絕原因，避免因 shell缺指令而假通過。此增量將重新跑兩個平台 CI；尚未實際重啟使用者 Bridge。
+
+2026-09-20 macOS 修正後本地 `bash -n scripts/run.sh`、build、4/4 restart regression、diff check 通過；真實 macOS 結果以後續 hosted CI 為準。
+
+
+### ISSUE-021：最終遠端 gate（2026-09-20）
+
+[CI run 35509147934](https://github.com/jon888465/Herdr_Discord_Bridge/actions/runs/35509147934)，code commit **0bc5bda28b9dc9cf906875679d3122f31580873f**（local e60cc97b813f2416029ff0cd1dcf8bf3cfd63bc4，identical tree0f795682d03219d8859f5b495117fbf915b1b557）。兩平台均 npm ci/typecheck/lint/build/original npm test 成功，沒有新增 skip 或放寬任何測試 timeout：
+
+| 平台／Node | 原始 suite | 結果 | Job |
+| --- | --- | --- | --- |
+| Ubuntu／22.23.2 | 206 | 206 pass、0 fail、0 cancelled、0 skipped | [106073903775](https://github.com/jon888465/Herdr_Discord_Bridge/actions/runs/35509147934/job/106073903775) |
+| macOS26 arm64／22.23.2 | 206 | 205 pass、0 fail、0 cancelled、1 skipped | [106073903533](https://github.com/jon888465/Herdr_Discord_Bridge/actions/runs/35509147934/job/106073903533) |
+
+macOS 唯一 skip 為原有 Linux-only killed-owner test，該 test 已在 Ubuntu 通過。第一輪 macOS mapfile 失敗確實修正後重跑通過，非 rerun 偶然掩蓋或變更 CI shell。歷史 ISSUE-007 的 duplicate-entrypoint 10 秒逾時此輪未重現，過去確切根因仍未確認，不因此聲稱 live duplicate-instance 已驗收。Phase 1–4、AgentPool／console、問題 UI 在這份 code tree 的 fixture gate 已通過；本地 sandbox 的 EPERM 紀錄仍保留，但不再把整個專案的完整 gate 標成受阻。
+
+[Draft PR #1](https://github.com/jon888465/Herdr_Discord_Bridge/pull/1) 仍以 Phase4 分支為 base；沒有 merge main、部署／重啟使用者 Bridge，也沒有真實 Discord／CLI prompt。最後補充僅 Markdown 文件，不重跑程式測試；測試證據指向上述 code commit，不假報新文件 commit 已受測。

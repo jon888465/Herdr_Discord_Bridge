@@ -1,6 +1,6 @@
 # Team Orchestration 實作計畫
 
-更新：2026-09-20。此文件以目前增量取代早期 vertical-slice 提案；歷史驗證保留於 known-issues。
+更新：2026-09-20。此文件以目前增量取代早期 vertical-slice 提案；歷史驗證保留於 known-issues。Phase 1–4 及問題 modal 的完整 fixture gate 已於 Ubuntu／macOS CI 通過（ISSUE-021），各 phase 的 live 驗收仍待完成。
 
 ## Phase 1：Durable Task Engine
 
@@ -18,7 +18,7 @@
 
 ## Phase 2：多 Agent blocked continuation（已實作，待 live 驗收）
 
-- task／assignment／question identity、durable 問題佇列與明確文字指令；點選 UI 未實作。
+- task／assignment／question identity、durable 問題佇列與明確文字指令；Discord 問題按鈕／modal 已實作，Agent/workspace 選單仍待做。
 - 精確 reply routing、過期／重複回答防護、blocked 後繼續排程。
 - 其他同 wave Worker 繼續；原有 wave barrier 保留。取消等待 in-flight answer，重啟問題 unknown、不自動送答。
 

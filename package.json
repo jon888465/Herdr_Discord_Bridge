@@ -4,7 +4,7 @@
   "description": "Discord Gateway bridge for controlling coding agents running in Herdr panes",
   "type": "module",
   "bin": {
-    "herdr-discord-bridge": "dist/index.js"
+    "herdr-discord-bridge": "dist/src/index.js"
   },
   "scripts": {
     "build": "tsc",
@@ -14,8 +14,8 @@
     "lint": "node scripts/lint.mjs",
     "test": "npm run build && node --test dist/test/*.test.js",
     "check": "npm run typecheck && npm test",
-    "start": "node dist/index.js",
-    "dry-run": "node dist/index.js --dry-run"
+    "start": "node dist/src/index.js",
+    "dry-run": "node dist/src/index.js --dry-run"
   },
   "keywords": [
     "herdr",

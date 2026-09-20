@@ -38,7 +38,11 @@ import {
   QuotaFailoverStore,
   type QuotaState,
 } from "./quota-failover.js";
-import { TeamTaskStore } from "./team-task-store.js";
+import {
+  TeamTaskStore,
+  terminalTask,
+  type TeamQuestion,
+} from "./team-task-store.js";
 import {
   AgentWatcher,
   type AgentRemoved,
@@ -54,6 +58,7 @@ import type {
   AgentRecord,
   ApprovalRecord,
   TargetMapping,
+  RoutingContext,
   WorkspaceRecord,
 } from "./types.js";
 import { agentLabel, workspacePath } from "./types.js";
@@ -184,6 +189,19 @@ async function startBridge(
     config.allowedWorkspaceIds,
   );
   failover.reconcile();
+  discord.onTeamQuestion((context, taskId, questionId, answer) =>
+    handleTeamQuestionAnswer(context, taskId, questionId, answer, {
+      config,
+      herdr,
+      routing,
+      discord,
+      activeStreams,
+      pool,
+      tasks,
+      handoffs,
+      failover,
+    }),
+  );
 
   discord.onCommand(async (context, command, args) => {
     try {
@@ -947,6 +965,49 @@ async function askAgent(
   );
 }
 
+export async function handleTeamQuestionAnswer(
+  context: RoutingContext,
+  taskId: string,
+  questionId: string,
+  answer: string | undefined,
+  runtime: Runtime,
+): Promise<TeamQuestion> {
+  if (!runtime.tasks) throw new Error("Team Task Engine unavailable");
+  const task = runtime.tasks.store.get(taskId);
+  const mapping = runtime.routing.resolve(context);
+  if (
+    !mapping?.workspaceId ||
+    mapping.workspaceId !== task.workspaceId ||
+    (runtime.config.allowedWorkspaceIds.length &&
+      !runtime.config.allowedWorkspaceIds.includes(task.workspaceId))
+  )
+    throw new Error("select the task's authorized workspace before answering");
+  if (
+    !task.origin ||
+    task.origin.guildId !== context.guildId ||
+    task.origin.channelId !== context.channelId ||
+    task.origin.threadId !== context.threadId
+  )
+    throw new Error(
+      "Team questions must be accessed from the originating Discord context",
+    );
+  const question = task.questions?.find((q) => q.id === questionId);
+  if (
+    !question ||
+    question.state !== "pending" ||
+    Date.parse(question.expiresAt) <= Date.now() ||
+    task.recovery ||
+    terminalTask(task.state) ||
+    task.state === "cancelling"
+  )
+    throw new Error(
+      "question is no longer replyable; refresh team questions/status",
+    );
+  if (answer !== undefined)
+    await runtime.tasks.reply(taskId, questionId, answer);
+  return question;
+}
+
 async function teamCommand(
   args: string[],
   context: CommandContext,
@@ -989,6 +1050,14 @@ async function teamCommand(
           context.message,
           `Answer delivered for ${args[1]}; waiting for the original turn's report.`,
         );
+      } else if (context.source !== "console" && task.questions?.length) {
+        for (const question of task.questions)
+          await runtime.discord.postTeamQuestion(
+            context.message,
+            task.taskId,
+            question,
+            task.workspaceId,
+          );
       } else {
         await runtime.discord.reply(
           context.message,
@@ -1343,6 +1412,24 @@ async function reportOrchestrationEvent(
   context: CommandContext,
   runtime: Runtime,
 ): Promise<void> {
+  if (
+    event.type === "question_opened" &&
+    context.source !== "console" &&
+    runtime.tasks &&
+    event.questionId
+  ) {
+    const task = runtime.tasks.store.get(event.taskId);
+    const question = task.questions?.find((q) => q.id === event.questionId);
+    if (question) {
+      await runtime.discord.postTeamQuestion(
+        context.message,
+        task.taskId,
+        question,
+        task.workspaceId,
+      );
+      return;
+    }
+  }
   const messages: Partial<Record<OrchestrationEvent["type"], string>> = {
     question_opened: `❓ Team Task ${event.taskId} · workspace ${event.agent?.workspace_id} · ${event.assignmentId ?? event.phase} · ${event.agent?.agent ?? "Agent"} · ${event.paneId}\n${event.detail}\nteam reply ${event.taskId} ${event.questionId} <answer>`,
     task_started: `🧭 Team Task \`${event.taskId}\` started.`,
