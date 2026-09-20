@@ -63,7 +63,10 @@ ensure_herdr_server
 # remove a tab and make a global "first tab 1" lookup select another workspace.
 # Only an explicitly labelled non-Agent pane is eligible for replacement.
 workspace_json="$(herdr workspace list)"
-mapfile -t bridge_workspaces < <(printf "%s" "$workspace_json" | jq -r '.result.workspaces[] | select(.label == "bridge" or .name == "bridge") | .workspace_id')
+bridge_workspaces=()
+while IFS= read -r workspace; do
+  [[ -n "$workspace" ]] && bridge_workspaces+=("$workspace")
+done < <(printf "%s" "$workspace_json" | jq -r '.result.workspaces[] | select(.label == "bridge" or .name == "bridge") | .workspace_id')
 if [[ ${#bridge_workspaces[@]} -gt 1 ]]; then
   echo "Multiple workspaces named bridge; resolve duplicate names first. No panes were closed." >&2
   exit 1
@@ -87,13 +90,19 @@ if [[ -n "$legacy_bridges" ]]; then
   exit 1
 fi
 tab_json="$(herdr tab list)"
-mapfile -t target_tabs < <(printf "%s" "$tab_json" | jq -r --arg wk "$workspace_id" '.result.tabs[] | select(.workspace_id == $wk and .number == 1) | .tab_id')
+target_tabs=()
+while IFS= read -r tab; do
+  [[ -n "$tab" ]] && target_tabs+=("$tab")
+done < <(printf "%s" "$tab_json" | jq -r --arg wk "$workspace_id" '.result.tabs[] | select(.workspace_id == $wk and .number == 1) | .tab_id')
 if [[ ${#target_tabs[@]} != 1 ]]; then
   echo "Could not find exactly one tab 1 in workspace $workspace_id; no panes were closed." >&2
   exit 1
 fi
 tab_id="${target_tabs[0]}"
-mapfile -t bridge_panes < <(printf "%s" "$panes_json" | jq -r --arg tab "$tab_id" '.result.panes[] | select(.tab_id == $tab and (.agent // "") == "" and (.label == "Discord bridge" or .terminal_title == "Discord bridge" or .terminal_title_stripped == "Discord bridge")) | .pane_id')
+bridge_panes=()
+while IFS= read -r pane; do
+  [[ -n "$pane" ]] && bridge_panes+=("$pane")
+done < <(printf "%s" "$panes_json" | jq -r --arg tab "$tab_id" '.result.panes[] | select(.tab_id == $tab and (.agent // "") == "" and (.label == "Discord bridge" or .terminal_title == "Discord bridge" or .terminal_title_stripped == "Discord bridge")) | .pane_id')
 target_pane="$(printf "%s" "$panes_json" | jq -r --arg tab "$tab_id" '[.result.panes[] | select(.tab_id == $tab) | select((.agent // "") != "" or (.label != "Discord bridge" and .terminal_title != "Discord bridge" and .terminal_title_stripped != "Discord bridge"))][0].pane_id // empty')"
 if [[ -z "$target_pane" ]]; then
   # Preserve tab 1 if its only pane is the old bridge.

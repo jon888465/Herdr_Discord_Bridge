@@ -21,6 +21,7 @@
 | ISSUE-015 | Team 僅能加入已啟動 pane，缺少 profile 與 session lifecycle | 修正中 | 完整檢查後驗收 lazy start／重用／Lead 動態分工 |
 | ISSUE-016 | use 自動刷 CLI 畫面，console 對話與終端檢視混在一起 | 修正中 | 完整檢查後驗收安靜對話與獨立 attach/watch |
 | ISSUE-017 | quota 耗盡時缺少跨 CLI session 交接流程 | 已修正、待驗收 | Skill 靜態檢查完成；待真實跨 CLI 接手驗收 |
+| ISSUE-018 | `scripts/run.sh` 在 macOS 內建 Bash 上無法執行 | 已修正、待驗收 | 以 macOS `/bin/bash` 執行 restart regression，並驗證 `-r` 的 build/link/live 流程 |
 
 2026-09-09 自動化驗證：`npm run check`（typecheck、build、33/33 tests）、`npm run lint`、`git diff --check` 通過。這是前一輪程式驗證紀錄，不代表已做 live Discord 驗收。本輪僅整理文件，未重跑程式測試。
 
@@ -541,3 +542,17 @@ Team Task 複雜性：同一個 1:1:N 任務可能同時有多個 Agent／Assign
 未驗證：所有真實跨 CLI session 接手、AGY 原生歷史可讀性、CLI 自動 discovery、來源耗盡時與並行 writer 的實際操作。沒有重跑 Bridge build／unit tests；無原始碼修改、未重啟／部署，執行中 bridge 未驗證，舊訊息不補送。未全域安裝、未 commit／push。
 
 下一步：依 docs/session-handoff.md 驗收矩陣記錄實際 CLI 版本／ID／工作樹與接手結果；尚未有全 CLI 原生相容或 live 接手成功證據。
+
+## ISSUE-018：`scripts/run.sh` 不相容 macOS 內建 Bash
+
+更新日期：2026-09-21。狀態：已修正、待驗收。
+
+症狀：在 macOS 內建 `/bin/bash` 3.2 執行 `scripts/run.sh -r` 時，腳本進入 Herdr workspace／tab／pane 解析後會因 `mapfile: command not found` 中止，因此尚未完成 local plugin link 與 bridge pane 開啟。
+
+根因：`mapfile` 是 Bash 4 才提供的 builtin；專案腳本的 shebang 沒有要求新版 Bash，而 README 宣稱支援 macOS。
+
+修正：將三個 `mapfile` 呼叫改為 Bash 3.2 可用的 `while IFS= read -r` 陣列填充，保留空結果與多筆結果的原有判斷語意。
+
+驗證：2026-09-21 已確認 `/bin/bash` 為 GNU bash 3.2.57，`bash -n scripts/run.sh` 通過；`npm run build` 受目前受限環境禁止寫入既有 `dist/` 阻擋，尚未完成 macOS live Herdr restart、local link 與 Discord bridge 驗收。
+
+下一步：在可寫入的本機環境以 `/bin/bash scripts/run.sh -r` 執行 restart regression，確認 build、`herdr plugin link`、pane replacement 與新 bridge 啟動完整通過。
