@@ -79,3 +79,12 @@
 - Reconciled differences / uncertainty: pending; source native transcript unavailable.
 - Writer ownership evidence: pending; wait for source final response and verify no overlapping writer.
 - Accepted scope / next action / result: pending.
+
+## Source milestone after checkpoint
+
+- 2026-09-19：實作及本 packet 已 commit：`ed56de021703004b4144253e4e97dd35f61110fd`，message `feat: add durable team task engine with recovery and cancellation`。
+- 本節另以 handoff 文件 commit 保存。上述 checkpoint 時的 base/staged 紀錄是歷史，不代表目前仍待 commit。接收端第一步仍核對最新 git log/status，不重做 implementation commit。
+- 原始碼 commit 後工作樹乾淨、指定分支 ahead origin 1。
+- **Push 未完成**：automatic approval review 拒絕 `git push origin HEAD:refs/heads/phase1-durable-task-engine`，理由是使用者授權 local branch commit，未明確授權將完整 source 送至外部 GitHub 並更新 remote branch。不得換工具繞過；需使用者明確同意 push 後才可重試。
+- 沒有 merge／修改 main、沒有部署／重啟或額外背景 writer。来源在最終回覆後停止本輪寫入；接收端仍應核對實際狀態。
+- 這份 packet 仍是 checkpoint-only；尚無 OpenCode receiving receipt，不宣稱 takeover 成功。
