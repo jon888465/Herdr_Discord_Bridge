@@ -1,6 +1,6 @@
 # Team Orchestration 實作計畫
 
-更新：2026-09-19。此文件以目前增量取代早期 vertical-slice 提案；歷史驗證保留於 known-issues。
+更新：2026-09-20。此文件以目前增量取代早期 vertical-slice 提案；歷史驗證保留於 known-issues。
 
 ## Phase 1：Durable Task Engine
 
@@ -16,13 +16,13 @@
 完整架構及 live 驗收步驟見 [Durable Task Engine](durable-task-engine.md)。
 自動化完整與 targeted 結果記錄於 [ISSUE-018](known-issues.md)；unit tests 不等於 live acceptance。
 
-## Phase 2：多 Agent blocked continuation（未實作）
+## Phase 2：多 Agent blocked continuation（已實作，待 live 驗收）
 
-- task／assignment／question identity、問題佇列與選擇 UI。
+- task／assignment／question identity、durable 問題佇列與明確文字指令；點選 UI 未實作。
 - 精確 reply routing、過期／重複回答防護、blocked 後繼續排程。
-- 是否凍結其他工作、人工接手／恢復的政策。
+- 其他同 wave Worker 繼續；原有 wave barrier 保留。取消等待 in-flight answer，重啟問題 unknown、不自動送答。
 
-Phase 1 只保留 blocker 與狀態，不重用單 Agent thread-level approval 來假裝 Team 問答已完成。
+完整使用／限制與驗收见 [Phase 2 question queue](team-question-queue.md) 及 ISSUE-012。新寫入 schema v2，讀取 v1 後 mutation 升級；不重用單 Agent thread-level approval。
 
 ## 後续提案（未實作）
 

@@ -11,6 +11,7 @@ export interface TeamTurnContext {
   assignmentId?: string;
   signal?: AbortSignal;
   beforeDispatch?: () => void;
+  beforeComplete?: () => Promise<void>;
 }
 
 const sources: ReadSource[] = [
@@ -28,7 +29,7 @@ export async function runTeamTurn(
   timeoutMs: number,
   lines: number,
   context?: TeamTurnContext,
-  onBlocked?: () => void,
+  onBlocked?: (agent: AgentRecord) => void | Promise<void>,
 ): Promise<{ state: "done" | "blocked"; text: string; terminal: boolean }> {
   const signal = context?.signal;
   const check = () => signal?.throwIfAborted();
@@ -127,7 +128,8 @@ export async function runTeamTurn(
       );
     lastStatus = current.agent_status;
     if (lastStatus === "blocked" && onBlocked) {
-      onBlocked();
+      await onBlocked(current);
+      check();
       current = undefined;
       await delay(Math.min(100, Math.max(1, deadline - Date.now())));
       continue;
@@ -154,6 +156,8 @@ export async function runTeamTurn(
           transcript.turn.final.trim();
         if (!text)
           throw new Error(`Agent ${agent.pane_id} completed without a report`);
+        await context?.beforeComplete?.();
+        check();
         return { state: "done", text, terminal: false };
       }
     }
@@ -175,6 +179,8 @@ export async function runTeamTurn(
             throw new Error(
               `Agent ${agent.pane_id} completed without a report`,
             );
+          await context?.beforeComplete?.();
+          check();
           return { state: "done", text, terminal: true };
         }
       }

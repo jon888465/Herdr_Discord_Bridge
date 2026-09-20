@@ -35,13 +35,13 @@ Task lifecycle：
 
 Assignment 沿用 `pending → assigned → working → done`，並可 blocked／failed／cancelled；沒有另一套 running/completed 別名。
 已驗證的 plan 必須先保存，才開始 acquire／dispatch；每個重要 state transition、report、cancel intent 與 reconciliation 都進 journal。
-blocked Worker 可產生 partial synthesis，仍保留 blocked turn；相依工作 failed 不代表該 Worker 已停止。
+Phase 2 正常執行會等待 blocked 問題回答後的原 turn 報告；觀察失敗可產生 partial synthesis，仍保留未確認 turn；相依工作 failed 不代表該 Worker 已停止。
 派送後 timeout／capture failure 若留下未確認的 turn，task 保持 blocked/unknown，不把「觀察失敗」當作「程序停止」。
 
 ## 持久化與故障
 
 路徑：既有 state directory 下的 `team-tasks/<task-id>.json`，與 routing／Agent Pool 檔案分開。
-Schema version 為 1；每個 event 有連續 sequence、timestamp、type 與完整 after-image。
+Phase 2 新寫入 schema version 為 2，可讀舊 v1 並於 mutation 升級；每個 event 有連續 sequence、timestamp、type 與完整 after-image。
 整份 journal 透過同目錄唯一 temporary file、0600、file fsync、atomic rename 寫入；POSIX 再 fsync directory。
 Windows 保留 file fsync／rename，沒有 POSIX directory fsync 保證。
 單一檔案同時是 journal 與可重建狀態，避免 snapshot 與 journal 雙檔提交不一致。
@@ -75,7 +75,7 @@ Phase 1 的 recovery 是持久保存、核對與人工處理，不是自動 resu
 
 這是邏輯任務取消及可觀察停止確認；Herdr 沒有 compare-session-and-cancel 原子 API，核對與送訊號之間仍有外部 pane 操作的競態。
 一般 `cancel <pane>` 與單 Agent blocked reply 拒絕操作 Engine 保留的 session，避免繞過 task lifecycle。
-Phase 2 的 assignment/question reply queue、續接與選擇 UI 不在本階段。
+Phase 2 已接入 assignment/question reply queue 與原 turn 續接，見 [問題佇列](team-question-queue.md)；點選 UI 仍未實作。
 Console conversation／attach／watch 不改變；Discord 通知失敗不回滾 task，也没有持久化 delivery retry。
 
 ## Live acceptance still required

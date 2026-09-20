@@ -44,7 +44,7 @@
   validated Assignment plan, dispatches bounded work through Herdr, collects
   Worker reports, and asks the Lead for synthesis. Phase 1 now persists that same
   lifecycle and reconciles interrupted tasks without redispatch. Interactive
-  blocked-Assignment continuation remains Phase 2.
+  blocked-Assignment continuation now uses the Phase 2 durable question queue; live acceptance remains pending.
 
 ## Pending feature index
 
@@ -69,7 +69,7 @@ The local bridge console can explicitly select an existing Discord thread with
 thread route, sharing active Agent and Team changes. `thread off` restores the
 independent console route. Selecting an Agent keeps the console in conversation mode. Explicit `attach` displays bounded visible terminal snapshots; `watch` displays state changes. Blocked questions remain visible and replyable in every mode.
 Controls remain available in every state. Direct Agent-pane mirroring to Discord
-and multi-Agent question correlation are still pending (ISSUE-010 / ISSUE-012).
+is still pending (ISSUE-010). Explicit Team question correlation is implemented; live acceptance is tracked in ISSUE-012.
 Bridge restart preserves other Agent panes and targets tab 1
 within the dedicated workspace named `bridge` (created if absent). Legacy bridge
 panes elsewhere must be explicitly migrated/stopped before restart.
@@ -89,3 +89,7 @@ instances; legacy processes without the lock still require explicit migration.
 ## Durable Tasks
 
 [Phase 1 architecture and acceptance](docs/durable-task-engine.md): versioned atomic event journals, frozen task identity, shared Assignment lifecycle, status/cancel commands, restart quarantine and reservation ownership. ISSUE-018 tracks source/test evidence separately from live acceptance.
+
+## Team Questions
+
+[Phase 2 question queue](docs/team-question-queue.md): durable question identities, explicit workspace/task/question replies, original turn continuation, cross-interface deduplication, conservative restart invalidation. Schema v2 reads v1. ISSUE-012 tracks fixture evidence separately from live acceptance.

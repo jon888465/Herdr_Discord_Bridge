@@ -1,6 +1,6 @@
 # Team Orchestration 規格
 
-狀態（2026-09-19）：Phase 1 Durable Task Engine 已實作、待 live 驗收。完整持久化／取消／restart 契約見 [Durable Task Engine](durable-task-engine.md)。blocked continuation 留待 Phase 2。
+狀態（2026-09-20）：Phase 1 Durable Task Engine 已實作、待 live 驗收。完整持久化／取消／restart 契約見 [Durable Task Engine](durable-task-engine.md)。blocked continuation 已由 [Phase 2 問題佇列](team-question-queue.md) 接續，live 待驗收。
 
 2026-09-11：ISSUE-013／014 原始碼修正已套用，planning／Worker／synthesis
 使用共用 turn 接收器與 Herdr prompt wait；targeted fixture 已更新，完整
@@ -23,7 +23,7 @@ Discord thread 是人類與 Lead Agent 的主要協作上下文。Lead Agent 是
 目前實作邊界：`team ask` 已建立 Lead planning、Assignment 驗證與排程、Herdr
 Worker dispatch、bounded Worker report 與 Lead synthesis，並將同一 lifecycle 保存為 versioned atomic journal。
 已提供 task status/cancel 與 restart reconciliation；不自動 resume／重送 prompt。
-Blocked Worker 的後續問答路由仍未實作。
+Blocked Worker 的後續問答使用 team questions/reply，保持原 turn 等待；詳見 Phase 2。
 
 ## 2026-09-18 已實作擴充
 
@@ -117,8 +117,8 @@ partial synthesis 必須明確標示未完成工作。
    `agent.read(workerPaneId, source=recent_unwrapped, lines=N)` 取得 bounded
    report；沒有 report 證據不得宣稱 Assignment 完成。
 5. Worker 進入 `blocked` 時標記 Assignment `blocked`，保留 pane／task／
-   assignment identity 與 observed blocker；目前第一階段會將 blocker 納入
-   Lead synthesis，但尚未實作 question ID、使用者回覆與繼續 dispatch。
+   assignment identity 與 observed blocker；Phase 2 保存 question ID 與有界畫面，
+   接受明確 reply，沿用原 turn 接收完成報告後繼續排程。
 6. Worker 進入 `unknown`、pane 不存在或 bounded wait timeout 時標記 `failed`，
    不靜默改派另一個 Worker；相依 Assignment 標記 failed／skipped。Herdr
    `agent_prompt_stalled` 不代表送達失敗；不得重送 prompt，須使用本次 marker
@@ -184,10 +184,10 @@ Task 保存 Lead、原 prompt、frozen roster、plans、實際 acquire session�
 已完成 Worker、不相關 session、替換後的新 session 不送訊號；不關閉 pane／CLI。重啟後仍 active 的舊 turn 需人工檢查。
 
 保留 Lead 自由分工、零 Worker、lazy start 與 existing-session reuse。取消途中 in-flight acquisition／dispatch 未結束時不得提前 release。
-Phase 2 question queue、auto resume、retention、跨 bot writer lock 與 durable Discord delivery 不在本階段。
+Phase 2 question queue 已實作；auto resume、retention、跨 bot writer lock 與 durable Discord delivery 仍未實作。
 
 ## 驗收
 
 測試需涵蓋 state transitions、round trip、restart、stale running、whole-team cancellation、動態多輪、零 Worker及 ISSUE-014 回歸。
 詳見 [Phase 1 live acceptance](durable-task-engine.md#live-acceptance-still-required)及 [known issues](known-issues.md)。
-先前 Draw.io 為初版排程圖，未呈現新增 durable journal／restart quarantine；不得據此推論自動 resume 已完成。
+先前 Draw.io 為初版排程圖，未呈現新增 durable journal／restart quarantine／Phase 2 question queue；不得據此推論自動 resume 已完成。

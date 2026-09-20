@@ -77,7 +77,7 @@ Release 保留 CLI 與 pane。Team 勾選與綁定寫入 state directory 的 age
 | `detach` / `agent detach`          | 關閉 inspector，回安靜對話；不停止 Agent      |
 | `read [pane]`                      | 一次性明確讀取終端輸出                        |
 
-Blocked 問題保留有界畫面及原有「已顯示問題、identity、state sequence」驗證；檢視其他 Agent 不會把回答改送給它。要回答另一 Agent 需先 use 選取。新 prompt 在 working/unknown 時仍拒絕；不注入第二個並行對話。Codex 優先使用相符 transcript final；其他來源只接受本次隨機 marker 回覆。無法取得時顯示 capture incomplete，從 read/attach 診斷。
+Blocked 問題保留有界畫面及原有「已顯示問題、identity、state sequence」驗證；檢視其他 Agent 不會把回答改送給它。單 Agent 回答另一 Agent 需先 use 選取；Team-owned Agent 則必須使用 team questions/reply 的明確 ID。新 prompt 在 working/unknown 時仍拒絕；不注入第二個並行對話。Codex 優先使用相符 transcript final；其他來源只接受本次隨機 marker 回覆。無法取得時顯示 capture incomplete，從 read/attach 診斷。
 
 ## 驗收與尚未完成項目
 
@@ -85,4 +85,4 @@ Blocked 問題保留有界畫面及原有「已顯示問題、identity、state s
 
 Live 驗收需在授權環境依序確認：勾選未啟動 profile → Lead 只啟動所需成員 → 正確 cwd／模型且不搶 focus → 第一次任務 → 同 session 追加修正 → 明確來源的完整回覆 → use 不刷 CLI → attach/detach 不改目標 → blocked 問答 → 重啟後重用。
 
-Task persistence/reconciliation 與取消已接上同一 scheduler（見 ISSUE-018）；仍未完成自動 resume、Team 多問題佇列／續接、跨 bridge 全域租用、原生 PTY 串流 attach、Discord mirror、完整事件匯流排。CLI 若不遵守 marker 或畫面截斷，擷取會失敗而非假裝完整。未重啟的 bridge 仍執行旧版本；舊任務與訊息不自動補送。
+Task persistence/reconciliation 與取消已接上同一 scheduler（見 ISSUE-018）；Team 多問題佇列／續接見 [Phase 2](team-question-queue.md)。仍未完成自動 resume、跨 bridge 全域租用、原生 PTY 串流 attach、Discord mirror、完整事件匯流排。CLI 若不遵守 marker 或畫面截斷，擷取會失敗而非假裝完整。未重啟的 bridge 仍執行旧版本；舊任務與訊息不自動補送。

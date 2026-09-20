@@ -41,6 +41,7 @@ export interface OrchestrationPort {
 
 export type OrchestrationEvent = {
   type:
+    | "question_opened"
     | "plan_validated"
     | "turn_dispatched"
     | "turn_settled"
@@ -55,6 +56,7 @@ export type OrchestrationEvent = {
     | "task_blocked"
     | "task_failed";
   taskId: string;
+  questionId?: string;
   assignmentId?: string;
   paneId?: string;
   detail?: string;
@@ -66,8 +68,15 @@ export type OrchestrationEvent = {
 };
 
 export interface TeamTaskInput {
+  origin?: { guildId: string; channelId: string; threadId?: string };
   taskId: string;
   signal?: AbortSignal;
+  beforeTurnComplete?: () => Promise<void>;
+  onQuestion?: (
+    agent: AgentRecord,
+    phase: "planning" | "assignment" | "synthesis",
+    assignmentId?: string,
+  ) => Promise<void>;
   prompt: string;
   lead: AgentRecord;
   workers: AgentRecord[];
@@ -121,9 +130,13 @@ export async function runTeamTask(
         taskId: input.taskId,
         phase,
         signal: input.signal,
+        beforeComplete: input.beforeTurnComplete,
         beforeDispatch: () =>
           emit({ type: "turn_dispatched", taskId: input.taskId, agent, phase }),
       },
+      input.onQuestion
+        ? (current) => input.onQuestion!(current, phase)
+        : undefined,
     );
     check();
     emit({
@@ -384,6 +397,7 @@ async function runAssignment(
         phase: "assignment",
         assignmentId: assignment.id,
         signal: input.signal,
+        beforeComplete: input.beforeTurnComplete,
         beforeDispatch: () =>
           emit({
             type: "turn_dispatched",
@@ -393,6 +407,9 @@ async function runAssignment(
             assignmentId: assignment.id,
           }),
       },
+      input.onQuestion
+        ? (current) => input.onQuestion!(current, "assignment", assignment.id)
+        : undefined,
     );
     input.signal?.throwIfAborted();
     emit({

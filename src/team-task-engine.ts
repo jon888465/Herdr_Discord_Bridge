@@ -1,3 +1,5 @@
+import { randomUUID, createHash } from "node:crypto";
+import { stripAnsi } from "./format.js";
 import { sameAgentSession } from "./response-stream.js";
 import {
   runTeamTask,
@@ -15,6 +17,11 @@ import type { AgentRecord } from "./types.js";
 type Port = OrchestrationPort & {
   listAgentsWithWorkspaceNames(): Promise<AgentRecord[]>;
   cancelAgent(target: string): Promise<void>;
+  sendAgent?(
+    target: string,
+    text: string,
+    options: { retries: number },
+  ): Promise<void>;
 };
 function knownSession(a: AgentRecord): boolean {
   const s = a.agent_session as { kind?: unknown; value?: unknown } | undefined;
@@ -45,6 +52,7 @@ export class TeamTaskEngine {
     { controller: AbortController; done: Promise<unknown> }
   >();
   private reservations = new Map<string, Set<string>>();
+  private replies = new Map<string, Promise<void>>();
   private cancellations = new Map<string, Promise<DurableTeamTask>>();
   constructor(
     readonly store: TeamTaskStore,
@@ -115,6 +123,94 @@ export class TeamTaskEngine {
           {
             ...input,
             signal: controller.signal,
+            beforeTurnComplete: async () => {
+              await Promise.allSettled(
+                [...this.replies.entries()]
+                  .filter(([key]) => key.startsWith(`${input.taskId}/`))
+                  .map(([, value]) => value),
+              );
+            },
+            onQuestion: this.herdr.sendAgent
+              ? async (agent, phase, assignmentId) => {
+                  controller.signal.throwIfAborted();
+                  const snapshot = stripAnsi(
+                    await this.herdr.readAgent(agent.pane_id, "visible", 40),
+                  ).slice(-6000);
+                  controller.signal.throwIfAborted();
+                  const fingerprint = questionFingerprint(agent, snapshot);
+                  const task = this.store.get(input.taskId);
+                  const previous = task.questions
+                    ?.filter(
+                      (q) =>
+                        q.agent.terminal_id === agent.terminal_id &&
+                        q.phase === phase &&
+                        q.assignmentId === assignmentId,
+                    )
+                    .at(-1);
+                  if (
+                    previous?.fingerprint === fingerprint ||
+                    previous?.state === "sending" ||
+                    previous?.state === "unknown"
+                  )
+                    return;
+                  if ((task.questions?.length ?? 0) >= 128)
+                    throw new Error(
+                      "Team question limit reached; inspect/cancel task",
+                    );
+                  const id = `q-${randomUUID()}`;
+                  this.store.update(input.taskId, "question_opened", (t) => {
+                    for (const q of t.questions ?? [])
+                      if (
+                        q.agent.terminal_id === agent.terminal_id &&
+                        q.state === "pending"
+                      )
+                        q.state = "stale";
+                    (t.questions ??= []).push({
+                      id,
+                      agent: structuredClone(agent),
+                      phase,
+                      assignmentId,
+                      snapshot,
+                      fingerprint,
+                      createdAt: new Date().toISOString(),
+                      expiresAt: new Date(
+                        Date.now() + (input.timeoutMs ?? 120000),
+                      ).toISOString(),
+                      state: "pending",
+                    });
+                    t.state = "blocked";
+                    const turn = t.turns.find(
+                      (v) =>
+                        v.agent.terminal_id === agent.terminal_id &&
+                        v.phase === phase &&
+                        v.assignmentId === assignmentId,
+                    );
+                    if (turn) turn.state = "blocked";
+                    const a = t.assignments.find(
+                      (a) => a.plan.id === assignmentId,
+                    );
+                    if (a) {
+                      a.state = "blocked";
+                      a.blocker = id;
+                      a.updatedAt = new Date().toISOString();
+                    }
+                  });
+                  try {
+                    notify({
+                      type: "question_opened",
+                      taskId: input.taskId,
+                      questionId: id,
+                      agent,
+                      phase,
+                      assignmentId,
+                      paneId: agent.pane_id,
+                      detail: snapshot,
+                    });
+                  } catch {
+                    /* Queryable even if delivery fails. */
+                  }
+                }
+              : undefined,
             acquireWorker: async (worker) => {
               controller.signal.throwIfAborted();
               const acquired = input.acquireWorker
@@ -165,6 +261,12 @@ export class TeamTaskEngine {
         }
       } finally {
         this.executions.delete(input.taskId);
+        const last = this.store.get(input.taskId);
+        if (last.questions?.some((q) => q.state === "pending"))
+          this.store.update(input.taskId, "questions_expired", (t) => {
+            for (const q of t.questions ?? [])
+              if (q.state === "pending") q.state = "stale";
+          });
         if (terminalTask(this.store.get(input.taskId).state))
           this.release(input.taskId);
       }
@@ -218,6 +320,15 @@ export class TeamTaskEngine {
             (t) =>
               t.phase === event.phase && t.assignmentId === event.assignmentId,
           );
+          if (event.turnState === "done") {
+            for (const q of task.questions ?? [])
+              if (
+                q.phase === event.phase &&
+                q.assignmentId === event.assignmentId &&
+                q.state === "pending"
+              )
+                q.state = "stale";
+          }
           if (event.turnState === "done")
             task.turns = task.turns.filter((t) => t !== turn);
           else if (turn) turn.state = "blocked";
@@ -261,6 +372,107 @@ export class TeamTaskEngine {
             };
           break;
       }
+      if (
+        !["cancelling", "completed", "failed", "cancelled"].includes(
+          task.state,
+        ) &&
+        task.questions?.some(
+          (q) => q.state === "pending" || q.state === "sending",
+        )
+      )
+        task.state = "blocked";
+    });
+  }
+  reply(id: string, questionId: string, answer: string): Promise<void> {
+    const key = `${id}/${questionId}`;
+    if (this.replies.has(key))
+      return Promise.reject(new Error("question reply already in progress"));
+    const operation = this.deliverReply(id, questionId, answer).finally(() =>
+      this.replies.delete(key),
+    );
+    this.replies.set(key, operation);
+    return operation;
+  }
+  private async deliverReply(
+    id: string,
+    questionId: string,
+    answer: string,
+  ): Promise<void> {
+    const task = this.store.get(id);
+    this.authorize(task);
+    const q = task.questions?.find((q) => q.id === questionId);
+    const execution = this.executions.get(id);
+    if (
+      !q ||
+      q.state !== "pending" ||
+      !execution ||
+      execution.controller.signal.aborted ||
+      task.recovery ||
+      Date.now() >= Date.parse(q.expiresAt)
+    )
+      throw new Error(
+        "question is not replyable; inspect team questions/status",
+      );
+    if (!answer.trim() || answer.length > 12000)
+      throw new Error("answer must contain 1–12000 characters");
+    const current = (await this.herdr.listAgentsWithWorkspaceNames()).find(
+      (a) => sameTaskSession(a, q.agent),
+    );
+    if (!current || current.agent_status !== "blocked")
+      throw new Error("question session changed or is no longer blocked");
+    const snapshot = stripAnsi(
+      await this.herdr.readAgent(current.pane_id, "visible", 40),
+    ).slice(-6000);
+    const verified = (await this.herdr.listAgentsWithWorkspaceNames()).find(
+      (a) => sameTaskSession(a, q.agent),
+    );
+    execution.controller.signal.throwIfAborted();
+    if (
+      !verified ||
+      verified.agent_status !== "blocked" ||
+      questionFingerprint(verified, snapshot) !== q.fingerprint
+    )
+      throw new Error(
+        "question changed; refresh team questions before answering",
+      );
+    const latest = this.store.get(id);
+    if (latest.questions?.find((v) => v.id === q.id)?.state !== "pending")
+      throw new Error("question is no longer pending");
+    this.store.update(id, "question_reply_intent", (t) => {
+      t.questions!.find((v) => v.id === q.id)!.state = "sending";
+    });
+    try {
+      await this.herdr.sendAgent!(current.pane_id, answer, { retries: 0 });
+    } catch (error) {
+      this.store.update(id, "question_reply_uncertain", (t) => {
+        t.questions!.find((v) => v.id === q.id)!.state = "unknown";
+      });
+      throw error;
+    }
+    this.store.update(id, "question_answered", (t) => {
+      t.questions!.find((v) => v.id === q.id)!.state = "answered";
+      if (t.state === "cancelling" || terminalTask(t.state)) return;
+      const a = t.assignments.find((a) => a.plan.id === q.assignmentId);
+      if (a?.state === "blocked") {
+        a.state = "working";
+        a.blocker = undefined;
+        a.updatedAt = new Date().toISOString();
+      }
+      if (
+        !t.questions!.some(
+          (v) =>
+            v.state === "pending" ||
+            v.state === "sending" ||
+            v.state === "unknown",
+        ) &&
+        t.state === "blocked"
+      )
+        t.state =
+          q.phase === "assignment"
+            ? "running"
+            : q.phase === "planning"
+              ? "planning"
+              : "synthesizing";
     });
   }
   /** Restart never resumes an old promise or treats matching idle/done as a report. */
@@ -299,6 +511,8 @@ export class TeamTaskEngine {
             "Bridge restarted; execution stopped being observed. Inspect/cancel; no automatic redispatch or synthesis.",
           observations,
         };
+        for (const q of task.questions ?? [])
+          if (["pending", "sending"].includes(q.state)) q.state = "unknown";
         for (const turn of task.turns) {
           turn.state = "uncertain";
           turn.recovered = true;
@@ -335,6 +549,11 @@ export class TeamTaskEngine {
     execution?.controller.abort(new Error("Team Task cancellation requested"));
     // Do not release reservations while a lazy acquisition or dispatch is still in flight.
     await execution?.done;
+    await Promise.allSettled(
+      [...this.replies.entries()]
+        .filter(([key]) => key.startsWith(`${id}/`))
+        .map(([, value]) => value),
+    );
     const remaining: string[] = [];
     for (const turn of this.store.get(id).turns) {
       try {
@@ -424,6 +643,9 @@ export class TeamTaskEngine {
           "All task turns settled; no CLI session was closed.";
         if (!remaining.length && !t.turns.length) {
           t.state = "cancelled";
+          for (const q of t.questions ?? [])
+            if (["pending", "sending", "unknown"].includes(q.state))
+              q.state = "cancelled";
           for (const a of t.assignments)
             if (!["done", "failed", "cancelled"].includes(a.state)) {
               a.state = "cancelled";
@@ -445,4 +667,10 @@ export class TeamTaskEngine {
       task.detail = detail;
     });
   }
+}
+
+function questionFingerprint(agent: AgentRecord, snapshot: string): string {
+  return createHash("sha256")
+    .update(JSON.stringify([agent.state_change_seq, snapshot]))
+    .digest("hex");
 }

@@ -178,7 +178,7 @@ prompt，並將該 Agent 記錄到 thread，但不改變 active target。`team l
 `team remove` 管理 workspace Team 成員；`team ask` 會以目前 thread 的
 active Agent 作為 Lead，先要求 Lead 產生受驗證的 Assignment plan，再透過 Herdr
 將 bounded 子任務送給同 workspace Workers，收集報告後讓 Lead 決定後續 Assignment，空計畫才進入直接處理／驗證／synthesis；失敗或 blocked 則只做 partial synthesis。它
-不會廣播完整 thread 或 terminal history。Phase 1 已加入 durable task、restart reconciliation 與 whole-team cancel；blocked Assignment 的後續問答仍待 Phase 2，詳見下方 Durable Task Engine 契約。
+不會廣播完整 thread 或 terminal history。Phase 1 已加入 durable task、restart reconciliation 與 whole-team cancel；blocked Assignment 的後續問答已由 Phase 2 question queue 接續（live 待驗收），詳見下方 Durable Task Engine 契約。
 
 Lead planning 對 Codex 優先讀取 dispatch 前連接的本機 transcript，以相符
 prompt／turn 且 task_complete 的 final 解析 plan。無可用 final 時使用 CLI
@@ -272,7 +272,7 @@ Discord command 與 approval handling 可用 `/herdr discord disable` 暫停，�
 
 ## 6. Blocked 與 approval 流程
 
-Discord 單一 Agent 的 blocked／approval 以 pane、terminal、workspace、thread identity 綁定。本機單 Agent 通道見「本機選取 Agent 後的互動」；Team Task 的多 Agent 問題回覆尚未支援，見 ISSUE-012。
+Discord 單一 Agent 的 blocked／approval 以 pane、terminal、workspace、thread identity 綁定。本機單 Agent 通道見「本機選取 Agent 後的互動」；Team Task 使用明確 task/question ID 的 questions/reply 指令，見 ISSUE-012 與 docs/team-question-queue.md。
 
 Watcher 以 bounded interval polling `agent.list`，並忽略初始 snapshot。偵測到
 設定的 `blocked` transition 後，讀取 detection snapshot，並將它發送到該 Agent
@@ -379,7 +379,7 @@ acceptance 的 issue。提議中的 feature 必須與已實作行為分開，並
 
 working/unknown 時一般 prompt 會明確拒絕；`help`、`current`、`agent`、`agent use`、`wk` 等控制指令仍可操作，無須等 blocked。若答案開頭恰為指令，以 `ask <answer>` 明確指定。觀察輸出會重畫 `bridge>` 並保留正在編輯的輸入。`cancel` 是另行明確的 Ctrl-C 操作。本機新 prompt 使用與 Team 相同的 runTeamTurn 接收器，優先相符 Codex transcript final，否則僅接受本次隨機 marker 內的完整回覆；不把任意 CLI 片段當回答。blocked 時保留擷取直到回答後完成或逾時。既有 Discord 單 Agent progress/final 路徑不變。
 
-各 CLI 的本機回答使用上述共同回覆流程；agy 等 CLI 需遵守 marker 格式，無可靠回覆時明示 capture incomplete，可用 read/attach 診斷。多 Agent 同時提問的 question ID／排隊／回覆 UI、是否暫停其他 Agent、agy 未被 Herdr 辨識為 blocked 的選單按鍵、直接 pane → Discord mirror 仍待做，不自動暫停其他 Agent 或猜測答案目的地。
+各 CLI 的本機回答使用上述共同回覆流程；agy 等 CLI 需遵守 marker 格式，無可靠回覆時明示 capture incomplete，可用 read/attach 診斷。多 Agent question ID／排隊／明確 reply 已實作；其他 Worker 不因提問被中斷。點選 UI、agy 未被 Herdr 辨識為 blocked 的選單按鍵、直接 pane → Discord mirror 仍待做。
 
 本機專用 `threads` 列出已映射且符合 guild/channel/workspace allowlist 的 thread；
 `thread <thread ID>` 明確選定共用路由，`thread off` 回到原本本機路由。
@@ -412,7 +412,7 @@ Lead 仍由已選取的 live Agent 擔任。可不委派而直接完成工作；
 
 同一 bridge 內以 terminal reservation 及 profile lease 防止不同任務搶用；同 Worker 每波最多一個 Assignment。
 完成一輪後 Lead 可再規劃，最多 8 次 planning、每次 16 個 Assignment、總計 64 個；ID 跨輪唯一，相依關係限當輪。
-blocked/failed 結束後續規劃並回報 partial synthesis；達輪數上限明示未完成。Task persistence/reconciliation 與取消見下方 Phase 1；跨 bridge 排他、Team 多問題續接仍未實作。
+正常 blocked 等待 Phase 2 問答與原 turn 完成；無法續接或 failed 時結束後續規劃並回報 partial synthesis；達輪數上限明示未完成。Task persistence/reconciliation 與取消見下方 Phase 1；跨 bridge 排他仍未實作；Team 多問題續接見 Phase 2 契約。
 這些自動化檢查不代表真實 Discord／Herdr／CLI 已驗收；部署狀態以 known-issues 為準。
 
 ## Session handoff skill（2026-09-18）
@@ -434,10 +434,21 @@ blocked/failed 結束後續規劃並回報 partial synthesis；達輪數上限�
 
 - `team ask` 先持久保存 task，再接受派送；`team status [task-id]`／`team cancel <task-id>` 只操作目前授權 workspace。
 - Task：planning、running、blocked、synthesizing（包含直接工作／驗證）、cancelling、completed、failed、cancelled。Assignment 沿用 pending、assigned、working、blocked、done、failed、cancelled。
-- 原 prompt、Lead/session、frozen roster、plans、reports、timestamps 與 lifecycle journal 保存至 version-1 atomic journals；未知 schema／損毀 fail closed。
+- 原 prompt、Lead/session、frozen roster、plans、reports、timestamps 與 lifecycle journal 保存至 atomic journals（Phase 1 為 v1，Phase 2 寫入 v2 並相容讀取 v1）；未知 schema／損毀 fail closed。
 - 重啟後 non-terminal task 不自動執行，標 blocked/recoverable 或 unknown；cancelling 保留。核對 live pane/session，但不將 same-session 或 idle/done 當成本次 turn 已完成。
 - cancel 停止後續派送，重用官方 Ctrl-C，等待 active turn 停止後才 cancelled／release；未知 identity、uncertain delivery、recovered active turn 保留 cancelling 並要求檢查。不得關閉共享 CLI。
 - ISSUE-014 correlation/settlement、動態 replanning、零 Worker、lazy start、existing-session reuse 與 conversation/attach/watch 保留。
-- 不實作 auto resume、prompt replay、Phase 2 question queue、跨 bot writer lock、journal compaction／retention 或 durable Discord delivery。
+- 不實作 auto resume、prompt replay、跨 bot writer lock、journal compaction／retention 或 durable Discord delivery。
 
 自動化只驗證 fixtures；部署／live 驗收以 ISSUE-018 為準。
+
+## Phase 2 Team Questions（2026-09-20）
+
+行為契約與 live 驗收見 [Team question queue](docs/team-question-queue.md)。
+`team questions <task-id>` 查詢有界問題卡片；`team reply <task-id> <question-id> <answer>` 僅回答指定問題。
+Discord 限 task 原 guild/channel/thread、console 限目前 workspace，沿用既有授權。
+問題保存 session／assignment／phase／sequence／snapshot fingerprint；送答前再核對、持久化 sending、不重試不明送達。
+同 wave Worker 繼續工作，不固定 Lead 分工；blocked Assignment 回 working/done、原 turn 保留 response correlation。
+有問題時 task blocked，回答後恢復 planning/running/synthesizing；不能把 pending 問題當成完成報告。
+Timeout 沿用原 turn 上限；取消等待 in-flight reply；重啟將待處理問題標 unknown 且不允許 replay。
+新 journal v2 向前讀 v1，未知版本 fail closed；不支援舊版直接讀取 v2 或自動恢復舊 turn。
