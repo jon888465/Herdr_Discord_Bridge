@@ -188,8 +188,7 @@ mention when `requireMention` is enabled. Each thread stores its active Agent
 and can retain additional Agent mappings. `team add` manages workspace Team members; members are not automatically given the thread's full history.
 
 `/herdr team ask ...` lets the selected Lead plan bounded Assignments, dispatch to live members or enabled profiles, and decide follow-up work from their reports before verification and synthesis. It can also choose no Workers and handle the task directly. It does not copy the Discord thread
-or terminal history. Task persistence, restart recovery, cancellation, and
-interactive blocked-Assignment continuation are not implemented yet. Use
+or terminal history. Tasks now persist across restarts; `team status [task-id]` shows saved state and `team cancel <task-id>` cancels the whole task. Restart reconciliation never automatically redispatches; uncertain sessions remain blocked/cancelling for inspection. Interactive blocked-Assignment continuation remains Phase 2. See [durable task behavior and limits](docs/durable-task-engine.md). Use
 `/herdr handoff <from> <to>` when a CLI reaches a token/context limit. Handoff
 reads only a bounded recent output window (`handoffLines` and
 `handoffMaxChars`), redacts common credential formats, posts a concise bounded

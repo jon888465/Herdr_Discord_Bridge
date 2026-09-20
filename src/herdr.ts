@@ -408,7 +408,12 @@ export class HerdrClient {
   }
 
   async cancelAgent(target: string): Promise<void> {
-    await this.request("agent.send_keys", { target, keys: ["ctrl+c"] });
+    // A lost acknowledgement must not repeat Ctrl-C against later work.
+    await this.request(
+      "agent.send_keys",
+      { target, keys: ["ctrl+c"] },
+      { retries: 0 },
+    );
   }
 }
 

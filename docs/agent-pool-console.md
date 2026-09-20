@@ -64,7 +64,7 @@ Lead 只可使用凍結 roster 中的 live pane 或 `profile:<id>`，角色自�
 
 Acquire 回報 `new-session`、`same-session` 或 `unknown`。同 pane 不代表同 context；既有綁定須核對 terminal、workspace、kind 與 session kind/value。缺少 metadata 不聲稱延續。新 session prompt 包含原任務、Assignment 與已完成的有界報告，並要求核對實際 repository 狀態；不會複製完整 context 或 hidden reasoning。
 
-Release 保留 CLI 與 pane。Team 勾選與綁定寫入 state directory 的 agent-pool.json，重啟後重新核對；這不代表 task 可以恢復。啟動前先持久記錄 uncertain，split/start 不盲目重試；送達不明時先檢查 pane，再 `team bind`。失敗建立的 pane 留下供檢查，不自動關閉。版面太小則拒絕新增，可調整版面或 bind 現有 pane。
+Release 保留 CLI 與 pane。Team 勾選與綁定寫入 state directory 的 agent-pool.json，重啟後重新核對；Task persistence 與保守 restart reconciliation 見 [Phase 1](durable-task-engine.md)，不自動 resume。啟動前先持久記錄 uncertain，split/start 不盲目重試；送達不明時先檢查 pane，再 `team bind`。失敗建立的 pane 留下供檢查，不自動關閉。版面太小則拒絕新增，可調整版面或 bind 現有 pane。
 
 ## Console
 
@@ -85,4 +85,4 @@ Blocked 問題保留有界畫面及原有「已顯示問題、identity、state s
 
 Live 驗收需在授權環境依序確認：勾選未啟動 profile → Lead 只啟動所需成員 → 正確 cwd／模型且不搶 focus → 第一次任務 → 同 session 追加修正 → 明確來源的完整回覆 → use 不刷 CLI → attach/detach 不改目標 → blocked 問答 → 重啟後重用。
 
-仍未完成 task persistence/recovery、Team 多問題佇列／續接、跨 bridge 全域租用、原生 PTY 串流 attach、Discord mirror、完整事件匯流排。CLI 若不遵守 marker 或畫面截斷，擷取會失敗而非假裝完整。未重啟的 bridge 仍執行旧版本；舊任務與訊息不自動補送。
+Task persistence/reconciliation 與取消已接上同一 scheduler（見 ISSUE-018）；仍未完成自動 resume、Team 多問題佇列／續接、跨 bridge 全域租用、原生 PTY 串流 attach、Discord mirror、完整事件匯流排。CLI 若不遵守 marker 或畫面截斷，擷取會失敗而非假裝完整。未重啟的 bridge 仍執行旧版本；舊任務與訊息不自動補送。

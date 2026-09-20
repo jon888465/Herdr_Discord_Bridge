@@ -1,6 +1,6 @@
 # Known Issues
 
-維護規則見 [AGENTS.md](../AGENTS.md)。最後整理：2026-09-18。
+維護規則見 [AGENTS.md](../AGENTS.md)。最後整理：2026-09-19。
 
 | ID        | 問題                                                                            | 狀態             | 下一步                                                                                                              |
 | --------- | ------------------------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------- |
@@ -12,7 +12,7 @@
 | ISSUE-006 | 重啟 bridge 後 pane 所屬 workspace／位置改變                                    | 已驗收           | 2026-09-10 live topology 驗證完成；後續觀察重啟保留                                                                 |
 | ISSUE-007 | 程序啟動未阻止同 bot 重複實例                                                   | 重新開啟／待調查 | 2026-09-18 完整套件入口逾時再現；核對負載與 startup 時序，live 第二實例拒絕仍待驗收                                                                                           |
 | ISSUE-008 | Discord current／回應仍引用 Herdr 已不存在的舊 pane，且串流回報 session changed | 重新開啟／待調查 | 取得該 Discord thread 的 current 輸出與 bridge 啟動版本；重啟新版後以 live prompt 重現                              |
-| ISSUE-010 | 1:1:N orchestration、Discord mirror 與選擇 UI                                   | 修正中／待驗收   | orchestration 第一階段已實作；持久化、recovery、blocked continuation、mirror 與 UI 仍待做                           |
+| ISSUE-010 | 1:1:N orchestration、Discord mirror 與選擇 UI                                   | 修正中／待驗收   | Phase 1 durable task／reconciliation／cancel 已實作見 ISSUE-018；blocked continuation、mirror 與 UI 仍待做                           |
 | ISSUE-011 | 選取 agy 後 bridge 沒顯示追問、無法回答                                         | 已修正、待驗收   | 本機快照／blocked reply 自動化完成後進行 live agy 驗收                                                              |
 | ISSUE-012 | Team 多 Agent 同時追問缺少問題識別                                              | 待調查           | 設計 task/assignment/question 綁定與回覆 UI／排隊策略                                                               |
 | ISSUE-013 | Lead plan 解析失敗或誤取 planning prompt 中的範例 JSON                          | 已修正、待驗收   | 重啟新版 bridge，以新 team ask 驗證 plan 不取 prompt／歷史，兩 Worker 均收到正確 Assignment                         |
@@ -21,6 +21,7 @@
 | ISSUE-015 | Team 僅能加入已啟動 pane，缺少 profile 與 session lifecycle | 修正中 | 完整檢查後驗收 lazy start／重用／Lead 動態分工 |
 | ISSUE-016 | use 自動刷 CLI 畫面，console 對話與終端檢視混在一起 | 修正中 | 完整檢查後驗收安靜對話與獨立 attach/watch |
 | ISSUE-017 | quota 耗盡時缺少跨 CLI session 交接流程 | 已修正、待驗收 | Skill 靜態檢查完成；待真實跨 CLI 接手驗收 |
+| ISSUE-018 | Phase 1 Durable Task Engine、restart reconciliation 與 whole-team cancellation | 已修正、待驗收 | targeted fixtures 通過；完整套件受 socket EPERM 阻擋，需一般環境重跑及 live 驗收 |
 
 2026-09-09 自動化驗證：`npm run check`（typecheck、build、33/33 tests）、`npm run lint`、`git diff --check` 通過。這是前一輪程式驗證紀錄，不代表已做 live Discord 驗收。本輪僅整理文件，未重跑程式測試。
 
@@ -541,3 +542,35 @@ Team Task 複雜性：同一個 1:1:N 任務可能同時有多個 Agent／Assign
 未驗證：所有真實跨 CLI session 接手、AGY 原生歷史可讀性、CLI 自動 discovery、來源耗盡時與並行 writer 的實際操作。沒有重跑 Bridge build／unit tests；無原始碼修改、未重啟／部署，執行中 bridge 未驗證，舊訊息不補送。未全域安裝、未 commit／push。
 
 下一步：依 docs/session-handoff.md 驗收矩陣記錄實際 CLI 版本／ID／工作樹與接手結果；尚未有全 CLI 原生相容或 live 接手成功證據。
+
+## ISSUE-018：Phase 1 Durable Task Engine
+
+更新日期：2026-09-19。狀態：已修正、待驗收；完整驗證 gate 受執行環境限制，未通過 live 驗收。
+
+症狀／已確認根因：原 `team ask` 是記憶體中的 run-to-completion function；Bridge restart 丟失 task／Assignment／report，無 whole-team cancel。AgentPool session binding 與 routing persistence 不能替代 task lifecycle。
+
+預期：durable task／frozen roster／Lead/session identity、shared Assignment state、可追蹤 journal；重啟核對而不假報 running；whole-team cancel 不誤殺其他 CLI。
+
+修正範圍：新增 `src/team-task-store.ts`、`src/team-task-engine.ts`、`test/team-task-engine.test.ts`；整合 main／orchestration／turn receiver，提供 `team status`／`team cancel`、持久化派送意圖／報告、restart quarantine、取消後 reservation／lease 清理。`src/herdr.ts` 的 Ctrl-C 不再 transport retry，避免失去 acknowledgement 後重複中斷後續工作。同步 SPEC／CONTEXT／雙語 README、orchestration spec/plan、Agent Pool／pending docs 及 [完整架構／驗收](durable-task-engine.md)。
+
+重現／驗證環境：本輪隔離 checkout 的 `phase1-durable-task-engine`，Linux Node.js runner，fake Herdr／Discord fixtures 與臨時 state 目錄；沒有使用者真實 CLI／Discord。未變更 main。
+
+### 自動化紀錄（2026-09-19）
+
+- 中途 typecheck：新增 event union 時 main event message map 尚未同步（TS2739）；新增 Ctrl-C 測試時 dynamic import 被用作 type（TS2749）。均已修正，最終 typecheck 通過。
+- 第一輪既有 orchestration／AgentPool／console：25/25 通過；初版 durable engine：16/16 通過。
+- 擴大 targeted：63/65，兩項 `herdr.test.js` 因 Unix socket `listen EPERM` 失敗；這是中途結果，不列為全通過。
+- 最終 `npm run typecheck`、`npm run build`、`npm run lint` 通過（42 個 TypeScript 檔案）；`git diff --check` 通過。
+- 最終 targeted：`node --test dist/test/team-task-engine.test.js dist/test/team-orchestration.test.js dist/test/agent-pool.test.js dist/test/console-conversation.test.js dist/test/local-agent.test.js` **63/63 通過**，含 **21 項 durable engine tests**。涵蓋 state transition、round trip／schema／atomic failure、restart missing/replaced/unknown/offline/stale running、平行 Worker／blocked Lead／lazy acquire／atomic prompt in-flight 取消、uncertain Ctrl-C 不重送、reservation 釋放、workspace scope、動態多輪與零 Worker、ISSUE-014 及 console 模式回歸。
+- 完整 `npm test`：build 通過；socket fixtures `EPERM`，instance-lock 子程序無法建立 lock／輸出 ready，套件沒有自然完成，手動停止 exit 130，無完整總數。未改動該測試 assertion 或 timeout。
+- 補跑完整 compiled suite `node --test --test-timeout=15000 dist/test/*.test.js`，以 runner timeout 收集受限環境結果；初次為 111 項：105 pass、5 fail、1 cancelled。最終為 **112 項：106 pass、5 fail、1 cancelled（15 秒 timeout）**，exit 1。5 fail 是兩項 Herdr socket fixture 及三項 instance-lock fixture；另有 Linux killed-owner fixture 逾時 cancelled。增加 runner timeout 不代表受阻測試通過。
+
+### 限制及下一步
+
+完整檢查失敗集中在 Herdr Unix socket 與 instance-lock fixtures；本機 `listen` 權限受限，不是 live bridge failure 證據。需在允許本機 IPC 的一般開發環境重跑原始 `npm test`；ISSUE-007 的先前入口逾時／live duplicate-instance 驗收仍未關閉。
+
+Phase 1 recovery 保存並核對任務，不自動 resume/replay。Recovered active turn 即使 same-session 也不證明 turn ownership，需人工確認停止後 `team cancel`；未知 identity／uncertain delivery 保持 cancelling，不假報 cancelled。取消等待 in-flight prompt 可受既有 approvalTimeoutMs + transport overhead 影響。Herdr 沒有 compare-session-and-cancel 原子 API，外部手動 pane 操作仍有競態。
+
+沒有 Phase 2 multi-Agent question queue／blocked continuation、journal retention／compaction／migration、跨 bot state-directory writer lock 或 durable Discord delivery retry。Windows rename／power-loss、真實 CLI session continuity、兩 Worker 取消、restart reconciliation、lazy start／reuse 與 conversation/attach/watch 需依架構文件 live 驗收。
+
+原始碼與 build 已完成；本輪沒有部署／重啟使用者 Bridge，執行中版本未核對，舊任務／訊息不補送。Unit fixtures 不等於 Discord／Herdr／CLI end-to-end acceptance。ISSUE-010 的 durable 部分由本項接續，ISSUE-012 保留 Phase 2；ISSUE-014、015、016 live 狀態不因本轮 fixture 通過而改為已驗收。

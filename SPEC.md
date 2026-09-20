@@ -58,7 +58,7 @@ request。帶有 `error` 的 response 會轉成 typed `HerdrError`；錯誤 log 
 包含 request parameters 或 prompt 文字。每個操作使用新的 bounded connection，
 避免長連線故障使所有 operation 的 multiplexing 一起失效。
 
-一般 socket failure 最多重試兩次；本機 blocked 回答不重試不確定的送達，避免重複回答。一般重試使用從 `reconnectBaseMs` 開始的 exponential
+一般 socket failure 最多重試兩次；Ctrl-C 取消與本機 blocked 回答不重試不確定的送達，避免重複回答。一般重試使用從 `reconnectBaseMs` 開始的 exponential
 backoff。Protocol error 不重試。Watcher 在故障後於下一個 interval 繼續，
 因此 socket failure 只會被回報，不會形成 crash loop，也不影響 Herdr pane。
 
@@ -178,8 +178,7 @@ prompt，並將該 Agent 記錄到 thread，但不改變 active target。`team l
 `team remove` 管理 workspace Team 成員；`team ask` 會以目前 thread 的
 active Agent 作為 Lead，先要求 Lead 產生受驗證的 Assignment plan，再透過 Herdr
 將 bounded 子任務送給同 workspace Workers，收集報告後讓 Lead 決定後續 Assignment，空計畫才進入直接處理／驗證／synthesis；失敗或 blocked 則只做 partial synthesis。它
-不會廣播完整 thread 或 terminal history；task persistence、restart recovery、
-cancel 與 blocked Assignment 的後續互動仍未完成。
+不會廣播完整 thread 或 terminal history。Phase 1 已加入 durable task、restart reconciliation 與 whole-team cancel；blocked Assignment 的後續問答仍待 Phase 2，詳見下方 Durable Task Engine 契約。
 
 Lead planning 對 Codex 優先讀取 dispatch 前連接的本機 transcript，以相符
 prompt／turn 且 task_complete 的 final 解析 plan。無可用 final 時使用 CLI
@@ -413,7 +412,7 @@ Lead 仍由已選取的 live Agent 擔任。可不委派而直接完成工作；
 
 同一 bridge 內以 terminal reservation 及 profile lease 防止不同任務搶用；同 Worker 每波最多一個 Assignment。
 完成一輪後 Lead 可再規劃，最多 8 次 planning、每次 16 個 Assignment、總計 64 個；ID 跨輪唯一，相依關係限當輪。
-blocked/failed 結束後續規劃並回報 partial synthesis；達輪數上限明示未完成。Task persistence/recovery、跨 bridge 排他、Team 多問題續接仍未實作。
+blocked/failed 結束後續規劃並回報 partial synthesis；達輪數上限明示未完成。Task persistence/reconciliation 與取消見下方 Phase 1；跨 bridge 排他、Team 多問題續接仍未實作。
 這些自動化檢查不代表真實 Discord／Herdr／CLI 已驗收；部署狀態以 known-issues 為準。
 
 ## Session handoff skill（2026-09-18）
@@ -428,3 +427,17 @@ blocked/failed 結束後續規劃並回報 partial synthesis；達輪數上限�
 - Skill 目錄可單獨複製；手動讀取 SKILL.md 為共通入口，各 CLI 自動發現位置與 slash 語法分開處理。
 
 本次僅 Markdown skill／文件，依 AGENTS.md 驗證 frontmatter、附件連結、內容一致性與 diff，不需重跑未改動的 Bridge 程式測試。真實來源→目的地接手（含 AGY 雙向）、quota 耗盡、歧義 identity、過期封包與其他 writer 情境另列 live 驗收，未通過不得宣稱全 CLI 原生相容。詳見 [用法與比較](docs/session-handoff.md)及 ISSUE-017。
+
+## Phase 1 Durable Task Engine（2026-09-19）
+
+完整契約、儲存格式、狀態轉移、取消限制及 live 驗收清單見 [Durable Task Engine](docs/durable-task-engine.md)。
+
+- `team ask` 先持久保存 task，再接受派送；`team status [task-id]`／`team cancel <task-id>` 只操作目前授權 workspace。
+- Task：planning、running、blocked、synthesizing（包含直接工作／驗證）、cancelling、completed、failed、cancelled。Assignment 沿用 pending、assigned、working、blocked、done、failed、cancelled。
+- 原 prompt、Lead/session、frozen roster、plans、reports、timestamps 與 lifecycle journal 保存至 version-1 atomic journals；未知 schema／損毀 fail closed。
+- 重啟後 non-terminal task 不自動執行，標 blocked/recoverable 或 unknown；cancelling 保留。核對 live pane/session，但不將 same-session 或 idle/done 當成本次 turn 已完成。
+- cancel 停止後續派送，重用官方 Ctrl-C，等待 active turn 停止後才 cancelled／release；未知 identity、uncertain delivery、recovered active turn 保留 cancelling 並要求檢查。不得關閉共享 CLI。
+- ISSUE-014 correlation/settlement、動態 replanning、零 Worker、lazy start、existing-session reuse 與 conversation/attach/watch 保留。
+- 不實作 auto resume、prompt replay、Phase 2 question queue、跨 bot writer lock、journal compaction／retention 或 durable Discord delivery。
+
+自動化只驗證 fixtures；部署／live 驗收以 ISSUE-018 為準。

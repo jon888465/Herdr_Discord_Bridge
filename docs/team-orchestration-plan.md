@@ -1,141 +1,34 @@
 # Team Orchestration 實作計畫
 
-狀態：第一階段 vertical slice 已實作；持久化、recovery、取消與完整 blocked
-互動仍待實作。
+更新：2026-09-19。此文件以目前增量取代早期 vertical-slice 提案；歷史驗證保留於 known-issues。
 
-2026-09-11 交接後已完成 ISSUE-013／014 原始碼修正與 targeted tests；完整
-repository 檢查及 live Discord／Herdr 驗收仍待完成。Herdr CLI／A2A 方法、
-版本差異與驗收清單見 [修正交接](team-orchestration-issues-013-014-handoff.md)。
+## Phase 1：Durable Task Engine
 
-目前已完成：`team ask` 會由 thread active Agent 擔任 Lead，要求 JSON
-Assignment plan，驗證 Worker roster／dependency，透過 Herdr `agent.prompt`、
-`agent.wait`、`agent.read` 執行 Worker，收集 bounded report，再由 Lead 產生
-synthesis。此流程目前以記憶體中的單次 task lifecycle 運作，尚未持久化 task
-或提供 restart recovery。
+原始碼已接上既有 scheduler，待 live 驗收：
 
-2026-09-11：ISSUE-013 重啟後再次失敗，已重現 Codex JSON 字串終端折行。
-planning 加入相符 Codex transcript final 優先與終端折行 fallback；驗證
-紀錄以 `known-issues.md` 為準，仍需新 build 的 live dispatch／synthesis 驗收。
+- 獨立 TeamTaskStore：version-1 atomic event journals、after-image replay、schema／identity／state transition 驗證。
+- TeamTaskEngine：持久 task、shared Assignment lifecycle、frozen roster、actual session、reports、blocked/unknown recovery。
+- `team ask`、`team status [task-id]`、`team cancel <task-id>` 共用 workspace 授權及 reservation。
+- 重啟核對，不重送 prompt、不恢復舊 Promise、不把 stale running 視為 active。
+- Whole-team cancellation：停止新派送，等待 acquisition／dispatch，核對後官方 Ctrl-C，停止確認後釋放 lease；未知或不確定時保持 cancelling。
+- 動態多輪 Lead、零 Worker、Agent Pool lazy start／reuse、ISSUE-014、console 分離保留。
 
-分派與等待的行為契約已寫入規格的「Herdr 分派與等待契約」；流程圖位於
-[`docs/team-orchestration-flow.drawio`](./team-orchestration-flow.drawio)。
+完整架構及 live 驗收步驟見 [Durable Task Engine](durable-task-engine.md)。
+自動化完整與 targeted 結果記錄於 [ISSUE-018](known-issues.md)；unit tests 不等於 live acceptance。
 
-本計畫實作 [Team Orchestration 規格](./team-orchestration-spec.md)，且不改變
-現有 single-Agent routing 語意。
+## Phase 2：多 Agent blocked continuation（未實作）
 
-## 階段 1：Domain type 與持久化
+- task／assignment／question identity、問題佇列與選擇 UI。
+- 精確 reply routing、過期／重複回答防護、blocked 後繼續排程。
+- 是否凍結其他工作、人工接手／恢復的政策。
 
-新增 `TeamTask`、`Assignment`、`TeamRoster`、`TaskReport` 及其狀態的
-明確 type。將 task record 以穩定 task ID 為 key，擴充持久化 routing state。
-加入有界限的保留與清理規則。
+Phase 1 只保留 blocker 與狀態，不重用單 Agent thread-level approval 來假裝 Team 問答已完成。
 
-交付項目：
+## 後续提案（未實作）
 
-- type 與 state migration；
-- task ID 產生；
-- serialization tests；
-- stale task recovery policy。
+- 有證據的 turn resume／重新規劃，不盲目重送有副作用的 prompt。
+- Journal retention／compaction、schema migrations、跨 bot／程序 state-directory 排他。
+- Durable Discord delivery retry、opt-in pane mirror、完整事件匯流排。
+- 各 phase 獨立 timeout 設定；目前沿用 approvalTimeoutMs。
 
-## 階段 2：Planning module
-
-建立介面精簡的深層 `TeamPlanner` module：
-
-```text
-plan(task, lead, roster) -> validated AssignmentPlan
-```
-
-其實作將 planning prompt 傳給 Lead，解析嚴格的 JSON envelope，驗證 Assignment
-target/dependency，並回傳安全 plan 或 typed failure。Prompt 建構與解析應封裝
-在 module seam 後，使測試不需要 Discord 或 Herdr。
-
-## 階段 3：Scheduler module
-
-建立介面精簡的深層 `TeamScheduler` module：
-
-```text
-start(task, plan) -> task lifecycle events
-cancel(taskId) -> result
-```
-
-注入 Herdr Adapter、clock、persistence store 與 event sink。此實作負責 dependency
-排序、concurrency、避免重複 dispatch、狀態轉換、timeout 處理與 restart recovery。
-
-## 階段 4：Discord 整合
-
-當 thread 有 Team 時，變更 `team ask` 以建立 orchestration task。保持
-`team add`、`team remove`、`ask` 與一般 active-Agent prompt 向後相容。
-
-新增精簡的 Discord 訊息，用於顯示：
-
-- task 已接受，以及 Lead/Roster；
-- plan 已接受或拒絕；
-- assignment 已開始／完成／blocked／failed；
-- synthesis 已開始；
-- final synthesis。
-
-所有訊息都必須使用現有 Agent/workspace/pane identity header，並支援
-Discord-safe splitting。
-
-## 階段 5：Approval、取消與 recovery
-
-重用現有 approval record，並在 approval context 加入 task 與 Assignment identity。
-只有在內部 lifecycle 穩定後，才加入 task-level cancel command：
-
-```text
-/herdr team cancel <task-id>
-/herdr team status [task-id]
-```
-
-Bridge restart 時，重新載入非 terminal task、查詢 Herdr state，並只恢復
-dispatch identity 仍有效的 Assignment。不得只因 bridge restart 就重播已完成的
-prompt。
-
-## 階段 6：測試
-
-在 module seam 建立測試：
-
-- planner 接受有效 JSON，拒絕格式錯誤或不安全 plan；
-- planner 拒絕重複、非 Roster、Lead 本身與循環 Assignment；
-- scheduler 平行 dispatch 獨立工作；
-- scheduler 等待 dependency；
-- busy、blocked、stale 與 unknown Agent 產生規格指定的狀態；
-- cancellation 阻止後續 dispatch，並使用 Herdr 官方 cancel；
-- restart recovery 具備冪等性；
-- synthesis 包含成功、失敗與被跳過 dependency；
-- Discord output 在分段訊息中保留所有 task report。
-
-使用 fake Herdr 與 Discord Adapter。除非另行加入 end-to-end smoke test，否則
-不要以真實 terminal 驅動 orchestration 測試。
-
-## 階段 7：發布
-
-第一階段以 configuration flag 保護功能，預設關閉。先對 allowlisted guild/user
-啟用，觀察 task state 與 failure rate；smoke test 穩定後再改為預設開啟。
-
-建議設定：
-
-```json
-{
-  "teamOrchestration": {
-    "enabled": false,
-    "maxConcurrentAssignments": 2,
-    "planningTimeoutMs": 120000,
-    "synthesisTimeoutMs": 120000,
-    "taskTimeoutMs": 3600000,
-    "maxAssignments": 8
-  }
-}
-```
-
-## 實作前待決事項
-
-1. 第一版是否維持 `team ask` 為唯一入口，或新增明確的 `team plan` 指令？
-2. Lead 是否永遠只擔任 planner/synthesizer，或也能收到 child Assignment？
-3. 同一 workspace 中的兩個 Assignment 若可能修改重疊檔案，是否預設拒絕？
-4. Blocked Assignment 應暫停整個 task，還是允許獨立 Assignment 繼續？
-5. Final synthesis 是否只能在所有 Assignment 結束後發布，或允許使用者要求
-   partial report？
-
-## 2026-09-18 實作增量
-
-已加入 Agent Pool、session identity persistence、按需啟動／重用、Lead 多輪規劃與零 Worker 直接處理；詳見 [架構與操作](agent-pool-console.md)。本機增加勾選介面與 use/attach/watch 分离。Task persistence、recovery、cancel、Team 多問題續接等上述未完成階段保持待做；session binding 持久化不能代替 task recovery。
+沒有固定 Planner → Coder → Reviewer → Tester，也不由 Bridge 默默新增 business roles、自動 merge 或接管未知 session。
