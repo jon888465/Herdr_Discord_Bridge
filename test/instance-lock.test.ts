@@ -47,6 +47,21 @@ test("rotated tokens for the same bot share the lock", async () => {
   }
 });
 
+test("acquires lock without EINVAL even with long TMPDIR", async () => {
+  const original = process.env.TMPDIR;
+  try {
+    process.env.TMPDIR = "/var/folders/ky/_b2l2pf552d54wtztb1r41rw0000gn/T";
+    const release = await acquireInstanceLock(randomUUID());
+    await release();
+  } finally {
+    if (original === undefined) {
+      delete process.env.TMPDIR;
+    } else {
+      process.env.TMPDIR = original;
+    }
+  }
+});
+
 test(
   "Linux releases the lock after an owner process is killed",
   { skip: process.platform !== "linux" },

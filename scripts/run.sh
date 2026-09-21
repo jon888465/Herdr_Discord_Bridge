@@ -117,10 +117,14 @@ if [[ -z "$target_pane" ]]; then
   echo "Could not prepare a target in tab 1; no panes were closed." >&2
   exit 1
 fi
-for pane_id in "${bridge_panes[@]}"; do
-  echo "Closing bridge pane $pane_id..."
-  herdr pane close "$pane_id"
-done
+# Bash 3.2 treats an empty array expansion as unset under nounset.
+# Check its length before expanding it (first startup has no bridge panes).
+if [[ ${#bridge_panes[@]} -gt 0 ]]; then
+  for pane_id in "${bridge_panes[@]}"; do
+    echo "Closing bridge pane $pane_id..."
+    herdr pane close "$pane_id"
+  done
+fi
 
 if [[ "$mode" == "-r" ]]; then
   echo "Linking local plugin..."

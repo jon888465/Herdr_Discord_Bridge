@@ -13,12 +13,17 @@ export async function acquireInstanceLock(
     .digest("hex")
     .slice(0, 40);
   const name = `herdr-discord-bridge-${key}`;
+  const socketDir =
+    process.platform === "darwin" ||
+    join(tmpdir(), `${name}.sock`).length >= 104
+      ? "/tmp"
+      : tmpdir();
   const address =
     process.platform === "linux"
       ? `\0${name}`
       : process.platform === "win32"
         ? `\\\\.\\pipe\\${name}`
-        : join(tmpdir(), `${name}.sock`);
+        : join(socketDir, `${name}.sock`);
   const server = createServer((socket) => socket.destroy());
   await new Promise<void>((resolve, reject) => {
     server.once("error", (error: NodeJS.ErrnoException) => {

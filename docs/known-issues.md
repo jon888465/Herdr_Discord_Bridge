@@ -556,3 +556,27 @@ Team Task 複雜性：同一個 1:1:N 任務可能同時有多個 Agent／Assign
 驗證：2026-09-21 已確認 `/bin/bash` 為 GNU bash 3.2.57，`bash -n scripts/run.sh` 通過；`npm run build` 受目前受限環境禁止寫入既有 `dist/` 阻擋，尚未完成 macOS live Herdr restart、local link 與 Discord bridge 驗收。
 
 下一步：在可寫入的本機環境以 `/bin/bash scripts/run.sh -r` 執行 restart regression，確認 build、`herdr plugin link`、pane replacement 與新 bridge 啟動完整通過。
+
+
+### 2026-09-21 再次失敗與空陣列修正
+
+狀態歷程：使用者回報後重新開啟／待調查 → 已修正、待驗收。先前移除 mapfile 未涵蓋 Bash 3.2 的 nounset 空陣列行為。
+
+症狀／重現：使用者執行 `./scripts/run.sh -r`，build 與 headless server ready 後，於建立 bridge workspace 時出現 `bridge_panes[@]: unbound variable`。本機 `/bin/bash` 3.2.57 以 `set -u`、空 bridge_panes 陣列及未防護的 for 迴圈重現相同錯誤（exit 127）。預期首次啟動無舊 pane 時應直接繼續 link/open/move，不關閉任何 pane。
+
+已確認根因：Bash 3.2 在 nounset 下展開空陣列會視為未設定。保留工作樹已有的陣列長度防護，補上原因註解；回歸測試在 macOS 明確使用 `/bin/bash`，避免 PATH 上新版 Bash 隱藏問題，並新增首次啟動 `-r` 情境，斷言 plugin link、pane move 與零 pane close。同步 SPEC 的 Bash 3.2 相容要求。
+
+驗證（2026-09-21）：`npm run lint`、`npm run typecheck`、`npm test`（包含 `npm run build`）及 `/bin/bash -n scripts/run.sh` 通過；完整測試 92 項，91 通過、1 項 Linux 專用測試跳過、0 失敗。5 項 restart fixtures 全數通過。fixtures 使用假的 Herdr/npm，不會操作真實 pane；真實 TypeScript build 已由 npm test 執行成功。
+
+未驗證／下一步：未重啟或部署真實 bridge，未完成 Herdr／Discord 端到端驗收，未 commit／push；執行中的 bridge 未確認載入新版，舊訊息不補送。請於專案執行 `./scripts/run.sh -r` 驗收首次／再次啟動。
+
+
+## ISSUE-019：Herdr plugin pane 啟動後消失，Discord 未上線
+
+更新日期：2026-09-21。狀態：已修正、待驗收。
+症狀／環境：macOS、Herdr 0.9.1；使用者回報 Discord 未上線，初始程序清單只有 Herdr server，沒有 bridge。執行修正後 `./scripts/run.sh -r` 成功 build/link/open/move（exit 0），但後續讀取新 pane 回傳 pane_not_found，pane list 亦無 bridge。plugin log list 為空。
+預期：plugin pane 維持執行並連上 Discord。
+已確認根因：macOS 預設 `TMPDIR` 為 `/var/folders/.../T`（約 49 字元），加上 `herdr-discord-bridge-${key}.sock` 後路徑長度達到 115 位元組，超過 macOS POSIX `sockaddr_un.sun_path` 的 104 位元組限制，導致 `acquireInstanceLock` 於 `net.createServer().listen()` 時拋出 `EINVAL`，bridge 程序於啟動時立即 exit 1，Herdr 偵測到指令退出因而自動關閉 pane。先前直接以診斷程序執行成功是因為該子程序環境未帶 `$TMPDIR`（Node 預設回退至 `/tmp`，長度 71 位元組 < 104 位元組）。
+修正：在 `src/instance-lock.ts` 中，若為 macOS (Darwin) 或 socket 路徑長度超過 104 位元組，使用 `/tmp` 存放 socket，確保長度維持在 71 位元組，避免 `EINVAL`。在 `test/instance-lock.test.ts` 加入長 `TMPDIR` 取得 instance lock 的回歸測試。同步 `SPEC.md` 的 macOS socket 路徑限制。
+驗證（2026-09-21）：`npm run lint`、`npm run typecheck`、`npm test`（包含 `npm run build`）及 `/bin/bash -n scripts/run.sh` 通過；完整測試 93 項，92 通過、1 項 Linux 專用測試跳過、0 失敗。5 項 restart fixtures 全數通過，5 項 instance-lock 測試全數通過。
+未驗證／下一步：未重啟或部署真實 bridge，未完成 Herdr／Discord 端到端驗收，未 commit／push；執行中的 bridge 仍為診斷直接程序，未確認載入新版或恢復 Herdr plugin pane 託管，舊訊息不補送。請於本機執行 `./scripts/run.sh -r` 驗收 Herdr pane 託管啟動與 Discord 連線。

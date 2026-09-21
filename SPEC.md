@@ -31,6 +31,7 @@ tab，也不搬移其他 Agent pane。依名稱查找 `bridge` workspace，沒�
 pane，停止並列出位置，要求先明確遷移／停止舊 bridge，避免重複 bot 程序。
 選定目標 tab 後，僅關閉該 tab 明確標示 Discord bridge 且無 Agent 的 pane；
 若 bridge 是唯一 pane，先 split 保留 tab。缺少 tab 1 時停止，不關閉 pane。
+啟動腳本須相容 macOS 內建 Bash 3.2；首次啟動沒有舊 bridge pane 時，空陣列不得觸發 `set -u` 錯誤。
 Herdr 會注入 `HERDR_SOCKET_PATH` 與 `HERDR_PLUGIN_CONFIG_DIR`；standalone
 執行時也支援文件定義的預設 socket 與 `HERDR_SESSION` 解析方式。
 
@@ -309,7 +310,7 @@ command 或 process log，不會停止遠端工作。長時間 assignment stream
 的 bot ID 建立雜湊 key（無有效 ID 時使用 token 雜湊），不輸出 token；token 輪替
 但 bot ID 相同也互斥。鎖只占用本機 IPC 名稱，不提供 command API 或 HTTP。
 Linux 使用 abstract Unix socket，Windows 使用 named pipe，程序退出由 OS 釋放；
-其他 Unix 使用 temporary-directory socket，異常退出殘留時 fail closed，需確認
+其他 Unix 使用 temporary-directory socket，若在 macOS（Darwin）或路徑長度超過 104 位元組時使用 `/tmp` 避免超出 `sockaddr_un` 限制觸發 `EINVAL`；異常退出殘留時 fail closed，需確認
 舊程序已退出後清除殘留 socket。不能防止舊版未實作鎖的 bridge 或另一台主機
 重複登入；首次升級仍須處理舊程序。dry-run 不登入 Discord，因此不取得 bot 鎖。
 

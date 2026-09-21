@@ -5,7 +5,13 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
-for (const scenario of ["existing", "create", "ambiguous", "legacy"]) {
+for (const scenario of [
+  "existing",
+  "create",
+  "ambiguous",
+  "legacy",
+  "create-local",
+]) {
   test(`restart uses dedicated bridge workspace: ${scenario}`, () => {
     const dir = mkdtempSync(join(tmpdir(), "bridge-restart-"));
     try {
@@ -46,17 +52,28 @@ console.log(JSON.stringify({result}));
 `,
         { mode: 0o700 },
       );
-      const run = spawnSync("bash", [resolve("scripts/run.sh")], {
-        env: {
-          ...process.env,
-          PATH: `${dir}:${process.env.PATH}`,
-          HERDR_WORKSPACE_ID: "w2",
-          BRIDGE_TEST_LOG: log,
-          BRIDGE_TEST_SCENARIO: scenario,
+      writeFileSync(join(dir, "npm"), "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+      // Pin the macOS system shell so Homebrew Bash cannot hide 3.2 regressions.
+      const shell = process.platform === "darwin" ? "/bin/bash" : "bash";
+      const run = spawnSync(
+        shell,
+        [
+          resolve("scripts/run.sh"),
+          ...(scenario === "create-local" ? ["-r"] : []),
+        ],
+        {
+          env: {
+            ...process.env,
+            PATH: `${dir}:${process.env.PATH}`,
+            HERDR_WORKSPACE_ID: "w2",
+            BRIDGE_TEST_LOG: log,
+            BRIDGE_TEST_SCENARIO:
+              scenario === "create-local" ? "create" : scenario,
+          },
+          encoding: "utf8",
+          timeout: 20000,
         },
-        encoding: "utf8",
-        timeout: 20000,
-      });
+      );
       const calls = readFileSync(log, "utf8")
         .trim()
         .split("\n")
@@ -72,12 +89,17 @@ console.log(JSON.stringify({result}));
       const created = calls.filter(
         (args) => args[0] === "workspace" && args[1] === "create",
       );
-      assert.equal(created.length, scenario === "create" ? 1 : 0);
+      assert.equal(created.length, scenario.startsWith("create") ? 1 : 0);
       if (created.length) {
         assert.ok(created[0].includes("bridge"));
         assert.ok(created[0].includes("--no-focus"));
       }
 
+      if (scenario === "create-local") {
+        assert.ok(
+          calls.some((args) => args.join(" ") === "plugin link . --enabled"),
+        );
+      }
       const moved = calls.filter(
         (args) => args[0] === "pane" && args[1] === "move",
       );
@@ -90,7 +112,7 @@ console.log(JSON.stringify({result}));
         calls
           .filter((args) => args[0] === "pane" && args[1] === "close")
           .map((args) => args[2]),
-        scenario === "create" ? [] : ["w3:p3"],
+        scenario.startsWith("create") ? [] : ["w3:p3"],
       );
     } finally {
       rmSync(dir, { recursive: true, force: true });
