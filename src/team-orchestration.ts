@@ -41,6 +41,9 @@ export interface OrchestrationPort {
 
 export type OrchestrationEvent = {
   type:
+    | "plan_validated"
+    | "turn_dispatched"
+    | "turn_settled"
     | "task_started"
     | "plan_requested"
     | "assignment_started"
@@ -55,10 +58,16 @@ export type OrchestrationEvent = {
   assignmentId?: string;
   paneId?: string;
   detail?: string;
+  plan?: AssignmentPlan;
+  agent?: AgentRecord;
+  phase?: "planning" | "assignment" | "synthesis";
+  turnState?: "done" | "blocked";
+  report?: string;
 };
 
 export interface TeamTaskInput {
   taskId: string;
+  signal?: AbortSignal;
   prompt: string;
   lead: AgentRecord;
   workers: AgentRecord[];
@@ -95,6 +104,37 @@ export async function runTeamTask(
   herdr: OrchestrationPort,
   emit: (event: OrchestrationEvent) => void,
 ): Promise<TeamTaskResult> {
+  const check = () => input.signal?.throwIfAborted();
+  const turn = async (
+    agent: AgentRecord,
+    instruction: string,
+    phase: "planning" | "synthesis",
+  ) => {
+    check();
+    const result = await runTeamTurn(
+      agent,
+      instruction,
+      herdr,
+      timeoutMs,
+      reportLines,
+      {
+        taskId: input.taskId,
+        phase,
+        signal: input.signal,
+        beforeDispatch: () =>
+          emit({ type: "turn_dispatched", taskId: input.taskId, agent, phase }),
+      },
+    );
+    check();
+    emit({
+      type: "turn_settled",
+      taskId: input.taskId,
+      agent,
+      phase,
+      turnState: result.state,
+    });
+    return result;
+  };
   const timeoutMs = input.timeoutMs ?? PLAN_TIMEOUT_MS;
   const reportLines = input.reportLines ?? DEFAULT_REPORT_LINES;
   const reportMaxChars = input.reportMaxChars ?? DEFAULT_REPORT_MAX_CHARS;
@@ -112,6 +152,7 @@ export async function runTeamTask(
 
     const allAssignments: AssignmentPlan["assignments"] = [];
     for (let round = 0; ; round++) {
+      check();
       if (round >= (input.maxRounds ?? 8))
         throw new Error(
           "Lead reached the planning round limit; task remains incomplete",
@@ -126,16 +167,20 @@ export async function runTeamTask(
         taskId: input.taskId,
         paneId: input.lead.pane_id,
       });
-      const planned = await runTeamTurn(
-        input.lead,
-        planningPrompt,
-        herdr,
-        timeoutMs,
-        reportLines,
-        { taskId: input.taskId, phase: "planning" },
-      );
-      if (planned.state === "blocked")
-        throw new Error("Lead became blocked while planning");
+      const planned = await turn(input.lead, planningPrompt, "planning");
+      if (planned.state === "blocked") {
+        emit({
+          type: "task_blocked",
+          taskId: input.taskId,
+          detail: "Lead became blocked while planning",
+        });
+        return {
+          taskId: input.taskId,
+          state: "blocked",
+          plan: { assignments: allAssignments },
+          reports,
+        };
+      }
       plan = parseAssignmentPlan(
         planned.text,
         planned.terminal && input.lead.agent?.toLowerCase().includes("codex"),
@@ -152,6 +197,7 @@ export async function runTeamTask(
         )
       )
         throw new Error("Assignment IDs must be unique across rounds");
+      emit({ type: "plan_validated", taskId: input.taskId, plan });
       allAssignments.push(...plan.assignments);
       if (!plan.assignments.length) break;
 
@@ -160,6 +206,7 @@ export async function runTeamTask(
       );
       const completed = new Set<string>();
       while (pending.size > 0) {
+        check();
         const wavePanes = new Set<string>();
         const ready = [...pending.values()].filter((assignment) => {
           if (
@@ -174,7 +221,7 @@ export async function runTeamTask(
         });
         if (ready.length === 0)
           throw new Error("assignment dependency graph cannot make progress");
-        const wave = await Promise.all(
+        const settledWave = await Promise.allSettled(
           ready.map(async (assignment) => {
             pending.delete(assignment.id);
             const worker = input.workers.find(
@@ -194,6 +241,12 @@ export async function runTeamTask(
             reports.push(report);
             return report;
           }),
+        );
+        check();
+        const rejected = settledWave.find((v) => v.status === "rejected");
+        if (rejected?.status === "rejected") throw rejected.reason;
+        const wave = settledWave.flatMap((v) =>
+          v.status === "fulfilled" ? [v.value] : [],
         );
         for (const report of wave) {
           if (report.state === "done") completed.add(report.assignmentId);
@@ -241,16 +294,15 @@ export async function runTeamTask(
       reports,
       reportMaxChars,
     );
-    const synthesized = await runTeamTurn(
-      input.lead,
-      synthesisPrompt,
-      herdr,
-      timeoutMs,
-      reportLines,
-      { taskId: input.taskId, phase: "synthesis" },
-    );
-    if (synthesized.state !== "done")
-      throw new Error("Lead synthesis did not reach a settled state");
+    const synthesized = await turn(input.lead, synthesisPrompt, "synthesis");
+    if (synthesized.state === "blocked") {
+      emit({
+        type: "task_blocked",
+        taskId: input.taskId,
+        detail: "Lead is blocked during synthesis",
+      });
+      return { taskId: input.taskId, state: "blocked", plan, reports };
+    }
     const synthesis = bounded(synthesized.text, reportMaxChars);
     if (!synthesis) throw new Error("Lead synthesis produced no report");
     const blocked = reports.some((report) => report.state === "blocked");
@@ -262,6 +314,7 @@ export async function runTeamTask(
           ? "task_blocked"
           : "task_completed",
       taskId: input.taskId,
+      report: synthesis,
       paneId: input.lead.pane_id,
       detail: failed
         ? "one or more Assignments failed; synthesis is partial"
@@ -279,7 +332,8 @@ export async function runTeamTask(
   } catch (error) {
     const detail =
       error instanceof Error ? error.message : "orchestration failed";
-    emit({ type: "task_failed", taskId: input.taskId, detail });
+    if (!input.signal?.aborted)
+      emit({ type: "task_failed", taskId: input.taskId, detail });
     throw error;
   }
 }
@@ -296,9 +350,11 @@ async function runAssignment(
   previousReports: TeamTaskResult["reports"],
 ): Promise<TeamTaskResult["reports"][number]> {
   try {
+    input.signal?.throwIfAborted();
     const acquired = input.acquireWorker
       ? await input.acquireWorker(worker)
       : { agent: worker, continuity: "unknown" };
+    input.signal?.throwIfAborted();
     worker = acquired.agent;
     if (
       worker.workspace_id !== input.lead.workspace_id ||
@@ -311,6 +367,7 @@ async function runAssignment(
       assignmentId: assignment.id,
       paneId: worker.pane_id,
       detail: acquired.continuity,
+      agent: worker,
     });
     if (!["idle", "done"].includes(worker.agent_status))
       throw new Error(`Worker is ${worker.agent_status}`);
@@ -326,8 +383,26 @@ async function runAssignment(
         taskId: input.taskId,
         phase: "assignment",
         assignmentId: assignment.id,
+        signal: input.signal,
+        beforeDispatch: () =>
+          emit({
+            type: "turn_dispatched",
+            taskId: input.taskId,
+            agent: worker,
+            phase: "assignment",
+            assignmentId: assignment.id,
+          }),
       },
     );
+    input.signal?.throwIfAborted();
+    emit({
+      type: "turn_settled",
+      taskId: input.taskId,
+      agent: worker,
+      phase: "assignment",
+      assignmentId: assignment.id,
+      turnState: settled.state,
+    });
     const observed = bounded(settled.text, reportMaxChars);
     if (settled.state === "blocked") {
       emit({
@@ -347,6 +422,7 @@ async function runAssignment(
     }
     emit({
       type: "assignment_completed",
+      report: observed,
       taskId: input.taskId,
       assignmentId: assignment.id,
       paneId: worker.pane_id,
@@ -358,6 +434,7 @@ async function runAssignment(
       report: observed,
     };
   } catch (error) {
+    if (input.signal?.aborted) throw error;
     const detail = error instanceof Error ? error.message : "Worker failed";
     emit({
       type: "assignment_failed",

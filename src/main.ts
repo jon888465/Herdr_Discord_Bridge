@@ -29,7 +29,9 @@ import {
   statusEmoji,
 } from "./format.js";
 import { HerdrClient } from "./herdr.js";
-import { runTeamTask, type OrchestrationEvent } from "./team-orchestration.js";
+import type { OrchestrationEvent } from "./team-orchestration.js";
+import { TeamTaskEngine } from "./team-task-engine.js";
+import { TeamTaskStore } from "./team-task-store.js";
 import {
   AgentWatcher,
   type AgentRemoved,
@@ -126,6 +128,15 @@ async function startBridge(
     );
   }
 
+  const tasks = new TeamTaskEngine(
+    new TeamTaskStore(join(stateDirectory(), "team-tasks")),
+    herdr,
+    activeStreams,
+    (owner) => pool.release(owner),
+    config.allowedWorkspaceIds,
+  );
+  await tasks.reconcile();
+
   discord.onCommand(async (context, command, args) => {
     try {
       await handleCommand(command, args, context, {
@@ -135,6 +146,7 @@ async function startBridge(
         discord,
         activeStreams,
         pool,
+        tasks,
       });
     } catch (error) {
       await discord.reply(context.message, `❌ ${safeError(error)}`);
@@ -145,6 +157,13 @@ async function startBridge(
       !config.discord.allowedUserIds.length ||
       config.discord.allowedUserIds.includes(userId)
     ) {
+      const target = (await herdr.listAgentsWithWorkspaceNames()).find(
+        (a) => a.terminal_id === approval.terminalId,
+      );
+      if (target && tasks.owns(target))
+        throw new Error(
+          "Team Task replies are not supported in Phase 1; inspect team status or cancel the task",
+        );
       await deliverApproval(approval, text, herdr, routing);
     } else {
       throw new Error("you are not authorized to control this agent");
@@ -174,6 +193,7 @@ async function startBridge(
         discord,
         activeStreams,
         pool,
+        tasks,
       });
     } catch (error) {
       await discord.reply(context.message, `❌ ${safeError(error)}`);
@@ -212,6 +232,7 @@ async function startBridge(
           discord,
           activeStreams,
           pool,
+          tasks,
           consoleAgent,
         });
         await consoleAgent?.tick();
@@ -263,6 +284,7 @@ async function startBridge(
 }
 
 interface Runtime {
+  tasks?: TeamTaskEngine;
   pool?: AgentPool;
   consoleAgent?: ConsoleAgent;
   config: ReturnType<typeof loadConfig>;
@@ -778,6 +800,8 @@ async function askAgent(
         undefined,
         runtime.config.allowedWorkspaceIds,
       );
+      if (runtime.tasks?.owns(explicit))
+        throw new Error("Agent belongs to a Team Task; use team status/cancel");
       if (explicit.agent_status === "blocked") {
         const selected = effectiveTarget(context, runtime.routing);
         if (!runtime.consoleAgent || selected?.paneId !== explicit.pane_id)
@@ -806,6 +830,11 @@ async function askAgent(
     );
   validatePrompt(prompt);
   if (localImplicit && runtime.consoleAgent) {
+    if (runtime.tasks) {
+      const selected = await resolveContextAgent("", context, runtime);
+      if (runtime.tasks.owns(selected))
+        throw new Error("Agent belongs to a Team Task; use team status/cancel");
+    }
     await runtime.consoleAgent.send(prompt, async (selected, text) => {
       await dispatchPrompt(
         selected,
@@ -845,6 +874,43 @@ async function teamCommand(
 ): Promise<void> {
   const action = args.shift()?.toLowerCase();
   switch (action) {
+    case "status":
+    case "cancel": {
+      const workspace = await teamWorkspaceId(context, runtime);
+      if (!runtime.tasks) throw new Error("Team Task Engine unavailable");
+      if (args.length > 1 || (action === "cancel" && args.length !== 1))
+        throw new Error("usage: team status [task-id] | team cancel <task-id>");
+      const task = args[0] ? runtime.tasks.store.get(args[0]) : undefined;
+      if (task && task.workspaceId !== workspace)
+        throw new Error("task belongs to another workspace");
+      const rows =
+        action === "cancel"
+          ? [await runtime.tasks.cancel(task!.taskId)]
+          : task
+            ? [task]
+            : runtime.tasks.store.list(workspace);
+      await runtime.discord.reply(
+        context.message,
+        rows
+          .map(
+            (t) =>
+              `Team Task ${t.taskId} · workspace ${t.workspaceId} · ${t.state}\nLead: ${t.lead.pane_id} · updated ${t.updatedAt}\n` +
+              t.assignments
+                .map(
+                  (a) =>
+                    `${a.plan.id}: ${a.state} · ${a.agent?.pane_id ?? a.plan.workerPaneId}${a.blocker ? ` · ${a.blocker}` : ""}`,
+                )
+                .join("\n") +
+              (t.recovery
+                ? `\nRecovery: ${t.recovery.status} · ${t.recovery.reason}\n${t.recovery.observations.join("\n")}`
+                : "") +
+              (t.detail ? `\n${t.detail}` : "") +
+              (task && t.synthesis ? `\n${t.synthesis}` : ""),
+          )
+          .join("\n\n") || "No durable Team Tasks in this workspace.",
+      );
+      return;
+    }
     case "pool":
     case "select": {
       const workspace = await teamWorkspaceId(context, runtime);
@@ -1081,83 +1147,62 @@ async function teamAsk(
   assertAgentAvailable(lead, runtime);
 
   const taskId = `task-${randomUUID()}`;
+  if (!runtime.tasks) throw new Error("Team Task Engine unavailable");
+  const running = runtime.tasks.run(
+    {
+      taskId,
+      prompt,
+      lead,
+      workers,
+      replan: true,
+      acquireWorker: async (target) => {
+        const acquired = target.pane_id.startsWith("profile:")
+          ? await runtime.pool!.acquire(
+              workspaceId,
+              target.pane_id.slice(8),
+              lead,
+              taskId,
+            )
+          : {
+              agent: (await runtime.herdr.listAgentsWithWorkspaceNames()).find(
+                (a) =>
+                  a.pane_id === target.pane_id &&
+                  a.terminal_id === target.terminal_id &&
+                  a.agent === target.agent &&
+                  a.workspace_id === target.workspace_id &&
+                  sameAgentSession(a.agent_session, target.agent_session),
+              ),
+              continuity: "unknown",
+            };
+        if (!acquired.agent)
+          throw new Error("Worker session changed or exited");
+        if (
+          acquired.agent.pane_id === lead.pane_id ||
+          acquired.agent.workspace_id !== workspaceId
+        )
+          throw new Error("invalid Worker target");
+        return { agent: acquired.agent, continuity: acquired.continuity };
+      },
+      // 將設定的 timeout 傳給 Lead planning、每個 Worker 與 Lead synthesis。
+      timeoutMs: runtime.config.approvalTimeoutMs,
+    },
+    (event) => {
+      void reportOrchestrationEvent(event, context, runtime).catch((error) =>
+        console.error(safeError(error)),
+      );
+    },
+  );
+  // Register/persist before the receipt. A delivery failure must not orphan execution.
+  void running.catch((error) => console.error(safeError(error)));
   await runtime.discord.reply(
     context.message,
-    `${agentHeaderFor(lead)}\n🧭 **1:1:N Team Task accepted** · \`${taskId}\`\nLead: **${agentLabel(lead)}**\nWorkers: ${workers.map(agentLabel).join(", ")}`,
+    `${agentHeaderFor(lead)}\n🧭 **Team Task accepted** · \`${taskId}\`\nLead: **${agentLabel(lead)}**\nWorkers: ${workers.map(agentLabel).join(", ")}`,
   );
-  const reserved = new Set<string>();
-  const reserve = (agent: AgentRecord) => {
-    if (!reserved.has(agent.terminal_id)) {
-      assertAgentAvailable(agent, runtime);
-      runtime.activeStreams.add(agent.terminal_id);
-      reserved.add(agent.terminal_id);
-    }
-  };
-  reserve(lead);
-  const workerOwners = new Map<string, string>();
-  try {
-    const result = await runTeamTask(
-      {
-        taskId,
-        prompt,
-        lead,
-        workers,
-        replan: true,
-        acquireWorker: async (target) => {
-          const acquired = target.pane_id.startsWith("profile:")
-            ? await runtime.pool!.acquire(
-                workspaceId,
-                target.pane_id.slice(8),
-                lead,
-                taskId,
-              )
-            : {
-                agent: (
-                  await runtime.herdr.listAgentsWithWorkspaceNames()
-                ).find(
-                  (a) =>
-                    a.pane_id === target.pane_id &&
-                    a.terminal_id === target.terminal_id &&
-                    a.agent === target.agent &&
-                    a.workspace_id === target.workspace_id &&
-                    sameAgentSession(a.agent_session, target.agent_session),
-                ),
-                continuity: "unknown",
-              };
-          if (!acquired.agent)
-            throw new Error("Worker session changed or exited");
-          if (
-            acquired.agent.pane_id === lead.pane_id ||
-            acquired.agent.workspace_id !== workspaceId
-          )
-            throw new Error("invalid Worker target");
-          const owner = workerOwners.get(acquired.agent.terminal_id);
-          if (owner && owner !== target.pane_id)
-            throw new Error(
-              "multiple roster entries refer to the same Worker session",
-            );
-          workerOwners.set(acquired.agent.terminal_id, target.pane_id);
-          reserve(acquired.agent);
-          return { agent: acquired.agent, continuity: acquired.continuity };
-        },
-        // 將設定的 timeout 傳給 Lead planning、每個 Worker 與 Lead synthesis。
-        timeoutMs: runtime.config.approvalTimeoutMs,
-      },
-      runtime.herdr,
-      (event) => {
-        void reportOrchestrationEvent(event, context, runtime).catch((error) =>
-          console.error(safeError(error)),
-        );
-      },
-    );
-    await runtime.discord.reply(
-      context.message,
-      `${agentHeaderFor(lead)}\n${result.state === "completed" ? "✅ **Team Task completed**" : result.state === "failed" ? "❌ **Team Task failed — partial synthesis**" : "⏸️ **Team Task blocked — partial synthesis**"} · \`${taskId}\`\n\n${result.synthesis || "(no synthesis)"}`,
-    );
-  } finally {
-    runtime.pool?.release(taskId);
-    for (const terminal of reserved) runtime.activeStreams.delete(terminal);
-  }
+  const result = await running;
+  await runtime.discord.reply(
+    context.message,
+    `${agentHeaderFor(lead)}\n**Team Task ${result.state}** · \`${taskId}\`\n\n${result.synthesis || result.detail || "(no synthesis)"}`,
+  );
 }
 
 async function reportOrchestrationEvent(
@@ -1165,7 +1210,7 @@ async function reportOrchestrationEvent(
   context: CommandContext,
   runtime: Runtime,
 ): Promise<void> {
-  const messages: Record<OrchestrationEvent["type"], string | undefined> = {
+  const messages: Partial<Record<OrchestrationEvent["type"], string>> = {
     task_started: `🧭 Team Task \`${event.taskId}\` started.`,
     plan_requested: `📋 Lead is planning Team Task \`${event.taskId}\`.`,
     assignment_started: `🔄 Assignment \`${event.assignmentId}\` started on \`${event.paneId}\` · ${event.detail || "session unknown"}.`,
@@ -1458,6 +1503,8 @@ async function cancelAgent(
     context,
     runtime,
   );
+  if (runtime.tasks?.owns(agent))
+    throw new Error("Agent belongs to a Team Task; use team cancel <task-id>");
   await runtime.herdr.cancelAgent(agent.pane_id);
   await runtime.discord.reply(
     context.message,
@@ -1765,7 +1812,8 @@ function helpText(prefix: string): string {
     "**多 Agent 與交接**",
     `\`${prefix} team add <agent>\` / \`${prefix} team remove <agent>\` — 管理 thread participants`,
     `\`${prefix} team list\` — 查看目前 thread 的 Team 成員、pane 與即時狀態`,
-    `\`${prefix} team ask <prompt>\` — 只把這次 prompt 送給所有 participants，不複製完整 history`,
+    `\`${prefix} team ask <prompt>\` — 建立持久化任務，由 Lead 動態分工`,
+    `\`${prefix} team status [task-id]\` / \`${prefix} team cancel <task-id>\` — 查看／取消任務`,
     `\`${prefix} handoff <from> <to> [instruction]\` — 以受限近期輸出摘要交接給另一個 Agent`,
     "",
     "**本機 bridge 共用路由**",
@@ -1812,7 +1860,9 @@ function consoleHelpText(): string {
     "**Team 與交接**",
     "team list — 列出所有 workspace Team 成員",
     "team add <agent> | team remove <agent> — 管理目前 workspace Team",
-    "team ask <prompt> — 對目前 workspace Team 發送 prompt",
+    "team ask <prompt> — 建立持久化任務，由 Lead 動態分工",
+    "team status [task-id] — 查看持久狀態與重啟核對結果",
+    "team cancel <task-id> — 停止任務派送並取消仍 active 的工作",
     "handoff <from> <to> [instruction] — 以受限近期輸出交接",
     "",
     "**共用 Discord routing**",

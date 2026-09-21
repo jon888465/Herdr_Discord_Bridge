@@ -9,6 +9,8 @@ export interface TeamTurnContext {
   taskId: string;
   phase: "planning" | "assignment" | "synthesis";
   assignmentId?: string;
+  signal?: AbortSignal;
+  beforeDispatch?: () => void;
 }
 
 const sources: ReadSource[] = [
@@ -28,6 +30,9 @@ export async function runTeamTurn(
   context?: TeamTurnContext,
   onBlocked?: () => void,
 ): Promise<{ state: "done" | "blocked"; text: string; terminal: boolean }> {
+  const signal = context?.signal;
+  const check = () => signal?.throwIfAborted();
+  check();
   const nonce = randomBytes(16).toString("hex");
   const begin = `BRIDGE_BEGIN_${nonce}`;
   const end = `BRIDGE_END_${nonce}`;
@@ -64,7 +69,11 @@ export async function runTeamTurn(
       /* One unsupported read source must not disable the others. */
     }
   }
+  check();
   let transcript = await CodexTranscript.connect(agent, prompt);
+  check();
+  context?.beforeDispatch?.();
+  check();
   // 優先使用 Herdr 的 atomic agent.prompt(wait=...)，確保發送與首次 settled
   // lifecycle 綁在同一個 request；不支援時才 fallback 到 promptAgent + waitAgent。
   let promptSettled: AgentRecord | undefined;
@@ -79,6 +88,7 @@ export async function runTeamTurn(
     // Do not resend: continue reading this turn's unique marker envelope.
     promptStalled = true;
   }
+  check();
   if (!onBlocked && promptSettled && promptSettled.agent_status === "blocked")
     return {
       state: "blocked",
@@ -92,13 +102,18 @@ export async function runTeamTurn(
   // settled record avoids spending a second timeout on agent.wait.
   let current = promptSettled;
   do {
+    check();
     // atomic prompt 已回傳 settled record 時不再重複消耗另一個完整 wait timeout。
     if (!current)
-      current = await herdr.waitAgent(
-        agent.pane_id,
-        ["idle", "done", "blocked", "unknown"],
-        Math.max(1, deadline - Date.now()),
+      current = await abortable(
+        herdr.waitAgent(
+          agent.pane_id,
+          ["idle", "done", "blocked", "unknown"],
+          Math.max(1, deadline - Date.now()),
+        ),
+        signal,
       );
+    check();
     if (
       !current ||
       current.pane_id !== agent.pane_id ||
@@ -126,6 +141,7 @@ export async function runTeamTurn(
     if (lastStatus === "unknown")
       throw new Error(`Agent ${agent.pane_id} ended in unknown`);
 
+    check();
     if (transcript) {
       try {
         await transcript.poll();
@@ -151,6 +167,7 @@ export async function runTeamTurn(
         } catch {
           continue;
         }
+        check();
         if (output === baseline.get(source)) continue;
         const text = extractFrame(output, begin, end);
         if (text !== undefined) {
@@ -202,4 +219,17 @@ function extractFrame(
   const finish = pattern(end).exec(text.slice(offset));
   if (!finish) return;
   return text.slice(offset, offset + finish.index).trim();
+}
+
+/** Only observational waits are raced. Dispatch must settle before cancellation cleans up. */
+function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    promise
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener("abort", abort));
+    if (signal.aborted) abort();
+  });
 }

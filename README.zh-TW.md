@@ -239,3 +239,11 @@ Lead 自行決定角色、是否委派，以及依報告追加工作，無固定
 
 釋放任務租用或移出 Team 不會停止 CLI。Bridge 會核對 session identity，不能確認時不宣稱 context 延續；新 session 收到原任務與有界報告。
 啟動送達不確定時不重試開 pane，需檢查後明確 bind。完整操作、限制與驗收見 [Agent Pool 與 console 架構](docs/agent-pool-console.md)。
+
+## Durable Team Task（Phase 1）
+
+`team ask <prompt>` 保存任務、Lead/session、凍結 roster、Assignment、事件與報告。
+`team status [task-id]` 查看目前 workspace 的持久狀態；`team cancel <task-id>` 取消整個任務。Discord 使用 `/herdr` 前綴。
+重啟後先核對 pane/session，標示 blocked/recoverable 或 unknown，不自動重送工作。取消只使用既有 Ctrl-C，確認停止後才 cancelled；不確定時保留 cancelling 與 reservation，不關閉 CLI。
+Team 的多 Agent 問題回覆／續接仍屬 Phase 2。一般單 Agent 問答不會繞過 Team reservation。
+詳見 [架構、操作限制與 live 驗收](docs/durable-task-engine.md)及 ISSUE-020。

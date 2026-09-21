@@ -19,10 +19,10 @@
 - **Roster**: The frozen set of Team members and their roles captured when a
   Team Task starts. Changes to the Discord Team affect later tasks, not a task
   already running.
-- **Assignment state**: `pending`, `running`, `blocked`, `completed`,
-  `failed`, or `cancelled`.
-- **Team Task state**: `planning`, `dispatching`, `running`, `synthesizing`,
-  `completed`, `failed`, or `cancelled`.
+- **Assignment state**: `pending`, `assigned`, `working`, `blocked`, `done`,
+  `failed`, or `cancelled` (the scheduler and durable engine share this lifecycle).
+- **Team Task state**: `planning`, `running`, `blocked`, `cancelling`, `synthesizing`,
+  `completed`, `failed`, or `cancelled`. Synthesis includes direct work and verification.
 - **Report**: A bounded, observable result from an Assignment. It is not the
   Agent's hidden reasoning or full terminal history.
 - **Synthesis**: The Lead's bounded final report combining Assignment reports,
@@ -42,9 +42,9 @@
 - Reports are bounded observed output; hidden chain-of-thought is never shared.
 - The first orchestration implementation of `team ask` now asks the Lead for a
   validated Assignment plan, dispatches bounded work through Herdr, collects
-  Worker reports, and asks the Lead for synthesis. Task persistence, restart
-  recovery, cancellation, and interactive blocked-Assignment continuation are
-  still pending.
+  Worker reports, and asks the Lead for synthesis. Phase 1 now persists that same
+  lifecycle and reconciles interrupted tasks without redispatch. Interactive
+  blocked-Assignment continuation remains Phase 2.
 
 ## Pending feature index
 
@@ -84,4 +84,8 @@ instances; legacy processes without the lock still require explicit migration.
 
 - [Agent Pool and console separation](docs/agent-pool-console.md): 2026-09-18 implementation of per-workspace profile permissions, lazy persistent CLI startup, explicit existing-session binding, session continuity checks, dynamic Lead replanning, and console selection/inspection modes.
 - Profiles are definitions, sessions hold CLI context, panes host processes. Removing a profile from a Team does not stop its session.
-- Team roster may contain live mappings and enabled profiles; only selected profiles start. Lead may choose zero Workers. Tasks still have no restart recovery.
+- Team roster may contain live mappings and enabled profiles; only selected profiles start. Lead may choose zero Workers. Tasks now have durable state and conservative restart reconciliation; automatic resume is not implemented.
+
+## Durable Tasks
+
+[Phase 1 architecture and acceptance](docs/durable-task-engine.md): versioned atomic event journals, frozen task identity, shared Assignment lifecycle, status/cancel commands, restart quarantine and reservation ownership. ISSUE-020 tracks source/test evidence separately from live acceptance.
