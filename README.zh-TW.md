@@ -7,7 +7,7 @@
 Agent quota 快用完時，可請 CLI 讀取 [session-handoff skill](skills/session-handoff/SKILL.md)
 保存交接資訊，或由另一 CLI 復原指定 session。整個目錄可稍後手動安裝。
 詳見[用法及與 bridge handoff 的差異](docs/session-handoff.md)。
-目前無自動 quota 監控／切換，真實跨 CLI 驗收仍待完成。
+目前無供應商 quota 自動監控；Bridge Phase 4 支援明確額度回報與驗證切換（見下方），真實跨 CLI 驗收仍待完成。
 
 ## 安裝與啟動
 
@@ -250,4 +250,10 @@ Team 多 Agent 問題使用 `team questions <task-id>` 查詢、`team reply <tas
 
 ### 持久化 Session Handoff（Phase 3）
 
-`handoff checkpoint <source> <goal>` 保存後，依序執行 `handoff verify <id> <destination> confirm-source-stopped`、`handoff accept <id>`、`handoff continue <id>`。以 `handoff status [id]`／`handoff packet <id>` 查詢；`handoff cancel <id>` 僅釋放已停止的交接，不殺 CLI。操作者須確認來源與背景 writer 停止；Bridge 核對同機同 workspace／工作樹、HEAD、dirty 內容與 session。詳見 [完整限制、adapter 與驗收](docs/session-handoff-runtime.md)。自動 quota／failover 屬 Phase 4，尚未實作。
+`handoff checkpoint <source> <goal>` 保存後，依序執行 `handoff verify <id> <destination> confirm-source-stopped`、`handoff accept <id>`、`handoff continue <id>`。以 `handoff status [id]`／`handoff packet <id>` 查詢；`handoff cancel <id>` 僅釋放已停止的交接，不殺 CLI。操作者須確認來源與背景 writer 停止；Bridge 核對同機同 workspace／工作樹、HEAD、dirty 內容與 session。詳見 [完整限制、adapter 與驗收](docs/session-handoff-runtime.md)。Phase 4 額度與切換政策見下方。
+
+### Phase 4：Quota / Failover Manager
+
+`failover arm <source> <candidate1,candidate2> <goal-and-constraints>` 保存任務與候選優先序；`quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds]` 記錄明確額度觀察。來源 limited/exhausted 會先建立 checkpoint，不呼叫來源模型。確認來源／背景 writer 停止後，`failover run <id> confirm-source-stopped` 選擇不同額度池且有新鮮 available 回報的目的地，驗證復原／工作樹、移交 ownership 再續作。`quota status`、`failover status [id]`／`cancel <id>` 可查詢／釋放。
+
+第一版採操作者回報，沒有 provider quota API。過期、unknown、同額度池或衝突觀察不准派送；不改帳號／憑證，不重試不明送達。詳見 [完整指令、journal、限制及驗收](docs/quota-failover-manager.md)。

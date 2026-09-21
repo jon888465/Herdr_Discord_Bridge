@@ -5,6 +5,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import {
+  QuotaFailoverManager,
+  QuotaFailoverStore,
+} from "../src/quota-failover.js";
 import { HandoffStore, renderHandoff } from "../src/handoff-store.js";
 import { SessionHandoffRuntime } from "../src/session-handoff.js";
 import {
@@ -673,4 +677,40 @@ test("nested Agent cwd fingerprints the whole repository including untracked fil
   } finally {
     await f.close();
   }
+});
+
+test("Phase 4 quota failover runs real handoff verification and continuation with preserved dirty work", async (t) => {
+  const f = await fixture();
+  t.after(f.close);
+  await fs.writeFile(path.join(f.repo, "file.txt"), "existing user work\n");
+  const manager = new QuotaFailoverManager(
+    new QuotaFailoverStore(path.join(f.dir, "quota.json")),
+    f.runtime,
+    f.port.listAgentsWithWorkspaceNames,
+    ["w"],
+  );
+  const policy = manager.arm(
+    f.source,
+    [f.destination],
+    "Continue work without reverting user changes",
+    { guildId: "g", channelId: "c" },
+  );
+  await manager.report(
+    f.destination,
+    "available",
+    "destination-budget",
+    "operator",
+  );
+  await manager.report(f.source, "exhausted", "source-budget", "operator");
+  assert.equal(f.prompts.length, 0);
+  const ready = manager.store.get(policy.id);
+  assert.equal(ready.state, "ready");
+  const result = await manager.run(policy.id, "operator", true);
+  assert.equal(result.state, "completed");
+  assert.equal(f.store.get(ready.checkpointId!).owner, "destination");
+  assert.equal(f.prompts.length, 2);
+  assert.equal(
+    await fs.readFile(path.join(f.repo, "file.txt"), "utf8"),
+    "existing user work\n",
+  );
 });

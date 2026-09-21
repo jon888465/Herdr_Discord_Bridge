@@ -198,7 +198,7 @@ For native session recovery across CLIs and checkpoints before quota exhaustion,
 ask your CLI to read the standalone [session-handoff skill](skills/session-handoff/SKILL.md).
 Copy the whole skill directory for manual installation; discovery paths vary by CLI.
 See [usage and the Bridge comparison](docs/session-handoff.md). This agent workflow
-has no automatic quota watcher or failover; live cross-CLI acceptance is pending.
+has no automatic quota watcher. Bridge Phase 4 adds failover from explicit quota observations (below); live cross-CLI acceptance is pending.
 
 Agent replies and progress messages are labeled with Agent, Workspace, and
 Pane. A typical Discord thread therefore looks like:
@@ -274,4 +274,10 @@ Existing sessions require explicit binding and retain their CLI context. New or 
 
 ### Durable session handoff (Phase 3)
 
-Use `handoff checkpoint <source> <goal>`, then `handoff verify <id> <destination> confirm-source-stopped`, `handoff accept <id>`, and `handoff continue <id>`. Inspect with `handoff status [id]` / `handoff packet <id>`; `handoff cancel <id>` releases settled ownership without stopping a CLI. Explicitly confirm source/background writers are stopped. Repository/HEAD/dirty files and exact sessions are checked; current support requires the same local workspace and worktree. See [behavior, adapters and live acceptance](docs/session-handoff-runtime.md). Automatic quota/failover is Phase 4 and is not implemented.
+Use `handoff checkpoint <source> <goal>`, then `handoff verify <id> <destination> confirm-source-stopped`, `handoff accept <id>`, and `handoff continue <id>`. Inspect with `handoff status [id]` / `handoff packet <id>`; `handoff cancel <id>` releases settled ownership without stopping a CLI. Explicitly confirm source/background writers are stopped. Repository/HEAD/dirty files and exact sessions are checked; current support requires the same local workspace and worktree. See [behavior, adapters and live acceptance](docs/session-handoff-runtime.md). Phase 4 adds quota policies described below.
+
+### Phase 4: Quota / Failover Manager
+
+Use `failover arm <source> <candidate1,candidate2> <goal-and-constraints>` to authorize an ordered set of existing sessions. Report observations with `quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds]`. A source limited/exhausted report prepares a checkpoint without calling its model. After stopping source/background writers, `failover run <id> confirm-source-stopped` chooses a fresh available candidate on a different budget, verifies recovery and repository state, transfers ownership, then continues. `quota status`, `failover status [id]`, and `failover cancel <id>` inspect or release policies.
+
+This version uses operator reports, not provider quota APIs. Expired/unknown/shared-budget-conflicting observations cannot authorize a destination. No account/credential rotation or automatic retry after uncertain dispatch. See [commands, journal behavior, limitations and live acceptance](docs/quota-failover-manager.md).

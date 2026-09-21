@@ -25,7 +25,9 @@
 
 | ISSUE-020 | Phase 1 Durable Task Engine、restart reconciliation 與 whole-team cancellation | 已修正、待驗收 | 2026-09-21 完整 113/114 通過；ISSUE-007 入口逾時，live 驗收仍待完成 |
 
-| ISSUE-021 | Phase 3 Session Handoff Runtime | 重新開啟／待調查 | 2026-09-21 並行 verify/cancel 測試 ENOENT，單獨重跑仍失敗；live 未驗收 |
+| ISSUE-021 | Phase 3 Session Handoff Runtime | 重新開啟／待調查 | 2026-09-21 並行 verify/cancel ENOENT 與 context 清理 ENOTEMPTY；詳見 Phase 3／4 合併紀錄，live 未驗收 |
+
+| ISSUE-022 | Phase 4 Quota / Failover Manager | 已修正、待驗收 | 2026-09-21 新增 28 項通過；完整 181/184，ISSUE-007／021 待調查，live 待驗收 |
 
 2026-09-09 自動化驗證：`npm run check`（typecheck、build、33/33 tests）、`npm run lint`、`git diff --check` 通過。這是前一輪程式驗證紀錄，不代表已做 live Discord 驗收。本輪僅整理文件，未重跑程式測試。
 
@@ -698,3 +700,49 @@ ISSUE-012 保持「已修正、待驗收」，ISSUE-007 保持「重新開啟／
 ISSUE-021 由已修正、待驗收重新開啟／待調查。下一步釐清並行測試 ENOENT、完成修正及完整 gate，再依 session-handoff-runtime.md 做實際 receipt／ownership／dirty preservation／cancel/restart 驗收。不得將本次合併視為完整自動化或 live 驗收通過。
 
 本輪完成本機 main 合併提交；原 README.zh-TW.md 未提交修改保留於提交之外。未 push、未部署或重啟 bridge，執行中版本未核對，舊任務／訊息不補送。Phase 4 未納入本輪。
+
+
+## ISSUE-022：Phase 4 Quota / Failover Manager
+
+更新日期：2026-09-21。狀態：已修正、待驗收；本機 main 合併後新增 28 項 Phase 4 測試通過，但完整 gate 因 ISSUE-007／021 未通過。以下保留 2026-09-20 的受限環境歷史；最新結果見末尾。
+
+症狀／已確認根因：Phase 3 可明確交接，但沒有額度 observation registry、候選 policy 或從限額訊號到 checkpoint／驗證續作的協調層。不同 CLI 可能共用同一耗盡額度池；不能只按 CLI 名称或假設經過時間就有額度。
+
+預期／修正：新增 `src/quota-failover.ts`，atomic schema-v1 quota/policy after-image journal、session-scoped TTL observations、ordered frozen候選、共享 budget group 衝突防護、來源 limited/exhausted report 自動 checkpoint。`failover run ... confirm-source-stopped` 選可用候選後串接 Phase 3 verify/accept/continue，成功更新目前 route。main／Discord／console 加入 quota/report/status、failover/arm/status/run/cancel；保持 context scope、active Team／ownership guards。Restart quarantine、先保存 intent、不明派送不重試／cascade。完整契約、命令與限制見 [Phase 4](quota-failover-manager.md)。
+
+第一版使用操作者回報；沒有 provider API／背景 quota watcher，不推算百分比或 reset，也不改帳號／憑證。候選能力與 budget-group 歸屬由使用者確認；不能將本版描述為全自動 provider 額度偵測。
+
+驗證環境：隔離 Linux Node runner、fake Herdr/Discord／clock、temporary state/Git；沒有呼叫真實模型或使用者 session。新 `test/quota-failover.test.ts` 27 項加 Phase 3 fixture 中 1 項完整串接，共新增 28 項。
+
+### 自動化紀錄（2026-09-20）
+
+- 中途 typecheck：測試誤用不存在的 `parseConsoleLine` export（TS2305）；改用既有 `parseConsoleCommand`，未改 parser 行為。
+- 第一批 Phase 3/4：52/52 通過；後續補上 restart 保留 armed/ready、跨 Discord context 回報遮蔽及 workspace 限制。
+- 最終 `npm run typecheck`、`npm run build`、`npm run lint` PASS（49 TypeScript files）。
+- Targeted：`node --test dist/test/quota-failover.test.js dist/test/session-handoff.test.js dist/test/team-questions.test.js dist/test/team-task-engine.test.js dist/test/team-orchestration.test.js dist/test/agent-pool.test.js dist/test/console-conversation.test.js dist/test/local-agent.test.js` **133/133 PASS**。
+- 涵蓋：先持久化再副作用、unknown/stale/時鐘倒退、同 pool／衝突、來源已可用、候選換 identity／busy、ordered fallback、checkpoint失敗、quota 在 verify/accept 期间過期、停止聲明、並行 run/cancel、unknown delivery 不重送／不換第二個、原子保存失敗、schema/immutable fields、restart quarantine、command scope／route。整合 fixture 執行真正 SessionHandoffRuntime，檢查 receipt／ownership／两次目的地 prompt 與 dirty 檔案保留。
+- 完整 compiled suite：`node --test --test-timeout=15000 dist/test/*.test.js` **182 項：176 pass、5 fail、1 cancelled**（exit 1）。兩項 Herdr socket fixtures、三項 instance-lock fixtures 因本機 listen EPERM／無法取得 lock 失敗，killed-owner fixture 15 秒逾時 cancelled。這次 build 與全套 runner 分開執行；沒有把限時套件稱為原始 npm test 通過。未修改受阻 fixtures。
+- 本次程式／文件格式與 diff 檢查通過；新文件的本機連結均存在。
+
+限制／下一步：在允許本機 IPC 的開發環境重跑原始 npm test，再依架構文件進行真實跨 CLI／quota／Discord scope／restart／ownership 驗收。額度觀察可能於下一次呼叫耗盡，不能保證 destination 有實際餘額；檔案改變需重新 checkpoint。Failover／handoff 分開 journal，崩潰邊界可能留下 orphan checkpoint 或最後狀態不同步，需人工查 evidence，不自動 replay。無 retention/compaction、跨程序 writer lock、provider-specific adapter、自動能力探測、mid-turn Team migration。Phase 3 的同機同工作樹、submodule 拒絕、ignored/external 不涵蓋與外部 writer 競態仍在。
+
+原始碼／build 完成；未 merge main、未部署／重啟使用者 Bridge，running version 未核對，舊訊息／工作不補送。Fixture 不能當成 live 驗收；既有 ISSUE-007/014 等狀態不因此關閉。
+
+### 2026-09-21 Phase 4 合併驗證（ISSUE-022／ISSUE-021／ISSUE-007）
+
+使用者授權將 `origin/phase4-quota-failover-manager`（`f813a53`）合併至本機 main（合併前 `5f04a33`）。保留前輪 issue／驗證歷史與 macOS 修正；Phase 4 原 ISSUE-020 改為 ISSUE-022，避免與已合併 Phase 1 重號，所有引用同步。原始碼與測試邏輯維持功能分支內容。
+
+開始解衝突與測試前，工具自動審核曾因額度耗盡拒絕整個指令；該次指令沒有執行。使用者確認 reset 並要求繼續後，重新核對 MERGE_HEAD、衝突與 README stash，再完成合併及檢查。
+
+環境：2026-09-21、Linux、Node.js v22.23.2、本機 checkout／IPC、temporary Git repositories、fake Herdr／Discord／clock；未使用真實 CLI 或 provider quota。
+
+- `npm run lint` 通過（49 個 TypeScript 檔案）；`npm run check` 的 typecheck、build 通過。
+- 完整 184 項：181 通過、3 失敗、0 跳過，check exit 1。27 項 quota tests 與 1 項真正 SessionHandoffRuntime 串接 fixture 均通過（本輪新增 28 項）。完整 gate 未通過，不以 targeted 結果取代。
+- ISSUE-007：real entrypoint duplicate-instance 再次超過既有 10 秒，exit code null 而非 1；沒有更改 timeout 或斷言。
+- ISSUE-021：並行 verify/cancel 再次 unhandledRejection／ENOENT，HandoffStore.write 寫臨時 journal 時路徑不存在；延續 Phase 3 完整及單獨重跑結果。
+- ISSUE-021 新增觀察：`command contexts restrict packets and replies, block normal prompts while ownership is held` 清理 `/tmp/handoff-runtime-*` 時 ENOTEMPTY。單獨重跑 `node --test --test-name-pattern='command contexts restrict packets and replies' dist/test/session-handoff.test.js` 為 1/1 通過、exit 0；不能抵銷完整套件失敗，確切根因仍待調查。
+- 65 個文件相對連結均存在，`git diff --cached --check` 通過。src/test/scripts 相對 Phase 4 分支只保留 main 的 instance-lock／restart macOS 修正與測試。
+
+ISSUE-021 的預期行為包含完成驗證後安全清理 fixture、無未處理拒絕；新增 ENOTEMPTY 的修正範圍本輪僅記錄，未改程式。下一步查明非同步工作與 fixture cleanup 時序及完整套件負載因素，並調查 ISSUE-007，再重跑完整 gate。兩項保持「重新開啟／待調查」，ISSUE-022 保持「已修正、待驗收」。Phase 4 依賴 Phase 3，因此不能因新增 fixture 通過宣稱整體 failover 已驗收。
+
+本輪完成本機 main 合併提交，README.zh-TW.md 既有未提交修改保留於提交之外。未 push、未部署或重啟 Bridge，running version 未核對；舊訊息／工作不補送。provider watcher、自動 reset 等候與 live quota／跨 CLI／Discord 驗收未完成；實際功能仍以 operator observations 與明確 stopped-writer run 為準。

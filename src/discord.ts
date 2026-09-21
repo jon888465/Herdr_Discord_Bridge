@@ -49,6 +49,8 @@ export const SHORT_COMMANDS = new Set([
   "wait",
   "cancel",
   "handoff",
+  "quota",
+  "failover",
   "team",
 ]);
 
