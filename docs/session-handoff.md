@@ -2,7 +2,9 @@
 
 日期：2026-09-18。需求來自[分享對話](https://chatgpt.com/share/6aacdb85-1a34-83ee-b9e5-9a6a968a3a84)：Agent 接近 quota 上限時保存進度，接手方優先讀指定 session 的原生歷史並繼續工作，包含 Gemini Antigravity（agy）。
 
-本次提供 [session-handoff skill](../skills/session-handoff/SKILL.md)、[adapter 指引](../skills/session-handoff/references/adapters.md)與 [HANDOFF.md 範本](../skills/session-handoff/assets/HANDOFF.md)。它是 Agent 執行的 Markdown 流程，不是背景服務或 bridge runtime 新功能。真實跨 CLI 驗收待完成，見 [ISSUE-017](known-issues.md)。
+2026-09-20 更新：Bridge 已新增 [Phase 3 Session Handoff Runtime](session-handoff-runtime.md)，提供 durable checkpoint、接手驗證、ownership 與續作。下文 2026-09-18 的 skill-only 說明與舊 bounded handoff 比較保留為歷史；Phase 3 現行行為以上述文件為準。
+
+2026-09-18 提供 [session-handoff skill](../skills/session-handoff/SKILL.md)、[adapter 指引](../skills/session-handoff/references/adapters.md)與 [HANDOFF.md 範本](../skills/session-handoff/assets/HANDOFF.md)。它是 Agent 執行的 Markdown 流程，不是背景服務或 bridge runtime 新功能。真實跨 CLI 驗收待完成，見 [ISSUE-017](known-issues.md)。
 
 ## 與現有 bridge handoff 的差異
 

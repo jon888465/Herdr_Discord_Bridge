@@ -271,3 +271,7 @@ detach
 `team select` opens a numbered checkbox list in the bridge pane: enter numbers to toggle, `done` to save, `cancel` to cancel. Discord uses `team select <profile> on|off`. Binding is optional: an unbound selected profile starts only when the Lead assigns it work. Use `team add profile:<id>` / `team remove profile:<id>` as explicit aliases.
 
 Existing sessions require explicit binding and retain their CLI context. New or unidentified sessions receive the original task and bounded reports, without claiming complete context recovery. Release and Team removal preserve the process. Startup failures with uncertain delivery require inspection and explicit binding before retrying; panes are not automatically closed. See [architecture, limits and acceptance](docs/agent-pool-console.md).
+
+### Durable session handoff (Phase 3)
+
+Use `handoff checkpoint <source> <goal>`, then `handoff verify <id> <destination> confirm-source-stopped`, `handoff accept <id>`, and `handoff continue <id>`. Inspect with `handoff status [id]` / `handoff packet <id>`; `handoff cancel <id>` releases settled ownership without stopping a CLI. Explicitly confirm source/background writers are stopped. Repository/HEAD/dirty files and exact sessions are checked; current support requires the same local workspace and worktree. See [behavior, adapters and live acceptance](docs/session-handoff-runtime.md). Automatic quota/failover is Phase 4 and is not implemented.

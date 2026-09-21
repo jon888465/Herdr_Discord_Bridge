@@ -24,7 +24,24 @@
 
 完整使用／限制與驗收见 [Phase 2 question queue](team-question-queue.md) 及 ISSUE-012。新寫入 schema v2，讀取 v1 後 mutation 升級；不重用單 Agent thread-level approval。
 
-## 後续提案（未實作）
+## Phase 3：Session Handoff Runtime（原始碼已實作，待驗收）
+
+原分期從 2026-09-19 規劃復原：checkpoint registry、session adapters、ownership transfer、acceptance verification、HANDOFF skill integration。
+
+- 持久 checkpoint／derived HANDOFF.md、來源身分與公開 evidence、Git HEAD／branch／dirty fingerprint。
+- `handoff checkpoint/status/packet/verify/accept/continue/cancel`；目的地驗證與實際 ownership 移交分開。
+- 來源／背景 writer 停止聲明與 Bridge workspace reservation；不改 active Team frozen roster。
+- Codex exact-ID 公開 JSONL、其他 CLI 的明確 public-export-v1 與 checkpoint fallback；不宣稱通用原生 DB 解碼。
+- Restart quarantine、未知送達不重試，與既有 session-handoff skill／ISSUE-014 receiver 整合。
+
+詳見 [Phase 3 契約與驗收](session-handoff-runtime.md)、ISSUE-021。
+
+## Phase 4：Quota / Failover Manager（未實作）
+
+- quota／狀態觸發 checkpoint、目的地能力與額度選擇、經驗證的 failover policy。
+- 本輪不自動切換帳戶、provider 或啟動未知 CLI；handoff 不重設 quota。
+
+## 其他後續提案（未實作）
 
 - 有證據的 turn resume／重新規劃，不盲目重送有副作用的 prompt。
 - Journal retention／compaction、schema migrations、跨 bot／程序 state-directory 排他。

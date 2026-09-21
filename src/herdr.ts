@@ -310,11 +310,11 @@ export class HerdrClient {
   /** Use the documented prompt method, with compatibility for herdr-hail's agent.send. */
   async promptAgent(target: string, text: string): Promise<void> {
     try {
-      await this.request("agent.prompt", { target, text });
+      await this.request("agent.prompt", { target, text }, { retries: 0 });
     } catch (error) {
       if (!(error instanceof HerdrError) || !isMissingMethod(error.code))
         throw error;
-      await this.request("agent.send", { target, text });
+      await this.request("agent.send", { target, text }, { retries: 0 });
     }
   }
 

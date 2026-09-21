@@ -247,3 +247,7 @@ Lead 自行決定角色、是否委派，以及依報告追加工作，無固定
 重啟後先核對 pane/session，標示 blocked/recoverable 或 unknown，不自動重送工作。取消只使用既有 Ctrl-C，確認停止後才 cancelled；不確定時保留 cancelling 與 reservation，不關閉 CLI。
 Team 多 Agent 問題使用 `team questions <task-id>` 查詢、`team reply <task-id> <question-id> <answer>` 回答。詳見 [Phase 2 行為與限制](docs/team-question-queue.md)。一般單 Agent 問答不會繞過 Team reservation。
 詳見 [架構、操作限制與 live 驗收](docs/durable-task-engine.md)及 ISSUE-020。
+
+### 持久化 Session Handoff（Phase 3）
+
+`handoff checkpoint <source> <goal>` 保存後，依序執行 `handoff verify <id> <destination> confirm-source-stopped`、`handoff accept <id>`、`handoff continue <id>`。以 `handoff status [id]`／`handoff packet <id>` 查詢；`handoff cancel <id>` 僅釋放已停止的交接，不殺 CLI。操作者須確認來源與背景 writer 停止；Bridge 核對同機同 workspace／工作樹、HEAD、dirty 內容與 session。詳見 [完整限制、adapter 與驗收](docs/session-handoff-runtime.md)。自動 quota／failover 屬 Phase 4，尚未實作。

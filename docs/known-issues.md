@@ -25,6 +25,8 @@
 
 | ISSUE-020 | Phase 1 Durable Task Engine、restart reconciliation 與 whole-team cancellation | 已修正、待驗收 | 2026-09-21 完整 113/114 通過；ISSUE-007 入口逾時，live 驗收仍待完成 |
 
+| ISSUE-021 | Phase 3 Session Handoff Runtime | 重新開啟／待調查 | 2026-09-21 並行 verify/cancel 測試 ENOENT，單獨重跑仍失敗；live 未驗收 |
+
 2026-09-09 自動化驗證：`npm run check`（typecheck、build、33/33 tests）、`npm run lint`、`git diff --check` 通過。這是前一輪程式驗證紀錄，不代表已做 live Discord 驗收。本輪僅整理文件，未重跑程式測試。
 
 ## ISSUE-013：Team ask 的 Lead JSON plan 解析失敗
@@ -657,3 +659,42 @@ ISSUE-007 保持「重新開啟／待調查」：症狀與先前相同，啟動�
 ISSUE-012 保持「已修正、待驗收」，ISSUE-007 保持「重新開啟／待調查」。下一步調查啟動逾時並重跑完整 gate；真實 Discord／console 兩 Worker 問答、session 更換、跨介面回答、cancel/restart 等仍需依 team-question-queue.md 驗收。Schema v2 可讀 v1，但舊 Phase 1 binary 不支援讀 v2；重啟不自動恢復舊 turn。
 
 本輪完成本機 main 合併提交，README.zh-TW.md 原有未提交修改保留於提交之外。未 push、未部署或重啟 bridge，執行中版本未核對，舊任務／訊息不補送；自動化不代表 live 驗收。
+
+## ISSUE-021：Phase 3 Session Handoff Runtime
+
+更新日期：2026-09-21。狀態：重新開啟／待調查。合併驗證出現並行 verify/cancel 測試 ENOENT，單獨重跑仍失敗；詳見末尾。以下保留 2026-09-20 的實作與受限環境驗證歷史。
+
+症狀／根因：既有 handoff 僅傳送有界 terminal output，session-handoff skill 尚未成為 runtime；缺乏持久 checkpoint、repository acceptance、ownership transfer 與 receiving receipt。原分期（2026-09-19）Phase 3 為 Session Handoff Runtime，Phase 4 為 Quota / Failover Manager。
+
+修正：新增 handoff-evidence/store、session-handoff runtime 與測試；整合 main 指令／ownership guards、現有 runTeamTurn 與 bundled skill。保存版本化 after-image journal、derived HANDOFF.md、exact source session、原 goal、task artifacts、公開 evidence、repo HEAD／branch／staged／unstaged／untracked fingerprint。verify → accept → continue 明確分離；未知／失敗／restart 轉 blocked，無 automatic replay。Herdr legacy prompt fallback 改 retries=0，防止 acknowledgement 遺失後重複工作。完整契約見 [Phase 3](session-handoff-runtime.md)。
+
+驗證環境：隔離 Linux Node runner、temporary Git repositories／state、fake Herdr／Discord；沒有呼叫真實模型或操作使用者 session。
+
+- `npm run typecheck`、`npm run build`、`npm run lint` PASS（47 TS files）。
+- 首批新測試 22/22；擴大後中途 103/104，唯一失敗是 fixture 以隨機檔案排序第一筆當成目前 checkpoint。改依 prompt 中 handoff ID 讀取正確 journal，保留「派送前已持久化」斷言。
+- 最終 targeted：`node --test dist/test/session-handoff.test.js dist/test/team-questions.test.js dist/test/team-task-engine.test.js dist/test/team-orchestration.test.js dist/test/agent-pool.test.js dist/test/console-conversation.test.js dist/test/local-agent.test.js`：**105/105**，含 **26 項 Phase 3 tests**。涵蓋流程、原子失敗、未知 schema、immutable fields、dirty bytes／HEAD／branch／index／nested cwd、session replacement、active Team／worker、錯誤 receipt、驗證期間寫檔、並行操作、restart quarantine、explicit export、Codex exact-ID／公開 channel filtering、context guard、legacy retry。
+- `timeout --signal=INT 30s npm test`：build PASS；Herdr socket fixtures 失敗、instance-lock 等待無法自然完成，30 秒停止 exit 124，無完整總數。
+- 完整限時 suite：`node --test --test-timeout=15000 dist/test/*.test.js` 最終 **154 項：148 pass、5 fail、1 cancelled**（exit1）；5 fail 為既有兩項 Herdr socket 與三項 instance-lock 的 EPERM，1 cancelled 為 killed-owner fixture 15 秒逾時。不能把限時 runner 或 targeted 等同完整 gate 通過。
+
+限制／未驗證：只支援同機同 workspace／canonical Git tree；active Team 先結束／取消，不改 frozen roster。Codex native adapter 支援特定公開 event_msg；其他 CLI 為明確 public-export-v1／checkpoint fallback，不宣稱原生 DB 相容。Ignored files／submodule／外部資料與背景 writer 不在完整自動驗證範圍，submodule 明確拒絕。驗證提示不是 OS read-only sandbox，外部 writer 仍有競態。Phase 4 尚未於本 commit 實作；不改帳戶或憑證。
+
+下一步：允許 IPC 的環境重跑 npm test，再依架構文件驗收 AGY/OpenCode、Codex/native fallback、quota 已耗盡、兩端版本／session、dirty preservation、真正 receiving receipt、cancel/restart。未部署／重啟使用者 Bridge，running version 未核對；fixture 不代表 live 驗收。
+
+### 2026-09-21 Phase 3 合併驗證（ISSUE-021／ISSUE-007）
+
+使用者授權將 `origin/phase3-session-handoff-runtime`（`d97c41b`）合併至本機 main（合併前 `51f2351`）。保留既有 macOS 修正與 Phase 1／2 驗證歷史；Phase 3 原 ISSUE-019 與 main 的 macOS socket 問題重號，改為 ISSUE-021 並同步引用。未修改功能分支程式或測試邏輯。
+
+環境：2026-09-21、Linux、Node.js v22.23.2、本機 checkout、允許本機 IPC；使用 temporary Git repositories 與 fake Herdr／Discord，未操作真實模型／session。
+
+- `npm run lint` 通過（47 個 TypeScript 檔案）。`npm run check` 的 typecheck、build 通過。
+- 完整 156 項測試：154 通過、2 失敗、0 跳過，check exit 1。Phase 3 的 26 項測試中 25 通過、1 失敗。
+- ISSUE-007 的 real entrypoint duplicate-instance 再次超過 10 秒，exit code null 而非 1；保留重新開啟／待調查，未更改 timeout 或斷言。
+- Phase 3 `concurrent handoff verification and cancellation cannot race in-flight dispatch` 出現 unhandledRejection：HandoffStore.write 寫入臨時 journal 時 ENOENT，呼叫鏈為 SessionHandoffRuntime.block → HandoffStore.update/write。
+- 單獨重跑 `node --test --test-name-pattern='concurrent handoff verification and cancellation' dist/test/session-handoff.test.js`：0/1 通過，同樣 ENOENT，exit 1。
+- 55 個文件相對連結均存在，`git diff --cached --check` 通過。src/test/scripts 相對功能分支僅有 main 既有 instance-lock／restart macOS 修正及回歸測試。
+
+預期：並行 verify 與 cancel 應被拒絕，第一個 verify 完成後才清理 fixture，不得有未處理拒絕或遺失 journal。已確認症狀是臨時 journal 路徑不存在；精確根因尚未確認。原測試以 100 次 10ms 輪詢等待 beforeReport，finally 會清除暫存目錄，後續需調查等待條件與未完成 verify 的清理順序；不能僅憑此推測宣稱 runtime 安全或已證實產品缺陷。本輪僅合併及記錄，未修改失敗測試或 runtime，不放寬驗收條件。
+
+ISSUE-021 由已修正、待驗收重新開啟／待調查。下一步釐清並行測試 ENOENT、完成修正及完整 gate，再依 session-handoff-runtime.md 做實際 receipt／ownership／dirty preservation／cancel/restart 驗收。不得將本次合併視為完整自動化或 live 驗收通過。
+
+本輪完成本機 main 合併提交；原 README.zh-TW.md 未提交修改保留於提交之外。未 push、未部署或重啟 bridge，執行中版本未核對，舊任務／訊息不補送。Phase 4 未納入本輪。

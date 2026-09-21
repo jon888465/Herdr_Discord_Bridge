@@ -31,6 +31,8 @@ import {
 import { HerdrClient } from "./herdr.js";
 import type { OrchestrationEvent } from "./team-orchestration.js";
 import { TeamTaskEngine } from "./team-task-engine.js";
+import { SessionHandoffRuntime } from "./session-handoff.js";
+import { HandoffStore, renderHandoff } from "./handoff-store.js";
 import { TeamTaskStore } from "./team-task-store.js";
 import {
   AgentWatcher,
@@ -136,6 +138,40 @@ async function startBridge(
     config.allowedWorkspaceIds,
   );
   await tasks.reconcile();
+  const handoffs = new SessionHandoffRuntime(
+    new HandoffStore(join(stateDirectory(), "session-handoffs")),
+    herdr,
+    activeStreams,
+    config.allowedWorkspaceIds,
+    config.approvalTimeoutMs,
+    (agent) =>
+      JSON.stringify(
+        tasks.store
+          .list(agent.workspace_id)
+          .filter(
+            (t) =>
+              t.lead.terminal_id === agent.terminal_id ||
+              t.assignments.some(
+                (a) => a.agent?.terminal_id === agent.terminal_id,
+              ),
+          )
+          .slice(-3)
+          .map((t) => ({
+            taskId: t.taskId,
+            state: t.state,
+            prompt: t.originalPrompt,
+            assignments: t.assignments.map((a) => ({
+              id: a.plan.id,
+              state: a.state,
+              report: a.report,
+              blocker: a.blocker,
+            })),
+            synthesis: t.synthesis,
+            recovery: t.recovery,
+          })),
+      ),
+  );
+  await handoffs.reconcile();
 
   discord.onCommand(async (context, command, args) => {
     try {
@@ -147,6 +183,7 @@ async function startBridge(
         activeStreams,
         pool,
         tasks,
+        handoffs,
       });
     } catch (error) {
       await discord.reply(context.message, `❌ ${safeError(error)}`);
@@ -160,6 +197,10 @@ async function startBridge(
       const target = (await herdr.listAgentsWithWorkspaceNames()).find(
         (a) => a.terminal_id === approval.terminalId,
       );
+      if (target && handoffs.blocks(target))
+        throw new Error(
+          "Workspace is held by a session handoff; inspect handoff status",
+        );
       if (target && tasks.owns(target))
         throw new Error(
           "Use team questions <task-id> and team reply <task-id> <question-id> <answer> for Team Task replies",
@@ -181,6 +222,7 @@ async function startBridge(
       routing,
       discord,
       activeStreams,
+      handoffs,
     });
     await herdr.sendInput(agent.pane_id, modelCommandFor(agent.agent, model));
   });
@@ -194,6 +236,7 @@ async function startBridge(
         activeStreams,
         pool,
         tasks,
+        handoffs,
       });
     } catch (error) {
       await discord.reply(context.message, `❌ ${safeError(error)}`);
@@ -233,6 +276,7 @@ async function startBridge(
           activeStreams,
           pool,
           tasks,
+          handoffs,
           consoleAgent,
         });
         await consoleAgent?.tick();
@@ -263,7 +307,7 @@ async function startBridge(
 
   const watcher = new AgentWatcher(herdr, config.pollIntervalMs);
   watcher.on("transition", (transition: AgentTransition) => {
-    if (!tasks.owns(transition.agent))
+    if (!tasks.owns(transition.agent) && !handoffs.blocks(transition.agent))
       void handleTransition(transition, { config, herdr, routing, discord });
   });
   watcher.on("removed", (removed: AgentRemoved) => {
@@ -285,6 +329,7 @@ async function startBridge(
 }
 
 interface Runtime {
+  handoffs?: SessionHandoffRuntime;
   tasks?: TeamTaskEngine;
   pool?: AgentPool;
   consoleAgent?: ConsoleAgent;
@@ -394,7 +439,7 @@ export async function handleCommand(
       await cancelAgent(args, context, runtime);
       return;
     case "handoff":
-      await handoffAgent(args, context, runtime);
+      await handoffCommand(args, context, runtime);
       return;
     case "team":
       await teamCommand(args, context, runtime);
@@ -801,6 +846,10 @@ async function askAgent(
         undefined,
         runtime.config.allowedWorkspaceIds,
       );
+      if (runtime.handoffs?.blocks(explicit))
+        throw new Error(
+          "Workspace is held by a session handoff; inspect handoff status",
+        );
       if (runtime.tasks?.owns(explicit))
         throw new Error(
           "Agent belongs to a Team Task; use team questions/reply/status/cancel",
@@ -833,6 +882,12 @@ async function askAgent(
     );
   validatePrompt(prompt);
   if (localImplicit && runtime.consoleAgent) {
+    if (
+      runtime.handoffs?.blocks(await resolveContextAgent("", context, runtime))
+    )
+      throw new Error(
+        "Workspace is held by a session handoff; inspect handoff status",
+      );
     if (runtime.tasks) {
       const selected = await resolveContextAgent("", context, runtime);
       if (runtime.tasks.owns(selected))
@@ -1285,6 +1340,124 @@ async function reportOrchestrationEvent(
   if (message) await runtime.discord.reply(context.message, message);
 }
 
+async function handoffCommand(
+  args: string[],
+  context: CommandContext,
+  runtime: Runtime,
+): Promise<void> {
+  const action = args[0]?.toLowerCase();
+  if (
+    ![
+      "checkpoint",
+      "checkpoint-file",
+      "status",
+      "packet",
+      "verify",
+      "accept",
+      "continue",
+      "cancel",
+    ].includes(action ?? "")
+  ) {
+    await handoffAgent(args, context, runtime);
+    return;
+  }
+  if (!runtime.handoffs) throw new Error("Session Handoff Runtime unavailable");
+  const engine = runtime.handoffs;
+  const workspace = await teamWorkspaceId(context, runtime);
+  const origin = {
+    guildId: context.routing.guildId,
+    channelId: context.routing.channelId,
+    threadId: context.routing.threadId,
+  };
+  if (action === "checkpoint" || action === "checkpoint-file") {
+    const source = findAgent(
+      await runtime.herdr.listAgentsWithWorkspaceNames(),
+      args[1] ?? "",
+    );
+    validateAgentTarget(source, undefined, runtime.config.allowedWorkspaceIds);
+    if (source.workspace_id !== workspace)
+      throw new Error("source belongs to another workspace");
+    const file = action === "checkpoint-file" ? args[2] : undefined;
+    if (action === "checkpoint-file" && !file)
+      throw new Error("provide repository-relative public export path");
+    const goal = args.slice(action === "checkpoint-file" ? 3 : 2).join(" ");
+    const record = await engine.checkpoint(source, goal, origin, file);
+    await runtime.discord.reply(
+      context.message,
+      `Checkpoint ${record.id} · ${record.state}\n${record.evidence.coverage}\nPacket: ${engine.store.packetPath(record.id)}\nNext: handoff verify ${record.id} <destination> confirm-source-stopped`,
+    );
+    return;
+  }
+  const record = args[1] ? engine.store.get(args[1]) : undefined;
+  const accessible = (r: NonNullable<typeof record>) =>
+    r.workspaceId === workspace &&
+    (context.source === "console" ||
+      (r.origin.guildId === origin.guildId &&
+        r.origin.channelId === origin.channelId &&
+        r.origin.threadId === origin.threadId));
+  if (record && !accessible(record))
+    throw new Error("handoff belongs to another workspace or Discord context");
+  if (action === "status") {
+    if (args.length > 2) throw new Error("usage: handoff status [id]");
+    const records = record ? [record] : engine.store.list().filter(accessible);
+    await runtime.discord.reply(
+      context.message,
+      records
+        .map(
+          (r) =>
+            `${r.id} · ${r.state} · owner ${r.owner}\n${r.source.pane_id} → ${r.destination?.pane_id ?? "not selected"}\n${r.receipt?.nextAction ?? r.detail ?? r.evidence.coverage}`,
+        )
+        .join("\n\n") || "No handoff checkpoints.",
+    );
+    return;
+  }
+  if (!record) throw new Error("provide a handoff ID");
+  if (action === "packet") {
+    if (args.length !== 2) throw new Error("usage: handoff packet <id>");
+    await runtime.discord.reply(context.message, renderHandoff(record));
+    return;
+  }
+  if (action === "verify") {
+    if (args.length !== 4 || args[3] !== "confirm-source-stopped")
+      throw new Error(
+        "usage: handoff verify <id> <destination> confirm-source-stopped (confirm source/background writers are stopped)",
+      );
+    const destination = findAgent(
+      await runtime.herdr.listAgentsWithWorkspaceNames(),
+      args[2],
+    );
+    validateAgentTarget(
+      destination,
+      undefined,
+      runtime.config.allowedWorkspaceIds,
+    );
+    const result = await engine.verify(
+      record.id,
+      destination,
+      context.routing.userId,
+      true,
+    );
+    await runtime.discord.reply(
+      context.message,
+      `Handoff ${result.id} verified; ownership still source.\nNext action: ${result.receipt?.nextAction}\nUse handoff accept ${result.id}, then handoff continue ${result.id}.`,
+    );
+    return;
+  }
+  if (args.length !== 2) throw new Error(`usage: handoff ${action} <id>`);
+  const result =
+    action === "accept"
+      ? await engine.accept(record.id)
+      : action === "continue"
+        ? await engine.continue(record.id)
+        : await engine.cancel(record.id);
+  if (action === "accept" && result.destination)
+    runtime.routing.bind(context.routing, agentTarget(result.destination));
+  await runtime.discord.reply(
+    context.message,
+    `Handoff ${result.id} · ${result.state} · owner ${result.owner}\n${result.result ?? result.detail ?? "Use handoff continue to execute the accepted work."}`,
+  );
+}
+
 async function handoffAgent(
   args: string[],
   context: CommandContext,
@@ -1308,6 +1481,10 @@ async function handoffAgent(
     undefined,
     runtime.config.allowedWorkspaceIds,
   );
+  if (runtime.handoffs?.blocks(source) || runtime.tasks?.owns(source))
+    throw new Error(
+      "Source belongs to an active task/handoff; settle it first",
+    );
   assertAgentAvailable(destination, runtime);
   const observed = await runtime.herdr.readAgent(
     source.pane_id,
@@ -1475,6 +1652,10 @@ function agentHeaderFor(agent: AgentRecord): string {
 }
 
 function assertAgentAvailable(agent: AgentRecord, runtime: Runtime): void {
+  if (runtime.handoffs?.blocks(agent))
+    throw new Error(
+      "Workspace is held by a session handoff; use handoff status/continue/cancel",
+    );
   if (
     agent.agent_status === "working" ||
     runtime.activeStreams.has(agent.terminal_id)
@@ -1562,6 +1743,10 @@ async function cancelAgent(
     context,
     runtime,
   );
+  if (runtime.handoffs?.blocks(agent))
+    throw new Error(
+      "Workspace is held by a session handoff; settle sessions before handoff cancel",
+    );
   if (runtime.tasks?.owns(agent))
     throw new Error("Agent belongs to a Team Task; use team cancel <task-id>");
   await runtime.herdr.cancelAgent(agent.pane_id);
@@ -1874,6 +2059,7 @@ function helpText(prefix: string): string {
     `\`${prefix} team ask <prompt>\` — 建立持久化任務，由 Lead 動態分工`,
     `\`${prefix} team questions <task-id>\` / \`${prefix} team reply <task-id> <question-id> <answer>\` — 指定問題回答`,
     `\`${prefix} team status [task-id]\` / \`${prefix} team cancel <task-id>\` — 查看／取消任務`,
+    `\`${prefix} handoff checkpoint <source> <goal>\` → \`handoff verify <id> <destination> confirm-source-stopped\` → \`handoff accept <id>\` → \`handoff continue <id>\` — 持久化交接；status/packet/cancel 可查詢／釋放`,
     `\`${prefix} handoff <from> <to> [instruction]\` — 以受限近期輸出摘要交接給另一個 Agent`,
     "",
     "**本機 bridge 共用路由**",
@@ -1925,6 +2111,11 @@ function consoleHelpText(): string {
     "team questions <task-id> — 列出多 Agent 問題與狀態",
     "team reply <task-id> <question-id> <answer> — 回答指定問題",
     "team cancel <task-id> — 停止任務派送並取消仍 active 的工作",
+    "handoff checkpoint <source> <goal> — 保存可驗證的交接 checkpoint",
+    "handoff checkpoint-file <source> <relative-export> <goal> — 加入 public-export-v1",
+    "handoff status [id] / handoff packet <id> — 查看交接紀錄",
+    "handoff verify <id> <destination> confirm-source-stopped — 唯讀復原驗證",
+    "handoff accept <id> / handoff continue <id> / handoff cancel <id> — 移交／續作／釋放",
     "handoff <from> <to> [instruction] — 以受限近期輸出交接",
     "",
     "**共用 Discord routing**",
