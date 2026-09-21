@@ -20,6 +20,9 @@ export function parseConsoleCommand(
     ? text.slice(commandPrefix.length).trim()
     : text;
   if (!rest) return null;
+  const reply = rest.match(/^team\s+reply\s+(\S+)\s+(\S+)\s+([\s\S]+)$/i);
+  if (reply)
+    return { command: "team", args: ["reply", reply[1], reply[2], reply[3]] };
   const parts = rest.split(/\s+/);
   const command = parts[0].toLowerCase();
   if (command === "ask")

@@ -488,6 +488,15 @@ export class DiscordAdapter {
         name: "help",
         args: [],
       };
+    const reply = parsed.rest.match(
+      /^team\s+reply\s+(\S+)\s+(\S+)\s+([\s\S]+)$/i,
+    );
+    if (reply)
+      return {
+        context: { message, routing: this.contextFor(message) },
+        name: "team",
+        args: ["reply", reply[1], reply[2], reply[3]],
+      };
     const parts = parsed.rest.split(/\s+/);
     return {
       context: { message, routing: this.contextFor(message) },

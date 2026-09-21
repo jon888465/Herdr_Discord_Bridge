@@ -162,7 +162,7 @@ async function startBridge(
       );
       if (target && tasks.owns(target))
         throw new Error(
-          "Team Task replies are not supported in Phase 1; inspect team status or cancel the task",
+          "Use team questions <task-id> and team reply <task-id> <question-id> <answer> for Team Task replies",
         );
       await deliverApproval(approval, text, herdr, routing);
     } else {
@@ -263,7 +263,8 @@ async function startBridge(
 
   const watcher = new AgentWatcher(herdr, config.pollIntervalMs);
   watcher.on("transition", (transition: AgentTransition) => {
-    void handleTransition(transition, { config, herdr, routing, discord });
+    if (!tasks.owns(transition.agent))
+      void handleTransition(transition, { config, herdr, routing, discord });
   });
   watcher.on("removed", (removed: AgentRemoved) => {
     void handleRemoved(removed, { routing, discord });
@@ -801,7 +802,9 @@ async function askAgent(
         runtime.config.allowedWorkspaceIds,
       );
       if (runtime.tasks?.owns(explicit))
-        throw new Error("Agent belongs to a Team Task; use team status/cancel");
+        throw new Error(
+          "Agent belongs to a Team Task; use team questions/reply/status/cancel",
+        );
       if (explicit.agent_status === "blocked") {
         const selected = effectiveTarget(context, runtime.routing);
         if (!runtime.consoleAgent || selected?.paneId !== explicit.pane_id)
@@ -833,7 +836,9 @@ async function askAgent(
     if (runtime.tasks) {
       const selected = await resolveContextAgent("", context, runtime);
       if (runtime.tasks.owns(selected))
-        throw new Error("Agent belongs to a Team Task; use team status/cancel");
+        throw new Error(
+          "Agent belongs to a Team Task; use team questions/reply/status/cancel",
+        );
     }
     await runtime.consoleAgent.send(prompt, async (selected, text) => {
       await dispatchPrompt(
@@ -874,6 +879,54 @@ async function teamCommand(
 ): Promise<void> {
   const action = args.shift()?.toLowerCase();
   switch (action) {
+    case "questions":
+    case "reply": {
+      const workspace = await teamWorkspaceId(context, runtime);
+      if (!runtime.tasks) throw new Error("Team Task Engine unavailable");
+      if (
+        !args[0] ||
+        (action === "questions" && args.length !== 1) ||
+        (action === "reply" && args.length < 3)
+      )
+        throw new Error(
+          "usage: team questions <task-id> | team reply <task-id> <question-id> <answer>",
+        );
+      const task = runtime.tasks.store.get(args[0]);
+      if (task.workspaceId !== workspace)
+        throw new Error("task belongs to another workspace");
+      if (
+        context.source !== "console" &&
+        (!task.origin ||
+          task.origin.guildId !== context.routing.guildId ||
+          task.origin.channelId !== context.routing.channelId ||
+          task.origin.threadId !== context.routing.threadId)
+      )
+        throw new Error(
+          "Team questions must be accessed from the originating Discord context",
+        );
+      if (action === "reply") {
+        await runtime.tasks.reply(
+          task.taskId,
+          args[1],
+          args.slice(2).join(" "),
+        );
+        await runtime.discord.reply(
+          context.message,
+          `Answer delivered for ${args[1]}; waiting for the original turn's report.`,
+        );
+      } else {
+        await runtime.discord.reply(
+          context.message,
+          (task.questions ?? [])
+            .map(
+              (q) =>
+                `${q.id} · ${q.state} · workspace ${task.workspaceId} · ${q.assignmentId ?? q.phase} · ${q.agent.agent ?? "Agent"} · ${q.agent.pane_id}\n${q.snapshot}\nteam reply ${task.taskId} ${q.id} <answer>`,
+            )
+            .join("\n\n") || "No Team questions.",
+        );
+      }
+      return;
+    }
     case "status":
     case "cancel": {
       const workspace = await teamWorkspaceId(context, runtime);
@@ -1151,6 +1204,11 @@ async function teamAsk(
   const running = runtime.tasks.run(
     {
       taskId,
+      origin: {
+        guildId: context.routing.guildId,
+        channelId: context.routing.channelId,
+        threadId: context.routing.threadId,
+      },
       prompt,
       lead,
       workers,
@@ -1211,6 +1269,7 @@ async function reportOrchestrationEvent(
   runtime: Runtime,
 ): Promise<void> {
   const messages: Partial<Record<OrchestrationEvent["type"], string>> = {
+    question_opened: `❓ Team Task ${event.taskId} · workspace ${event.agent?.workspace_id} · ${event.assignmentId ?? event.phase} · ${event.agent?.agent ?? "Agent"} · ${event.paneId}\n${event.detail}\nteam reply ${event.taskId} ${event.questionId} <answer>`,
     task_started: `🧭 Team Task \`${event.taskId}\` started.`,
     plan_requested: `📋 Lead is planning Team Task \`${event.taskId}\`.`,
     assignment_started: `🔄 Assignment \`${event.assignmentId}\` started on \`${event.paneId}\` · ${event.detail || "session unknown"}.`,
@@ -1813,6 +1872,7 @@ function helpText(prefix: string): string {
     `\`${prefix} team add <agent>\` / \`${prefix} team remove <agent>\` — 管理 thread participants`,
     `\`${prefix} team list\` — 查看目前 thread 的 Team 成員、pane 與即時狀態`,
     `\`${prefix} team ask <prompt>\` — 建立持久化任務，由 Lead 動態分工`,
+    `\`${prefix} team questions <task-id>\` / \`${prefix} team reply <task-id> <question-id> <answer>\` — 指定問題回答`,
     `\`${prefix} team status [task-id]\` / \`${prefix} team cancel <task-id>\` — 查看／取消任務`,
     `\`${prefix} handoff <from> <to> [instruction]\` — 以受限近期輸出摘要交接給另一個 Agent`,
     "",
@@ -1862,6 +1922,8 @@ function consoleHelpText(): string {
     "team add <agent> | team remove <agent> — 管理目前 workspace Team",
     "team ask <prompt> — 建立持久化任務，由 Lead 動態分工",
     "team status [task-id] — 查看持久狀態與重啟核對結果",
+    "team questions <task-id> — 列出多 Agent 問題與狀態",
+    "team reply <task-id> <question-id> <answer> — 回答指定問題",
     "team cancel <task-id> — 停止任務派送並取消仍 active 的工作",
     "handoff <from> <to> [instruction] — 以受限近期輸出交接",
     "",

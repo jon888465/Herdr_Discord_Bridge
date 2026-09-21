@@ -6,7 +6,7 @@
 `team select` 可勾選尚未啟動的 Agent profiles；Lead 按需分派、重用 session 或啟動 CLI，並依報告決定下一輪。詳見 [使用與架構](agent-pool-console.md)。
 這不是下述 Discord mirror；原生全串流 PTY attach、task 自動 resume 與完整 event bus 仍未實作；Phase 1 已提供 [durable state／restart reconciliation](durable-task-engine.md)。
 
-後續多 Agent 問題須有 task／assignment／question identity 與回覆 UI／排隊；尚未決定是否凍結其他輸出，不自動暫停其他 Agent。Herdr GUI 選擇與 Discord select menu 仍待評估；`focus` 只改畫面焦點，不能作為 routing 選擇的替代。
+Phase 2 已實作 task／assignment／question identity 與文字指令回覆／排隊，不中斷其他 Agent；點選 UI 待做，見 [問題佇列](team-question-queue.md)。Herdr GUI 選擇與 Discord select menu 仍待評估；`focus` 只改畫面焦點，不能作為 routing 選擇的替代。
 
 ## 將 Herdr 內直接互動鏡像轉發到 Discord
 

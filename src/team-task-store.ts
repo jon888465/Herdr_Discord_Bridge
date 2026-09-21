@@ -22,7 +22,7 @@ export const terminalTask = (state: TaskState): boolean =>
 const transitions: Record<TaskState, TaskState[]> = {
   planning: ["running", "blocked", "synthesizing", "cancelling", "failed"],
   running: ["planning", "blocked", "synthesizing", "cancelling", "failed"],
-  blocked: ["synthesizing", "cancelling", "failed"],
+  blocked: ["planning", "running", "synthesizing", "cancelling", "failed"],
   synthesizing: ["completed", "blocked", "failed", "cancelling"],
   cancelling: ["cancelled"],
   completed: [],
@@ -51,7 +51,20 @@ export interface TaskTurn {
   cancelAttempted?: boolean;
   recovered?: boolean;
 }
+export interface TeamQuestion {
+  id: string;
+  agent: AgentRecord;
+  phase: TaskTurn["phase"];
+  assignmentId?: string;
+  snapshot: string;
+  fingerprint: string;
+  createdAt: string;
+  expiresAt: string;
+  state: "pending" | "sending" | "answered" | "stale" | "unknown" | "cancelled";
+}
 export interface DurableTeamTask {
+  questions?: TeamQuestion[];
+  origin?: TeamTaskInput["origin"];
   taskId: string;
   workspaceId: string;
   lead: AgentRecord;
@@ -79,7 +92,7 @@ export interface TaskJournalEvent {
   task: DurableTeamTask;
 }
 interface Journal {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   events: TaskJournalEvent[];
 }
 
@@ -96,7 +109,7 @@ export class TeamTaskStore {
         fs.readFileSync(path.join(directory, name), "utf8"),
       ) as Journal;
       if (
-        journal.schemaVersion !== 1 ||
+        ![1, 2].includes(journal.schemaVersion) ||
         !Array.isArray(journal.events) ||
         !journal.events.length
       )
@@ -140,6 +153,7 @@ export class TeamTaskStore {
     const now = new Date().toISOString();
     const task: DurableTeamTask = {
       taskId: input.taskId,
+      ...(input.origin ? { origin: structuredClone(input.origin) } : {}),
       workspaceId: input.lead.workspace_id,
       lead: structuredClone(input.lead),
       originalPrompt: input.prompt,
@@ -174,7 +188,7 @@ export class TeamTaskStore {
     const old = this.journals.get(task.taskId);
     if (old) validateUpdate(old.events.at(-1)!.task, task);
     const journal: Journal = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       events: [
         ...(old?.events ?? []),
         {
@@ -284,6 +298,34 @@ function validateTask(t: DurableTeamTask): void {
     )
       throw new Error("invalid durable turn");
   }
+  const questions = new Set<string>();
+  if (t.questions !== undefined && !Array.isArray(t.questions))
+    throw new Error("invalid question queue");
+  for (const q of t.questions ?? []) {
+    validateAgent(q.agent);
+    if (
+      !q.id ||
+      questions.has(q.id) ||
+      q.agent.workspace_id !== t.workspaceId ||
+      !["planning", "assignment", "synthesis"].includes(q.phase) ||
+      (q.phase === "assignment" && !ids.has(q.assignmentId!)) ||
+      typeof q.snapshot !== "string" ||
+      q.snapshot.length > 6000 ||
+      typeof q.fingerprint !== "string" ||
+      !validDate(q.createdAt) ||
+      !validDate(q.expiresAt) ||
+      ![
+        "pending",
+        "sending",
+        "answered",
+        "stale",
+        "unknown",
+        "cancelled",
+      ].includes(q.state)
+    )
+      throw new Error("invalid durable question");
+    questions.add(q.id);
+  }
   if (terminalTask(t.state) && t.turns.length)
     throw new Error("terminal task still owns unsettled turns");
 }
@@ -291,6 +333,7 @@ function validateUpdate(old: DurableTeamTask, next: DurableTeamTask): void {
   assertTaskTransition(old.state, next.state);
   for (const key of [
     "taskId",
+    "origin",
     "workspaceId",
     "lead",
     "originalPrompt",
@@ -299,6 +342,34 @@ function validateUpdate(old: DurableTeamTask, next: DurableTeamTask): void {
   ] as const)
     if (JSON.stringify(old[key]) !== JSON.stringify(next[key]))
       throw new Error(`immutable task field: ${key}`);
+  for (const q of old.questions ?? []) {
+    const nextQuestion = next.questions?.find((v) => v.id === q.id);
+    if (!nextQuestion) throw new Error("question history removed");
+    for (const field of [
+      "agent",
+      "phase",
+      "assignmentId",
+      "snapshot",
+      "fingerprint",
+      "createdAt",
+      "expiresAt",
+    ] as const)
+      if (JSON.stringify(q[field]) !== JSON.stringify(nextQuestion[field]))
+        throw new Error("question identity changed");
+    const allowed = {
+      pending: ["sending", "stale", "unknown", "cancelled"],
+      sending: ["answered", "unknown", "cancelled"],
+      answered: [],
+      stale: [],
+      unknown: ["cancelled"],
+      cancelled: [],
+    };
+    if (
+      q.state !== nextQuestion.state &&
+      !(allowed[q.state] as string[]).includes(nextQuestion.state)
+    )
+      throw new Error("invalid question transition");
+  }
   for (const a of old.assignments) {
     const b = next.assignments.find((v) => v.plan.id === a.plan.id);
     if (!b || JSON.stringify(a.plan) !== JSON.stringify(b.plan))
@@ -307,7 +378,7 @@ function validateUpdate(old: DurableTeamTask, next: DurableTeamTask): void {
       pending: ["assigned", "failed", "cancelled"],
       assigned: ["working", "blocked", "failed", "cancelled"],
       working: ["done", "blocked", "failed", "cancelled"],
-      blocked: ["cancelled"],
+      blocked: ["working", "done", "failed", "cancelled"],
       done: [],
       failed: [],
       cancelled: [],

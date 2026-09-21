@@ -177,7 +177,7 @@ Agent 完成後，回覆會更新原本的 progress message；預設不會另外
 設定 `requireMention` 後，兩種 command 都必須 mention bot，例如 `@bridge agents` 或 `@bridge /herdr agents`。在已 mapping 的 thread 中，普通文字會被當作 active Agent 的 prompt。
 在 `bridge>` 執行 `agent use <pane>` 後，只保存對話目標，不自動刷出 CLI 畫面。本次發問只顯示相符的回答；`attach [pane]` 才顯示終端快照（40 行／6,000 字元），`watch [pane]` 顯示狀態變化，`detach` 回對話模式。檢視其他 pane 不改對話目標。blocked 問題仍會顯示並可回答。attach 是有界快照 inspector，不是完整 stdout/stderr 或原生 PTY attach；不自動送往 Discord。
 
-直接輸入 `ask <文字>` 或非指令文字：idle/done 時發問，blocked 時回答 bridge 已顯示的問題。問題已變更或尚未顯示時，先看新問題再回答；同一問題不重複送答。`help`、`current`、`agent`、`agent use`、`wk` 等控制指令在 working／blocked 時仍可用；working/unknown 時不插入新 prompt。答案開頭若是指令名稱，請用 `ask current` 等明確格式。顯示輸出時保留正在編輯的輸入。多 Agent 問題識別／排隊與 Discord mirror 仍待做。
+直接輸入 `ask <文字>` 或非指令文字：idle/done 時發問，blocked 時回答 bridge 已顯示的問題。問題已變更或尚未顯示時，先看新問題再回答；同一問題不重複送答。`help`、`current`、`agent`、`agent use`、`wk` 等控制指令在 working／blocked 時仍可用；working/unknown 時不插入新 prompt。答案開頭若是指令名稱，請用 `ask current` 等明確格式。顯示輸出時保留正在編輯的輸入。多 Agent 以 team questions/reply 明確指定問題；Discord mirror 仍待做。
 
 `bridge>` 的 Agent 選取以 workspace scope 保存；Discord user／thread mapping 仍各自獨立。請輸入 `agent use <pane ID>` 後再執行 `current`。
 
@@ -245,5 +245,5 @@ Lead 自行決定角色、是否委派，以及依報告追加工作，無固定
 `team ask <prompt>` 保存任務、Lead/session、凍結 roster、Assignment、事件與報告。
 `team status [task-id]` 查看目前 workspace 的持久狀態；`team cancel <task-id>` 取消整個任務。Discord 使用 `/herdr` 前綴。
 重啟後先核對 pane/session，標示 blocked/recoverable 或 unknown，不自動重送工作。取消只使用既有 Ctrl-C，確認停止後才 cancelled；不確定時保留 cancelling 與 reservation，不關閉 CLI。
-Team 的多 Agent 問題回覆／續接仍屬 Phase 2。一般單 Agent 問答不會繞過 Team reservation。
+Team 多 Agent 問題使用 `team questions <task-id>` 查詢、`team reply <task-id> <question-id> <answer>` 回答。詳見 [Phase 2 行為與限制](docs/team-question-queue.md)。一般單 Agent 問答不會繞過 Team reservation。
 詳見 [架構、操作限制與 live 驗收](docs/durable-task-engine.md)及 ISSUE-020。

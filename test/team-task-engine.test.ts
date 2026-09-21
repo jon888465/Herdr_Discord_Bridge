@@ -430,7 +430,7 @@ test("unknown schema, corrupt journal, altered roster and invalid assignment tra
     const file = join(f.dir, "tasks", `${input.taskId}.json`);
     const original = readFileSync(file, "utf8");
     const journal = JSON.parse(original);
-    journal.schemaVersion = 2;
+    journal.schemaVersion = 999;
     writeFileSync(file, JSON.stringify(journal));
     assert.throws(() => new TeamTaskStore(join(f.dir, "tasks")), /unsupported/);
     writeFileSync(file, '{"truncated":');
