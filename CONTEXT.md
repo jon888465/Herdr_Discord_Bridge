@@ -108,3 +108,10 @@ instances; legacy processes without the lock still require explicit migration.
 normalizes terminal text for the shared turn receiver's nonce markers. No native
 Grok transcript/session adapter is implied. [ISSUE-023](docs/known-issues.md)
 tracks captured terminal evidence, regression checks and live acceptance.
+
+## Current image/capture checkpoint
+
+[Quota handoff checkpoint](handoffs/20261001T064048Z-image-capture/HANDOFF.md)
+records the current Codex session for conditional agy takeover. It is checkpoint-only,
+not an ownership transfer or quota monitor. ISSUE-002 tracks image MIME evidence;
+ISSUE-003 tracks the typed busy-history → visible response-capture fallback.
