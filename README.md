@@ -220,7 +220,7 @@ source pane. No full Discord or CLI history is copied to another Agent.
 For Discord single-Agent prompt replies, the bridge records the terminal snapshot before sending the
 prompt and forwards only output after that prompt. CLI-specific prompt markers
 and terminal chrome are handled by adapters in `src/cli-adapter.ts`; Codex,
-Antigravity (`agy`), and OpenCode have separate adapters, while unknown CLIs use
+Antigravity (`agy`), OpenCode, and Grok have separate adapters, while unknown CLIs use
 a safe generic adapter. If no reliable prompt boundary is found, historical output is
 not forwarded. The default `notifyOn` setting is `["blocked"]`, so a separate
 `done` notification is not posted after a completed prompt.
@@ -281,3 +281,8 @@ Use `handoff checkpoint <source> <goal>`, then `handoff verify <id> <destination
 Use `failover arm <source> <candidate1,candidate2> <goal-and-constraints>` to authorize an ordered set of existing sessions. Report observations with `quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds]`. A source limited/exhausted report prepares a checkpoint without calling its model. After stopping source/background writers, `failover run <id> confirm-source-stopped` chooses a fresh available candidate on a different budget, verifies recovery and repository state, transfers ownership, then continues. `quota status`, `failover status [id]`, and `failover cancel <id>` inspect or release policies.
 
 This version uses operator reports, not provider quota APIs. Expired/unknown/shared-budget-conflicting observations cannot authorize a destination. No account/credential rotation or automatic retry after uncertain dispatch. See [commands, journal behavior, limitations and live acceptance](docs/quota-failover-manager.md).
+
+Grok terminal support targets the observed 1.0.46 boxed and completed unboxed answers, including wrapped
+Bridge response markers. It is not a structured transcript source; clipped boxes
+and changed terminal formats can leave capture incomplete. See ISSUE-023 in
+[known issues](docs/known-issues.md) for validation and deployment status.

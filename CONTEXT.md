@@ -101,3 +101,10 @@ instances; legacy processes without the lock still require explicit migration.
 ## Quota / Failover Manager
 
 [Phase 4](docs/quota-failover-manager.md): explicit operator quota observations with TTL and shared-budget groups; ordered frozen candidate policy, quota-triggered checkpoint and operator-confirmed verify/accept/continue chain. Durable intents, no retry/cascade after unknown delivery, restart quarantine, exact session/worktree acceptance. No provider quota watcher or credential/account switching. ISSUE-022 separates source/fixture evidence from pending live acceptance.
+
+## Grok terminal responses
+
+`src/cli-adapter.ts` parses Grok 1.0.46 boxed and completed unboxed answers for Discord fallback and
+normalizes terminal text for the shared turn receiver's nonce markers. No native
+Grok transcript/session adapter is implied. [ISSUE-023](docs/known-issues.md)
+tracks captured terminal evidence, regression checks and live acceptance.

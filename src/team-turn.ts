@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
+import { normalizeTerminalResponse } from "./cli-adapter.js";
 import { stripAnsi } from "./format.js";
 import { CodexTranscript, sameAgentSession } from "./response-stream.js";
 import type { AgentRecord, ReadSource } from "./types.js";
@@ -173,7 +174,11 @@ export async function runTeamTurn(
         }
         check();
         if (output === baseline.get(source)) continue;
-        const text = extractFrame(output, begin, end);
+        const text = extractFrame(
+          normalizeTerminalResponse(agent.agent, output),
+          begin,
+          end,
+        );
         if (text !== undefined) {
           if (!text.trim())
             throw new Error(

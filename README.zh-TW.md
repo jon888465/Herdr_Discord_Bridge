@@ -46,7 +46,7 @@ herdr pane process-info --pane <pane_id>
 ## 更新 GitHub 版本
 
 先用 pane-open 回應中的 `pane_id` 關閉舊 pane，再重新安裝並啟動：
-
+      
 ```text
 herdr plugin pane close <pane_id>
 herdr plugin install jon888465/Herdr_Discord_Bridge --ref main --yes
@@ -134,6 +134,7 @@ command 由 CLI adapter 處理，避免 Codex、Antigravity（`agy`）與其他 
 - Codex：`› prompt`
 - Antigravity / `agy`：`> prompt`
 - OpenCode：`> prompt`
+- Grok：1.0.46 方形回答框與帶完成 footer 的無框回答，去除 UI 外框、捲軸與首行時間；支援折行的 Bridge 標記。不是原生 transcript，截斷或格式變更仍可能擷取不完整（見 ISSUE-023）。
 - 未知 CLI：使用保守的通用 adapter
 
 model/path 等 terminal UI metadata 會被過濾。如果找不到可靠的 prompt 邊界，bridge 不會把整份歷史 snapshot 當作回覆轉送。

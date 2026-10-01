@@ -29,6 +29,8 @@
 
 | ISSUE-022 | Phase 4 Quota / Failover Manager | 已修正、待驗收 | 2026-09-21 新增 28 項通過；完整 181/184，ISSUE-007／021 待調查，live 待驗收 |
 
+| ISSUE-023 | Grok 回答框與折行標記無法解析 | 已修正、待驗收 | Grok live turn probe 通過；Discord 交付、長文及 blocked 續答待驗收 |
+
 2026-09-09 自動化驗證：`npm run check`（typecheck、build、33/33 tests）、`npm run lint`、`git diff --check` 通過。這是前一輪程式驗證紀錄，不代表已做 live Discord 驗收。本輪僅整理文件，未重跑程式測試。
 
 ## ISSUE-013：Team ask 的 Lead JSON plan 解析失敗
@@ -702,6 +704,12 @@ ISSUE-021 由已修正、待驗收重新開啟／待調查。下一步釐清並�
 本輪完成本機 main 合併提交；原 README.zh-TW.md 未提交修改保留於提交之外。未 push、未部署或重啟 bridge，執行中版本未核對，舊任務／訊息不補送。Phase 4 未納入本輪。
 
 
+### 2026-10-01 Grok 工作期間再現（ISSUE-021）
+
+狀態維持重新開啟／待調查。首輪完整套件的 concurrent verify/cancel 與 command
+contexts 測試均於 fixture 清理發生 ENOTEMPTY（187 項中 2 fail）；
+精確原因仍未確認，未修改 handoff 程式與測試。最新完整重跑結果見 ISSUE-023。
+
 ## ISSUE-022：Phase 4 Quota / Failover Manager
 
 更新日期：2026-09-21。狀態：已修正、待驗收；本機 main 合併後新增 28 項 Phase 4 測試通過，但完整 gate 因 ISSUE-007／021 未通過。以下保留 2026-09-20 的受限環境歷史；最新結果見末尾。
@@ -746,3 +754,60 @@ ISSUE-021 由已修正、待驗收重新開啟／待調查。下一步釐清並�
 ISSUE-021 的預期行為包含完成驗證後安全清理 fixture、無未處理拒絕；新增 ENOTEMPTY 的修正範圍本輪僅記錄，未改程式。下一步查明非同步工作與 fixture cleanup 時序及完整套件負載因素，並調查 ISSUE-007，再重跑完整 gate。兩項保持「重新開啟／待調查」，ISSUE-022 保持「已修正、待驗收」。Phase 4 依賴 Phase 3，因此不能因新增 fixture 通過宣稱整體 failover 已驗收。
 
 本輪完成本機 main 合併提交，README.zh-TW.md 既有未提交修改保留於提交之外。未 push、未部署或重啟 Bridge，running version 未核對；舊訊息／工作不補送。provider watcher、自動 reset 等候與 live quota／跨 CLI／Discord 驗收未完成；實際功能仍以 operator observations 與明確 stopped-writer run 為準。
+
+
+## ISSUE-023：Grok terminal adapter 相容性
+
+更新日期：2026-10-01。狀態：已修正、待驗收。
+
+症狀／預期：Grok 已回覆且 idle，但共用 turn receiver 逾時；Discord 通用 parser
+無法擷取被縮略 prompt 後的回答。預期能取得本次回答並驗證隨機標記，不混入 UI 或歷史。
+環境／重現：Linux，本機 Herdr `w2:p6`、Grok Build 1.0.46，畫面顯示 Grok 4.7 (high)。
+透過 `runTeamTurn` 送出只回覆 GROK_ADAPTER_OK、禁止工具與修改檔案的 probe；
+CLI 9.6 秒完成，接收器最終回報 `last state: idle; no verified completion`。
+已確認根因：Grok prompt 顯示縮略；回答框每列有 `│`，首列有時間，begin/end 標記
+被折行且混入 UI。原 `extractFrame` 僅容許標記間 whitespace，通用 adapter 無對應框線 parser。
+
+修正範圍：cli-adapter 的 Grok 方框 parser；team-turn 僅在終端來源套用清理，
+保持 nonce／identity／settled 檢查。同步 SPEC、README 雙語、CONTEXT。
+測試歷史（2026-10-01）：初次 fixture 缺 tab_id，build TS2345；補齊後
+`npm run build && node --test dist/test/cli-adapter.test.js` 為 2 pass／2 fail，
+兩個失敗分別為空回答與 idle timeout，與 live 症狀相符。最終驗證待補。
+
+限制／下一步：不支援原生 Grok transcript，不保證截斷框線／捲出內容／未觀察格式。
+相同 baseline 回答保守忽略。尚未測試 Discord 交付、長文與 blocked 續答。
+未重啟或部署 bridge、未 commit/push；執行中的 bridge 未載入本次修正，舊訊息不補送。
+
+### 2026-10-01 第二種 live 格式與完整套件
+
+第一版方框修正 targeted 4/4 通過；第二次真實 probe 回覆 GROK_ADAPTER_FIXED，
+但仍 idle timeout。重新讀取顯示後續回合改為無框回答、首列時間與右側 `█` scrollbar。
+已補上 user-message 邊界／空行／`Worked for` footer 限定的無框 parser，
+不以整張畫面當回答。增加兩種 rendering 的 turn-level tests 與 incomplete/redraw guards。
+中途 targeted 6/6 通過，新增雙 rendering 測試後最終結果另記。
+
+首輪完整 `npm test`（含 build）187 項：185 pass、2 fail（2026-10-01）；
+lint、typecheck 通過。兩個失敗屬 ISSUE-021：concurrent verify/cancel 清理 state
+目錄 ENOTEMPTY；command contexts 清理 fixture ENOTEMPTY。保留重新開啟／待調查，
+未調整 unrelated handoff 程式、timeout 或斷言。此輪執行期间追加無框 parser，
+因此不能把首輪套件視為最終版本驗證；最終 gate 已另行重跑。
+
+### 2026-10-01 最終 Grok 驗證
+
+- `node --test dist/test/cli-adapter.test.js`：7/7 通過（含既有 Codex/OpenCode 2 項）；
+  Grok 五項涵蓋方框／無框、折行 nonce、首行時間、ANSI、內文縮排、舊回答與不完整輸出。
+- 已重播兩次實際 terminal capture。第三次以修正後 compiled `runTeamTurn` 對
+  同一 `w2:p6` 發出禁止工具／改檔的 probe，得到
+  `{ state: 'done', text: 'GROK_PARSER_PASS', terminal: true }`。
+  這是 Herdr → Grok → Bridge receiver 的 live 驗證，不含 Discord delivery。
+- 修改的 TypeScript Prettier check、文件相對連結檢查通過。此次新增差異 whitespace
+  檢查通過；全域 `git diff --check` 仍報 README.zh-TW.md:49 使用者原有 trailing
+  whitespace，保留未改。
+- 原始碼與 build 已更新；執行中 bridge 未重啟／部署，未確認載入新版。
+  Discord 交付、長文／截斷、blocked 續答仍待驗收，舊訊息不補送，未 commit/push。
+
+最終完整 gate（2026-10-01、Linux Node.js v22.23.3）：`npm run lint`、
+`npm run typecheck`、`npm test`（含 `npm run build`）全部通過；
+完整 **189/189 pass，0 fail，0 skipped**。首輪 ISSUE-021 的兩項 ENOTEMPTY
+本次未再現；因未調查或修正其根因，保留重新開啟／待調查與首輪失敗歷史，
+不以一次全綠宣稱已修復。Grok 保持已修正、待驗收（Discord／長文／blocked 尚待驗收）。

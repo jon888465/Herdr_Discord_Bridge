@@ -480,3 +480,17 @@ Timeout 沿用原 turn 上限；取消等待 in-flight reply；重啟將待處�
 - schema v1 atomic after-image journal，先保存 intent；checkpointing/running 重啟 blocked，不 replay。不明送達／驗證後失敗不自動再選別人；quota 過期不自動 reset；無候選保留 ready。
 - 第一版為明確 operator observation adapter；沒有 provider API watcher、credentials/account rotation、自動啟動 CLI、百分比／reset 推測或 active Team roster replacement。候選能力及真實額度池歸屬由操作者確認。
 - 兩個 journals 可能於崩潰邊界不同步，需查 linked handoff，不能假報完成或重送。完整 suite／live gate 狀態見 ISSUE-022；原始碼通過不代表實機驗收。
+
+## Grok terminal adapter（2026-10-01）
+
+Grok（Herdr agent kind `grok`）使用專用終端 parser，依 1.0.46 實測的方形回答框
+擷取內容，移除外框、每列固定 UI 縮排及首列右側時間，保留內文縮排。
+也接受有 user-message 邊界、空行分隔與 `Worked for` 完成 footer 的無框回答，
+去除右側 scrollbar；未完成／無可辨識邊界時不猜測回答。
+Discord preview／fallback 使用最新可辨識完整回答；與 dispatch baseline 任一回答相同時
+不重播。Console／Team turn 使用相同清理後文字，再驗證本次隨機 begin/end 標記
+與 idle/done；支援被折行的標記，不放寬原本完成契約。
+這不是 Grok structured transcript adapter；不還原一般內文軟折行、不讀 hidden reasoning。
+框線被截斷、格式版本改變、相同答案與 baseline 無法區分時，保守回報擷取缺失；
+終端已捲出的內容無法恢復。模型清單及原生 session handoff 不在本次新增範圍。
+驗證／部署狀態見 ISSUE-023。
