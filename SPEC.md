@@ -494,3 +494,8 @@ Discord preview／fallback 使用最新可辨識完整回答；與 dispatch base
 框線被截斷、格式版本改變、相同答案與 baseline 無法區分時，保守回報擷取缺失；
 終端已捲出的內容無法恢復。模型清單及原生 session handoff 不在本次新增範圍。
 驗證／部署狀態見 ISSUE-023。
+
+Terminal history 讀取若遇 Herdr `agent_not_idle`，改讀 `visible`（使用設定的 outputLines），
+避免要求工作中的 alternate screen 捲動歷史。其他讀取錯誤仍按失敗處理；
+idle 後繼續嘗試 `recent_unwrapped`。Visible 仍須通過 prompt scope 擷取，
+不是完整 transcript，不能據此宣稱已取得完整 final。

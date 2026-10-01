@@ -267,7 +267,7 @@ contentType 與下載 response 建立重播，再判定是格式宣告不符、�
 
 ## ISSUE-003：更新後 Discord 預覽與 final response 未更新
 
-狀態：已修正、待驗收（2026-09-10 重新開啟後修正 metadata 誤判）。2026-09-07 解析器修正與重播歷史保留如下。
+狀態：已修正、待驗收（2026-10-01 新增 busy-history fallback；完整 gate 結果見下方）。2026-09-10 metadata 與 2026-09-07 解析器修正歷史保留如下。
 
 使用者回報：更新回應呈現功能後，CLI 執行中未在 Discord 顯示內容；CLI 結束後也未更新 Discord response。已透過實際 session 紀錄重播確認事件格式不相容，詳見下方修正紀錄。
 
@@ -277,6 +277,31 @@ contentType 與下載 response 建立重播，再判定是格式宣告不符、�
 - 檢查預覽擷取、Codex transcript 問答對應、完成判斷與 Discord 傳送錯誤。
 - 驗證執行中可見最新內容、結束後 final 獨立送達、失敗時明確顯示原因。
 - blocked 不提前結案；來源或傳送失敗不使後續問題永久失去回應。
+
+### 2026-10-01 工作中歷史擷取失敗
+
+更新日期：2026-10-01。狀態：已修正、待驗收（本次完整 gate 已通過，live 待驗收）。
+使用者 1.png 顯示 `agent.read: agent_not_idle cannot read 2000 lines while w2:p4
+is working`，提示 `--source visible`；2.png 顯示 Codex 完成後 capture incomplete。
+預期：busy history 無法讀取時仍可觀察可見畫面，保留 prompt 範圍的片段，
+不把片段誤標完整 final；無片段時仍明示 incomplete。
+
+已確認根因：Discord `streamAgent` 固定讀至少 2000 行 recent_unwrapped，沒有
+agent_not_idle fallback，working 時的可見片段因而遺失。這解釋截圖的持續讀取錯誤；
+未取得當次 prompt/session transcript，不能宣稱這是 final 缺失的唯一原因。
+修正：僅 typed HerdrError code=agent_not_idle 時追加 visible read，沿用 outputLines；
+idle 恢復 recent_unwrapped。其他錯誤不吞掉，identity、prompt scope、settlement、
+最長 excerpt 與 structured final 優先規則保持不變。SPEC 同步。
+
+驗證（2026-10-01）：新增 regression 經 streamAgent 真實入口重現 busy error，
+修正前 0/1（未呼叫 visible），修正後 build + response-delivery/progress-time/attachments
+11/11 通過；覆蓋 working visible 片段在 idle 畫面消失後仍保留，且不標完整 final。
+最終 gate（2026-10-01，Linux Node.js v22.23.3）：`npm run lint`、
+`npm run typecheck`、`npm test`（含 build）通過，完整 190/190、0 fail、0 skipped。
+修改的 TypeScript Prettier check、文件相對連結及本次新增差異 whitespace 檢查通過；
+README.zh-TW.md:49 使用者原有 trailing whitespace 保留。
+未重啟／部署 bridge、未驗收 Discord live；visible 仍可能缺 prompt
+或早已捲出答案，不能保證補回歷史或完整 final，舊訊息不自動補送。
 
 ### 已確認根因與修正（2026-09-07）
 

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { HerdrError } from "../src/herdr.js";
 import { streamAgent } from "../src/main.js";
 import { splitFinalMarkdown } from "../src/final-format.js";
 
@@ -200,4 +201,63 @@ test("a replacement session or moved pane still stops capture", async (t) => {
     await task;
     assert.ok(cards.at(-1)?.includes("capture stopped"));
   }
+});
+
+test("busy history falls back to visible and retains that excerpt after idle redraw", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const agent = {
+    terminal_id: "term",
+    pane_id: "w2:p4",
+    workspace_id: "w2",
+    tab_id: "w2:t1",
+    agent: "codex",
+    agent_status: "working",
+  };
+  const reads: string[] = [];
+  const sent: string[] = [];
+  const cards: string[] = [];
+  const runtime = {
+    config: { streamIntervalMs: 1000, outputLines: 40 },
+    herdr: {
+      listAgentsWithWorkspaceNames: async () => [agent],
+      readAgent: async (_target: string, source: string) => {
+        reads.push(source);
+        if (source === "recent_unwrapped" && agent.agent_status === "working")
+          throw new HerdrError(
+            "agent.read",
+            "agent_not_idle",
+            "cannot read 2000 lines while working; use --source visible",
+          );
+        if (source === "visible")
+          return "› question\nanswer seen while working";
+        return "";
+      },
+    },
+    discord: {
+      editProgress: async (_message: unknown, text: string) => {
+        cards.push(text);
+      },
+      postOutput: async (_message: unknown, text: string) => {
+        sent.push(text);
+      },
+    },
+  } as unknown as Parameters<typeof streamAgent>[2];
+  const task = streamAgent(
+    agent,
+    {} as Parameters<typeof streamAgent>[1],
+    runtime,
+    "question",
+    "",
+  );
+  for (let second = 1; second <= 20; second++) {
+    if (second === 2) agent.agent_status = "idle";
+    t.mock.timers.tick(1000);
+    for (let i = 0; i < 60; i++) await Promise.resolve();
+  }
+  await task;
+  assert.ok(reads.includes("visible"));
+  assert.match(cards[0], /answer seen while working/);
+  assert.match(sent.join("\n"), /answer seen while working/);
+  assert.match(sent.join("\n"), /may include progress or be incomplete/);
+  assert.ok(!cards.some((card) => card.includes("final response delivered")));
 });

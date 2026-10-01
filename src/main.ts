@@ -28,7 +28,7 @@ import {
   stripAnsi,
   statusEmoji,
 } from "./format.js";
-import { HerdrClient } from "./herdr.js";
+import { HerdrClient, HerdrError } from "./herdr.js";
 import type { OrchestrationEvent } from "./team-orchestration.js";
 import { TeamTaskEngine } from "./team-task-engine.js";
 import { SessionHandoffRuntime } from "./session-handoff.js";
@@ -1992,11 +1992,24 @@ export async function streamAgent(
       console.error(`Transcript capture failed: ${safeError(error)}`);
     }
     try {
-      const output = await runtime.herdr.readAgent(
-        current.pane_id,
-        "recent_unwrapped",
-        Math.max(runtime.config.outputLines, 2000),
-      );
+      let output: string;
+      try {
+        output = await runtime.herdr.readAgent(
+          current.pane_id,
+          "recent_unwrapped",
+          Math.max(runtime.config.outputLines, 2000),
+        );
+      } catch (error) {
+        // Alternate-screen history may require idle scrolling. A visible read
+        // observes the current screen without interrupting the working Agent.
+        if (!(error instanceof HerdrError) || error.code !== "agent_not_idle")
+          throw error;
+        output = await runtime.herdr.readAgent(
+          current.pane_id,
+          "visible",
+          runtime.config.outputLines,
+        );
+      }
       const latest = latestAgentResponse(
         current.agent,
         prompt,
