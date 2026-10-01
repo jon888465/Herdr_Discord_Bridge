@@ -129,7 +129,8 @@ async function fixture() {
     beforeReport: (fn: () => Promise<void>) => {
       beforeReport = fn;
     },
-    close: () => fs.rm(dir, { recursive: true, force: true }),
+    close: () =>
+      fs.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }),
   };
 }
 
