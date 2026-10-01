@@ -247,6 +247,11 @@ Transcript 缺少、不明確、無法存取或格式不相容時，使用 termi
 pane 不同的 `CODEX_HOME` 必須使用相同 catalog；不支援只存在遠端的 session
 file。
 
+Terminal history 讀取若遇 Herdr `agent_not_idle`，改讀 `visible`（使用設定的 outputLines），
+避免要求工作中的 alternate screen 捲動歷史。其他讀取錯誤仍按失敗處理；
+idle 後繼續嘗試 `recent_unwrapped`。Visible 仍須通過 prompt scope 擷取，
+不是完整 transcript，不能據此宣稱已取得完整 final。
+
 Terminal fallback 保留最長的、限定於 prompt scope 的已觀察摘錄；不會宣稱此
 摘錄是完整 final 或累積 transcript。只有在 idle/done 狀態連續四次未變且成功的
 read，再持續 settlement 十秒，才允許 fallback 完成。blocked、unknown、輸出
@@ -342,12 +347,15 @@ destination。既有 routing 與 workspace validation 仍會套用。暫停中�
 
 只有圖片的 thread message 使用預設 image-inspection prompt。最多下載四個
 PNG/JPEG/WebP attachment，每個最多 5 MiB；下載來源限 Discord HTTPS CDN host，
-禁止 redirect，具有 timeout、streamed byte limit 與 signature check。產生的本機
-路徑位於 target Agent cwd 下的 `.herdr-discord-bridge/attachments`，並以明確
-指示要求 Codex/agy 使用 image-viewing tool。這是本機檔案傳遞，不是原生
-multimodal input，且要求 Agent 可存取相同 filesystem。不支援的 agent/format
-與下載失敗會回報。成功檔案會保留（目前尚無自動 retention cleanup）；失敗批次
-只會刪除自己新建的 temporary directory。準備期間會保留 terminal，避免並行
+禁止 redirect，具有 timeout、streamed byte limit 與 signature check。下載後以
+實際二進位 magic bytes 簽章判定真實格式（支援 PNG、JPEG、WebP）；若 Discord 宣告
+格式與二進位簽章不一致，但在支援格式範圍內（例如宣告 image/png 但實質為 JPEG），
+Bridge 會自動依實際二進位格式正規化副檔名（如儲存為 `.jpg`），避免下游解碼器崩潰；
+若二進位內容非受支援圖片格式，則拒絕並清除暫存。產生的本機路徑位於 target Agent cwd 下的
+`.herdr-discord-bridge/attachments`，並以明確指示要求 Codex/agy 使用 image-viewing tool。
+這是本機檔案傳遞，不是原生 multimodal input，且要求 Agent 可存取相同 filesystem。
+不支援的 agent/format 與下載失敗會回報。成功檔案會保留（目前尚無自動 retention cleanup）；
+失敗批次只會刪除自己新建的 temporary directory。準備期間會保留 terminal，避免並行
 dispatch。
 
 ## 文件與 issue 生命週期（強制）
@@ -494,8 +502,3 @@ Discord preview／fallback 使用最新可辨識完整回答；與 dispatch base
 框線被截斷、格式版本改變、相同答案與 baseline 無法區分時，保守回報擷取缺失；
 終端已捲出的內容無法恢復。模型清單及原生 session handoff 不在本次新增範圍。
 驗證／部署狀態見 ISSUE-023。
-
-Terminal history 讀取若遇 Herdr `agent_not_idle`，改讀 `visible`（使用設定的 outputLines），
-避免要求工作中的 alternate screen 捲動歷史。其他讀取錯誤仍按失敗處理；
-idle 後繼續嘗試 `recent_unwrapped`。Visible 仍須通過 prompt scope 擷取，
-不是完整 transcript，不能據此宣稱已取得完整 final。

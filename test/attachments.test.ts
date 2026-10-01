@@ -56,3 +56,47 @@ test("download failure and invalid bytes clean up partial attachment sets", asyn
     await rm(dir, { recursive: true, force: true });
   }
 });
+test("cross-format image content normalizes extension and saves successfully", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "bridge-image-cross-format-"));
+  const jpegBytes = Buffer.from([255, 216, 255, 224, 0, 16, 74, 70, 73, 70]);
+  const webpBytes = Buffer.concat([
+    Buffer.from("RIFF"),
+    Buffer.alloc(4),
+    Buffer.from("WEBP"),
+  ]);
+  const pngBytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+
+  try {
+    // 1. Declared image/png, but actually JPEG bytes -> saved as .jpg
+    const paths1 = await prepareImages(
+      [{ ...image, contentType: "image/png" }],
+      dir,
+      (async () => new Response(jpegBytes)) as typeof fetch,
+    );
+    assert.equal(paths1.length, 1);
+    assert.match(paths1[0], /1\.jpg$/);
+    assert.deepEqual(await readFile(paths1[0]), jpegBytes);
+
+    // 2. Declared image/jpeg, but actually PNG bytes -> saved as .png
+    const paths2 = await prepareImages(
+      [{ ...image, contentType: "image/jpeg" }],
+      dir,
+      (async () => new Response(pngBytes)) as typeof fetch,
+    );
+    assert.equal(paths2.length, 1);
+    assert.match(paths2[0], /1\.png$/);
+    assert.deepEqual(await readFile(paths2[0]), pngBytes);
+
+    // 3. Declared image/png, but actually WebP bytes -> saved as .webp
+    const paths3 = await prepareImages(
+      [{ ...image, contentType: "image/png; charset=utf-8" }],
+      dir,
+      (async () => new Response(webpBytes)) as typeof fetch,
+    );
+    assert.equal(paths3.length, 1);
+    assert.match(paths3[0], /1\.webp$/);
+    assert.deepEqual(await readFile(paths3[0]), webpBytes);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

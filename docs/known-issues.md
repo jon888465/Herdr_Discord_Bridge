@@ -1,11 +1,11 @@
 # Known Issues
 
-維護規則見 [AGENTS.md](../AGENTS.md)。最後整理：2026-09-21。
+維護規則見 [AGENTS.md](../AGENTS.md)。最後整理：2026-10-01。
 
 | ID        | 問題                                                                            | 狀態             | 下一步                                                                                                              |
 | --------- | ------------------------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------- |
 | ISSUE-001 | Discord reply 未觸發 bridge                                                     | 重新開啟、待驗收 | 重啟後在 mapped thread 回覆 bot                                                                                     |
-| ISSUE-002 | Discord 圖片未交付 Agent                                                        | 重新開啟／待調查 | 取得格式驗證失敗的原始附件與 metadata，重播下載                                                                     |
+| ISSUE-002 | Discord 圖片未交付 Agent                                                        | 已修正、待驗收   | 重啟後以副檔名與內容不符（如 PNG/JPEG 互換）之圖片驗收本機交付                                                     |
 | ISSUE-003 | 預覽與 final 未更新                                                             | 已修正、待驗收   | 重啟後驗證 metadata 更新與截圖情境                                                                                  |
 | ISSUE-004 | Team 成員可跨 workspace 混入，且 stale mapping 容易造成誤解                     | 已修正、待驗收   | 重啟後確認同 workspace 限制、持久化與 stale 顯示                                                                    |
 | ISSUE-005 | 本機 current 顯示未選取 Agent                                                   | 已修正、待驗收   | workspace selection 回歸修正後須重新驗收；先前 shared-thread 驗收歷史保留                                           |
@@ -227,9 +227,50 @@ message.
 
 ## ISSUE-002：Discord 圖片附件未傳達至 Agent
 
-狀態：重新開啟／待調查（2026-09-10）。2026-09-09 已實作附件下載與本機交付，但尚未完成 CLI 讀圖端到端驗收。
+狀態：已修正、待驗收（2026-10-01 新增二進位簽章自動偵測與副檔名正規化；自動化回歸通過，live 待驗收）。2026-09-09 已實作附件下載與本機交付，但尚未完成 CLI 讀圖端到端驗收。
 
 使用者從 Discord 傳送圖片後詢問 Agent 是否看得到；本次 Agent 對話僅收到文字，未收到可檢視的圖片附件。已確認入口略過空文字訊息，且原 dispatch 未處理 attachments；現已加入下載與本機檔案交付。Agent 實際讀圖能力仍待端到端驗收，不應直接歸因於模型不支援圖片。
+
+### 2026-10-01 跨格式容錯與副檔名正規化修正
+
+更新日期：2026-10-01。狀態：已修正、待驗收。
+使用者回報 Discord 上傳圖顯示 `Image content does not match its declared format`。
+已確認原因：原實作嚴格要求 Discord `attachment.contentType` 必須與下載二進位 magic bytes 完全一致。若使用者手動修改副檔名（例如 JPEG 存為 `.png`）或 Discord MIME 判定與二進位不同，即拋出錯誤中斷 dispatch。
+修正範圍：維持二進位 Magic Bytes 安全簽章檢驗（拒絕非圖片、未支援格式或惡意檔案），新增 `detectImageFormat` 判斷真實格式（PNG/JPEG/WebP），並自動依真實格式正規化儲存副檔名（如宣告 `image/png` 但內容為 JPEG 時儲存為 `.jpg`），避免下游 Agent 解碼器 crash，兼顧安全性與相容性。
+驗證（2026-10-01）：新增 `test/attachments.test.ts` 回歸測試（包含 PNG 宣告+JPEG 內容、JPEG 宣告+PNG 內容、含 charset 參數之 WebP 內容及非法內容拒絕）。全套 gate 通過。未重啟／部署 bridge，live 待驗收。
+
+### 2026-10-01 相同格式錯誤再次發生
+
+使用者再次回報 Discord 上傳圖顯示 `Image content does not match its declared format`。
+狀態維持重新開啟／待調查，保留以下歷史。期望支援且有效的圖片可交付正確 Agent，
+非圖片／格式不符仍需拒絕，不移除簽章驗證以掩蓋錯誤。
+
+已確認：目前 checkout 的 `src/attachments.ts` 在下載 body 完成後，比對 PNG/JPEG/WebP
+簽章與 attachment.contentType；不符即清除本次批次、拒絕 dispatch。錯誤出現在
+本機圖片準備階段，與 Grok terminal response parser 無關。`src/main.ts` 目前
+只允許 Codex／agy／Antigravity 本機圖片交付；Grok 會先得到另一個不支援交付錯誤。
+尚未核對此次執行中 bridge 的版本或使用者當時選取 Agent，不據此推定實際目標。
+
+重現／環境：本機 Linux Node.js v22.23.3；未取得失敗訊息連結、原始附件、
+attachment.contentType 或 HTTP response metadata，故尚未重現本次真實上傳。
+已要求使用者提供該訊息／附件下載連結與選取 Agent。真實根因仍未確認。
+
+驗證（2026-10-01）：`node --test dist/test/attachments.test.js` 3/3 通過，
+涵蓋 URL／大小／格式限制、PNG signature bytes 寫入、invalid bytes 拒絕及清理。
+現有 fixture 僅驗證簽章，不等於完整圖片解碼或 Discord／CLI 端到端成功。
+修正範圍：本輪僅同步 issue 證據，尚未更改圖片 runtime 或放寬驗證。
+未因本次回報重新 build／重啟／部署；先前 Grok build 不代表此圖片問題已修復。
+失敗圖片不會自動補送。下一步取得同一附件及 metadata，建立確切重播，再修正與重新上傳驗收。
+
+### 2026-10-01 使用者檔案重播
+
+使用者提供 `/media/sf_tmp/1.png`、`/media/sf_tmp/2.png`。`file` 確認均為
+8-bit RGBA PNG，分別 741×397／84,729 bytes、1017×267／40,334 bytes。
+兩者 header 均為完整 PNG signature。將原始 bytes 透過 mock fetch 送入真正
+`prepareImages`、contentType 設為 `image/png`：2/2 成功，讀回檔案與來源 bytes 完全相同。
+這不含 Discord CDN 下載，不能證明 Discord attachment.contentType 與 body 相符。
+尚待訊息／附件連結及 metadata，未放寬驗證或宣稱 ISSUE-002 已修復。
+圖片內容為 Herdr `agent_not_idle` 與 Discord capture incomplete 截圖；另見 ISSUE-003。
 
 ### 2026-09-10 格式驗證失敗回報
 
@@ -779,7 +820,6 @@ contexts 測試均於 fixture 清理發生 ENOTEMPTY（187 項中 2 fail）；
 ISSUE-021 的預期行為包含完成驗證後安全清理 fixture、無未處理拒絕；新增 ENOTEMPTY 的修正範圍本輪僅記錄，未改程式。下一步查明非同步工作與 fixture cleanup 時序及完整套件負載因素，並調查 ISSUE-007，再重跑完整 gate。兩項保持「重新開啟／待調查」，ISSUE-022 保持「已修正、待驗收」。Phase 4 依賴 Phase 3，因此不能因新增 fixture 通過宣稱整體 failover 已驗收。
 
 本輪完成本機 main 合併提交，README.zh-TW.md 既有未提交修改保留於提交之外。未 push、未部署或重啟 Bridge，running version 未核對；舊訊息／工作不補送。provider watcher、自動 reset 等候與 live quota／跨 CLI／Discord 驗收未完成；實際功能仍以 operator observations 與明確 stopped-writer run 為準。
-
 
 ## ISSUE-023：Grok terminal adapter 相容性
 
