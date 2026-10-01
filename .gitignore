@@ -9,3 +9,4 @@ config.jsonc
 !.env.example
 state/
 coverage/
+.herdr-discord-bridge/
