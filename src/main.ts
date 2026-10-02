@@ -1950,6 +1950,7 @@ export async function streamAgent(
   let lastCard = "";
   let lastEdit = started - PROGRESS_UPDATE_MS;
   let collectingSince = 0;
+  let identityMissingSince: number | undefined;
   const settlement = new Settlement();
   const edit = async (content: string): Promise<boolean> => {
     try {
@@ -1970,20 +1971,62 @@ export async function streamAgent(
     } catch {
       continue;
     }
-    const current = agents.find(
-      (agent) =>
-        agent.terminal_id === initial.terminal_id &&
-        agent.pane_id === initial.pane_id &&
-        agent.workspace_id === initial.workspace_id &&
-        agent.agent === initial.agent &&
-        sameAgentSession(agent.agent_session, initial.agent_session),
-    );
-    if (!current) {
+    const candidate =
+      agents.find((agent) => agent.pane_id === initial.pane_id) ||
+      agents.find((agent) => agent.terminal_id === initial.terminal_id);
+    const sameLocation =
+      candidate &&
+      candidate.pane_id === initial.pane_id &&
+      candidate.terminal_id === initial.terminal_id &&
+      candidate.workspace_id === initial.workspace_id &&
+      candidate.agent === initial.agent;
+    const sessionMatches =
+      candidate &&
+      sameAgentSession(candidate.agent_session, initial.agent_session);
+    const sessionMissing =
+      sameLocation &&
+      initial.agent_session != null &&
+      (candidate.agent_session == null ||
+        !sameAgentSession(candidate.agent_session, candidate.agent_session));
+    if (!candidate || sessionMissing) {
+      identityMissingSince ??= Date.now();
+      settlement.observe("unknown", false, true);
+      collectingSince = 0;
+      if (Date.now() - identityMissingSince < 30000) {
+        if (
+          identityMissingSince === Date.now() ||
+          Date.now() - lastEdit >= PROGRESS_UPDATE_MS
+        ) {
+          await edit(
+            `${agentHeaderFor(initial)}\n⏳ Agent identity temporarily unavailable; waiting to verify the original session. · 已耗時 ${formatElapsed(Date.now() - started)}`,
+          );
+          lastEdit = Date.now();
+        }
+        // Do not read terminal/transcript or infer completion while identity is unknown.
+        continue;
+      }
+      console.error(
+        `Response capture stopped: identity unavailable for 30s (pane=${initial.pane_id}).`,
+      );
       await edit(
-        `${agentHeaderFor(initial)}\n⚫ Agent exited or session changed; response capture stopped.`,
+        `${agentHeaderFor(initial)}\n⚠️ Agent identity unavailable for 30 seconds; response capture stopped. Use /herdr agents or /herdr read to inspect.`,
       );
       return;
     }
+    if (!sameLocation || !sessionMatches) {
+      const reason = !sameLocation
+        ? "pane/terminal/workspace/agent changed"
+        : "session changed";
+      console.error(
+        `Response capture stopped: ${reason} (pane=${initial.pane_id}).`,
+      );
+      await edit(
+        `${agentHeaderFor(initial)}\n⚫ Agent identity changed (${reason}); response capture stopped.`,
+      );
+      return;
+    }
+    identityMissingSince = undefined;
+    const current = candidate;
     let readOk = false;
     let changed = false;
     try {

@@ -257,6 +257,7 @@ Terminal fallback 保留最長的、限定於 prompt scope 的已觀察摘錄；
 read，再持續 settlement 十秒，才允許 fallback 完成。blocked、unknown、輸出
 變動或 read failure 都會重設 settlement。Structured completion 可在沒有成功
 terminal read 時完成。Agent session 被替換後停止觀察；identity 比較 terminal、pane、workspace、agent kind，以及 session 的 kind/value，不以 source、欄位順序或其他 metadata 判斷替換。缺少或無法辨識的 session 不自動認定為新的相同 session。
+2026-10-02：Discord 單 Agent 回覆觀察若 Agent 暫時未列出，或已知 session 的 metadata 暫時缺失／無效，先顯示等待核對，最多等待 30 秒並在下一輪成功查詢判定逾時。等待期間不讀 terminal／transcript、不送 final，並重設 settlement；原完整 identity 回來才續接。明確 session ID 或 pane／terminal／workspace／agent kind 改變仍立即停止。初始未知 session 不因稍後出現 ID 就自動接納為原 session。此邏輯不重送 prompt，也不變更 thread mapping。
 
 Final 會獨立發送，使用 Markdown-aware chunks，且不超過 Discord content limit。
 所有 chunks 發送完後才顯示 finished。缺少 final 時會描述為 capture incomplete，

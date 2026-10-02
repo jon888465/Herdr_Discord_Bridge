@@ -261,3 +261,131 @@ test("busy history falls back to visible and retains that excerpt after idle red
   assert.match(sent.join("\n"), /may include progress or be incomplete/);
   assert.ok(!cards.some((card) => card.includes("final response delivered")));
 });
+
+for (const gap of ["agent", "session"] as const) {
+  test(`temporary ${gap} disappearance does not abandon the same response`, async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+    const initial = {
+      terminal_id: "term",
+      pane_id: "w2:p4",
+      workspace_id: "w2",
+      tab_id: "w2:t1",
+      agent: "codex",
+      agent_status: "working",
+      agent_session: { kind: "id", value: "original" },
+    };
+    let polls = 0;
+    const sent: string[] = [];
+    const cards: string[] = [];
+    const runtime = {
+      config: { streamIntervalMs: 1000, outputLines: 40 },
+      herdr: {
+        listAgentsWithWorkspaceNames: async () =>
+          ++polls === 1
+            ? gap === "agent"
+              ? []
+              : [{ ...initial, agent_session: undefined }]
+            : [initial],
+        readAgent: async () => {
+          assert.equal(polls, 2);
+          return "";
+        },
+      },
+      discord: {
+        editProgress: async (_: unknown, text: string) => {
+          cards.push(text);
+        },
+        postOutput: async (_: unknown, text: string) => {
+          sent.push(text);
+        },
+      },
+    } as unknown as Parameters<typeof streamAgent>[2];
+    const transcript = {
+      poll: async () => {
+        assert.equal(polls, 2);
+      },
+      turn: { completed: true, final: "this turn answer" },
+    } as unknown as Parameters<typeof streamAgent>[5];
+    const task = streamAgent(
+      initial,
+      {} as Parameters<typeof streamAgent>[1],
+      runtime,
+      "question",
+      "",
+      transcript,
+    );
+    t.mock.timers.tick(1000);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.ok(!cards.some((card) => card.includes("capture stopped")));
+    t.mock.timers.tick(1000);
+    await task;
+    assert.deepEqual(sent, ["this turn answer"]);
+  });
+}
+
+for (const outcome of ["timeout", "replacement"] as const) {
+  test(`unverified identity ${outcome} never reads or delivers a final`, async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+    const initial = {
+      terminal_id: "term",
+      pane_id: "w2:p4",
+      workspace_id: "w2",
+      tab_id: "w2:t1",
+      agent: "codex",
+      agent_status: "working",
+      agent_session: { kind: "id", value: "original" },
+    };
+    let polls = 0;
+    const cards: string[] = [];
+    const runtime = {
+      config: { streamIntervalMs: 1000, outputLines: 40 },
+      herdr: {
+        listAgentsWithWorkspaceNames: async () => {
+          polls++;
+          return outcome === "replacement" && polls > 1
+            ? [
+                {
+                  ...initial,
+                  agent_session: { kind: "id", value: "replacement" },
+                },
+              ]
+            : [];
+        },
+        readAgent: async () => {
+          assert.fail("unknown or replaced identity must not be read");
+        },
+      },
+      discord: {
+        editProgress: async (_: unknown, text: string) => {
+          cards.push(text);
+        },
+        postOutput: async () => {
+          assert.fail("must not deliver an unverified final");
+        },
+      },
+    } as unknown as Parameters<typeof streamAgent>[2];
+    const transcript = {
+      poll: async () => {
+        assert.fail("must not poll while identity is unknown");
+      },
+      turn: { completed: true, final: "answer" },
+    } as unknown as Parameters<typeof streamAgent>[5];
+    const task = streamAgent(
+      initial,
+      {} as Parameters<typeof streamAgent>[1],
+      runtime,
+      "question",
+      "",
+      transcript,
+    );
+    t.mock.timers.tick(1000);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.ok(!cards.at(-1)?.includes("capture stopped"));
+    t.mock.timers.tick(outcome === "timeout" ? 30000 : 1000);
+    await task;
+    assert.match(
+      cards.at(-1)!,
+      outcome === "timeout" ? /unavailable for 30 seconds/ : /session changed/,
+    );
+  });
+}

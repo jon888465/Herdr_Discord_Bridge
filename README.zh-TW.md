@@ -259,3 +259,5 @@ Team 多 Agent 問題使用 `team questions <task-id>` 查詢、`team reply <tas
 `failover arm <source> <candidate1,candidate2> <goal-and-constraints>` 保存任務與候選優先序；`quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds]` 記錄明確額度觀察。來源 limited/exhausted 會先建立 checkpoint，不呼叫來源模型。確認來源／背景 writer 停止後，`failover run <id> confirm-source-stopped` 選擇不同額度池且有新鮮 available 回報的目的地，驗證復原／工作樹、移交 ownership 再續作。`quota status`、`failover status [id]`／`cancel <id>` 可查詢／釋放。
 
 第一版採操作者回報，沒有 provider quota API。過期、unknown、同額度池或衝突觀察不准派送；不改帳號／憑證，不重試不明送達。詳見 [完整指令、journal、限制及驗收](docs/quota-failover-manager.md)。
+
+Discord 回覆擷取遇到原 Agent 或已知 session 資料暫時消失時，會等待最多 30 秒重新核對；確認原 identity 後才續接，明確 session 更換仍停止。沿用 Discord 舊 thread 只會路由到 live pane，不會還原舊 CLI 對話。實際驗收仍待完成（ISSUE-003／008）。

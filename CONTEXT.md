@@ -116,3 +116,12 @@ tracks captured terminal evidence, regression checks and live acceptance.
 records the current Codex session for conditional agy takeover. It is checkpoint-only,
 not an ownership transfer or quota monitor. ISSUE-002 tracks image MIME evidence;
 ISSUE-003 tracks the typed busy-history → visible response-capture fallback.
+
+## Discord response identity gaps
+
+Single-Agent Discord capture now waits up to 30 seconds when the original Agent
+or its known session metadata is temporarily absent, without reading or delivering
+unverified output. Only the full original identity can resume capture; explicit
+replacements still stop immediately. ISSUE-003/008 track the 2026-10-02 live
+failure (new boot conversation, reused Discord thread), fixtures and pending live
+acceptance. Thread routing stores pane mappings, not old session IDs.

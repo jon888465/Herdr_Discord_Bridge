@@ -6,7 +6,7 @@
 | --------- | ------------------------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------- |
 | ISSUE-001 | Discord reply 未觸發 bridge                                                     | 重新開啟、待驗收 | 重啟後在 mapped thread 回覆 bot                                                                                     |
 | ISSUE-002 | Discord 圖片未交付 Agent                                                        | 已修正、待驗收   | 重啟後以副檔名與內容不符（如 PNG/JPEG 互換）之圖片驗收本機交付                                                     |
-| ISSUE-003 | 預覽與 final 未更新                                                             | 已修正、待驗收   | 重啟後驗證 metadata 更新與截圖情境                                                                                  |
+| ISSUE-003 | 預覽與 final 未更新                                                             | 重新開啟／待調查 | 暫時缺失子缺陷已修正；2026-10-02 重跑 195/195，載入新版原 thread 驗收與核對 live identity |
 | ISSUE-004 | Team 成員可跨 workspace 混入，且 stale mapping 容易造成誤解                     | 已修正、待驗收   | 重啟後確認同 workspace 限制、持久化與 stale 顯示                                                                    |
 | ISSUE-005 | 本機 current 顯示未選取 Agent                                                   | 已修正、待驗收   | workspace selection 回歸修正後須重新驗收；先前 shared-thread 驗收歷史保留                                           |
 | ISSUE-006 | 重啟 bridge 後 pane 所屬 workspace／位置改變                                    | 已驗收           | 2026-09-10 live topology 驗證完成；後續觀察重啟保留                                                                 |
@@ -892,3 +892,35 @@ lint、typecheck 通過。兩個失敗屬 ISSUE-021：concurrent verify/cancel �
 完整 **189/189 pass，0 fail，0 skipped**。首輪 ISSUE-021 的兩項 ENOTEMPTY
 本次未再現；因未調查或修正其根因，保留重新開啟／待調查與首輪失敗歷史，
 不以一次全綠宣稱已修復。Grok 保持已修正、待驗收（Discord／長文／blocked 尚待驗收）。
+
+## 2026-10-02 ISSUE-003／008：送出問題後立即停止回覆擷取
+
+更新日期：2026-10-02。ISSUE-003 重新開啟／待調查，ISSUE-008 維持重新開啟／待調查。先前 source 修正與自動化紀錄保留，不當作本次 live 通過。
+
+使用者症狀／證據：附圖 `.herdr-discord-bridge/attachments/message-F8GzI8/1.png` 已以圖片工具讀取。Discord 08:59 回應卡片標示 Codex、w2、w2:p4，並顯示 `Agent exited or session changed; response capture stopped.`；使用者回報「問完就沒等回應」。預期：有效 prompt 送達後持續等待本次回覆；同 session metadata 更新不可停止，真正替換不得轉發其他對話。
+
+環境與核對：Linux、Herdr 0.8.0；running Bridge PID 7007，cwd 為本 checkout，entry 為 `dist/src/index.js`，main.js 建置時間為台北 2026-10-02 08:55:27。Herdr server log 00:59:34 UTC（台北 08:59:34）的 `agent.prompt` 回傳 ok。目前 `herdr agent get w2:p4` 回報 Codex working，session ID `01a0fa1d-bedf-7c41-80e0-7272f5f90e1c`。Bridge pane 另有 console selected Agent exited／session changed 警告，但未含時間與前後 identity，不能直接認定與這張 Discord 卡片相同事件。
+
+已確認程式路徑：`streamAgent` 第一次輪詢前就記錄 initial identity；每輪比對 terminal、pane、workspace、agent kind、session kind/value，找不到相符 Agent 即編輯成附圖訊息並 return，後續 final 不再讀取或交付。`sameAgentSession` 已忽略 source metadata。尚未確認根因：缺當次 initial／current snapshot，無法分辨真正 session 更換、暫時缺失或其他不相符欄位；不以目前 Agent 存在證明當時 identity 未變。
+
+驗證（2026-10-02）：`node --test dist/test/response-delivery.test.js` **6/6 通過**，包含相同 session metadata 更新仍送 final、真正 session／pane／terminal 更換停止、busy visible fallback。這是既有 build fixtures，沒有重現當次失敗，也不是端到端驗收。另執行唯讀 live agent／process-info／Bridge visible log／Herdr server log 與 build timestamp 核對。未建立能重播這次身分變更的 pass/fail loop。
+
+修正範圍：本輪只重新開啟 issue 並補上證據，未改程式或降低 identity 驗收標準。下一步：確認使用者當時是否新建／切換 Codex session，取得一次停止前後的完整 identity diff；以該 trace 建立 streamAgent 回歸 fixture，確認根因後修正。若現有日誌無法取得 snapshot，需在下一次 live 重現加入有界 identity 診斷紀錄。
+
+限制：沒有 build、部署、重啟、重送 prompt、操作其他 Agent 或 commit／push。執行中 Bridge 的出錯分支仍存在，舊回覆不自動補送。已有未提交文件修改保留；本輪文件 diff 檢查不等同 live 驗收。
+
+### 2026-10-02 使用者補充與暫時 identity 缺失修正
+
+使用者確認：沒有在送問前後手動 `/new`、resume 或切換對話；是今天開機後的對話，Herdr 曾重新啟動，Discord 使用原有 thread。`resolveContextAgent` 每次先依 thread pane mapping 查詢 live Agent；routing 不保存 session ID，因此沒有證據能將「舊 thread」列為直接原因。重啟後 metadata 回報時序仍需 live trace 確認。
+
+回歸重現：新增 streamAgent 真實 seam，分別讓一輪 Agent 清單缺少原 Agent、或原 Agent 的已知 session 欄位缺失，下一輪恢復完整原 identity。`npm run build && node --test --test-name-pattern='temporary.*disappearance' dist/test/response-delivery.test.js` 修正前 **0/2 通過、2 失敗**（2026-10-02），同樣顯示 capture stopped 並提前 return。這確認原程式會把暫時缺失當永久退出；沒有當次 live snapshots，仍不能斷言是附圖唯一根因。
+
+修正範圍：`src/main.ts` 的 Discord streamAgent 暫時缺失先等待最多 30 秒，在下一輪成功查詢判定逾時。期間不讀 transcript／terminal、不完成 settlement 或送 final；只有完整原 identity 回來才續接。已知不同 session ID、同 pane terminal 被替換，或同 terminal 移到別的 pane／workspace，立即停止。初始未知 session 不會自動採納後來的新 ID。卡片與程序 log 分別說明 identity 缺失逾時或明確替換；不重送 prompt、不自動綁定其他對話。SPEC／CONTEXT／雙語 README 已同步。
+
+修正中驗證歷史：第一輪修正未追蹤同 terminal 的 moved pane，原 moved-pane fixture 因等待而 cancelled，結果 **4 通過、4 cancelled**，不是全通過。補上同 terminal 候選辨識後，`npm run build && node --test dist/test/response-delivery.test.js` **10/10 通過**（2026-10-02），新增四項涵蓋暫時 Agent／session 缺失後續接、30 秒逾時、缺失後出現真正 replacement；後兩者不得讀來源或送 final。完整 gate 尚在執行，結果另補。
+
+狀態：ISSUE-003／008 維持重新開啟／待調查；上述可重現子缺陷已 source 修正、targeted 通過，但使用者本次環境的 identity 變化根因仍未確認。未部署／重啟執行中的 Bridge，running process 仍載入修正前程式，舊回覆不自動補送；沒有 commit／push。下一步完整 gate 後在載入新版的原 Discord thread 驗收，若再停止，依新的分支訊息取得前後 identity。
+
+2026-10-02 完整檢查補記：`npm run lint`（49 TypeScript files）、`npm run typecheck`、`npm run build` 通過。`npm test` 首輪 **195 項、194 通過、1 失敗、0 cancelled、0 skipped**，總耗時 174 秒。首輪串流輸出有截斷，未保留唯一失敗的詳細內容，不能猜測是 ISSUE-007 或 ISSUE-021；已開始將重跑完整 TAP 保存於 `/tmp/herdr-bridge-full-20261002.tap`。另 `node --test dist/test/instance-lock.test.js` 單獨重跑 **5/5 通過**；`timeout 45s node --test dist/test/session-handoff.test.js` 在第 13 項之後達到人為 45 秒上限，exit 124，沒有完整結果，不將它當作新的已確認 handoff 根因或全通過。以上不涉及 running Bridge 或 live Agent 操作。
+
+2026-10-02 最終驗證：`timeout 240s node --test dist/test/*.test.js` 使用本輪 `npm test` 建置的相同 dist，**195/195 通過、0 fail、0 cancelled、0 skipped**，exit 0，耗時 60.4 秒；完整 TAP 位於 `/tmp/herdr-bridge-full-20261002.tap`。lint、typecheck、build 已通過；兩個修改的 TypeScript 檔 Prettier check、文件相對連結與 `git diff --check` 通過。首輪 194/195 的失敗未再現且詳細原因未確認，保留失敗歷史，不宣稱修復它。暫時 identity 缺失子缺陷原 0/2 已變為 targeted 10/10；ISSUE-003／008 保留重新開啟／待調查，待驗收使用者實際重啟後的舊 Discord thread 情境及確切 identity 變化。原始碼／build 已更新；執行中 Bridge 未重啟／部署、未載入本輪程式，舊訊息不補送，未 commit／push。

@@ -287,3 +287,5 @@ Grok terminal support targets the observed 1.0.46 boxed and completed unboxed an
 Bridge response markers. It is not a structured transcript source; clipped boxes
 and changed terminal formats can leave capture incomplete. See ISSUE-023 in
 [known issues](docs/known-issues.md) for validation and deployment status.
+
+Discord response capture waits up to 30 seconds if the original Agent or its known session metadata temporarily disappears. It resumes only after the original identity is verified; explicit session replacements stop capture. Reusing a Discord thread routes to a live pane and does not restore its old CLI conversation. Live acceptance remains pending (ISSUE-003/008).
