@@ -1,6 +1,6 @@
 ---
 name: session-handoff
-description: Prepares quota-aware checkpoints and takes over a named coding-agent session across Claude Code, Codex CLI, GitHub Copilot CLI, Gemini Antigravity (agy), OpenCode, or another harness. Use when asked to hand off, 接手, 交接, continue another agent's session, or preserve progress before quota/rate/context limits. Prefers accessible native history and verifies workspace state before continuing.
+description: Prepares quota-aware checkpoints and takes over a named coding-agent session across Claude Code, Codex CLI, GitHub Copilot CLI, Gemini Antigravity (agy), OpenCode, Grok Build (grok CLI), or another harness. Use when asked to hand off, 接手, 交接, continue another agent's session, or preserve progress before quota/rate/context limits. Prefers accessible native history and verifies workspace state before continuing.
 ---
 
 # Session handoff

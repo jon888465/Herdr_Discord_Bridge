@@ -194,9 +194,10 @@ reads only a bounded recent output window (`handoffLines` and
 `handoffMaxChars`), redacts common credential formats, posts a concise bounded
 summary, and sends that summary to the destination Agent.
 
-For native session recovery across CLIs and checkpoints before quota exhaustion,
+For native session recovery across CLIs, including Grok Build, and checkpoints before quota exhaustion,
 ask your CLI to read the standalone [session-handoff skill](skills/session-handoff/SKILL.md).
 Copy the whole skill directory for manual installation; discovery paths vary by CLI.
+The skill can read a local `grok export`; the Bridge runtime does not decode Grok session files.
 See [usage and the Bridge comparison](docs/session-handoff.md). This agent workflow
 has no automatic quota watcher. Bridge Phase 4 adds failover from explicit quota observations (below); live cross-CLI acceptance is pending.
 

@@ -430,7 +430,8 @@ Lead 仍由已選取的 live Agent 擔任。可不委派而直接完成工作；
 
 - Prepare 在可見 quota 警告、使用者要求或明確門檻時保存 checkpoint；無訊號時 quota 記 unknown，不把 context 剩餘量當 account quota。
 - Takeover 以確切來源 identity／workspace 選擇可讀原生歷史，依序 fallback 到本機匯出、checkpoint＋專案證據、終端摘錄。來源已無額度時不要求它再次推論。
-- 覆蓋 Claude Code、Codex CLI、Copilot CLI、Antigravity CLI、OpenCode 與其他 CLI 的共通流程；各版本原生歷史可讀性不保證，AGY 不等同 Gemini CLI。
+- 覆蓋 Claude Code、Codex CLI、Copilot CLI、Antigravity CLI、OpenCode、Grok Build（`grok`）與其他 CLI 的共通流程；各版本原生歷史可讀性不保證，AGY 不等同 Gemini CLI。
+- Grok 優先使用 `grok export <exact-id>` 的本機 Markdown。直接讀取時只保留 `updates.jsonl` 的 user／assistant／tool 更新，排除 thought／reasoning 與 system prompt。匯出是公開摘要，不是完整 raw tool result。`grok usage` 與 context window 不是帳戶 quota。此技能不讓 Bridge runtime 自動解碼 Grok session 檔。
 - 接手核對實際工作樹、HEAD、修改、授權與驗證證據，標記缺漏，不移轉 hidden reasoning／credentials。跨機器不假設 uncommitted files 已同步。
 - Checkpoint-only 不代表來源停止；真正 takeover 在重疊寫入前確認 ownership，保存接收紀錄。Markdown 不是原子鎖，也不會自動停止 process。
 - Skill 目錄可單獨複製；手動讀取 SKILL.md 為共通入口，各 CLI 自動發現位置與 slash 語法分開處理。
@@ -500,5 +501,6 @@ Discord preview／fallback 使用最新可辨識完整回答；與 dispatch base
 與 idle/done；支援被折行的標記，不放寬原本完成契約。
 這不是 Grok structured transcript adapter；不還原一般內文軟折行、不讀 hidden reasoning。
 框線被截斷、格式版本改變、相同答案與 baseline 無法區分時，保守回報擷取缺失；
-終端已捲出的內容無法恢復。模型清單及原生 session handoff 不在本次新增範圍。
-驗證／部署狀態見 ISSUE-023。
+終端已捲出的內容無法恢復。模型清單不在本 parser 範圍。跨 CLI 的 Grok session
+讀取由 [session-handoff skill](skills/session-handoff/SKILL.md) 描述；Bridge runtime
+仍不自動解碼 Grok session 檔。驗證／部署狀態見 ISSUE-023。

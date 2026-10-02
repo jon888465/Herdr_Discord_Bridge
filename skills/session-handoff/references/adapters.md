@@ -12,6 +12,7 @@ follows SKILL.md in its own current session.
 | GitHub Copilot CLI         | Exact session files or local Markdown export                  | Checkpoint/artifacts                                 | Same                                   |
 | Antigravity CLI (`agy`)    | Available readable history/export for identified conversation | Checkpoint/artifacts; native decoding not guaranteed | Same                                   |
 | OpenCode                   | Local native JSON session export                              | Checkpoint/artifacts                                 | Same                                   |
+| Grok Build (`grok`)        | `grok export <id>` Markdown, or filtered `updates.jsonl`      | Checkpoint/artifacts; export is a public summary     | Same                                   |
 | Gemini CLI / other harness | Discovered documented local history/export                    | Checkpoint/artifacts                                 | Same, if file/tool access is available |
 
 ## Common selection and reading
@@ -113,6 +114,54 @@ versions. Cross-CLI recovery reads the export; native `import` is unnecessary.
 
 Sources: [CLI export](https://opencode.ai/docs/cli/),
 [v2 commands](https://opencode.ai/v2/docs/cli/commands/).
+
+## Grok Build (`grok`)
+
+Grok Build is the `grok` CLI. It is not xAI API chat history and not Gemini CLI
+history. Do not point recovery at `~/.gemini` or another product's sessions.
+
+Identify with `grok sessions list` or `grok sessions search <query>` from the
+source workspace. Rows show session ID, created, updated, status, and summary,
+grouped by worktree label. A summary or title is not a unique ID. UUID-shaped
+values are session IDs. `grok --resume <title>` only matches titles in the
+current directory and can error when several match; never use bare
+`grok --resume` or `grok -c` to choose a session. Do not resume, fork, or delete
+a session to inspect it.
+
+Preferred evidence is `grok export <exact-session-id> <local-file>`. It writes
+a Markdown transcript without calling the model. On `grok` 1.0.46 (2026-10-01)
+the file had `## User`, `## Assistant`, and `## Tools` sections, omitted
+thought/reasoning chunks and the system prompt, and summarized tool calls
+instead of dumping raw tool results. Treat that export as partial public
+history. Do not pass `--clipboard`. Keep the file local and out of commits.
+
+If export is unavailable, read
+`${GROK_HOME:-~/.grok}/sessions/<encoded-cwd>/<session-id>/` only after
+`summary.json` `info.id` and `info.cwd` match. `updates.jsonl` is the ACP
+conversation log. Keep `sessionUpdate` values `user_message_chunk`,
+`agent_message_chunk`, `tool_call`, and `tool_call_update`. Omit
+`agent_thought_chunk`. Do not dump `chat_history.jsonl` (it includes the system
+prompt and `reasoning` records, including encrypted content),
+`system_prompt.txt`, `prompt_context.json`, or `tool_definitions.json`.
+`events.jsonl` is turn telemetry, not the transcript. When
+`compaction_checkpoints/` exists, record the gap. `session_recap` and
+`last_turn_summary` are summaries, not complete history. Encoded directory
+names and event names are version-dependent discovery hints. A `*.lock` file
+does not prove the writer has stopped.
+
+`grok usage <id>` is persisted token and cost for that session. `/session-info`
+shows context-window capacity. Neither is remaining account quota.
+
+Same-harness continuation is `grok --resume <exact-id>`. `grok import` copies
+Claude Code sessions into Grok storage and is not this takeover procedure. As a
+destination, read this skill in the current Grok session. This procedure does
+not make the Bridge runtime decode Grok session files.
+
+Sources: [Sessions](https://x.ai/docs/build/features/sessions),
+[CLI reference](https://x.ai/docs/build/cli/reference).
+Local `grok export --help`, `grok sessions list`, and
+`~/.grok/docs/user-guide/17-sessions.md` were checked on 2026-10-01 against
+`grok` 1.0.46.
 
 ## Gemini CLI and other harnesses
 

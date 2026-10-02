@@ -52,7 +52,7 @@ Registry 位於 state directory 的 `session-handoffs/<id>.json`；同步產生 
 | Claude、Copilot、OpenCode、AGY、Gemini | 明確 public-export-v1 或 checkpoint/artifact fallback                                                                                   | 未自動解碼各 CLI 原生 DB／私有格式，不呼叫來源模型或 export CLI                    |
 | 其他 CLI                               | 同一公開匯出契約或 checkpoint fallback                                                                                                  | 目的地需遵守現有 Bridge marker；版本相容待 live 驗收                               |
 
-AGY 與 Gemini 分開識別，沒有把 AGY 當成 Gemini CLI 的 history。缺失、歧義、不支援或過大的 Codex native history 會標示 partial fallback；不自行選最近一次對話。所有模式保留 exact source session identity；未知身份不可接手。
+AGY 與 Gemini 分開識別，沒有把 AGY 當成 Gemini CLI 的 history。Grok 的 `grok export` 與 `updates.jsonl` 只由 [session-handoff skill](../skills/session-handoff/SKILL.md) 在 Agent 側讀取；本 runtime 不自動解碼該格式，Grok 仍走 public-export-v1 或 checkpoint。缺失、歧義、不支援或過大的 Codex native history 會標示 partial fallback；不自行選最近一次對話。所有模式保留 exact source session identity；未知身份不可接手。
 
 需要匯入公開訊息時，在 task repository 內準備 UTF-8 JSON（最多 4 MiB）：
 

@@ -20,7 +20,7 @@
 
 | ISSUE-015 | Team 僅能加入已啟動 pane，缺少 profile 與 session lifecycle | 修正中 | 完整檢查後驗收 lazy start／重用／Lead 動態分工 |
 | ISSUE-016 | use 自動刷 CLI 畫面，console 對話與終端檢視混在一起 | 修正中 | 完整檢查後驗收安靜對話與獨立 attach/watch |
-| ISSUE-017 | quota 耗盡時缺少跨 CLI session 交接流程 | 已修正、待驗收 | Skill 靜態檢查完成；待真實跨 CLI 接手驗收 |
+| ISSUE-017 | quota 耗盡時缺少跨 CLI session 交接流程 | 已修正、待驗收 | 2026-10-01 已補 Grok skill adapter；真實跨 CLI 接手（含 Grok）仍待驗收 |
 | ISSUE-018 | `scripts/run.sh` 在 macOS 內建 Bash 上無法執行 | 已修正、待驗收 | 以 macOS `/bin/bash` 執行 restart regression，並驗證 `-r` 的 build/link/live 流程 |
 
 | ISSUE-020 | Phase 1 Durable Task Engine、restart reconciliation 與 whole-team cancellation | 已修正、待驗收 | 2026-09-21 完整 113/114 通過；ISSUE-007 入口逾時，live 驗收仍待完成 |
@@ -629,6 +629,22 @@ Team Task 複雜性：同一個 1:1:N 任務可能同時有多個 Agent／Assign
 未驗證：所有真實跨 CLI session 接手、AGY 原生歷史可讀性、CLI 自動 discovery、來源耗盡時與並行 writer 的實際操作。沒有重跑 Bridge build／unit tests；無原始碼修改、未重啟／部署，執行中 bridge 未驗證，舊訊息不補送。未全域安裝、未 commit／push。
 
 下一步：依 docs/session-handoff.md 驗收矩陣記錄實際 CLI 版本／ID／工作樹與接手結果；尚未有全 CLI 原生相容或 live 接手成功證據。
+
+### 2026-10-01 補上 Grok Build adapter
+
+症狀：session-handoff skill 已涵蓋 Claude、Codex、Copilot、AGY、OpenCode，沒有 Grok Build（`grok` CLI）的身份、匯出與 thought 排除方式。Bridge 終端 parser 只處理畫面回答，不能代替 session 接手。
+
+預期：接手方能依 exact session ID 讀 Grok 公開歷史或 checkpoint，排除 thought／reasoning，核對工作樹後繼續；不把 `grok usage` 當帳戶 quota，也不讓 Bridge runtime 自動解碼 Grok session 檔。
+
+環境：Linux，`grok` 1.0.46（2026-10-01）。核對 `grok export --help`、`grok sessions list`、本機 user guide `17-sessions.md`，以及 [Sessions](https://x.ai/docs/build/features/sessions)。用既有本機 session 檢查匯出標題與 thought 是否出現；未把匯出內容寫入 repo，未呼叫來源模型做摘要。
+
+根因：adapter 指引當初沒有 Grok 列。`grok export <id> <file>` 會寫出 `## User`／`## Assistant`／`## Tools` Markdown，且不含 `agent_thought_chunk`、reasoning 或 system prompt；工具節是摘要，不是完整 raw output。可直接讀的對話紀錄是 `updates.jsonl`；`chat_history.jsonl` 含 system prompt 與 reasoning。
+
+修正範圍：`skills/session-handoff/SKILL.md` 描述、`references/adapters.md`、`docs/session-handoff.md`、SPEC、CONTEXT、runtime 文件的範圍說明、README 雙語。無 Bridge TypeScript、runtime decoder 或 quota watcher 變更。
+
+未驗證：真實 Grok → 其他 CLI 與反向接手、quota 耗盡、同名 session、過期封包與其他 writer。未重跑 Bridge build／unit tests，未重啟或部署，執行中的 bridge 未變更，舊訊息不補送。未 commit／push。
+
+下一步：依 docs/session-handoff.md 第 7 項記錄兩端版本、exact session ID、workspace／HEAD 與接手結果。通過前不得宣稱 Grok 原生交接已驗收。
 
 ## ISSUE-018：`scripts/run.sh` 不相容 macOS 內建 Bash
 

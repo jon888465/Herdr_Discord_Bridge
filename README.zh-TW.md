@@ -5,7 +5,8 @@
 [English](README.md) | 繁體中文
 
 Agent quota 快用完時，可請 CLI 讀取 [session-handoff skill](skills/session-handoff/SKILL.md)
-保存交接資訊，或由另一 CLI 復原指定 session。整個目錄可稍後手動安裝。
+保存交接資訊，或由另一 CLI 復原指定 session，來源包含 Grok Build。整個目錄可稍後手動安裝。
+Skill 可讀本機 `grok export`；Bridge runtime 不解碼 Grok session 檔。
 詳見[用法及與 bridge handoff 的差異](docs/session-handoff.md)。
 目前無供應商 quota 自動監控；Bridge Phase 4 支援明確額度回報與驗證切換（見下方），真實跨 CLI 驗收仍待完成。
 

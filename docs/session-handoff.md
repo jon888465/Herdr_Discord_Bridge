@@ -4,6 +4,8 @@
 
 2026-09-20 更新：Bridge 已新增 [Phase 3 Session Handoff Runtime](session-handoff-runtime.md)，提供 durable checkpoint、接手驗證、ownership 與續作。下文 2026-09-18 的 skill-only 說明與舊 bounded handoff 比較保留為歷史；Phase 3 現行行為以上述文件為準。[Phase 4](quota-failover-manager.md) 另接上明確 quota 回報、目的地選擇與驗證續作，未安裝 provider quota watcher。
 
+2026-10-01：skill 的來源 adapter 補上 Grok Build（`grok` CLI）。接手優先讀 `grok export <exact-session-id>` 寫出的本機 Markdown；無法匯出時才過濾 `updates.jsonl` 的 user／assistant／tool 更新，排除 thought／reasoning。`grok usage` 與 context window 不是帳戶 quota。這仍是 Agent 讀檔流程。Bridge runtime 不自動解碼 Grok session 檔，仍用 public-export-v1 或 checkpoint。Live 接手未做，見 [ISSUE-017](known-issues.md)。
+
 2026-09-18 提供 [session-handoff skill](../skills/session-handoff/SKILL.md)、[adapter 指引](../skills/session-handoff/references/adapters.md)與 [HANDOFF.md 範本](../skills/session-handoff/assets/HANDOFF.md)。它是 Agent 執行的 Markdown 流程，不是背景服務或 bridge runtime 新功能。真實跨 CLI 驗收待完成，見 [ISSUE-017](known-issues.md)。
 
 ## 與現有 bridge handoff 的差異
@@ -62,7 +64,7 @@ cp -R -n skills/session-handoff ~/.agent/skills/
 
 本次沒有執行安裝。`~/.agent/skills` 是使用者選定的保存位置，**不是所有 CLI 保證自動搜尋的共同路徑**。未自動發現時，直接要求讀取 `~/.agent/skills/session-handoff/SKILL.md`；前提是 Agent 有讀檔權限。自動發現需依 CLI 版本配置，不能將 `$session-handoff` 或 `/session-handoff` 視為通用語法。
 
-Claude Code、Codex、Copilot、OpenCode 的本機歷史／匯出方式與官方來源見 adapter 指引。AGY 能作來源與接手方，但 `--conversation` 只證明同 harness resume。本機 `agy --help` 未提供通用歷史 export 子命令；無可讀歷史介面時使用 checkpoint／可讀匯出。AGY 與 `gemini` CLI 分開處理，不能假設共用 history 格式。
+Claude Code、Codex、Copilot、OpenCode、Grok Build 的本機歷史／匯出方式與官方來源見 adapter 指引。AGY 能作來源與接手方，但 `--conversation` 只證明同 harness resume。本機 `agy --help` 未提供通用歷史 export 子命令；無可讀歷史介面時使用 checkpoint／可讀匯出。AGY 與 `gemini` CLI 分開處理，不能假設共用 history 格式。Grok 的 `grok export` 是公開 Markdown 摘要，不是完整 raw tool result，也不是 Bridge runtime adapter。
 
 ## 驗證與限制
 
@@ -76,5 +78,6 @@ Claude Code、Codex、Copilot、OpenCode 的本機歷史／匯出方式與官方
 4. 同名 session、不同 worktree、過期 checkpoint：確認 identity，保留新修改、不退回舊摘要。
 5. 來源／背景作業仍在寫入：先唯讀復原，釐清 ownership 後才修改重疊範圍。
 6. 歷史遺失／截斷、目的地也無 quota：明載缺口或受阻，不宣稱完整接手。
+7. Grok → 另一 CLI、另一 CLI → Grok：`grok export` 或過濾後的 `updates.jsonl` 能找回目標與工具摘要且不含 thought；目的地為 Grok 時在目前 session 讀 skill，不以 `grok import` 或 `--resume` 代替交接。
 
 換 CLI 不代表換 provider/account，不會重設五小時 quota。目的地仍須有額度與存取權。Skill 只能在 Agent 能執行時保存，因此不能保證毫無預警的 hard limit 前自動 checkpoint。
