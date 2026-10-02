@@ -25,11 +25,12 @@
 
 | ISSUE-020 | Phase 1 Durable Task Engine、restart reconciliation 與 whole-team cancellation | 已修正、待驗收 | 2026-09-21 完整 113/114 通過；ISSUE-007 入口逾時，live 驗收仍待完成 |
 
-| ISSUE-021 | Phase 3 Session Handoff Runtime | 重新開啟／待調查 | 2026-09-21 並行 verify/cancel ENOENT 與 context 清理 ENOTEMPTY；詳見 Phase 3／4 合併紀錄，live 未驗收 |
+| ISSUE-021 | Phase 3 Session Handoff Runtime | 重新開啟／待調查 | 2026-10-02 完整套件與單獨重跑再次出現並行 verify/cancel ENOENT；未改 handoff，live 未驗收 |
 
 | ISSUE-022 | Phase 4 Quota / Failover Manager | 已修正、待驗收 | 2026-09-21 新增 28 項通過；完整 181/184，ISSUE-007／021 待調查，live 待驗收 |
 
 | ISSUE-023 | Grok 回答框與折行標記無法解析 | 已修正、待驗收 | Grok live turn probe 通過；Discord 交付、長文及 blocked 續答待驗收 |
+| ISSUE-024 | Herdr 重啟後 Grok 未自動恢復 | 待調查 | 已確認缺少 Grok integration；安裝後以 exact session resume，取得 session metadata 並驗收下一次重啟 |
 
 2026-09-09 自動化驗證：`npm run check`（typecheck、build、33/33 tests）、`npm run lint`、`git diff --check` 通過。這是前一輪程式驗證紀錄，不代表已做 live Discord 驗收。本輪僅整理文件，未重跑程式測試。
 
@@ -792,6 +793,15 @@ ISSUE-021 由已修正、待驗收重新開啟／待調查。下一步釐清並�
 contexts 測試均於 fixture 清理發生 ENOTEMPTY（187 項中 2 fail）；
 精確原因仍未確認，未修改 handoff 程式與測試。最新完整重跑結果見 ISSUE-023。
 
+### 2026-10-02 coding 工作期間再次再現（ISSUE-021）
+
+狀態維持重新開啟／待調查。本輪沒有修改 `src/handoff-store.ts`、`src/session-handoff.ts` 的寫入路徑，也沒有放寬 `test/session-handoff.test.ts`。`session-handoff.ts` 只沿用既有的 `sameTaskSession` import，與本次 ENOENT 無關。
+
+環境：2026-10-02、Linux、Node.js v22.23.3、本機 checkout。`npm test`（`npm run build && node --test dist/test/*.test.js`）建置通過後 **206 項：205 通過、1 失敗、0 cancelled、0 skipped**，exit 1，duration_ms 224941。唯一失敗是 not ok 145：`concurrent handoff verification and cancellation cannot race in-flight dispatch`（`dist/test/session-handoff.test.js:265`，原始碼 `test/session-handoff.test.ts`），failureType `unhandledRejection`，`HandoffStore.write` 開啟 `/tmp/handoff-runtime-liGhJS/state/handoff-2b7c1f17-5210-4750-a729-d566f097f91b.json.8627767a-6279-41e8-b607-f89db75ecdc7.tmp` 時 ENOENT。呼叫鏈仍是 `SessionHandoffRuntime.block` → `HandoffStore.update/write`。
+
+單獨重跑 `node --test --test-name-pattern 'concurrent handoff verification' dist/test/session-handoff.test.js`：**0/1 通過**，exit 1，duration_ms 15608，同樣 ENOENT，路徑改為 `/tmp/handoff-runtime-36BhUQ/state/handoff-40ac39ff-50dd-490a-9436-d77c88ef404b.json.17a7e832-d8b3-4711-9e59-50bd5d9e8af1.tmp`。與 2026-09-21 合併紀錄的症狀相同。精確根因仍未確認，本輪不修、不把完整套件記為通過。
+
+
 ## ISSUE-022：Phase 4 Quota / Failover Manager
 
 更新日期：2026-09-21。狀態：已修正、待驗收；本機 main 合併後新增 28 項 Phase 4 測試通過，但完整 gate 因 ISSUE-007／021 未通過。以下保留 2026-09-20 的受限環境歷史；最新結果見末尾。
@@ -892,6 +902,26 @@ lint、typecheck 通過。兩個失敗屬 ISSUE-021：concurrent verify/cancel �
 完整 **189/189 pass，0 fail，0 skipped**。首輪 ISSUE-021 的兩項 ENOTEMPTY
 本次未再現；因未調查或修正其根因，保留重新開啟／待調查與首輪失敗歷史，
 不以一次全綠宣稱已修復。Grok 保持已修正、待驗收（Discord／長文／blocked 尚待驗收）。
+
+## ISSUE-024：Herdr 重啟後 Grok 未自動恢復
+
+更新日期：2026-10-02。狀態：待調查（已確認本機缺少 integration；尚未修正或完成重啟驗收）。
+
+症狀：使用者回報 Herdr 關閉前執行中的 Grok 沒有隨重啟重新啟動。預期：有有效 native session reference 的 Grok pane 可恢复原對話；沒有 reference 時應明確說明只恢復 shell。
+
+環境／證據（2026-10-02，Linux、Herdr 0.8.0）：
+
+- `herdr integration status`：`grok: not installed`；Codex v7、Antigravity CLI v1 已安裝。
+- `herdr agent list`：目前只有 Codex、agy，沒有 Grok。`herdr pane list` 與 `herdr pane read w2:p6 --source visible --lines 40`：原 Grok 所在 pane 保留，但畫面只有 shell prompt。
+- 唯讀檢查 `~/.config/herdr/session.json`：w2:p6 對應 internal pane 6 只有 cwd，沒有 agent_session；Codex、agy 的 pane 有 exact session ID。沒有把私有 session 檔複製進 repo。
+- Herdr server log：2026-10-01 09:21 UTC 曾辨識 pane 6 的 Grok；09:37 UTC server shutdown 時該 pane 收到 Hangup；2026-10-02 00:55 UTC 完成三個 workspace 的 layout restore，沒有新 Grok agent detection。時間為 UTC，對應台北 2026-10-02 08:55 啟動。
+
+已確認原因：目前沒有 Grok 官方 integration，保存檔也沒有 Grok native session reference，因此不具備自動恢復條件。程序辨識（agent=Grok）與 session identity 回報是不同機制。[官方 session restore 文件](https://herdr.dev/docs/session-state/) 說明 Grok 需 integration v2 以上及有效 reference，以 `grok --resume <id>` 恢復；無有效 reference 時只恢復原目錄的 shell。當時是否另有自訂 hook、關閉前 reference 是否曾存在仍未取得證據，不推定其他 Grok pane 的個別原因。
+
+修正範圍／下一步：尚未改原始碼或本機 integration。先安裝 `herdr integration install grok`，再核對 `grok sessions list` 的 exact ID、於原 pane 恢復對話，確認 `herdr agent get w2:p6` 回報 agent_session，才驗收下次使用者授權的 Herdr server restart。安裝 integration 本身不會補回已遺失的 Herdr reference，也不會重新啟動既有 shell 中的 Grok。
+
+驗證與限制：本輪只執行上述唯讀 CLI、保存欄位與日誌核對，未建立重啟 pass/fail loop，未重現一次新的關閉／重啟；不宣稱修正或端到端驗收完成。只更新問題文件並檢查 diff，未改 Bridge source/build、未部署／重啟、未對任何 Agent 送字、未 commit／push；既有未提交修改保留。
+
 
 ## 2026-10-02 ISSUE-003／008：送出問題後立即停止回覆擷取
 
