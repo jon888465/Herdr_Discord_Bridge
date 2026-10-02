@@ -162,7 +162,7 @@ mapping 過期時，一律 fail closed。
 /herdr team list
 /herdr team add <agent-name-or-pane-id>
 /herdr team remove <agent-name-or-pane-id>
-/herdr team ask <prompt>
+/herdr team ask [--coding] <prompt>
 ```
 
 Bridge pane 的 stdin 也接受相同指令，可直接輸入 `agent`、`agent use w2:p1`、`agent detach`、`status`、`ask <prompt>`、`read w2:p1`、`wait w2:p1`、`cancel w2:p1`，或使用 `/herdr` prefix。`agent detach`（相容 `detach`）回到安靜對話模式，保留 blocked 問題通知，不停止／取消 Agent，也不清除 routing；要顯示終端快照輸入 `attach <pane>`。結果與 streaming progress 會印回 pane。Team routing 指令需要目前已選取的 workspace；Discord thread 只提供 route context，本機可用 `wk use <workspace>` 選取。
@@ -180,6 +180,10 @@ prompt，並將該 Agent 記錄到 thread，但不改變 active target。`team l
 active Agent 作為 Lead，先要求 Lead 產生受驗證的 Assignment plan，再透過 Herdr
 將 bounded 子任務送給同 workspace Workers，收集報告後讓 Lead 決定後續 Assignment，空計畫才進入直接處理／驗證／synthesis；失敗或 blocked 則只做 partial synthesis。它
 不會廣播完整 thread 或 terminal history。Phase 1 已加入 durable task、restart reconciliation 與 whole-team cancel；blocked Assignment 的後續問答已由 Phase 2 question queue 接續（live 待驗收），詳見下方 Durable Task Engine 契約。
+
+`team ask --coding <prompt>` 是明確選用的本機 Git coding 任務。沒有這個旗標時，prompt 文字即使包含 `--coding` 仍走一般 team ask：零 Worker、原指令文字、空計畫由 Lead 直接完成，以及既有 blocked／cancel／restart／輪數限制都保持原行為。Coding 任務仍用同一個 scheduler、TaskState、最多 8 輪 planning、每輪 16 個 Assignment、總計 64 個；跨輪依賴仍只能引用本輪 ID。首版只有一個 writer，diagnose／review／verify 為 read，review 必須是與作者不同的已知 session。不同 pane 不是獨立 session 的證明，prompt 與 write scope 也不是作業系統寫入隔離。Review 回合成功完成時 Assignment 為 done，findings／verdict 另記；有待處理 findings、版本改變、驗證失敗或缺少證據時，不得 `task_completed`，由 Lead 下一輪以 artifact／finding reference 派工。diagnose／review／verify 在派工時捕捉開始指紋，結束時再捕捉。review 或 verify 期間工作樹改變、缺少開始指紋，或 review 對不上實作 artifact 時，該報告保留可查，verdict 為 inconclusive 或驗證不算通過；不得把 pass 改貼到開始或結束指紋，不得因此解決 findings 或結案。同輪有 writer 時，其他 assignment 必須依賴該 writer，不能與它平行。重複的 finding 原始 id 保留第一筆儲存 id，後續存成 `assignmentId:id`；`findingRefs` 使用已儲存 id，既有的原始 id 在未被占用時仍可引用。結案前 Lead 不得藉空計畫改碼。Lead 直接實作後再回派 review、多 writer、worktree 隔離與 GitHub 不在首版。Bridge 不執行 commit、merge、push，也不重跑 Worker 回報的測試命令；它只把回報的 exit code 綁到目前版本指紋。Ignored 檔與 submodule 不在指紋內。Live 驗收見 ISSUE-025。
+
+Coding 首版對 review／verify 期間漂移採保守失敗：任務若保留此類 drift artifact，後續 pass 不解除最終 gate 的拒絕；需另建任務與 baseline 重新驗收。正常 changes_requested 的修正與再 review 仍可在同一任務完成。
 
 Lead planning 對 Codex 優先讀取 dispatch 前連接的本機 transcript，以相符
 prompt／turn 且 task_complete 的 final 解析 plan。無可用 final 時使用 CLI
@@ -445,7 +449,7 @@ Lead 仍由已選取的 live Agent 擔任。可不委派而直接完成工作；
 
 - `team ask` 先持久保存 task，再接受派送；`team status [task-id]`／`team cancel <task-id>` 只操作目前授權 workspace。
 - Task：planning、running、blocked、synthesizing（包含直接工作／驗證）、cancelling、completed、failed、cancelled。Assignment 沿用 pending、assigned、working、blocked、done、failed、cancelled。
-- 原 prompt、Lead/session、frozen roster、plans、reports、timestamps 與 lifecycle journal 保存至 atomic journals（Phase 1 為 v1，Phase 2 寫入 v2 並相容讀取 v1）；未知 schema／損毀 fail closed。
+- 原 prompt、Lead/session、frozen roster、plans、reports、timestamps 與 lifecycle journal 保存至 atomic journals（Phase 1 為 v1，Phase 2 寫入 v2 並相容讀取 v1，coding 任務寫入 v3 並相容讀取 v1/v2）；未知 schema／損毀 fail closed。v2 不可帶 coding mode。Coding baseline、stage、artifact metadata 與 findings 在 journal；artifact 檔放在 journal 目錄下、工作樹之外，讀取限制在該 task 目錄且單檔最多 256 KiB。版本指紋含 base／head SHA，以及 staged、unstaged 與未忽略 untracked 內容；任務開始前的 dirty baseline 不當成交付，也不會被清掉。
 - 重啟後 non-terminal task 不自動執行，標 blocked/recoverable 或 unknown；cancelling 保留。核對 live pane/session，但不將 same-session 或 idle/done 當成本次 turn 已完成。
 - cancel 停止後續派送，重用官方 Ctrl-C，等待 active turn 停止後才 cancelled／release；未知 identity、uncertain delivery、recovered active turn 保留 cancelling 並要求檢查。不得關閉共享 CLI。
 - ISSUE-014 correlation/settlement、動態 replanning、零 Worker、lazy start、existing-session reuse 與 conversation/attach/watch 保留。

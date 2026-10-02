@@ -1,22 +1,22 @@
 # Known Issues
 
-維護規則見 [AGENTS.md](../AGENTS.md)。最後整理：2026-10-01。
+維護規則見 [AGENTS.md](../AGENTS.md)。最後整理：2026-10-02。
 
-| ID        | 問題                                                                            | 狀態             | 下一步                                                                                                              |
-| --------- | ------------------------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------- |
-| ISSUE-001 | Discord reply 未觸發 bridge                                                     | 重新開啟、待驗收 | 重啟後在 mapped thread 回覆 bot                                                                                     |
-| ISSUE-002 | Discord 圖片未交付 Agent                                                        | 已修正、待驗收   | 重啟後以副檔名與內容不符（如 PNG/JPEG 互換）之圖片驗收本機交付                                                     |
-| ISSUE-003 | 預覽與 final 未更新                                                             | 重新開啟／待調查 | 暫時缺失子缺陷已修正；2026-10-02 重跑 195/195，載入新版原 thread 驗收與核對 live identity |
-| ISSUE-004 | Team 成員可跨 workspace 混入，且 stale mapping 容易造成誤解                     | 已修正、待驗收   | 重啟後確認同 workspace 限制、持久化與 stale 顯示                                                                    |
-| ISSUE-005 | 本機 current 顯示未選取 Agent                                                   | 已修正、待驗收   | workspace selection 回歸修正後須重新驗收；先前 shared-thread 驗收歷史保留                                           |
-| ISSUE-006 | 重啟 bridge 後 pane 所屬 workspace／位置改變                                    | 已驗收           | 2026-09-10 live topology 驗證完成；後續觀察重啟保留                                                                 |
-| ISSUE-007 | 程序啟動未阻止同 bot 重複實例                                                   | 重新開啟／待調查 | 2026-09-21 完整與單獨重跑入口逾時再現；核對負載與 startup 時序，live 第二實例拒絕仍待驗收                                                                                           |
-| ISSUE-008 | Discord current／回應仍引用 Herdr 已不存在的舊 pane，且串流回報 session changed | 重新開啟／待調查 | 取得該 Discord thread 的 current 輸出與 bridge 啟動版本；重啟新版後以 live prompt 重現                              |
-| ISSUE-010 | 1:1:N orchestration、Discord mirror 與選擇 UI                                   | 修正中／待驗收   | Phase 1 durable task／reconciliation／cancel 已實作見 ISSUE-020；Phase 2 blocked continuation 已實作見 ISSUE-012；mirror 與點選 UI 仍待做                           |
-| ISSUE-011 | 選取 agy 後 bridge 沒顯示追問、無法回答                                         | 已修正、待驗收   | 本機快照／blocked reply 自動化完成後進行 live agy 驗收                                                              |
-| ISSUE-012 | Team 多 Agent 同時提問識別                                                      | 已修正、待驗收   | Phase 2 已合併；2026-09-21 完整 129/130，ISSUE-007 逾時；live 待驗收                                        |
-| ISSUE-013 | Lead plan 解析失敗或誤取 planning prompt 中的範例 JSON                          | 已修正、待驗收   | 重啟新版 bridge，以新 team ask 驗證 plan 不取 prompt／歷史，兩 Worker 均收到正確 Assignment                         |
-| ISSUE-014 | 未等 Worker 完成本次任務便以歷史輸出標記 done 並進入統整                        | 重新開啟／待驗收 | 載入本次修正後重啟 bridge，驗證 atomic prompt wait 的 done 回傳可直接產生本次報告，且所有 Worker 完成後才 synthesis |
+| ID        | 問題                                                                            | 狀態             | 下一步                                                                                                                                    |
+| --------- | ------------------------------------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| ISSUE-001 | Discord reply 未觸發 bridge                                                     | 重新開啟、待驗收 | 重啟後在 mapped thread 回覆 bot                                                                                                           |
+| ISSUE-002 | Discord 圖片未交付 Agent                                                        | 已修正、待驗收   | 重啟後以副檔名與內容不符（如 PNG/JPEG 互換）之圖片驗收本機交付                                                                            |
+| ISSUE-003 | 預覽與 final 未更新                                                             | 重新開啟／待調查 | 暫時缺失子缺陷已修正；2026-10-02 重跑 195/195，載入新版原 thread 驗收與核對 live identity                                                 |
+| ISSUE-004 | Team 成員可跨 workspace 混入，且 stale mapping 容易造成誤解                     | 已修正、待驗收   | 重啟後確認同 workspace 限制、持久化與 stale 顯示                                                                                          |
+| ISSUE-005 | 本機 current 顯示未選取 Agent                                                   | 已修正、待驗收   | workspace selection 回歸修正後須重新驗收；先前 shared-thread 驗收歷史保留                                                                 |
+| ISSUE-006 | 重啟 bridge 後 pane 所屬 workspace／位置改變                                    | 已驗收           | 2026-09-10 live topology 驗證完成；後續觀察重啟保留                                                                                       |
+| ISSUE-007 | 程序啟動未阻止同 bot 重複實例                                                   | 重新開啟／待調查 | 2026-09-21 完整與單獨重跑入口逾時再現；核對負載與 startup 時序，live 第二實例拒絕仍待驗收                                                 |
+| ISSUE-008 | Discord current／回應仍引用 Herdr 已不存在的舊 pane，且串流回報 session changed | 重新開啟／待調查 | 取得該 Discord thread 的 current 輸出與 bridge 啟動版本；重啟新版後以 live prompt 重現                                                    |
+| ISSUE-010 | 1:1:N orchestration、Discord mirror 與選擇 UI                                   | 修正中／待驗收   | Phase 1 durable task／reconciliation／cancel 已實作見 ISSUE-020；Phase 2 blocked continuation 已實作見 ISSUE-012；mirror 與點選 UI 仍待做 |
+| ISSUE-011 | 選取 agy 後 bridge 沒顯示追問、無法回答                                         | 已修正、待驗收   | 本機快照／blocked reply 自動化完成後進行 live agy 驗收                                                                                    |
+| ISSUE-012 | Team 多 Agent 同時提問識別                                                      | 重新開啟／待調查 | 2026-10-02 同 session 128 questions 仍未確認根因；coding 原始碼續作見 ISSUE-025，cap 未修                                                 |
+| ISSUE-013 | Lead plan 解析失敗或誤取 planning prompt 中的範例 JSON                          | 已修正、待驗收   | 重啟新版 bridge，以新 team ask 驗證 plan 不取 prompt／歷史，兩 Worker 均收到正確 Assignment                                               |
+| ISSUE-014 | 未等 Worker 完成本次任務便以歷史輸出標記 done 並進入統整                        | 重新開啟／待驗收 | 載入本次修正後重啟 bridge，驗證 atomic prompt wait 的 done 回傳可直接產生本次報告，且所有 Worker 完成後才 synthesis                       |
 
 | ISSUE-015 | Team 僅能加入已啟動 pane，缺少 profile 與 session lifecycle | 修正中 | 完整檢查後驗收 lazy start／重用／Lead 動態分工 |
 | ISSUE-016 | use 自動刷 CLI 畫面，console 對話與終端檢視混在一起 | 修正中 | 完整檢查後驗收安靜對話與獨立 attach/watch |
@@ -26,6 +26,7 @@
 | ISSUE-020 | Phase 1 Durable Task Engine、restart reconciliation 與 whole-team cancellation | 已修正、待驗收 | 2026-09-21 完整 113/114 通過；ISSUE-007 入口逾時，live 驗收仍待完成 |
 
 | ISSUE-021 | Phase 3 Session Handoff Runtime | 重新開啟／待調查 | 2026-10-02 完整套件與單獨重跑再次出現並行 verify/cancel ENOENT；未改 handoff，live 未驗收 |
+| ISSUE-025 | 本機 Git coding workflow 首版 | 已修正、待驗收 | 2026-10-02 重新開啟後已補 read-only 起迄指紋與 finding id；live 未驗收 |
 
 | ISSUE-022 | Phase 4 Quota / Failover Manager | 已修正、待驗收 | 2026-09-21 新增 28 項通過；完整 181/184，ISSUE-007／021 待調查，live 待驗收 |
 
@@ -309,7 +310,7 @@ contentType 與下載 response 建立重播，再判定是格式宣告不符、�
 
 ## ISSUE-003：更新後 Discord 預覽與 final response 未更新
 
-狀態：已修正、待驗收（2026-10-01 新增 busy-history fallback；完整 gate 結果見下方）。2026-09-10 metadata 與 2026-09-07 解析器修正歷史保留如下。
+狀態：重新開啟／待調查（2026-10-02 使用者附圖再現 capture stopped；最新證據見本文件末尾）。2026-10-01 busy-history fallback、2026-09-10 metadata 與 2026-09-07 解析器修正歷史保留如下。
 
 使用者回報：更新回應呈現功能後，CLI 執行中未在 Discord 顯示內容；CLI 結束後也未更新 Discord response。已透過實際 session 紀錄重播確認事件格式不相容，詳見下方修正紀錄。
 
@@ -606,7 +607,7 @@ Team Task 複雜性：同一個 1:1:N 任務可能同時有多個 Agent／Assign
 
 ## ISSUE-017：跨 CLI quota 交接缺少可攜流程
 
-更新日期：2026-09-18。狀態：已修正、待驗收。
+更新日期：2026-10-01。狀態：已修正、待驗收。
 
 症狀／需求：來源 Agent 接近 quota 上限或已不能回答時，希望由其他 CLI 復原指定 session，包含 AGY。現有 bridge handoff 只有近期有界 terminal output，不保證保留原始目標、決策及未完成工作。
 
@@ -661,7 +662,6 @@ Team Task 複雜性：同一個 1:1:N 任務可能同時有多個 Agent／Assign
 
 下一步：在可寫入的本機環境以 `/bin/bash scripts/run.sh -r` 執行 restart regression，確認 build、`herdr plugin link`、pane replacement 與新 bridge 啟動完整通過。
 
-
 ### 2026-09-21 再次失敗與空陣列修正
 
 狀態歷程：使用者回報後重新開啟／待調查 → 已修正、待驗收。先前移除 mapfile 未涵蓋 Bash 3.2 的 nounset 空陣列行為。
@@ -673,7 +673,6 @@ Team Task 複雜性：同一個 1:1:N 任務可能同時有多個 Agent／Assign
 驗證（2026-09-21）：`npm run lint`、`npm run typecheck`、`npm test`（包含 `npm run build`）及 `/bin/bash -n scripts/run.sh` 通過；完整測試 92 項，91 通過、1 項 Linux 專用測試跳過、0 失敗。5 項 restart fixtures 全數通過。fixtures 使用假的 Herdr/npm，不會操作真實 pane；真實 TypeScript build 已由 npm test 執行成功。
 
 未驗證／下一步：未重啟或部署真實 bridge，未完成 Herdr／Discord 端到端驗收，未 commit／push；執行中的 bridge 未確認載入新版，舊訊息不補送。請於專案執行 `./scripts/run.sh -r` 驗收首次／再次啟動。
-
 
 ## ISSUE-019：Herdr plugin pane 啟動後消失，Discord 未上線
 
@@ -786,7 +785,6 @@ ISSUE-021 由已修正、待驗收重新開啟／待調查。下一步釐清並�
 
 本輪完成本機 main 合併提交；原 README.zh-TW.md 未提交修改保留於提交之外。未 push、未部署或重啟 bridge，執行中版本未核對，舊任務／訊息不補送。Phase 4 未納入本輪。
 
-
 ### 2026-10-01 Grok 工作期間再現（ISSUE-021）
 
 狀態維持重新開啟／待調查。首輪完整套件的 concurrent verify/cancel 與 command
@@ -800,7 +798,6 @@ contexts 測試均於 fixture 清理發生 ENOTEMPTY（187 項中 2 fail）；
 環境：2026-10-02、Linux、Node.js v22.23.3、本機 checkout。`npm test`（`npm run build && node --test dist/test/*.test.js`）建置通過後 **206 項：205 通過、1 失敗、0 cancelled、0 skipped**，exit 1，duration_ms 224941。唯一失敗是 not ok 145：`concurrent handoff verification and cancellation cannot race in-flight dispatch`（`dist/test/session-handoff.test.js:265`，原始碼 `test/session-handoff.test.ts`），failureType `unhandledRejection`，`HandoffStore.write` 開啟 `/tmp/handoff-runtime-liGhJS/state/handoff-2b7c1f17-5210-4750-a729-d566f097f91b.json.8627767a-6279-41e8-b607-f89db75ecdc7.tmp` 時 ENOENT。呼叫鏈仍是 `SessionHandoffRuntime.block` → `HandoffStore.update/write`。
 
 單獨重跑 `node --test --test-name-pattern 'concurrent handoff verification' dist/test/session-handoff.test.js`：**0/1 通過**，exit 1，duration_ms 15608，同樣 ENOENT，路徑改為 `/tmp/handoff-runtime-36BhUQ/state/handoff-40ac39ff-50dd-490a-9436-d77c88ef404b.json.17a7e832-d8b3-4711-9e59-50bd5d9e8af1.tmp`。與 2026-09-21 合併紀錄的症狀相同。精確根因仍未確認，本輪不修、不把完整套件記為通過。
-
 
 ## ISSUE-022：Phase 4 Quota / Failover Manager
 
@@ -865,7 +862,7 @@ CLI 9.6 秒完成，接收器最終回報 `last state: idle; no verified complet
 `npm run build && node --test dist/test/cli-adapter.test.js` 為 2 pass／2 fail，
 兩個失敗分別為空回答與 idle timeout，與 live 症狀相符。最終驗證待補。
 
-限制／下一步：不支援原生 Grok transcript，不保證截斷框線／捲出內容／未觀察格式。
+限制／下一步：終端 parser 不讀 Grok session 檔。可攜交接見 ISSUE-017 的 2026-10-01 skill adapter，與本 parser 無關。不保證截斷框線／捲出內容／未觀察格式。
 相同 baseline 回答保守忽略。尚未測試 Discord 交付、長文與 blocked 續答。
 未重啟或部署 bridge、未 commit/push；執行中的 bridge 未載入本次修正，舊訊息不補送。
 
@@ -922,7 +919,6 @@ lint、typecheck 通過。兩個失敗屬 ISSUE-021：concurrent verify/cancel �
 
 驗證與限制：本輪只執行上述唯讀 CLI、保存欄位與日誌核對，未建立重啟 pass/fail loop，未重現一次新的關閉／重啟；不宣稱修正或端到端驗收完成。只更新問題文件並檢查 diff，未改 Bridge source/build、未部署／重啟、未對任何 Agent 送字、未 commit／push；既有未提交修改保留。
 
-
 ## 2026-10-02 ISSUE-003／008：送出問題後立即停止回覆擷取
 
 更新日期：2026-10-02。ISSUE-003 重新開啟／待調查，ISSUE-008 維持重新開啟／待調查。先前 source 修正與自動化紀錄保留，不當作本次 live 通過。
@@ -954,3 +950,130 @@ lint、typecheck 通過。兩個失敗屬 ISSUE-021：concurrent verify/cancel �
 2026-10-02 完整檢查補記：`npm run lint`（49 TypeScript files）、`npm run typecheck`、`npm run build` 通過。`npm test` 首輪 **195 項、194 通過、1 失敗、0 cancelled、0 skipped**，總耗時 174 秒。首輪串流輸出有截斷，未保留唯一失敗的詳細內容，不能猜測是 ISSUE-007 或 ISSUE-021；已開始將重跑完整 TAP 保存於 `/tmp/herdr-bridge-full-20261002.tap`。另 `node --test dist/test/instance-lock.test.js` 單獨重跑 **5/5 通過**；`timeout 45s node --test dist/test/session-handoff.test.js` 在第 13 項之後達到人為 45 秒上限，exit 124，沒有完整結果，不將它當作新的已確認 handoff 根因或全通過。以上不涉及 running Bridge 或 live Agent 操作。
 
 2026-10-02 最終驗證：`timeout 240s node --test dist/test/*.test.js` 使用本輪 `npm test` 建置的相同 dist，**195/195 通過、0 fail、0 cancelled、0 skipped**，exit 0，耗時 60.4 秒；完整 TAP 位於 `/tmp/herdr-bridge-full-20261002.tap`。lint、typecheck、build 已通過；兩個修改的 TypeScript 檔 Prettier check、文件相對連結與 `git diff --check` 通過。首輪 194/195 的失敗未再現且詳細原因未確認，保留失敗歷史，不宣稱修復它。暫時 identity 缺失子缺陷原 0/2 已變為 targeted 10/10；ISSUE-003／008 保留重新開啟／待調查，待驗收使用者實際重啟後的舊 Discord thread 情境及確切 identity 變化。原始碼／build 已更新；執行中 Bridge 未重啟／部署、未載入本輪程式，舊訊息不補送，未 commit／push。
+
+### 2026-10-02 ISSUE-010：Coding 任務流程建議與現有約束差距
+
+狀態沿用 ISSUE-010 的修正中／待驗收；本輪建議未定案、未實作。使用者要求保留 Lead 拆解與分派原則，評估 coding 流程，並提供分享連結；web open 兩次皆 cache miss，未取得內容，不假裝已讀。
+
+靜態確認：`src/team-orchestration.ts` 的 AssignmentPlan 只有 id／workerPaneId／instruction／dependsOn；已有依賴、多輪與 wave 執行，但沒有結構化檔案寫入範圍／衝突檢查或以實際測試 exit code 驗證結果的 coding 結案規則。文件的同檔案不平行修改要求目前依賴 Lead／Worker 遵守。這是程式約束的缺口，沒有新的使用者衝突重現或已確認失敗。
+
+建議範圍與下一步：先以指引試行 Lead → 分工實作 → 按需 review／驗證 → Lead 整合及多輪修正，再評估 plan schema 的寫入範圍／唯讀、交付物／驗收條件與 runtime 驗證；較後期才評估隔離 worktree。詳見 [未定案提案](coding-workflow-proposal.md)。待使用者提供分享重點後再比較，不將本建議當成已決定需求。
+
+驗證（2026-10-02）：只讀設計／原始碼，檢查提案內容、連結與 diff；無新的程式行為變更，不重跑程式測試。未部署／重啟或對 Agent 派工，前輪尚未部署的回覆捕捉修正狀態不變。既有未提交修改保留。
+
+### 2026-10-02 ISSUE-010：分享全文提供後的 coding workflow 比較
+
+使用者已貼上原分享全文，先前缺少分享內容的條件解除；保留原 cache miss 調查歷史。採用方向：Lead 動態安排 troubleshoot／implement／PR／review／fix／verify，Role 與 Agent 分開，不加入 Bricks skill。提案未定案、runtime 未實作。
+
+靜態確認 `TeamTaskStore` 現有 TaskState 及 `AssignmentPlan`：没有 coding stage、PR／SHA／CI artifact 或 reviewer session 獨立性欄位。建議保留 lifecycle，另加 coding stage／artifact；結案證據要對應目前 commit；Agent session 的獨立性與 GitHub actor 的 approval 權限分開。GitHub 官方文件確認作者不能 approve 自己的 PR、required checks 需對應最新 SHA。詳見已更新的 [完整提案](coding-workflow-proposal.md)與其中來源。
+
+驗證（2026-10-02）：核對使用者原文、Team schema／scheduler、GitHub 官方 primary docs，检查提案相對連結、內容一致性與 `git diff --check`。純文件更新，沒有新程式測試或 runtime 行為變更；未安裝 skills、發 PR／review、commit／push、merge、部署／重啟，既有未提交修改與未部署的 capture 修正保留。下一步由使用者決定是否試行指引與 artifact 格式，再規劃 schema／GitHub 接入；不視為已授權實作或發布。
+
+### 2026-10-02 ISSUE-010：改為本機 Git coding workflow
+
+使用者要求流程針對本機 Git、不推 GitHub。最新提案已以本機 commit／diff 取代 PR、以 review report／本機 test log 取代線上 approval／CI，移除 GitHub 整合的必要階段；前述 PR 方案保留為歷史讨论，現行提案以 [本機 Git 版本](coding-workflow-proposal.md) 為準。
+
+預期：Lead 仍拆解／分派／決定修正，可在沒有 remote／GitHub 的 repository 工作。支援 commit SHA 或未提交 diff 指紋的交接；untracked 不能漏掉，既有 dirty tree 保留。Review 與 test 綁定具體版本，修改後重新核對；沒有有效證據不能結案。需要的新 schema／gate／session 獨立性約束仍是提案，不是現成功能；ISSUE-010 狀態不變。
+
+驗證（2026-10-02）：本輪純文件更新，核對內容、相對連結與 `git diff --check`，未重跑程式測試。只修改提案／CONTEXT 索引／本清單，不改 Team runtime 或實際設定；未 commit、merge、push、部署／重啟，所有原有修改保留。下一步先試行本機交付格式，若要程式支援再規劃並驗收 runtime；本輪不把設計提案當作已完成實作。
+
+### 2026-10-02 ISSUE-010：本機 coding workflow 與既有 team ask 相容性
+
+使用者詢問是否與目前流程矛盾。靜態核對確認概念相容，但直接套固定 pipeline 會衝突：空計畫進 synthesis 後 Lead 可改碼且沒有現成回派獨立 review 入口；將 review「需修正」標成 failed 會停止正常 replanning；結案目前依 synthesis 與 Assignment state，沒有當前 SHA／diff 的 review／test gate；跨輪 dependsOn 會被 validator 拒絕。這些是提案接入風險，不是本輪新重現的 runtime bug。
+
+已補入 [相容條件](coding-workflow-proposal.md#與現有-team-ask-的相容條件)：保留單一 scheduler、一般零 Worker、多輪限制與 lifecycle；coding 規則只明確選用；review 執行狀態與 verdict 分開；結案前驗證版本與證據；跨輪以 artifact／finding reference 交接。首版建議 Worker 實作、不同 session review、Lead 只讀結案，Lead 直接實作再 review 的入口需另行設計。未定案、未實作，ISSUE-010 原狀態不變。
+
+驗證（2026-10-02）：核對 runTeamTask／planningInstruction／synthesisInstruction／plan parser／validator 與 Task engine 結案分支，檢查文件連結及 diff。純文件補充，未改程式、未新增 CLI mode、未重跑測試、未部署／重啟／commit／push；既有修改保留。下一步若實作，需驗收 review findings 後正常重派、最終 Lead 不改碼、gate 不提前 completed、一般任務行為不受影響。
+
+### 2026-10-02 ISSUE-012／010：本機 coding 實作任務因 question cap 中斷
+
+Task：`task-f5b17ade-7cd6-484f-aebb-edc7a5612f1d`。ISSUE-012 重新開啟／待調查；ISSUE-010 本機 coding 功能實作中、未完成驗收。使用者已要求依提案實作，不再把該要求描述為只有提案討論。
+
+症狀／任務回報：實作 Assignment `local-coding-implementation-01`（Grok w2:p6）failed，report 為空，blocker 為 `Team question limit reached; inspect/cancel task`。Reviewer Assignment `local-coding-independent-review-01`（agy w2:p8）因 dependency 未完成而 failed，沒有 review report。
+
+已驗證證據（2026-10-02）：唯讀 task journal 最新 after-image 顯示 schema v2、task `blocked`、140 events、128 questions（127 stale、1 pending），128 個不同 fingerprint，全部來自同一 Grok session；首題 02:28:47 UTC、最後 02:42:23 UTC。Grok assignment turn 為 uncertain，Lead synthesis 為 dispatched。`herdr agent get w2:p6` 仍是 working；w2:p8 為 idle。不能將觀察失敗當成 Worker 停止，也不能聲稱 review 已執行。
+
+已確認直接條件：onQuestion 在累積 questions >=128 時拋出上述錯誤；只在相同 fingerprint 或上一題 sending／unknown 時略過新題。128 題為何產生尚未確認，不將「畫面誤辨識 blocked」或「去重失效」當成已證實根因。未讀取／轉錄 question terminal snapshot 或模型 thought。
+
+部分成果：工作樹新增 `src/coding-version.ts`、`src/coding-workflow.ts`、`test/coding-workflow.test.ts`，並修改 main／team-orchestration／team-task-engine／team-task-store；原始碼出現 `team ask --coding`、coding fields 與 schema v3 等實作。這只是部分改碼證據，沒有有效作者交付與獨立 review，不宣稱功能完成、編譯成功或現已可用。先前 195/195 是新增 coding 程式前的歷史結果，不能套用本次修改。
+
+本輪驗證／限制：只核對 git status、部分 source 分支、journal 統計與 live agent identity；`git diff --check` 當次通過。Writer 仍工作，沒有接管產品碼、建置／執行完整驗收、發送新 prompt 或重派工作，沒有取消／停止任何 CLI。只維護本事件紀錄及設計文件狀態，保留所有既有與 Worker 修改；未 commit／merge／push／部署／重啟。執行中 Bridge 未載入本機 coding 修改。
+
+下一步：先確認仍工作中的 Grok 的結果與 ownership，透過 task status／questions 查詢後依使用者授權處理取消或等待；釐清 question 辨識／fingerprint／cap 的重現條件。Writer 明確停止／完成後，取得可驗證交付版本、補完實作與 SPEC gate，再由 agy 獨立 review。未處理 uncertain turn 前不可重送原實作 prompt 或讓第二個 writer 同時改碼。
+
+同一 Assignment 在上下文截斷後於本 session 續寫。上方「部分成果、writer 仍工作、沒有編譯成功」是截斷當下的觀察，保留不改寫。後續原始碼、測試與文件狀態以 ISSUE-025 為準。作者續作當時沒有改 `onQuestion`、沒有取消或重啟該 live task；後續 Lead 清理見下段，cap 仍未修正。
+
+### 2026-10-02：作者晚完成、Lead busy 與舊任務清理
+
+使用者回報 Grok 後來完成，但 Discord 再向 Lead w2:p4 提問得到 `agent is busy (w2:p4); wait for it to settle before assigning another prompt`。預期在既有 turn 完成並解除 task 占用後能接收新 prompt。已確認先前 synthesis 是 Bridge 在 question cap 失敗後派送，並不代表 Grok CLI 已停止；response transport 的 `BRIDGE_END` 也不控制 CLI idle 或 task reservation。
+
+已確認程式條件：`assertAgentAvailable` 檢查 working／active stream；task engine 對 blocked task 保留 roster reservation，只有 completed／failed／cancelled 才釋放。舊 task journal 仍 blocked 並保留 uncertain turn。使用者該次 busy 訊息缺少精確時點的 agent／stream 證據，不能單憑字串判定是 reservation 或 working；Lead 在這輪檢查時確實仍 working。沒有證據把此事故稱為單純 timeout。
+
+處理與驗證：確認 Grok w2:p6 同一已知 session 已 idle 後，透過執行中的 bridge console 執行 `team cancel task-f5b17ade-7cd6-484f-aebb-edc7a5612f1d`。Journal 確認 cancelled、turns 為 0，detail 為 `All task turns settled; no CLI session was closed.`，舊 task reservation 已解除；沒有關閉 CLI、刪除工作樹修改、commit／push 或重啟 bridge。作者完成後已接續 agy 唯讀獨立 review；此為舊 task 之外的交付核對，不把舊 failed assignments 改稱成功。
+
+仍待驗證：question cap 的根因與修正、Lead 本輪 CLI settled 後 Discord 新 prompt 是否正常送達，以及 coding 的 live 驗收。原始碼測試與執行中 bridge 版本須分開判定。
+
+後續複查另觀察到 agy 同一 session 的權限對話框（sha256sum 與 build／指定測試）仍被 Herdr 回報 idle；背景 Node 測試執行時也曾 idle。Lead 實際核對具體命令後，僅對原授權的唯讀雜湊／驗證單次確認，沒有永久變更 permission 設定；等待背景程序完成並取得正式報告後才判定 review 執行完成。此為已觀察到的狀態辨識限制，尚未修正，不能推定為 Grok 128 questions 的根因。下一步須分別重現 CLI approval UI 與背景工具的 status 偵測。
+
+## ISSUE-025：本機 Git coding workflow 首版
+
+更新日期：2026-10-02。狀態：已修正、待驗收。獨立 review 後曾重新開啟；版本漂移與重複 finding id 的修正見末段。以下首版測試結果保留為歷史，不能單獨代表漂移已修。
+
+識別碼：ISSUE-025。對應任務 `task-f5b17ade-7cd6-484f-aebb-edc7a5612f1d`、Assignment `local-coding-implementation-01`。契約見 [提案實作狀態](coding-workflow-proposal.md) 與 `SPEC.md` 的 `team ask --coding`。
+
+使用者可見症狀（實作前）：一般 `team ask` 沒有本機 Git 版本 gate。Review「需修正」若標成 failed 會停掉 replanning；結案只看 synthesis 與 Assignment state，不綁目前 SHA／diff。空計畫後 Lead 仍可改碼。
+
+預期行為：`team ask --coding <prompt>` 才進入 coding。一般 team ask、零 Worker、以及 prompt 文字裡的 `--coding` 維持原指令解析。共用既有 scheduler、TaskState、blocked／cancel／restart，以及 8 輪 planning、每輪 16 個 Assignment、總計 64 個。首版單一 writer；diagnose／review／verify 為 read；review 必須是與所有 implement 作者不同的已知 session。Review 執行成功與 findings／verdict 分開；需修正時 Assignment 仍 done，Lead 下一輪用 artifact／finding reference 派工。版本改動、未處理 findings、驗證失敗或缺少證據不得 `task_completed`。未知 reviewer identity 不是獨立 review。Artifact 在工作樹外。任務開始前的 dirty baseline 只做雜湊快照，不還原工作樹。
+
+已確認根因（設計，不是線上事故）：結案缺少對目前版本的 review／test gate；跨輪 `dependsOn` 不能引用上一輪。首版因此把 gate 放在 scheduler 結案之前，跨輪只接受 artifact／finding reference。
+
+修正範圍：新增 `src/coding-version.ts`、`src/coding-workflow.ts`、`test/coding-workflow.test.ts`。接入 `src/team-orchestration.ts`、`src/team-task-engine.ts`、`src/team-task-store.ts`、`src/main.ts` 的 `--coding` 入口與 status。文件同步 `SPEC.md`、`README.md`、`README.zh-TW.md`、`CONTEXT.md`、`docs/coding-workflow-proposal.md`、`docs/durable-task-engine.md` 與本清單。Coding journal 寫 schema v3；一般任務新寫入仍是 schema v2。v2 帶 coding mode，或 v3 沒有 coding mode，載入時失敗。
+
+設計取捨：不新增第二條 pipeline。Prompt 與 write scope 不是作業系統隔離，文件不宣稱已強制隔離。不同 pane 不是不同 session。Bridge 不重跑 Worker 回報的測試命令，只把回報的 exit code 綁到指紋。Ignored 檔與 submodule 不進指紋；submodule 直接拒絕。沒有本機 commit 當 base SHA 時無法建立 baseline。Lead 直接實作後回派 review、多 writer、worktree 隔離、GitHub 不在首版。
+
+驗證（2026-10-02，Linux，Node.js v22.23.3，本機 checkout，fake agent／temporary git，沒有真實模型、沒有 commit／merge／push／GitHub、沒有重啟 bridge）：
+
+- 修正 harness 計數、schema 檢查順序與測試讀檔路徑後，`npx tsc && node --test --test-name-pattern '...' dist/test/coding-workflow.test.js` 針對先前後五項失敗名稱重跑：**5/5 通過**，exit 0，duration_ms 77272。
+- `npm test`：build／tsc 通過，接著 `node --test dist/test/*.test.js`。**206 項：205 通過、1 失敗**，exit 1，duration_ms 224941。Coding 測試在這次執行裡是 ok 21–31，**11/11 通過**，涵蓋一般任務相容、review findings 後重派、版本失效、untracked、既有 dirty 保留、同 session／未知 reviewer 拒絕、結案 gate、取消與重啟、artifact 讀取範圍、`--coding` 只在第一個參數生效、第二個 writer 與未知 finding reference 拒絕。
+- 唯一失敗是既有 ISSUE-021：not ok 145 concurrent handoff verification ENOENT。單獨重跑仍 0/1。不是本輪 coding diff，未改該測試。完整套件不記為通過。
+- `npm run lint`：`lint ok (52 TypeScript files)`，exit 0。
+- `git diff --check`：exit 0（只涵蓋已追蹤 diff）。
+- `npm run format:check`：exit 1。警告是 `src/attachments.ts`、`test/session-handoff.test.ts`、`CONTEXT.md`、`README.md`、`README.zh-TW.md`。前兩項不是本輪 coding 修改。後三項在本輪之前已有未提交修改，本輪又補了 `--coding` 說明；沒有對這五個檔執行 `prettier --write`。本輪新增的 coding TypeScript 不在這份警告名單。隨後只對 `docs/known-issues.md` 與 `docs/coding-workflow-proposal.md` 執行 `prettier --write`，索引表對齊有跟著改動。
+
+未驗證：執行中的 bridge 未重啟、未載入這份原始碼。沒有 Discord／Herdr／CLI 端到端驗收，沒有對真實 dirty repository 做 live `team ask --coding`。ISSUE-012 question cap 未修。未 commit、未 push。
+
+下一步：獨立 reviewer 核對 diff 與測試證據。使用者授權後才 commit。重啟 bridge 後，用新的 `team ask --coding` 做 live 驗收：單一 writer、不同已知 session 的 review、版本改變不得結案、既有 dirty 檔保留、一般 `team ask` 行為不變。舊訊息與已 blocked 的 live task 不補送。
+
+### 2026-10-02 獨立 review 後重新開啟：read-only turn 期間版本漂移
+
+agy 初次 review 後，Lead 以真實 engine fixture 補查，agy 亦獨立重現並將 verdict 改為 changes_requested。已確認 `onAssignmentStart` 未記錄 read-only assignment 開始版本，`onAssignmentDone` 直接把結果綁到結束時指紋；因此第二輪 review 期間改動 `added.txt`，回報 pass 後 verify 新版，task 仍 completed。這不是只靠 prompt 強制唯讀的問題，而是證據綁定缺少開始／結束版本核對。
+
+Lead 重現命令（2026-10-02）：`node --test --test-name-pattern 'coding review findings are replanned' /tmp/herdr-readonly-version-repro.mjs`，以既有 compiled fixture、臨時 Git repo 注入第二次 review 改檔，**0/1 通過、exit 1**，斷言「不得 completed」但實際 completed。重現只寫 `/tmp`，沒有修改產品碼。agy 重現腳本 `/tmp/repro-version-drift.mjs`；其報告位於 `/tmp/herdr-local-coding-review-agy.md`。報告中列出的 `dist/test/team-task-store.test.js` 在本 checkout 不存在，所稱 35/35 回歸結果尚無可核對輸出，不採用為已驗證證據，已要求 reviewer 更正。
+
+Reviewer 後續補上實際 stdout 並更正範圍：35 項由 orchestration 14 項、engine 21 項組成，Store 經 engine／coding fixtures 間接覆蓋；不存在獨立 store 測試檔。此為漂移修正前版本的 review 證據，不替代修正後複查。
+
+已回派原唯一 writer Grok：先加正式紅測試，再補 read-only start／end fingerprint gate；漂移不得留下可接受的 pass、解決 findings 或完成 task。另要求處理跨 review 重複原始 finding ID 的 assignment failure，保持 findingRefs 可追蹤。尚在修正，待新版本獨立複查；不把初次 11/11 當成版本漂移已修正，不宣稱 live 驗收完成。
+
+Lead 修正中獨立核對（2026-10-02）：確認 `dist/src/team-task-engine.js` 已包含 `readonlyStarts`／`settleReadonlyVersion` 後，以上 `/tmp` engine 重現 **1/1 通過、exit 0**（duration_ms 45861），確認第二次 review 改檔後 task 不 completed，review artifact 為 inconclusive。先前在作者建置完成前啟動的重跑仍讀到舊 build 並失敗，未把它當成新版本修正失敗。作者尚未完整交付，其他測試與 agy 新版本複查仍待完成。
+
+### 2026-10-02 修正交付：read-only 起迄指紋與 finding id
+
+狀態改為已修正、待驗收。上一段「尚在修正」是回派當下的紀錄。根因是 review／verify 的結論被綁到 turn 結束時的指紋。diagnose／review／verify 現在在 `onAssignmentStart` 保存開始指紋，`onAssignmentDone` 用 `settleReadonlyVersion` 比對結束指紋。漂移、缺少開始指紋，或 review 對不上實作 artifact 時，artifact 仍寫到工作樹外並保留 `reportedVerdict` 與 `driftReason`；有效 verdict 為 inconclusive，verify 的 `verificationPassed` 為 false。Pass 不會改貼到開始或結束指紋，漂移報告不新增、不解決 findings，gate 理由包含 `read-only version drifted`。同輪 writer 與其餘 assignment 仍必須有依賴，未依賴會在派工前失敗。重複 finding 原始 id 保留第一筆，其後存成 `assignmentId:id`；`findingRefs: ["f1"]` 仍指向第一筆。沒有擴充「沒有 implement artifact 的純 review」。
+
+紅測試（修正前，Node.js v22.23.3，`npx tsc` 後）：`node --test --test-name-pattern 'read-only review drift|verify drift and an earlier pass|repeated raw finding ids|writer round cannot overlap' dist/test/coding-workflow.test.js`。**4 項：1 通過、3 失敗**，exit 1，duration_ms 69081。review drift 實際 `completed`；verify drift 沒有 `driftReason`；第二輪相同原始 id `f1` 使 `rev-b` 為 failed。同輪重疊那項已由既有 validator 拒絕。
+
+修正後同一環境、工作樹建置（不是新 commit）：
+
+- 先前後五項名稱再加 happy path：`npx tsc && node --test --test-name-pattern 'read-only review drift|verify drift and an earlier pass|repeated raw finding ids|writer round cannot overlap|coding review findings are replanned' dist/test/coding-workflow.test.js`。**5/5 通過**，exit 0，duration_ms 145074。
+- `npx tsc && node --test dist/test/coding-workflow.test.js dist/test/team-task-engine.test.js dist/test/team-orchestration.test.js`：**50/50 通過**，exit 0，duration_ms 241542。其中 coding 檔為 ok 1–15。本 checkout 沒有 `dist/test/team-task-store.test.js`；store 行為由 coding journal 與 engine seam 覆蓋。
+- `npm run lint`：`lint ok (52 TypeScript files)`，exit 0。
+- 上述修改過的 TypeScript 與本輪相關 Markdown `prettier --check` 通過。`git diff --check` exit 0。
+- 本輪沒有重跑完整 `npm test`。上一輪完整套件仍是 **206 項：205 通過、1 失敗**，失敗是既有 ISSUE-021 concurrent handoff ENOENT。不把本次 50/50 當成完整套件通過。
+
+未驗證：bridge 未重啟、未載入這份程式。沒有 Discord／Herdr／CLI live `team ask --coding`。未 commit、未 push。ISSUE-012 question cap 未修。下一步是另一個已知 session 的獨立複查，以及使用者授權後的 live 驗收。
+
+### 2026-10-02 修正後獨立複查完成
+
+agy 同一已知 reviewer session 已交付 `/tmp/herdr-local-coding-rereview-agy.md`，execution done、原始碼 review verdict pass。獨立執行 `npm run build && node --test --test-name-pattern 'read-only review drift|verify drift and an earlier pass|repeated raw finding ids|writer round cannot overlap' dist/test/coding-workflow.test.js`：**4/4 通過**，duration_ms 58291；另以指定 name pattern 執行 Lead 的 /tmp engine 重現 **1/1 通過**，duration_ms 28234。六個核心 source 檔案的開始／結束 SHA-256 一致。Lead 補充規格／提案，明載任務歷史保留 review／verify drift 時 gate 採保守失敗，後續 pass 不解除；正常 changes_requested 可同任務修正。
+
+Reviewer 報告的「Pass / Accepted」僅採用為原始碼 review 通過，不改成 live 已驗收。狀態保持「已修正、待驗收」。已知限制：開始／結束指紋無法發現中途改檔後完全還原；coding stage 顯示不是結案 gate 的替代。Bridge 未重啟、原始碼未部署，question cap 與 ISSUE-021 未修；完整 suite 沒有修正後的新結果。Lead 修正後 lint（52 TypeScript files）、相關文件 Prettier 與 diff 空白檢查通過。此輪保存所有未提交修改，沒有 commit／merge／push。

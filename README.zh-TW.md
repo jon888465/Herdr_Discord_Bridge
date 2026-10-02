@@ -173,7 +173,7 @@ Agent 完成後，回覆會更新原本的 progress message；預設不會另外
 /herdr team list
 /herdr team add <agent-name-or-pane-id>
 /herdr team remove <agent-name-or-pane-id>
-/herdr team ask <prompt>
+/herdr team ask [--coding] <prompt>
 ```
 
 設定 `requireMention` 後，兩種 command 都必須 mention bot，例如 `@bridge agents` 或 `@bridge /herdr agents`。在已 mapping 的 thread 中，普通文字會被當作 active Agent 的 prompt。
@@ -244,7 +244,7 @@ Lead 自行決定角色、是否委派，以及依報告追加工作，無固定
 
 ## Durable Team Task（Phase 1）
 
-`team ask <prompt>` 保存任務、Lead/session、凍結 roster、Assignment、事件與報告。
+`team ask <prompt>` 保存任務、Lead/session、凍結 roster、Assignment、事件與報告。`team ask --coding <prompt>` 才啟用本機 Git coding 驗收：單一 writer、不同已知 session review、版本指紋相符的 review／test 證據。Review 或 verify 期間工作樹若改變，該證據不算通過。旗標不會從 prompt 文字推論。它不 commit、不 push，write scope 也不是作業系統鎖。見 [本機 coding workflow](docs/coding-workflow-proposal.md) 與 ISSUE-025。
 `team status [task-id]` 查看目前 workspace 的持久狀態；`team cancel <task-id>` 取消整個任務。Discord 使用 `/herdr` 前綴。
 重啟後先核對 pane/session，標示 blocked/recoverable 或 unknown，不自動重送工作。取消只使用既有 Ctrl-C，確認停止後才 cancelled；不確定時保留 cancelling 與 reservation，不關閉 CLI。
 Team 多 Agent 問題使用 `team questions <task-id>` 查詢、`team reply <task-id> <question-id> <answer>` 回答。詳見 [Phase 2 行為與限制](docs/team-question-queue.md)。一般單 Agent 問答不會繞過 Team reservation。
@@ -259,5 +259,6 @@ Team 多 Agent 問題使用 `team questions <task-id>` 查詢、`team reply <tas
 `failover arm <source> <candidate1,candidate2> <goal-and-constraints>` 保存任務與候選優先序；`quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds]` 記錄明確額度觀察。來源 limited/exhausted 會先建立 checkpoint，不呼叫來源模型。確認來源／背景 writer 停止後，`failover run <id> confirm-source-stopped` 選擇不同額度池且有新鮮 available 回報的目的地，驗證復原／工作樹、移交 ownership 再續作。`quota status`、`failover status [id]`／`cancel <id>` 可查詢／釋放。
 
 第一版採操作者回報，沒有 provider quota API。過期、unknown、同額度池或衝突觀察不准派送；不改帳號／憑證，不重試不明送達。詳見 [完整指令、journal、限制及驗收](docs/quota-failover-manager.md)。
+
 
 Discord 回覆擷取遇到原 Agent 或已知 session 資料暫時消失時，會等待最多 30 秒重新核對；確認原 identity 後才續接，明確 session 更換仍停止。沿用 Discord 舊 thread 只會路由到 live pane，不會還原舊 CLI 對話。實際驗收仍待完成（ISSUE-003／008）。

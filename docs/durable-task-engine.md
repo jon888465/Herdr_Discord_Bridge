@@ -41,7 +41,7 @@ Phase 2 正常執行會等待 blocked 問題回答後的原 turn 報告；觀察
 ## 持久化與故障
 
 路徑：既有 state directory 下的 `team-tasks/<task-id>.json`，與 routing／Agent Pool 檔案分開。
-Phase 2 新寫入 schema version 為 2，可讀舊 v1 並於 mutation 升級；每個 event 有連續 sequence、timestamp、type 與完整 after-image。
+Phase 2 新寫入 schema version 為 2，可讀舊 v1 並於 mutation 升級。Coding 任務寫入 schema v3，讀取仍接受 v1 與 v2；v2 journal 若帶 coding mode 會失敗。每個 event 有連續 sequence、timestamp、type 與完整 after-image。Coding artifact 檔放在 journal 目錄的 `artifacts/` 下，不寫進被審查的工作樹。Read-only review／verify artifact 另記開始與結束指紋；期間漂移的證據不能當通過。
 整份 journal 透過同目錄唯一 temporary file、0600、file fsync、atomic rename 寫入；POSIX 再 fsync directory。
 Windows 保留 file fsync／rename，沒有 POSIX directory fsync 保證。
 單一檔案同時是 journal 與可重建狀態，避免 snapshot 與 journal 雙檔提交不一致。

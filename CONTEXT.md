@@ -48,6 +48,8 @@
 
 ## Pending feature index
 
+- [本機 Git Coding Workflow](docs/coding-workflow-proposal.md)：首版已接入 `team ask --coding`。同一 scheduler、單一 writer、不同已知 session review、Lead 只讀結案與版本 gate。Review／verify 期間工作樹改變不會留下有效 pass。Lead 直接實作後回派 review、多 writer／worktree 與 GitHub 未做。Live 驗收見 ISSUE-025。
+
 - [ISSUE-013/014 handoff and Herdr delegation methods](docs/team-orchestration-issues-013-014-handoff.md):
   user-provided CLI/A2A approaches, installed Herdr 0.8.0 findings, unfinished
   response-correlation patch, and remaining verification after the user-requested pause.

@@ -1,4 +1,23 @@
 import { randomUUID, createHash } from "node:crypto";
+import path from "node:path";
+import {
+  acceptanceReasons,
+  applyCodingResult,
+  assertIndependentReview,
+  deriveCodingStage,
+  initialCodingState,
+  parseCodingResult,
+  sessionIdentity,
+  settleReadonlyVersion,
+  type CodingArtifactRecord,
+} from "./coding-workflow.js";
+import {
+  assertArtifactsOutsideWorktree,
+  captureCodingBaseline,
+  captureCodingTree,
+  versionFromBaseline,
+  writeCodingArtifact,
+} from "./coding-version.js";
 import { stripAnsi } from "./format.js";
 import { sameAgentSession } from "./response-stream.js";
 import {
@@ -104,6 +123,17 @@ export class TeamTaskEngine {
       lead: structuredClone(input.lead),
       workers: structuredClone(input.workers),
     };
+    if (input.coding) {
+      const cwd = input.lead.foreground_cwd || input.lead.cwd;
+      if (typeof cwd !== "string" || !path.isAbsolute(cwd))
+        throw new Error("coding task Lead has no absolute local cwd");
+      const baseline = captureCodingBaseline(cwd);
+      assertArtifactsOutsideWorktree(
+        this.store.journalDirectory(),
+        baseline.repository,
+      );
+      input = { ...input, codingBaseline: initialCodingState(baseline) };
+    }
     this.store.create(input);
     try {
       this.reserve(input.taskId, input.lead);
@@ -122,6 +152,9 @@ export class TeamTaskEngine {
         await runTeamTask(
           {
             ...input,
+            codingHooks: input.coding
+              ? this.codingHooks(input.taskId)
+              : undefined,
             signal: controller.signal,
             beforeTurnComplete: async () => {
               await Promise.allSettled(
@@ -276,6 +309,179 @@ export class TeamTaskEngine {
     const done = Promise.resolve().then(execute);
     this.executions.set(input.taskId, { controller, done });
     return done;
+  }
+  private codingHooks(taskId: string) {
+    const current = () => {
+      const task = this.store.get(taskId);
+      if (!task.coding) throw new Error("coding task state is missing");
+      return versionFromBaseline(
+        task.coding.baseline,
+        captureCodingTree(task.coding.repository),
+      );
+    };
+    const readonlyStarts = new Map<string, string>();
+    return {
+      findingIds: () =>
+        this.store.get(taskId).coding?.findings.map((f) => f.id) ?? [],
+      artifactIds: () =>
+        this.store.get(taskId).coding?.artifacts.map((a) => a.id) ?? [],
+      evidenceSummary: () => {
+        const coding = this.store.get(taskId).coding;
+        return {
+          stage: coding?.stage,
+          versionFingerprint: coding?.versionFingerprint,
+          artifacts: (coding?.artifacts ?? []).map((artifact) => ({
+            id: artifact.id,
+            assignmentId: artifact.assignmentId,
+            role: artifact.role,
+            versionFingerprint: artifact.versionFingerprint,
+            verdict: artifact.verdict,
+            evidence: artifact.evidence,
+            startVersionFingerprint: artifact.startVersionFingerprint,
+            endVersionFingerprint: artifact.endVersionFingerprint,
+            driftReason: artifact.driftReason,
+          })),
+          findings: (coding?.findings ?? []).map((finding) => ({
+            id: finding.id,
+            status: finding.status,
+            summary: finding.summary,
+            artifactId: finding.artifactId,
+          })),
+        };
+      },
+      onAssignmentStart: (
+        assignment: { id: string; coding?: { role?: string } },
+        worker: Parameters<typeof assertIndependentReview>[1],
+      ) => {
+        if (assignment.coding && assignment.coding.role !== "implement")
+          readonlyStarts.set(assignment.id, current().fingerprint);
+        if (assignment.coding?.role !== "review") return;
+        const authors = (this.store.get(taskId).coding?.artifacts ?? [])
+          .filter((artifact) => artifact.role === "implement")
+          .map((artifact) => ({
+            paneId: artifact.authorPaneId,
+            session: artifact.authorSession,
+          }));
+        assertIndependentReview(authors, worker);
+      },
+      onAssignmentDone: (
+        assignment: {
+          id: string;
+          coding?: { role: CodingArtifactRecord["role"] };
+        },
+        worker: Parameters<typeof sessionIdentity>[0],
+        report: string,
+      ) => {
+        if (!assignment.coding) return;
+        const version = current();
+        const parsed = parseCodingResult(report);
+        const result =
+          parsed?.kind === assignment.coding.role ? parsed : undefined;
+        const coding = this.store.get(taskId).coding!;
+        const settled = settleReadonlyVersion({
+          role: assignment.coding.role,
+          startFingerprint: readonlyStarts.get(assignment.id),
+          endFingerprint: version.fingerprint,
+          implementFingerprints: coding.artifacts
+            .filter((artifact) => artifact.role === "implement")
+            .map((artifact) => artifact.versionFingerprint),
+        });
+        const drifted = Boolean(settled.driftReason);
+        const artifact: CodingArtifactRecord = {
+          id: `a-${assignment.id}-${coding.artifacts.length + 1}`,
+          assignmentId: assignment.id,
+          role: assignment.coding.role,
+          versionFingerprint: settled.versionFingerprint,
+          mode: version.mode,
+          baseSha: version.baseSha,
+          headSha: version.headSha,
+          stagedDiffSha256: version.stagedDiffSha256,
+          unstagedDiffSha256: version.unstagedDiffSha256,
+          deliveryPaths: version.deliveryPaths,
+          untracked: version.untracked,
+          findingIds: result?.findings.map((finding) => finding.id) ?? [],
+          commands: result?.commands ?? [],
+          evidence: result ? "recorded" : "missing",
+          ...(assignment.coding.role === "implement"
+            ? {
+                authorPaneId: worker.pane_id,
+                authorSession: sessionIdentity(worker),
+              }
+            : {
+                startVersionFingerprint: readonlyStarts.get(assignment.id),
+                endVersionFingerprint: version.fingerprint,
+                ...(settled.driftReason
+                  ? { driftReason: settled.driftReason }
+                  : {}),
+              }),
+          ...(assignment.coding.role === "review"
+            ? {
+                reviewerPaneId: worker.pane_id,
+                reviewerSession: sessionIdentity(worker),
+                independentReview: true,
+                reportedVerdict: result?.verdict,
+                verdict: drifted ? "inconclusive" : result?.verdict,
+              }
+            : {}),
+          ...(assignment.coding.role === "verify"
+            ? {
+                verificationPassed: drifted
+                  ? false
+                  : Boolean(
+                      result &&
+                      result.commands.length > 0 &&
+                      result.commands.every(
+                        (command) => command.exitCode === 0,
+                      ),
+                    ),
+              }
+            : {}),
+        };
+        writeCodingArtifact(
+          this.store.journalDirectory(),
+          coding.repository,
+          taskId,
+          artifact.id,
+          { ...artifact, outsideWorktree: true },
+        );
+        this.store.update(taskId, "coding_artifact_recorded", (task) => {
+          task.coding!.artifacts.push(artifact);
+          applyCodingResult(
+            task.coding!,
+            artifact,
+            drifted ? undefined : result,
+          );
+          task.coding!.versionFingerprint = version.fingerprint;
+          task.coding!.headSha = version.headSha;
+          task.coding!.stage = deriveCodingStage(
+            task.coding!,
+            version.fingerprint,
+          );
+        });
+      },
+      assess: () => {
+        const task = this.store.get(taskId);
+        const version = current();
+        const scopes = task.assignments
+          .filter((assignment) => assignment.plan.coding?.access === "write")
+          .flatMap((assignment) => assignment.plan.coding!.writeScope);
+        const reasons = acceptanceReasons(task.coding!, version, scopes);
+        this.store.update(taskId, "coding_assessed", (next) => {
+          next.coding!.versionFingerprint = version.fingerprint;
+          next.coding!.headSha = version.headSha;
+          next.coding!.stage = deriveCodingStage(
+            next.coding!,
+            version.fingerprint,
+          );
+          next.coding!.acceptance = {
+            ok: reasons.length === 0,
+            reasons: [...reasons],
+            versionFingerprint: version.fingerprint,
+          };
+        });
+        return { reasons: [...reasons], fingerprint: version.fingerprint };
+      },
+    };
   }
   private record(event: OrchestrationEvent): void {
     this.store.update(event.taskId, event.type, (task) => {

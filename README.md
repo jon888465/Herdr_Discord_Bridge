@@ -126,7 +126,7 @@ The original prefixed form remains supported:
 /herdr team list
 /herdr team add <agent-name-or-pane-id>
 /herdr team remove <agent-name-or-pane-id>
-/herdr team ask <prompt>
+/herdr team ask [--coding] <prompt>
 ```
 
 When `requireMention` is enabled, mention the bot for both forms, for example
@@ -187,7 +187,7 @@ that thread are sent only to the active Agent. The bridge requires an explicit
 mention when `requireMention` is enabled. Each thread stores its active Agent
 and can retain additional Agent mappings. `team add` manages workspace Team members; members are not automatically given the thread's full history.
 
-`/herdr team ask ...` lets the selected Lead plan bounded Assignments, dispatch to live members or enabled profiles, and decide follow-up work from their reports before verification and synthesis. It can also choose no Workers and handle the task directly. It does not copy the Discord thread
+`/herdr team ask ...` lets the selected Lead plan bounded Assignments, dispatch to live members or enabled profiles, and decide follow-up work from their reports before verification and synthesis. It can also choose no Workers and handle the task directly. `team ask --coding <prompt>` opts into the local Git coding gate: one writer, a different known-session review, and version-bound test evidence before completion. A review or verify does not stay valid if the tree changes during that turn. The flag is not inferred from the prompt text. It does not commit, push, or isolate writers with an OS lock. See [the local coding workflow](docs/coding-workflow-proposal.md) and ISSUE-025. It does not copy the Discord thread
 or terminal history. Tasks now persist across restarts; `team status [task-id]` shows saved state and `team cancel <task-id>` cancels the whole task. Restart reconciliation never automatically redispatches; uncertain sessions remain blocked/cancelling for inspection. Interactive blocked Assignments use `team questions <task-id>` and `team reply <task-id> <question-id> <answer>`. See [Phase 2 behavior and limits](docs/team-question-queue.md). See [durable task behavior and limits](docs/durable-task-engine.md). Use
 `/herdr handoff <from> <to>` when a CLI reaches a token/context limit. Handoff
 reads only a bounded recent output window (`handoffLines` and
@@ -287,5 +287,6 @@ Grok terminal support targets the observed 1.0.46 boxed and completed unboxed an
 Bridge response markers. It is not a structured transcript source; clipped boxes
 and changed terminal formats can leave capture incomplete. See ISSUE-023 in
 [known issues](docs/known-issues.md) for validation and deployment status.
+
 
 Discord response capture waits up to 30 seconds if the original Agent or its known session metadata temporarily disappears. It resumes only after the original identity is verified; explicit session replacements stop capture. Reusing a Discord thread routes to a live pane and does not restore its old CLI conversation. Live acceptance remains pending (ISSUE-003/008).

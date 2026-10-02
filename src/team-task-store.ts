@@ -2,6 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { AgentRecord } from "./types.js";
+import {
+  validateAssignmentCoding,
+  type CodingArtifactRecord,
+  type CodingStage,
+  type CodingTaskState,
+} from "./coding-workflow.js";
 import type {
   AssignmentPlan,
   AssignmentState,
@@ -78,6 +84,9 @@ export interface DurableTeamTask {
   finishedAt?: string;
   synthesis?: string;
   detail?: string;
+  /** Absent on general team ask and on schema v1/v2 journals. */
+  codingMode?: true;
+  coding?: CodingTaskState;
   recovery?: {
     status: "unknown" | "recoverable";
     reason: string;
@@ -92,7 +101,7 @@ export interface TaskJournalEvent {
   task: DurableTeamTask;
 }
 interface Journal {
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
   events: TaskJournalEvent[];
 }
 
@@ -109,7 +118,7 @@ export class TeamTaskStore {
         fs.readFileSync(path.join(directory, name), "utf8"),
       ) as Journal;
       if (
-        ![1, 2].includes(journal.schemaVersion) ||
+        ![1, 2, 3].includes(journal.schemaVersion) ||
         !Array.isArray(journal.events) ||
         !journal.events.length
       )
@@ -123,6 +132,10 @@ export class TeamTaskStore {
           !validDate(event.at)
         )
           throw new Error(`invalid task journal event: ${name}`);
+        if (journal.schemaVersion < 3 && event.task.codingMode)
+          throw new Error("coding task requires schema v3");
+        if (journal.schemaVersion >= 3 && !event.task.codingMode)
+          throw new Error("schema v3 task is not a coding task");
         validateTask(event.task);
         if (name !== `${event.task.taskId}.json`)
           throw new Error("task journal identity mismatch");
@@ -163,6 +176,12 @@ export class TeamTaskStore {
       state: "planning",
       createdAt: now,
       updatedAt: now,
+      ...(input.coding
+        ? {
+            codingMode: true as const,
+            coding: structuredClone(requiredBaseline(input)),
+          }
+        : {}),
     };
     this.write(task, "task_created");
     return this.get(task.taskId);
@@ -179,6 +198,9 @@ export class TeamTaskStore {
     this.write(task, type);
     return this.get(id);
   }
+  journalDirectory(): string {
+    return this.directory;
+  }
   private write(task: DurableTeamTask, type: string): void {
     if (this.poisoned)
       throw new Error(
@@ -188,7 +210,7 @@ export class TeamTaskStore {
     const old = this.journals.get(task.taskId);
     if (old) validateUpdate(old.events.at(-1)!.task, task);
     const journal: Journal = {
-      schemaVersion: 2,
+      schemaVersion: task.codingMode ? 3 : 2,
       events: [
         ...(old?.events ?? []),
         {
@@ -226,6 +248,83 @@ export class TeamTaskStore {
       if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
     }
   }
+}
+const STAGES: CodingStage[] = [
+  "diagnose",
+  "implement",
+  "review",
+  "verify",
+  "ready-to-integrate",
+];
+function validateCodingState(state: CodingTaskState | undefined): void {
+  if (
+    !state ||
+    !STAGES.includes(state.stage) ||
+    !path.isAbsolute(state.repository) ||
+    !/^[0-9a-f]{40}$/.test(state.baseSha) ||
+    !/^[0-9a-f]{64}$/.test(state.baselineFingerprint) ||
+    state.baseline?.headSha !== state.baseSha ||
+    state.baseline.repository !== state.repository ||
+    !Array.isArray(state.artifacts) ||
+    !Array.isArray(state.findings)
+  )
+    throw new Error("invalid coding task state");
+  const ids = new Set<string>();
+  for (const artifact of state.artifacts) validateArtifact(artifact, ids);
+  const findingIds = new Set<string>();
+  for (const finding of state.findings) {
+    if (
+      !finding.id ||
+      findingIds.has(finding.id) ||
+      !ids.has(finding.artifactId) ||
+      !finding.summary ||
+      finding.summary.length > 500 ||
+      !/^[0-9a-f]{64}$/.test(finding.versionFingerprint) ||
+      !["open", "resolved"].includes(finding.status)
+    )
+      throw new Error("invalid coding finding");
+    findingIds.add(finding.id);
+  }
+}
+function validateArtifact(
+  artifact: CodingArtifactRecord,
+  ids: Set<string>,
+): void {
+  if (
+    !/^a-[A-Za-z0-9_-]{1,120}$/.test(artifact.id) ||
+    ids.has(artifact.id) ||
+    !artifact.assignmentId ||
+    !["diagnose", "implement", "review", "verify"].includes(artifact.role) ||
+    !/^[0-9a-f]{64}$/.test(artifact.versionFingerprint) ||
+    !["committed", "uncommitted", "mixed"].includes(artifact.mode) ||
+    !/^[0-9a-f]{40}$/.test(artifact.baseSha) ||
+    !/^[0-9a-f]{40}$/.test(artifact.headSha) ||
+    !Array.isArray(artifact.deliveryPaths) ||
+    !Array.isArray(artifact.untracked) ||
+    !Array.isArray(artifact.findingIds) ||
+    !Array.isArray(artifact.commands) ||
+    !["recorded", "missing"].includes(artifact.evidence) ||
+    (artifact.driftReason !== undefined &&
+      (typeof artifact.driftReason !== "string" ||
+        !artifact.driftReason ||
+        artifact.driftReason.length > 500)) ||
+    (artifact.reportedVerdict !== undefined &&
+      !["pass", "changes_requested", "inconclusive"].includes(
+        artifact.reportedVerdict,
+      )) ||
+    [artifact.startVersionFingerprint, artifact.endVersionFingerprint].some(
+      (value) => value !== undefined && !/^[0-9a-f]{64}$/.test(value),
+    ) ||
+    (Boolean(artifact.driftReason) &&
+      (artifact.verdict === "pass" || artifact.verificationPassed === true))
+  )
+    throw new Error("invalid coding artifact");
+  ids.add(artifact.id);
+}
+function requiredBaseline(input: TeamTaskInput): CodingTaskState {
+  if (!input.codingBaseline)
+    throw new Error("coding task is missing a baseline snapshot");
+  return input.codingBaseline;
 }
 function validDate(value: unknown): boolean {
   return typeof value === "string" && Number.isFinite(Date.parse(value));
@@ -282,6 +381,9 @@ function validateTask(t: DurableTeamTask): void {
     )
       throw new Error("invalid durable assignment");
     ids.add(a.plan.id);
+    if (a.plan.coding) validateAssignmentCoding(a.plan.coding);
+    if (t.codingMode && !a.plan.coding)
+      throw new Error("coding assignment is missing role and access");
     if (a.agent) {
       validateAgent(a.agent);
       if (a.agent.workspace_id !== t.workspaceId)
@@ -326,6 +428,14 @@ function validateTask(t: DurableTeamTask): void {
       throw new Error("invalid durable question");
     questions.add(q.id);
   }
+  const writers = new Set(
+    t.assignments
+      .filter((a) => a.plan.coding?.access === "write")
+      .map((a) => a.plan.workerPaneId),
+  );
+  if (writers.size > 1) throw new Error("coding v1 allows only one writer");
+  if (t.codingMode) validateCodingState(t.coding);
+  else if (t.coding) throw new Error("coding state without coding mode");
   if (terminalTask(t.state) && t.turns.length)
     throw new Error("terminal task still owns unsettled turns");
 }
@@ -342,6 +452,35 @@ function validateUpdate(old: DurableTeamTask, next: DurableTeamTask): void {
   ] as const)
     if (JSON.stringify(old[key]) !== JSON.stringify(next[key]))
       throw new Error(`immutable task field: ${key}`);
+  if (Boolean(old.codingMode) !== Boolean(next.codingMode))
+    throw new Error("immutable task field: codingMode");
+  if (
+    JSON.stringify(old.coding?.baseline) !==
+    JSON.stringify(next.coding?.baseline)
+  )
+    throw new Error("immutable coding field: baseline");
+  if (old.coding && next.coding) {
+    for (const artifact of old.coding.artifacts) {
+      const kept = next.coding.artifacts.find(
+        (item) => item.id === artifact.id,
+      );
+      if (!kept || JSON.stringify(kept) !== JSON.stringify(artifact))
+        throw new Error("coding artifact changed");
+    }
+    for (const finding of old.coding.findings) {
+      const kept = next.coding.findings.find((item) => item.id === finding.id);
+      if (
+        !kept ||
+        kept.summary !== finding.summary ||
+        kept.sourceAssignmentId !== finding.sourceAssignmentId ||
+        kept.versionFingerprint !== finding.versionFingerprint ||
+        (finding.status === "resolved" && kept.status !== "resolved") ||
+        (finding.status === "open" &&
+          !["open", "resolved"].includes(kept.status))
+      )
+        throw new Error("coding finding changed");
+    }
+  }
   for (const q of old.questions ?? []) {
     const nextQuestion = next.questions?.find((v) => v.id === q.id);
     if (!nextQuestion) throw new Error("question history removed");

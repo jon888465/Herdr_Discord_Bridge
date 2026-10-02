@@ -1032,6 +1032,9 @@ async function teamCommand(
               (t.recovery
                 ? `\nRecovery: ${t.recovery.status} · ${t.recovery.reason}\n${t.recovery.observations.join("\n")}`
                 : "") +
+              (t.codingMode
+                ? `\nCoding stage: ${t.coding?.stage ?? "unset"} · version ${t.coding?.versionFingerprint?.slice(0, 12) ?? "none"}${t.coding?.acceptance ? ` · ${t.coding.acceptance.ok ? "gate passed" : t.coding.acceptance.reasons.join("; ")}` : ""}`
+                : "") +
               (t.detail ? `\n${t.detail}` : "") +
               (task && t.synthesis ? `\n${t.synthesis}` : ""),
           )
@@ -1245,7 +1248,9 @@ async function teamAsk(
   runtime: Runtime,
 ): Promise<void> {
   const workspaceId = await teamWorkspaceId(context, runtime);
-  const prompt = args.join(" ").trim();
+  const coding = args[0] === "--coding";
+  const prompt = (coding ? args.slice(1) : args).join(" ").trim();
+  if (coding && !prompt) throw new Error("usage: team ask --coding <prompt>");
   validatePrompt(prompt);
   const targets = runtime.routing.workspaceTargets(workspaceId);
   const agents = await runtime.herdr.listAgentsWithWorkspaceNames();
@@ -1288,6 +1293,7 @@ async function teamAsk(
       lead,
       workers,
       replan: true,
+      ...(coding ? { coding: true } : {}),
       acquireWorker: async (target) => {
         const acquired = target.pane_id.startsWith("profile:")
           ? await runtime.pool!.acquire(
@@ -2259,7 +2265,7 @@ function helpText(prefix: string): string {
     "**多 Agent 與交接**",
     `\`${prefix} team add <agent>\` / \`${prefix} team remove <agent>\` — 管理 thread participants`,
     `\`${prefix} team list\` — 查看目前 thread 的 Team 成員、pane 與即時狀態`,
-    `\`${prefix} team ask <prompt>\` — 建立持久化任務，由 Lead 動態分工`,
+    `\`${prefix} team ask [--coding] <prompt>\` — 建立持久化任務，由 Lead 動態分工；--coding 才啟用本機 Git 驗收`,
     `\`${prefix} team questions <task-id>\` / \`${prefix} team reply <task-id> <question-id> <answer>\` — 指定問題回答`,
     `\`${prefix} team status [task-id]\` / \`${prefix} team cancel <task-id>\` — 查看／取消任務`,
     `\`${prefix} quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds]\` — 明確額度回報；quota status 查詢`,
@@ -2311,7 +2317,7 @@ function consoleHelpText(): string {
     "**Team 與交接**",
     "team list — 列出所有 workspace Team 成員",
     "team add <agent> | team remove <agent> — 管理目前 workspace Team",
-    "team ask <prompt> — 建立持久化任務，由 Lead 動態分工",
+    "team ask [--coding] <prompt> — 建立持久化任務，由 Lead 動態分工；--coding 才啟用本機 Git 驗收",
     "team status [task-id] — 查看持久狀態與重啟核對結果",
     "team questions <task-id> — 列出多 Agent 問題與狀態",
     "team reply <task-id> <question-id> <answer> — 回答指定問題",
