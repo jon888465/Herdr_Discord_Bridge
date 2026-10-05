@@ -47,7 +47,7 @@ herdr pane process-info --pane <pane_id>
 ## 更新 GitHub 版本
 
 先用 pane-open 回應中的 `pane_id` 關閉舊 pane，再重新安裝並啟動：
-      
+
 ```text
 herdr plugin pane close <pane_id>
 herdr plugin install jon888465/Herdr_Discord_Bridge --ref main --yes
