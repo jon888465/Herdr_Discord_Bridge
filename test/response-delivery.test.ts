@@ -389,3 +389,57 @@ for (const outcome of ["timeout", "replacement"] as const) {
     );
   });
 }
+
+for (const unchanged of [false, true]) {
+  test(`Claude Discord fallback ${unchanged ? "does not replay old answers" : "delivers a cleaned excerpt without claiming structured final"}`, async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+    const agent = {
+      terminal_id: "claude-terminal",
+      pane_id: "w:p",
+      workspace_id: "w",
+      tab_id: "w:tab",
+      agent: "claude",
+      agent_status: "idle",
+    };
+    const screen = (text: string) =>
+      `❯ question\n\n⏺ ${text}\n\n✻ Worked for 2s\n────────────────────\n❯\n────────────────────\n  ⏵⏵ auto mode on`;
+    const sent: string[] = [];
+    const cards: string[] = [];
+    const runtime = {
+      config: { streamIntervalMs: 1000, outputLines: 40 },
+      herdr: {
+        listAgentsWithWorkspaceNames: async () => [agent],
+        readAgent: async () => screen(unchanged ? "old answer" : "new answer"),
+      },
+      discord: {
+        editProgress: async (_message: unknown, text: string) => {
+          cards.push(text);
+        },
+        postOutput: async (_message: unknown, text: string) => {
+          sent.push(text);
+        },
+      },
+    } as unknown as Parameters<typeof streamAgent>[2];
+    const task = streamAgent(
+      agent,
+      {} as Parameters<typeof streamAgent>[1],
+      runtime,
+      "question",
+      screen("old answer"),
+    );
+    for (let second = 0; second < 20; second++) {
+      t.mock.timers.tick(1000);
+      for (let i = 0; i < 60; i++) await Promise.resolve();
+    }
+    await task;
+    const output = sent.join("\n");
+    assert.ok(!output.includes("old answer"));
+    assert.ok(!output.includes("auto mode"));
+    assert.ok(!cards.some((card) => card.includes("final response delivered")));
+    if (unchanged) assert.match(output, /capture failure/);
+    else {
+      assert.match(output, /new answer/);
+      assert.match(output, /may include progress or be incomplete/);
+    }
+  });
+}

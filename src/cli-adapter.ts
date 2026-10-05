@@ -101,13 +101,115 @@ function grokResponses(output: string): string[] {
   return responses;
 }
 
+/** Claude's two-column message gutter is presentation, not body indentation. */
+function claudeResponseText(output: string): string {
+  const body: string[] = [];
+  let inMessage = false;
+  let inCode = false;
+  let messageStart = 0;
+  for (const line of stripAnsi(output).replace(/\r/g, "").split("\n")) {
+    if (!inCode && /^(?: ?[❯>](?: |$)|[─━]{8,}|[✻✽✶✳✢·] )/.test(line)) {
+      inMessage = false;
+      continue;
+    }
+    const first = /^ ?[⏺●] (.*)$/.exec(line);
+    if (!inCode && first) {
+      while (body.length && !body.at(-1)!.trim()) body.pop();
+      messageStart = body.length;
+      if (body.length) body.push("");
+      body.push(first[1]!);
+      inMessage = true;
+      inCode = first[1]!.startsWith("```");
+    } else if (inMessage) {
+      if (!inCode && /^\s*⎿/.test(line)) {
+        // A tool heading may echo the nonce too; discard the whole tool block.
+        body.length = messageStart;
+        inMessage = false;
+        continue;
+      }
+      if (!line.trim()) {
+        body.push("");
+      } else if (line.startsWith("  ")) {
+        const text = line.slice(2);
+        body.push(text);
+        if (/^```/.test(text)) inCode = !inCode;
+      } else {
+        inMessage = false;
+        inCode = false;
+      }
+    }
+  }
+  return body.join("\n").trim();
+}
+
+/** Only the latest nonempty user block can establish this prompt's scope. */
+function claudePromptTail(prompt: string, output: string): string | undefined {
+  const lines = stripAnsi(output).replace(/\r/g, "").split("\n");
+  let start = -1;
+  let echoed = "";
+  let end = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const match = /^ ?[❯>] (.+)$/.exec(lines[i]!);
+    if (!match) continue;
+    start = i;
+    echoed = match[1]!;
+    end = i + 1;
+    while (
+      end < lines.length &&
+      (lines[end]!.startsWith("  ") || !lines[end]!.trim())
+    ) {
+      // Tool output and the input status area are not multiline user text.
+      if (/^\s*[⎿⏵]/.test(lines[end]!)) break;
+      echoed += "\n" + lines[end]!.slice(2);
+      end++;
+    }
+    i = end - 1;
+  }
+  const normalized = (text: string) => text.replace(/\s+/g, " ").trim();
+  if (start < 0) return;
+  // A terminal wrap may split a Chinese phrase or an English word without a
+  // space. Only displayed row boundaries are optional whitespace; keep the
+  // characters and spaces within each row intact.
+  const rows = echoed.split("\n").map(normalized).filter(Boolean);
+  const escaped = rows.map((row) => row.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  if (
+    !new RegExp("^" + escaped.join("\\s*") + "$", "u").test(normalized(prompt))
+  )
+    return;
+  return lines.slice(end).join("\n");
+}
+
+class ClaudeCliAdapter implements CliOutputAdapter {
+  modelCommand(model: string): string {
+    return "/model " + model;
+  }
+
+  extractLatestResponse(
+    prompt: string,
+    output: string,
+    baseline: string,
+  ): string {
+    const tail = claudePromptTail(prompt, output);
+    // A visible different user turn must never be bypassed by baseline diffing.
+    const hasUser = /^ ?[❯>] .+/m.test(stripAnsi(output));
+    if (tail === undefined && hasUser) return "";
+    const text = claudeResponseText(
+      tail ?? (baseline.trim() ? outputSinceBaseline(baseline, output) : ""),
+    );
+    const old = claudeResponseText(
+      claudePromptTail(prompt, baseline) ?? baseline,
+    );
+    return text && text !== old ? text : "";
+  }
+}
+
 export function normalizeTerminalResponse(
   agentKind: string | undefined,
   output: string,
 ): string {
-  return (agentKind || "").toLowerCase() === "grok"
-    ? grokResponses(output).join("\n\n")
-    : output;
+  const kind = (agentKind || "").toLowerCase();
+  if (kind.includes("claude")) return claudeResponseText(output);
+  return kind === "grok" ? grokResponses(output).join("\n\n") : output;
 }
 
 class GrokCliAdapter implements CliOutputAdapter {
@@ -129,6 +231,7 @@ class GrokCliAdapter implements CliOutputAdapter {
 }
 
 const grokAdapter = new GrokCliAdapter();
+const claudeAdapter = new ClaudeCliAdapter();
 
 const codexAdapter = new MarkerCliAdapter(["› ", "❯ "]);
 const antigravityAdapter = new MarkerCliAdapter(["> "]);
@@ -144,6 +247,7 @@ const genericAdapter = new MarkerCliAdapter([
 
 export function modelOptionsFor(agentKind: string | undefined): string[] {
   const kind = (agentKind || "").toLowerCase();
+  if (kind.includes("claude")) return ["sonnet", "opus", "haiku"];
   if (kind.includes("codex"))
     return [
       "gpt-6-astra",
@@ -184,6 +288,7 @@ export function latestAgentResponse(
 function adapterFor(agentKind: string | undefined): CliOutputAdapter {
   const kind = (agentKind || "").toLowerCase();
   if (kind === "grok") return grokAdapter;
+  if (kind.includes("claude")) return claudeAdapter;
   if (kind.includes("opencode")) return opencodeAdapter;
   if (kind.includes("antigravity") || kind === "agy") return antigravityAdapter;
   if (kind.includes("codex")) return codexAdapter;
