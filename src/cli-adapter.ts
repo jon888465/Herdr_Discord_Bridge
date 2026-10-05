@@ -165,7 +165,16 @@ function claudePromptTail(prompt: string, output: string): string | undefined {
     }
     i = end - 1;
   }
-  const normalized = (text: string) => text.replace(/\s+/g, " ").trim();
+  // Claude 把貼上的附圖路徑換成 [Image #n] 並省略該路徑行；兩側都去除再比對。
+  const normalized = (text: string) =>
+    text
+      .replace(/\[Image #\d+\]/g, "")
+      .replace(
+        /^\s*"[^"\n]*\.herdr-discord-bridge\/attachments\/[^"\n]*"\s*$/gm,
+        "",
+      )
+      .replace(/\s+/g, " ")
+      .trim();
   if (start < 0) return;
   // A terminal wrap may split a Chinese phrase or an English word without a
   // space. Only displayed row boundaries are optional whitespace; keep the

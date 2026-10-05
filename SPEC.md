@@ -521,6 +521,8 @@ Discord fallback 以最新非空 `❯`／`>` user block 比對 prompt，容許�
 兩欄 continuation 的換行差異，包含中文／英文單字中間的軟折行；只在顯示列
 邊界容許零或多個空白，每列其他字元維持核對。保留回答 code indentation。`⏺`／`●` 訊息
 移除兩欄 gutter、輸入列、分隔線、頂層耗時 footer 及帶 `⎿` 結果的工具區塊（含工具標頭）。
+Claude 附圖回顯比對會去除雙方的 `[Image #n]` 與 bridge 附圖路徑行，
+容許 CLI 將路徑轉為附件標記並省略路徑。
 可見 user block 不相符時拒絕；prompt 不可見時只接受與非空 baseline 有
 重疊的新增訊息。相同擷取內容與 baseline 視為重繪，不重播；空 baseline
 不可拿無 prompt 邊界的歷史回答代替本次回覆。

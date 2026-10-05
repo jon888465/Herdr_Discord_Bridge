@@ -363,3 +363,14 @@ test("Claude correlates Chinese and word-internal soft wraps without inventing s
     "",
   );
 });
+
+test("Claude matches an echoed prompt whose image paths became [Image #n] attachments", () => {
+  const prompt =
+    '1.png qxb pdf的pass應該要像2.png pass一樣是的藍色\n\n使用者附圖（本機檔案）：\n"/work/.herdr-discord-bridge/attachments/message-XroCNb/1.png"\n"/work/.herdr-discord-bridge/attachments/message-XroCNb/2.png"\n請使用圖片檢視工具讀取這些檔案；若無法讀取，請明確告知，不要假設已看見圖片。';
+  const screen =
+    "Claude Code v2.1.289\n❯ [Image #1] [Image #2]1.png qxb pdf的pass應該要像2.png pass一樣是的藍色\n  使用者附圖（本機檔案）：\n  請使用圖片檢視工具讀取這些檔案；若無法讀取，請明確告知，不要假設已看見圖片。\n  ⎿  [Image #1]\n  ⎿  [Image #2]\n\n● 檔案裡已經有，所以這次沒再改程式。\n\n✻ Worked for 4m 54s\n────────────────────\n❯\n────────────────────\n  ⏵⏵ auto mode on (shift+tab to cycle)";
+  assert.equal(
+    latestAgentResponse("claude", prompt, screen, ""),
+    "檔案裡已經有，所以這次沒再改程式。",
+  );
+});

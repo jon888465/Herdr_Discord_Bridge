@@ -1115,6 +1115,8 @@ allowlist 拒絕；2026-10-05 已將 claude 加入 allowlist（使用者回報 D
 
 2026-10-05 重新開啟（使用者實測）：Discord 送圖後 bridge 已把文字轉到 Claude pane（w1:p1E），但訊息停在輸入框、未送出，Claude 無動作。根因（已重現）：Claude Code 把貼上的本機圖片路徑轉成 `[Image #n]` 附件，`agent.prompt` 的 Enter 偶爾被吞掉（測試 pane w2:p9 首次貼上同樣重現；之後 4 次未重現，屬間歇性，觸發條件未確認）。修正：`HerdrClient.submitStuckImagePrompt` 於 Claude 附圖 dispatch 時背景輪詢最多 15 秒，若輸入框（最後兩條分隔線之間）仍有 `[Image #n]` 且 Agent 未 working，補送一次 Enter（`hasPendingImageInput` 有單元測試）。驗證：對實際卡住的 w1:p1E 執行該方法，回傳 true、訊息送出並開始處理；`tsc`／新增 2 項單元測試通過。未驗證：重啟後的 bridge 端到端 Discord 流程；完整 `npm test`（2026-10-05，222 項）220 通過、2 失敗，失敗為既有 handoff ENOENT 競態（session-handoff.test，已列於本檔；同日稍早一次為 220/220），與本修正無關；lint 通過。
 
+2026-10-05 第二次實測（使用者 Discord 截圖）：圖片已送達並由 Claude 處理（pane 顯示完成並回覆），但 Discord 顯示「finished — capture incomplete／Bridge could not capture its final response」。根因（由截圖與程式碼確認）：Claude 輸入框回顯為 `[Image #3] [Image #4]1.png …` 且省略路徑行，`claudePromptTail` 與送出的 prompt 比對失敗，回覆被判為不屬於本輪而丟棄。修正：比對時兩側皆去除 `[Image #n]` 與附圖路徑行（`src/cli-adapter.ts`）；新增回歸測試，修正前失敗、修正後通過。驗證：`npm test`（2026-10-05，223 項）222 通過、1 失敗（既有 handoff ENOENT 競態）；lint 通過。未驗證：重啟後的 Discord 端到端回覆擷取；該次已遺失的回覆無法補送。
+
 驗證：最終 build／targeted／lint／typecheck 已完成，詳細命令與結果見下段；完整套件仍有既有失敗。
 原始碼已修改，執行中 bridge 未重啟／未確認載入新版，未部署、未 commit／push。
 新測試不算 Discord／Herdr／Claude 回覆端到端驗收；舊訊息與舊任務不補送。
