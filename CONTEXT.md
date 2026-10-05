@@ -127,3 +127,14 @@ unverified output. Only the full original identity can resume capture; explicit
 replacements still stop immediately. ISSUE-003/008 track the 2026-10-02 live
 failure (new boot conversation, reused Discord thread), fixtures and pending live
 acceptance. Thread routing stores pane mappings, not old session IDs.
+
+## Claude compatibility
+
+`src/cli-adapter.ts` now handles Claude model aliases and terminal message gutters
+for Discord excerpts and Console/Team nonce frames. It has no Claude native
+transcript reader or image delivery. Claude Code 2.1.289 lacked session metadata before integration installation;
+after the user installed it and restarted Claude, Herdr reported a session ID.
+Live short-answer prompt and shared turn capture were tested; coding reviewer
+and handoff/failover identity gates stay unchanged.
+[ISSUE-026](docs/known-issues.md) records synthetic fixtures, live short-answer capture, and pending
+Discord delivery and deployment; unknown-session restart detection remains limited.

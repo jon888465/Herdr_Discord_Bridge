@@ -162,6 +162,7 @@ a specific Agent. The model string is passed through the selected CLI adapter as
 that CLI's model-switch command; the Agent must be idle. Running `/herdr model` shows a Discord select menu for the
 selected Agent; choosing an option disables the menu and reports the requested
 switch. Direct model names remain supported for models not listed by the picker.
+Claude uses `sonnet`, `opus`, and `haiku` aliases with `/model <name>`; availability depends on your CLI/account.
 
 To pause Discord command and approval handling while keeping the bot connected, use:
 
@@ -221,7 +222,7 @@ source pane. No full Discord or CLI history is copied to another Agent.
 For Discord single-Agent prompt replies, the bridge records the terminal snapshot before sending the
 prompt and forwards only output after that prompt. CLI-specific prompt markers
 and terminal chrome are handled by adapters in `src/cli-adapter.ts`; Codex,
-Antigravity (`agy`), OpenCode, and Grok have separate adapters, while unknown CLIs use
+Antigravity (`agy`), OpenCode, Grok, and Claude have separate adapters, while unknown CLIs use
 a safe generic adapter. If no reliable prompt boundary is found, historical output is
 not forwarded. The default `notifyOn` setting is `["blocked"]`, so a separate
 `done` notification is not posted after a completed prompt.
@@ -288,5 +289,10 @@ Bridge response markers. It is not a structured transcript source; clipped boxes
 and changed terminal formats can leave capture incomplete. See ISSUE-023 in
 [known issues](docs/known-issues.md) for validation and deployment status.
 
-
 Discord response capture waits up to 30 seconds if the original Agent or its known session metadata temporarily disappears. It resumes only after the original identity is verified; explicit session replacements stop capture. Reusing a Discord thread routes to a live pane and does not restore its old CLI conversation. Live acceptance remains pending (ISSUE-003/008).
+
+Claude terminal capture handles multiline prompt echoes and message gutters; it is
+an observed excerpt, not a native transcript. Claude image delivery is not supported.
+If Herdr omits Claude session identity, coding review and session handoff/failover
+keep their known-session requirements. Live acceptance is pending in
+[ISSUE-026](docs/known-issues.md); build and fixture tests do not establish Discord acceptance.

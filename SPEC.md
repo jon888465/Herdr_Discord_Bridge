@@ -509,3 +509,32 @@ Discord preview／fallback 使用最新可辨識完整回答；與 dispatch base
 終端已捲出的內容無法恢復。模型清單不在本 parser 範圍。跨 CLI 的 Grok session
 讀取由 [session-handoff skill](skills/session-handoff/SKILL.md) 描述；Bridge runtime
 仍不自動解碼 Grok session 檔。驗證／部署狀態見 ISSUE-023。
+
+## Claude terminal adapter（2026-10-05）
+
+Herdr kind 含 `claude`（大小寫不敏感）使用專用 adapter；模型選單為
+`sonnet`、`opus`、`haiku`，送出 `/model <name>`，仍可直接指定完整 model ID。
+這些是 CLI alias，不保證帳號可用，也不固定 alias 對應版本。Profile 的
+`--model` 啟動行為維持原契約。
+
+Discord fallback 以最新非空 `❯`／`>` user block 比對 prompt，容許空白與
+兩欄 continuation 的換行差異，包含中文／英文單字中間的軟折行；只在顯示列
+邊界容許零或多個空白，每列其他字元維持核對。保留回答 code indentation。`⏺`／`●` 訊息
+移除兩欄 gutter、輸入列、分隔線、頂層耗時 footer 及帶 `⎿` 結果的工具區塊（含工具標頭）。
+可見 user block 不相符時拒絕；prompt 不可見時只接受與非空 baseline 有
+重疊的新增訊息。相同擷取內容與 baseline 視為重繪，不重播；空 baseline
+不可拿無 prompt 邊界的歷史回答代替本次回覆。
+
+Console／Team turn 使用同一清理器，仍須本次隨機 begin/end envelope 與
+idle/done 才完成。沒有 Claude native structured transcript reader；Discord
+仍標示 captured excerpt／capture incomplete，訊息標頭可能含工具名稱或公開
+進度，不能宣稱 semantic final。工具區塊／UI 格式改變、壓縮的
+paste prompt、截斷與無 overlap 可能失敗；不猜測丟失內容。
+
+2026-10-05 安裝 integration 前 Herdr 未提供 Claude `agent_session`；使用者
+安裝 integration 並重開 Claude 後已取得 session ID。普通 prompt 與共用
+Console／Team turn receiver 的真實短回答已驗證，見 ISSUE-026。缺 metadata
+時仍無法可靠辨識同 terminal 內的 restart；Coding reviewer、session handoff／
+failover 的已知 session gate 不放寬，也不猜最近 `.claude` 檔。這些進階流程、
+blocked 問答、長回答與實際 Discord delivery 尚未驗收，bridge 未重啟。
+Claude 圖片交付仍不支援；fixture 證據與本次 CLI 短回答證據分別記錄。

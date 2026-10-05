@@ -113,6 +113,7 @@ command 由 CLI adapter 處理，避免 Codex、Antigravity（`agy`）與其他 
 
 `/herdr model` 會顯示 Discord dropdown，列出該 CLI adapter 的 model 選項；也
 可以直接指定 model 名稱。model 名稱仍需符合該 CLI 支援的名稱。
+Claude 選單使用 `sonnet`、`opus`、`haiku` alias，送出 `/model <name>`；可用性依 CLI／帳號決定。
 
 要暫停 Discord command 與 approval 處理但保持 bot 連線，可使用：
 
@@ -136,6 +137,7 @@ command 由 CLI adapter 處理，避免 Codex、Antigravity（`agy`）與其他 
 - Antigravity / `agy`：`> prompt`
 - OpenCode：`> prompt`
 - Grok：1.0.46 方形回答框與帶完成 footer 的無框回答，去除 UI 外框、捲軸與首行時間；支援折行的 Bridge 標記。不是原生 transcript，截斷或格式變更仍可能擷取不完整（見 ISSUE-023）。
+- Claude：比對多行 prompt，清理訊息 gutter、輸入列與工具結果區塊；仍為終端摘錄，沒有原生 transcript adapter（ISSUE-026）。
 - 未知 CLI：使用保守的通用 adapter
 
 model/path 等 terminal UI metadata 會被過濾。如果找不到可靠的 prompt 邊界，bridge 不會把整份歷史 snapshot 當作回覆轉送。
@@ -260,5 +262,8 @@ Team 多 Agent 問題使用 `team questions <task-id>` 查詢、`team reply <tas
 
 第一版採操作者回報，沒有 provider quota API。過期、unknown、同額度池或衝突觀察不准派送；不改帳號／憑證，不重試不明送達。詳見 [完整指令、journal、限制及驗收](docs/quota-failover-manager.md)。
 
-
 Discord 回覆擷取遇到原 Agent 或已知 session 資料暫時消失時，會等待最多 30 秒重新核對；確認原 identity 後才續接，明確 session 更換仍停止。沿用 Discord 舊 thread 只會路由到 live pane，不會還原舊 CLI 對話。實際驗收仍待完成（ISSUE-003／008）。
+
+Claude 圖片交付仍不支援。Herdr 未回報 Claude session identity 時，coding reviewer、
+session handoff／failover 保持已知 session 的要求；不猜測最近歷史檔。Claude
+實際 Discord 回覆仍待驗收，詳見 [ISSUE-026](docs/known-issues.md)。

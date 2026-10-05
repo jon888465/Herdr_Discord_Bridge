@@ -86,3 +86,12 @@ Blocked 問題保留有界畫面及原有「已顯示問題、identity、state s
 Live 驗收需在授權環境依序確認：勾選未啟動 profile → Lead 只啟動所需成員 → 正確 cwd／模型且不搶 focus → 第一次任務 → 同 session 追加修正 → 明確來源的完整回覆 → use 不刷 CLI → attach/detach 不改目標 → blocked 問答 → 重啟後重用。
 
 Task persistence/reconciliation 與取消已接上同一 scheduler（見 ISSUE-020）；Team 多問題佇列／續接見 [Phase 2](team-question-queue.md)。仍未完成自動 resume、跨 bridge 全域租用、原生 PTY 串流 attach、Discord mirror、完整事件匯流排。CLI 若不遵守 marker 或畫面截斷，擷取會失敗而非假裝完整。未重啟的 bridge 仍執行旧版本；舊任務與訊息不自動補送。
+
+## Claude adapter 檢查（2026-10-05）
+
+Claude profile 已有 `--model`，本輪補模型選單 aliases 與 terminal gutter／
+多行 prompt parser。沒有新增 CLI 啟動或 transcript 猜測。Claude Code 2.1.289 在 integration 安裝前缺 session metadata；安裝並重開
+Claude 後已取得 session ID，真實短 prompt 與共用 turn 接收器已驗證。
+coding reviewer、handoff／failover 保留已知 session gate。本機／Team 回覆
+仍須本次 marker 與 settled，Discord fallback 仍是有界摘錄。blocked 問答、
+完整 Team 任務與 Discord delivery 未驗收，沒有重啟 bridge，見 [ISSUE-026](known-issues.md)。

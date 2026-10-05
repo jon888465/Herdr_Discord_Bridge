@@ -1,6 +1,6 @@
 # Known Issues
 
-維護規則見 [AGENTS.md](../AGENTS.md)。最後整理：2026-10-02。
+維護規則見 [AGENTS.md](../AGENTS.md)。最後整理：2026-10-05。
 
 | ID        | 問題                                                                            | 狀態             | 下一步                                                                                                                                    |
 | --------- | ------------------------------------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
@@ -27,6 +27,7 @@
 
 | ISSUE-021 | Phase 3 Session Handoff Runtime | 重新開啟／待調查 | 2026-10-02 完整套件與單獨重跑再次出現並行 verify/cancel ENOENT；未改 handoff，live 未驗收 |
 | ISSUE-025 | 本機 Git coding workflow 首版 | 已修正、待驗收 | 2026-10-02 重新開啟後已補 read-only 起迄指紋與 finding id；live 未驗收 |
+| ISSUE-026 | Claude 模型／終端擷取相容性；integration 安裝前缺 session | 已修正、待驗收 | integration 後短互動及最終 30/30 回歸通過；重啟後驗收 Discord／Team／blocked |
 
 | ISSUE-022 | Phase 4 Quota / Failover Manager | 已修正、待驗收 | 2026-09-21 新增 28 項通過；完整 181/184，ISSUE-007／021 待調查，live 待驗收 |
 
@@ -1077,3 +1078,114 @@ Lead 修正中獨立核對（2026-10-02）：確認 `dist/src/team-task-engine.j
 agy 同一已知 reviewer session 已交付 `/tmp/herdr-local-coding-rereview-agy.md`，execution done、原始碼 review verdict pass。獨立執行 `npm run build && node --test --test-name-pattern 'read-only review drift|verify drift and an earlier pass|repeated raw finding ids|writer round cannot overlap' dist/test/coding-workflow.test.js`：**4/4 通過**，duration_ms 58291；另以指定 name pattern 執行 Lead 的 /tmp engine 重現 **1/1 通過**，duration_ms 28234。六個核心 source 檔案的開始／結束 SHA-256 一致。Lead 補充規格／提案，明載任務歷史保留 review／verify drift 時 gate 採保守失敗，後續 pass 不解除；正常 changes_requested 可同任務修正。
 
 Reviewer 報告的「Pass / Accepted」僅採用為原始碼 review 通過，不改成 live 已驗收。狀態保持「已修正、待驗收」。已知限制：開始／結束指紋無法發現中途改檔後完全還原；coding stage 顯示不是結案 gate 的替代。Bridge 未重啟、原始碼未部署，question cap 與 ISSUE-021 未修；完整 suite 沒有修正後的新結果。Lead 修正後 lint（52 TypeScript files）、相關文件 Prettier 與 diff 空白檢查通過。此輪保存所有未提交修改，沒有 commit／merge／push。
+
+## ISSUE-026：Claude adapter 相容性與身分限制
+
+更新日期：2026-10-05。狀態：已修正、待驗收。環境：Linux、本機 checkout，Claude Code
+2.1.289。工作開始 `git status --short` 為空；除使用者要求的 Claude 短互動測試外，未操作其他 Agent pane。
+
+症狀／預期：新加入的 Claude 被 Herdr 辨識，但 bridge 模型選單列 GPT，
+通用 parser 在多行 prompt 可能傳出 banner／prompt／footer，且同一歷史回答
+重繪時可能再擷取。預期模型指令符合 Claude；只傳送本次 scope 的可辨識
+文字，缺失明示，不以 fixture 當 live final。
+
+重現與根因：Claude 沒有 adapter 分支，modelOptionsFor fallback 為 GPT；
+MarkerCliAdapter 完整 prompt 字串不支援兩欄 continuation，且 prompt 分支
+沒有 baseline 去重。2026-10-05 `npm run build && node --test
+ dist/test/cli-adapter.test.js`（命令實際不含換行）：build 通過，13 項中
+8 通過、5 失敗，exit 1。失敗涵蓋 Claude 模型選單、多行回覆、舊回答／UI、
+baseline 與 normalization；此為新測試對修正前 build 的結果。
+
+修正範圍：`src/cli-adapter.ts` 新增 Claude adapter 與共用 terminal 清理；
+`test/cli-adapter.test.ts` 合成 fixture 覆蓋多行／空行、code indentation、
+重繪與不同 turn、overlap 缺失、工具結果區塊與折行 nonce 接收。模型 aliases
+與 `/model` 參考 [Claude 官方模型設定](https://code.claude.com/docs/en/model-config)
+及 [官方 Help Center](https://support.claude.com/en/articles/11940350-claude-code-model-configuration)，
+不固定 alias 版本、不聲稱帳號所有模型可用。
+
+安裝前實測證據為唯讀 `agent.list`／`agent.read visible`：`w2:p8`、kind `claude`、
+idle；畫面顯示 v2.1.289、`❯ /model`、`⎿ Set model`、兩欄 continuation 與
+底部輸入區。該階段未擷取真實 assistant answer，當時回答 fixture 是合成的；安裝後 live 證據見下段。
+當時 Herdr 未回報 `agent_session`；使用者後來指出 integration 尚未安裝，安裝後 metadata 已恢復（因果由安裝前後觀察支持，未另稽核 hook 安裝細節）。Bridge 不猜 `.claude`
+最近 session，不能承諾 coding reviewer、handoff／failover 接受此 pane；
+同 terminal 的無 metadata restart 不能可靠辨識。Claude 圖片交付仍被既有
+allowlist 拒絕；本輪不擴充圖片支援或 native transcript adapter。
+
+驗證：最終 build／targeted／lint／typecheck 已完成，詳細命令與結果見下段；完整套件仍有既有失敗。
+原始碼已修改，執行中 bridge 未重啟／未確認載入新版，未部署、未 commit／push。
+新測試不算 Discord／Herdr／Claude 回覆端到端驗收；舊訊息與舊任務不補送。
+
+下一步／未驗證：完成自動化檢查後，於授權重啟後用新文字 prompt、多行／
+長回答、blocked reply、完整 Team 任務與 model picker 做 Discord live 驗收；
+需要已知 session 的進階流程仍須分別驗收。安裝後已知 session 與 marker
+短互動證據見下段。
+
+### 2026-10-05 使用者安裝 integration 後重試
+
+使用者明確要求安裝 Herdr Claude integration 後重試；`HERDR_ENV=1` 驗證
+通過，依 Herdr skill（`/home/jones/.agents/skills/herdr/SKILL.md`） 的 agent prompt／
+read 流程測試，不改 pane 拓樸、不切換模型、不使用工具／不讀寫專案。
+Claude `w2:p8`（同 workspace）已回報 `agent_session.kind=id`；短測試前後
+session ID 一致。上段無 metadata 是安裝前紀錄，不代表目前仍缺失。
+
+真實共用 turn：以 built `HerdrClient` 與 `runTeamTurn` 發送一次短 token
+prompt，回傳 `{"state":"done","text":"CLAUDE_BRIDGE_OK","terminal":true}`。
+這證明 marker 接收器的 Herdr→Claude→read→capture 短互動成功，沒有建立
+完整 Team 任務或透過執行中 bridge／Discord。可見回答使用 `●`，兩欄 gutter，
+`✻ Cogitated for 6s` footer。暫存 raw snapshots 在 `/tmp/claude-bridge-live-*.txt`，
+不提交 runtime state。
+
+一般 prompt 另送一次只回答 `CLAUDE_SINGLE_OK` 的中文請求；Herdr 回傳 idle
+與同 session，Claude 正常回答，但 `latestAgentResponse` 回傳空字串，檢查
+腳本 exit 1。已確認根因：視窗在「工具／，也」之間軟折行，原 prompt 沒有
+空白，adapter 卻強制把每次換行當成一個空白；故比對失敗。回放來源為
+`/tmp/claude-bridge-single-output.txt`；新回歸保留觀察到的中文行與 `●` 格式，
+另測英文單字中間折行及更改文字不得比對成功。
+
+修正只將「顯示列邊界」匹配為可選空白，每列字元仍核對；不把所有 prompt
+空白刪除。修正後已回放同一份 live 回答並驗證一般 adapter，最終 build／
+回歸結果見下段。前次完整測試被使用者訊息中斷，沒有總結，不算套件通過。
+初步修正 targeted `npm run build && node --test dist/test/cli-adapter.test.js`
+13/13 通過（1374 ms），不包含後來的中文字內折行、工具 heading echo 和
+Discord seam 新測試；`npm run typecheck`、`npm run lint`（52 TS files）先前
+通過，但字內折行修正後仍須重新驗證。
+
+### 2026-10-05 完整檢查再次重現既有 ISSUE-007／021
+
+環境：Linux、Node.js v22.23.3，本機 checkout；不是執行中的 bridge 測試。
+`npm test`（log `/tmp/claude-adapter-npm-test-final.log`）：build 通過，
+**219 項：217 通過、2 失敗、0 skipped**，exit 1，duration_ms 226571。
+此 build 在中文字內折行最終修正前啟動，未包含後加的一項字內折行測試；
+其結果不能當最終版本完整套件全通過。Claude adapter／Discord seam 新測試
+在這份結果通過，兩項失敗均對應已追蹤的症狀：
+
+- ISSUE-007（更新 2026-10-05，保持重新開啟／待調查）：
+  `the real entrypoint rejects a duplicate before contacting Herdr or Discord`
+  約 10.5 秒 timeout，actual exit code null，預期 1；根因仍未確認，未改
+  instance lock、入口或 timeout。下一步調查 startup／負載與原門檻。
+- ISSUE-021（更新 2026-10-05，保持重新開啟／待調查）：
+  `concurrent handoff verification and cancellation cannot race in-flight dispatch`
+  unhandledRejection／ENOENT，HandoffStore.write 的臨時 state journal 不存在；
+  與先前症狀一致，精確 async／cleanup 根因未確認，未改 handoff runtime
+  或測試。下一步修正並重跑該 seam／完整套件；不宣稱 live handoff 已驗收。
+
+一般 adapter 的 source 回放已確認 `CLAUDE_SINGLE_OK`，相同畫面 baseline
+回傳空字串，exit 0。回放使用 TypeScript transpileModule 讀取最終 source
+並 import 現有 format module，不等同完整 tsc；最終 build／回歸另列。
+
+### 2026-10-05 最終交付與驗收範圍
+
+狀態：已修正、待驗收。最終 source 已編譯，Linux／Node.js v22.23.3：
+
+- `npm run build && node --test dist/test/cli-adapter.test.js dist/test/model.test.js dist/test/response-delivery.test.js`：build 通過，**30/30 通過**，exit 0，duration_ms 10869；包含中文字內折行、tool marker echo 拒絕與 Discord fallback 去重／缺失標示。
+- `npm run typecheck`、`npm run lint`：exit 0，lint 為 52 TypeScript files。
+- 最終 `dist/src/cli-adapter.js` 重播 `/tmp/claude-bridge-single-output.txt`，斷言新回答為 `CLAUDE_SINGLE_OK`、相同 baseline 為空：exit 0，`BUILT_LIVE_CAPTURE_REPLAY_OK`。不是再次送 prompt，也沒有重送舊 Discord 訊息。
+- 本輪修改 TypeScript 與 Markdown 的 Prettier check、`git diff --check` 通過；文件連結人工核對，沒有提交 private config／token／raw runtime snapshot。
+- 完整套件只有上段 **217/219** 的結果（中文字內折行最終修正前 build）；最終版沒有再次重跑完整 suite，不把 30/30 當完整 gate 通過。ISSUE-007／021 維持待調查，本輪未修。
+
+已驗證範圍：真實 Herdr integration 的 session 身分、一次無工具的 marker
+短回答，以及另一次普通短回答的擷取回放。這不代表完整 Team／coding／
+handoff／failover、長回答、approval 或 Discord delivery 已驗收。
+執行中 bridge 未重啟／未確認載入新 build，未部署、未 commit／push。下一步
+在授權重啟後以新 prompt 驗收 Discord 模型選單／回覆、blocked 問答與完整
+Team 任務；保留圖片不支援與沒有 native Claude transcript reader 的限制。
