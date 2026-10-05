@@ -25,9 +25,9 @@
 
 | ISSUE-020 | Phase 1 Durable Task Engine、restart reconciliation 與 whole-team cancellation | 已修正、待驗收 | 2026-09-21 完整 113/114 通過；ISSUE-007 入口逾時，live 驗收仍待完成 |
 
-| ISSUE-021 | Phase 3 Session Handoff Runtime | 重新開啟／待調查 | 2026-10-02 完整套件與單獨重跑再次出現並行 verify/cancel ENOENT；未改 handoff，live 未驗收 |
+| ISSUE-021 | Phase 3 Session Handoff Runtime | 重新開啟／待調查 | 2026-10-05 完整套件 222/223，再現並行 verify/cancel ENOENT；未改 handoff，live 未驗收 |
 | ISSUE-025 | 本機 Git coding workflow 首版 | 已修正、待驗收 | 2026-10-02 重新開啟後已補 read-only 起迄指紋與 finding id；live 未驗收 |
-| ISSUE-026 | Claude 模型／終端擷取相容性；integration 安裝前缺 session | 已修正、待驗收 | integration 後短互動及最終 30/30 回歸通過；重啟後驗收 Discord／Team／blocked |
+| ISSUE-026 | Claude 模型／終端擷取與附圖相容性；完成後持續滾動 | 重新開啟／待調查 | 附圖修正待 Discord 驗收；idle 30 秒收尾已改，滾動根因未確認；2026-10-05 targeted 37/37 |
 
 | ISSUE-022 | Phase 4 Quota / Failover Manager | 已修正、待驗收 | 2026-09-21 新增 28 項通過；完整 181/184，ISSUE-007／021 待調查，live 待驗收 |
 
@@ -749,7 +749,7 @@ ISSUE-012 保持「已修正、待驗收」，ISSUE-007 保持「重新開啟／
 
 ## ISSUE-021：Phase 3 Session Handoff Runtime
 
-更新日期：2026-09-21。狀態：重新開啟／待調查。合併驗證出現並行 verify/cancel 測試 ENOENT，單獨重跑仍失敗；詳見末尾。以下保留 2026-09-20 的實作與受限環境驗證歷史。
+更新日期：2026-10-05。狀態：重新開啟／待調查。合併驗證出現並行 verify/cancel 測試 ENOENT，單獨重跑仍失敗；2026-10-05 本輪完整套件再現，詳見本節最新紀錄。以下保留 2026-09-20 的實作與受限環境驗證歷史。
 
 症狀／根因：既有 handoff 僅傳送有界 terminal output，session-handoff skill 尚未成為 runtime；缺乏持久 checkpoint、repository acceptance、ownership transfer 與 receiving receipt。原分期（2026-09-19）Phase 3 為 Session Handoff Runtime，Phase 4 為 Quota / Failover Manager。
 
@@ -799,6 +799,10 @@ contexts 測試均於 fixture 清理發生 ENOTEMPTY（187 項中 2 fail）；
 環境：2026-10-02、Linux、Node.js v22.23.3、本機 checkout。`npm test`（`npm run build && node --test dist/test/*.test.js`）建置通過後 **206 項：205 通過、1 失敗、0 cancelled、0 skipped**，exit 1，duration_ms 224941。唯一失敗是 not ok 145：`concurrent handoff verification and cancellation cannot race in-flight dispatch`（`dist/test/session-handoff.test.js:265`，原始碼 `test/session-handoff.test.ts`），failureType `unhandledRejection`，`HandoffStore.write` 開啟 `/tmp/handoff-runtime-liGhJS/state/handoff-2b7c1f17-5210-4750-a729-d566f097f91b.json.8627767a-6279-41e8-b607-f89db75ecdc7.tmp` 時 ENOENT。呼叫鏈仍是 `SessionHandoffRuntime.block` → `HandoffStore.update/write`。
 
 單獨重跑 `node --test --test-name-pattern 'concurrent handoff verification' dist/test/session-handoff.test.js`：**0/1 通過**，exit 1，duration_ms 15608，同樣 ENOENT，路徑改為 `/tmp/handoff-runtime-36BhUQ/state/handoff-40ac39ff-50dd-490a-9436-d77c88ef404b.json.17a7e832-d8b3-4711-9e59-50bd5d9e8af1.tmp`。與 2026-09-21 合併紀錄的症狀相同。精確根因仍未確認，本輪不修、不把完整套件記為通過。
+
+### 2026-10-05 提交前完整套件再次重現
+
+Linux、本機 checkout：`npm test`（log `/tmp/lazy-commit-npm-test.log`）build 通過，223 項：222 通過、1 失敗，exit 1，duration_ms 241919.872525。失敗為 `concurrent handoff verification and cancellation cannot race in-flight dispatch`，`HandoffStore.write` 開啟臨時 journal 發生 unhandledRejection／ENOENT，符合既有症狀；精確 async／cleanup 根因仍未確認。本輪只整理 Claude／串流提交與文件，未改 handoff。下一步調查競態並重跑 handoff seam／完整套件，live 驗收未完成。
 
 ## ISSUE-022：Phase 4 Quota / Failover Manager
 
@@ -1117,6 +1121,8 @@ allowlist 拒絕；2026-10-05 已將 claude 加入 allowlist（使用者回報 D
 
 2026-10-05 第二次實測（使用者 Discord 截圖）：圖片已送達並由 Claude 處理（pane 顯示完成並回覆），但 Discord 顯示「finished — capture incomplete／Bridge could not capture its final response」。根因（由截圖與程式碼確認）：Claude 輸入框回顯為 `[Image #3] [Image #4]1.png …` 且省略路徑行，`claudePromptTail` 與送出的 prompt 比對失敗，回覆被判為不屬於本輪而丟棄。修正：比對時兩側皆去除 `[Image #n]` 與附圖路徑行（`src/cli-adapter.ts`）；新增回歸測試，修正前失敗、修正後通過。驗證：`npm test`（2026-10-05，223 項）222 通過、1 失敗（既有 handoff ENOENT 競態）；lint 通過。未驗證：重啟後的 Discord 端到端回覆擷取；該次已遺失的回覆無法補送。
 
+2026-10-05 待調查（使用者回報）：Claude pane「完成後仍持續滾動」。調查時（w1:p1E，Claude idle）以 `herdr pane get`／`pane list` 連續取樣 3–4 次、每次間隔 3 秒：revision 固定 854、scroll offset 為 0、畫面靜止；同時只有本工作階段 pane w2:p8（working 中）的 revision 在增加。bridge（pid 61404，15:22 啟動）未持續讀取該 pane。因此目前無法重現，根因未確認；可能是 Herdr／終端畫面重繪，或僅發生於處理期間的歷史輪詢（`recent_unwrapped` 2000 行），尚未驗證。使用者補充：Discord 回覆完成後 pane 仍持續滾動，使用者送出新訊息後才停止；預期 bridge 回應後應停止。附圖資料夾 `message-XroCNb` 建在本 repo 下，表示該訊息送進了本工作階段 pane（w2:p8）。推測根因（未直接驗證）：`streamAgent` 只在「idle／done 且連續 4 次擷取內容不變」時收尾，若畫面持續重繪或擷取結果一直變動就會每 1.2 秒讀 2000 行直到 24 小時上限。修正（原始碼）：Agent 進入 idle／done 連續 30 秒即強制收尾（`IDLE_FORCE_COMPLETE_MS`，`src/main.ts`）。驗證：`tsc`、lint 通過；`npm test`（2026-10-05，223 項）221 通過、2 失敗（handoff ENOENT 競態，以及重複實例測試一次不穩定、單獨重跑通過）。未驗證：實機重現與重啟後行為；狀態維持待調查，不視為已解決。
+
 驗證：最終 build／targeted／lint／typecheck 已完成，詳細命令與結果見下段；完整套件仍有既有失敗。
 原始碼已修改，執行中 bridge 未重啟／未確認載入新版，未部署、未 commit／push。
 新測試不算 Discord／Herdr／Claude 回覆端到端驗收；舊訊息與舊任務不補送。
@@ -1195,3 +1201,13 @@ handoff／failover、長回答、approval 或 Discord delivery 已驗收。
 執行中 bridge 未重啟／未確認載入新 build，未部署、未 commit／push。下一步
 在授權重啟後以新 prompt 驗收 Discord 模型選單／回覆、blocked 問答與完整
 Team 任務；圖片本機路徑交付已加入 allowlist，仍待 Discord 端到端驗收；沒有 native Claude transcript reader。
+
+### 2026-10-05 lazy-commit 提交前驗證
+
+本次整理為附圖交付／卡住輸入、附圖回覆擷取、idle 輪詢上限三個原子提交，同步 SPEC、README 與 CONTEXT。完成後持續滾動子問題保持待調查；圖片相關原始碼已修正、待 Discord 驗收。
+
+- `npm test`：build 通過，223 項：222 通過、1 失敗，exit 1，duration_ms 241919.872525；唯一失敗為 ISSUE-021 handoff ENOENT，已更新該 issue。log：`/tmp/lazy-commit-npm-test.log`。
+- `node --test dist/test/claude-image-submit.test.js dist/test/cli-adapter.test.js dist/test/response-stream.test.js dist/test/response-delivery.test.js dist/test/herdr.test.js`：37/37 通過，exit 0，duration_ms 4457.281853。log：`/tmp/lazy-commit-targeted.log`。
+- `npm run lint`（53 TypeScript files）、`npm run typecheck`、修改 TypeScript 的 Prettier check 與 `git diff --check` 通過；文件核對差異與本機連結。
+
+既有 response-stream 測試通過不等同於新增 idle 30 秒上限有專用回歸測試；該上限的實機行為仍待驗證。沒有重啟、部署、push 或再次操作 Claude／Herdr pane；執行中 bridge 是否載入新版未確認，舊訊息與舊任務不補送。ISSUE-026 整體因滾動子問題保留重新開啟／待調查，其他修正維持待驗收。

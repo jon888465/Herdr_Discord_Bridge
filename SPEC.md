@@ -257,9 +257,10 @@ idle 後繼續嘗試 `recent_unwrapped`。Visible 仍須通過 prompt scope 擷�
 不是完整 transcript，不能據此宣稱已取得完整 final。
 
 Terminal fallback 保留最長的、限定於 prompt scope 的已觀察摘錄；不會宣稱此
-摘錄是完整 final 或累積 transcript。只有在 idle/done 狀態連續四次未變且成功的
-read，再持續 settlement 十秒，才允許 fallback 完成。blocked、unknown、輸出
-變動或 read failure 都會重設 settlement。Structured completion 可在沒有成功
+摘錄是完整 final 或累積 transcript。一般在 idle/done 狀態連續四次未變且成功的
+read，再持續 settlement 十秒，允許 fallback 完成。另於 idle/done 連續 30 秒後
+強制收尾，避免畫面重繪造成持續輪詢；缺少擷取內容仍標示 capture incomplete。
+blocked、unknown、輸出變動或 read failure 都會重設 settlement。Structured completion 可在沒有成功
 terminal read 時完成。Agent session 被替換後停止觀察；identity 比較 terminal、pane、workspace、agent kind，以及 session 的 kind/value，不以 source、欄位順序或其他 metadata 判斷替換。缺少或無法辨識的 session 不自動認定為新的相同 session。
 2026-10-02：Discord 單 Agent 回覆觀察若 Agent 暫時未列出，或已知 session 的 metadata 暫時缺失／無效，先顯示等待核對，最多等待 30 秒並在下一輪成功查詢判定逾時。等待期間不讀 terminal／transcript、不送 final，並重設 settlement；原完整 identity 回來才續接。明確 session ID 或 pane／terminal／workspace／agent kind 改變仍立即停止。初始未知 session 不因稍後出現 ID 就自動接納為原 session。此邏輯不重送 prompt，也不變更 thread mapping。
 
@@ -539,5 +540,6 @@ Console／Team turn receiver 的真實短回答已驗證，見 ISSUE-026。缺 m
 時仍無法可靠辨識同 terminal 內的 restart；Coding reviewer、session handoff／
 failover 的已知 session gate 不放寬，也不猜最近 `.claude` 檔。這些進階流程、
 blocked 問答、長回答與實際 Discord delivery 尚未驗收，bridge 未重啟。
+Discord 回覆串流在 Agent 進入 idle／done 連續 30 秒後必須強制收尾，不得無止境輪詢 pane（ISSUE-026，待實機驗收）。
 Claude 會把貼上的圖片路徑轉成 [Image #n] 附件並可能吞掉 Enter，bridge 會偵測輸入框殘留並補送 Enter（ISSUE-026）。
 Claude 圖片交付已加入本機路徑交付 allowlist（2026-10-05，原始碼已改、待實際 Discord 驗收）；fixture 證據與本次 CLI 短回答證據分別記錄。

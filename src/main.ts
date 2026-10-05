@@ -1948,6 +1948,8 @@ function effectiveTarget(
   return routing.workspaceActiveTarget(mapping.workspaceId) || mapping;
 }
 
+const IDLE_FORCE_COMPLETE_MS = 30000;
+
 export async function streamAgent(
   initial: AgentRecord,
   progress: import("discord.js").Message,
@@ -1963,6 +1965,7 @@ export async function streamAgent(
   let lastEdit = started - PROGRESS_UPDATE_MS;
   let collectingSince = 0;
   let identityMissingSince: number | undefined;
+  let idleSince = 0;
   const settlement = new Settlement();
   const edit = async (content: string): Promise<boolean> => {
     try {
@@ -2079,6 +2082,10 @@ export async function streamAgent(
       console.error(`Terminal capture failed: ${safeError(error)}`);
     }
     const settled = settlement.observe(current.agent_status, readOk, changed);
+    // 畫面持續重繪（changed 一直為 true）時仍須收尾，避免 bridge 無止境輪詢 pane。
+    if (["idle", "done"].includes(current.agent_status))
+      idleSince ||= Date.now();
+    else idleSince = 0;
     if (!settled) collectingSince = 0;
     else if (!collectingSince) collectingSince = Date.now();
     const status =
@@ -2095,7 +2102,8 @@ export async function streamAgent(
     }
     const complete =
       transcript?.turn.completed ||
-      (settled && Date.now() - collectingSince >= 10000);
+      (settled && Date.now() - collectingSince >= 10000) ||
+      (idleSince > 0 && Date.now() - idleSince >= IDLE_FORCE_COMPLETE_MS);
     if (complete && current.agent_status !== "blocked") {
       const elapsed = formatElapsed(Date.now() - started);
       const final = transcript?.turn.completed ? transcript.turn.final : "";
