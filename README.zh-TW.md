@@ -264,6 +264,6 @@ Team 多 Agent 問題使用 `team questions <task-id>` 查詢、`team reply <tas
 
 Discord 回覆擷取遇到原 Agent 或已知 session 資料暫時消失時，會等待最多 30 秒重新核對；確認原 identity 後才續接，明確 session 更換仍停止。沿用 Discord 舊 thread 只會路由到 live pane，不會還原舊 CLI 對話。實際驗收仍待完成（ISSUE-003／008）。
 
-Claude 圖片交付仍不支援。Herdr 未回報 Claude session identity 時，coding reviewer、
+Claude 圖片交付已改為本機路徑交付（2026-10-05，待 Discord 實機驗收）。Herdr 未回報 Claude session identity 時，coding reviewer、
 session handoff／failover 保持已知 session 的要求；不猜測最近歷史檔。Claude
 實際 Discord 回覆仍待驗收，詳見 [ISSUE-026](docs/known-issues.md)。

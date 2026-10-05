@@ -407,6 +407,33 @@ export class HerdrClient {
     return result.agent;
   }
 
+  /**
+   * Claude Code 會把貼上的圖片路徑轉成 [Image #n] 附件，並吞掉 agent.prompt 的 Enter，
+   * 文字停在輸入框。偵測到輸入框仍有附件標記且 Agent 未工作時補送一次 Enter。
+   */
+  async submitStuckImagePrompt(
+    target: string,
+    attempts = 15,
+    intervalMs = 1000,
+  ): Promise<boolean> {
+    for (let i = 0; i < attempts; i++) {
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      const text = await this.readAgent(target, "visible", 60).catch(() => "");
+      if (!hasPendingImageInput(text)) continue;
+      const agent = (await this.listAgents().catch(() => [])).find(
+        (item) => item.pane_id === target,
+      );
+      if (agent?.agent_status === "working") return false;
+      await this.request(
+        "agent.send_keys",
+        { target, keys: ["enter"] },
+        { retries: 0 },
+      );
+      return true;
+    }
+    return false;
+  }
+
   async cancelAgent(target: string): Promise<void> {
     // A lost acknowledgement must not repeat Ctrl-C against later work.
     await this.request(
@@ -448,4 +475,18 @@ function isTransientSocketError(error: unknown): boolean {
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+/** 輸入框（最後兩條分隔線之間）仍含 Claude 的 [Image #n] 附件標記。 */
+export function hasPendingImageInput(screen: string): boolean {
+  const lines = screen.split("\n");
+  const rules = lines
+    .map((line, index) => (/^\s*─{10,}\s*$/.test(line) ? index : -1))
+    .filter((index) => index >= 0);
+  if (rules.length < 2) return false;
+  const input = lines.slice(
+    rules[rules.length - 2] + 1,
+    rules[rules.length - 1],
+  );
+  return input.some((line) => /\[Image #\d+\]/.test(line));
 }

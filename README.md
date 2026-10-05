@@ -292,7 +292,7 @@ and changed terminal formats can leave capture incomplete. See ISSUE-023 in
 Discord response capture waits up to 30 seconds if the original Agent or its known session metadata temporarily disappears. It resumes only after the original identity is verified; explicit session replacements stop capture. Reusing a Discord thread routes to a live pane and does not restore its old CLI conversation. Live acceptance remains pending (ISSUE-003/008).
 
 Claude terminal capture handles multiline prompt echoes and message gutters; it is
-an observed excerpt, not a native transcript. Claude image delivery is not supported.
+an observed excerpt, not a native transcript. Claude image delivery now uses local file paths (2026-10-05, pending live Discord acceptance).
 If Herdr omits Claude session identity, coding review and session handoff/failover
 keep their known-session requirements. Live acceptance is pending in
 [ISSUE-026](docs/known-issues.md); build and fixture tests do not establish Discord acceptance.

@@ -132,7 +132,7 @@ acceptance. Thread routing stores pane mappings, not old session IDs.
 
 `src/cli-adapter.ts` now handles Claude model aliases and terminal message gutters
 for Discord excerpts and Console/Team nonce frames. It has no Claude native
-transcript reader or image delivery. Claude Code 2.1.289 lacked session metadata before integration installation;
+transcript reader. Claude image delivery uses local file paths; Discord live acceptance remains pending. Claude Code 2.1.289 lacked session metadata before integration installation;
 after the user installed it and restarted Claude, Herdr reported a session ID.
 Live short-answer prompt and shared turn capture were tested; coding reviewer
 and handoff/failover identity gates stay unchanged.

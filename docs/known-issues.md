@@ -1108,8 +1108,12 @@ idle；畫面顯示 v2.1.289、`❯ /model`、`⎿ Set model`、兩欄 continuat
 底部輸入區。該階段未擷取真實 assistant answer，當時回答 fixture 是合成的；安裝後 live 證據見下段。
 當時 Herdr 未回報 `agent_session`；使用者後來指出 integration 尚未安裝，安裝後 metadata 已恢復（因果由安裝前後觀察支持，未另稽核 hook 安裝細節）。Bridge 不猜 `.claude`
 最近 session，不能承諾 coding reviewer、handoff／failover 接受此 pane；
-同 terminal 的無 metadata restart 不能可靠辨識。Claude 圖片交付仍被既有
-allowlist 拒絕；本輪不擴充圖片支援或 native transcript adapter。
+同 terminal 的無 metadata restart 不能可靠辨識。Claude 圖片交付原被既有
+allowlist 拒絕；2026-10-05 已將 claude 加入 allowlist（使用者回報 Discord 上傳圖片顯示「此 Agent 尚未支援本機圖片交付」），待實機驗收 Claude 是否能讀取附圖；native transcript adapter 仍未擴充。
+
+2026-10-05 驗證：`npm test`（build＋220 項）220/220 通過；另以 `claude -p` 在暫存 cwd 的 `.herdr-discord-bridge/attachments/message-x/1.png`（含紅方塊、藍橢圓與文字 K7Q-93 的合成 PNG）使用與 bridge 相同的附圖提示，Claude 正確描述顏色、形狀並讀出 K7Q-93，證明 Claude 能真實辨識本機路徑圖片。未驗證：Discord 實際上傳經執行中 bridge 到 Claude pane 的端到端流程（bridge 未重啟）。
+
+2026-10-05 重新開啟（使用者實測）：Discord 送圖後 bridge 已把文字轉到 Claude pane（w1:p1E），但訊息停在輸入框、未送出，Claude 無動作。根因（已重現）：Claude Code 把貼上的本機圖片路徑轉成 `[Image #n]` 附件，`agent.prompt` 的 Enter 偶爾被吞掉（測試 pane w2:p9 首次貼上同樣重現；之後 4 次未重現，屬間歇性，觸發條件未確認）。修正：`HerdrClient.submitStuckImagePrompt` 於 Claude 附圖 dispatch 時背景輪詢最多 15 秒，若輸入框（最後兩條分隔線之間）仍有 `[Image #n]` 且 Agent 未 working，補送一次 Enter（`hasPendingImageInput` 有單元測試）。驗證：對實際卡住的 w1:p1E 執行該方法，回傳 true、訊息送出並開始處理；`tsc`／新增 2 項單元測試通過。未驗證：重啟後的 bridge 端到端 Discord 流程；完整 `npm test`（2026-10-05，222 項）220 通過、2 失敗，失敗為既有 handoff ENOENT 競態（session-handoff.test，已列於本檔；同日稍早一次為 220/220），與本修正無關；lint 通過。
 
 驗證：最終 build／targeted／lint／typecheck 已完成，詳細命令與結果見下段；完整套件仍有既有失敗。
 原始碼已修改，執行中 bridge 未重啟／未確認載入新版，未部署、未 commit／push。
@@ -1188,4 +1192,4 @@ Discord seam 新測試；`npm run typecheck`、`npm run lint`（52 TS files）�
 handoff／failover、長回答、approval 或 Discord delivery 已驗收。
 執行中 bridge 未重啟／未確認載入新 build，未部署、未 commit／push。下一步
 在授權重啟後以新 prompt 驗收 Discord 模型選單／回覆、blocked 問答與完整
-Team 任務；保留圖片不支援與沒有 native Claude transcript reader 的限制。
+Team 任務；圖片本機路徑交付已加入 allowlist，仍待 Discord 端到端驗收；沒有 native Claude transcript reader。

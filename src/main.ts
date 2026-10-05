@@ -1710,7 +1710,7 @@ async function dispatchPrompt(
     const attachments = [...context.message.attachments.values()];
     if (attachments.length) {
       if (
-        !["codex", "agy", "antigravity"].some((kind) =>
+        !["codex", "claude", "agy", "antigravity"].some((kind) =>
           agent.agent?.toLowerCase().includes(kind),
         )
       )
@@ -1728,6 +1728,12 @@ async function dispatchPrompt(
         paths.map((path) => JSON.stringify(path)).join("\n") +
         "\n請使用圖片檢視工具讀取這些檔案；若無法讀取，請明確告知，不要假設已看見圖片。";
     }
+    if (attachments.length && agent.agent?.toLowerCase().includes("claude"))
+      void runtime.herdr
+        .submitStuckImagePrompt(agent.pane_id)
+        .catch((error) =>
+          console.error(`Claude image submit failed: ${safeError(error)}`),
+        );
     const progress = await runtime.discord.reply(
       context.message,
       acknowledgement,

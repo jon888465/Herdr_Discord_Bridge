@@ -357,7 +357,7 @@ PNG/JPEG/WebP attachment，每個最多 5 MiB；下載來源限 Discord HTTPS CD
 格式與二進位簽章不一致，但在支援格式範圍內（例如宣告 image/png 但實質為 JPEG），
 Bridge 會自動依實際二進位格式正規化副檔名（如儲存為 `.jpg`），避免下游解碼器崩潰；
 若二進位內容非受支援圖片格式，則拒絕並清除暫存。產生的本機路徑位於 target Agent cwd 下的
-`.herdr-discord-bridge/attachments`，並以明確指示要求 Codex/agy 使用 image-viewing tool。
+`.herdr-discord-bridge/attachments`，並以明確指示要求 Codex/agy 使用 image-viewing tool（Codex／Claude／agy 皆在 allowlist；Claude 以 Read 工具讀取路徑，尚待實機驗收）。
 這是本機檔案傳遞，不是原生 multimodal input，且要求 Agent 可存取相同 filesystem。
 不支援的 agent/format 與下載失敗會回報。成功檔案會保留（目前尚無自動 retention cleanup）；
 失敗批次只會刪除自己新建的 temporary directory。準備期間會保留 terminal，避免並行
@@ -537,4 +537,5 @@ Console／Team turn receiver 的真實短回答已驗證，見 ISSUE-026。缺 m
 時仍無法可靠辨識同 terminal 內的 restart；Coding reviewer、session handoff／
 failover 的已知 session gate 不放寬，也不猜最近 `.claude` 檔。這些進階流程、
 blocked 問答、長回答與實際 Discord delivery 尚未驗收，bridge 未重啟。
-Claude 圖片交付仍不支援；fixture 證據與本次 CLI 短回答證據分別記錄。
+Claude 會把貼上的圖片路徑轉成 [Image #n] 附件並可能吞掉 Enter，bridge 會偵測輸入框殘留並補送 Enter（ISSUE-026）。
+Claude 圖片交付已加入本機路徑交付 allowlist（2026-10-05，原始碼已改、待實際 Discord 驗收）；fixture 證據與本次 CLI 短回答證據分別記錄。
