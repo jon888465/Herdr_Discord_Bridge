@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { createServer } from "node:net";
+import { unlinkSync } from "node:fs";
+import { connect, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -24,19 +25,53 @@ export async function acquireInstanceLock(
       : process.platform === "win32"
         ? `\\\\.\\pipe\\${name}`
         : join(socketDir, `${name}.sock`);
-  const server = createServer((socket) => socket.destroy());
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", (error: NodeJS.ErrnoException) => {
-      reject(
-        new Error(
-          error.code === "EADDRINUSE"
-            ? "Another bridge instance for this Discord bot is already running (or a local IPC lock remains). Stop the existing instance before starting another."
-            : `Cannot acquire bridge instance lock (${error.code || "unknown error"}).`,
-        ),
-      );
+  // A crashed bridge leaves its socket file behind; with nobody listening it
+  // is stale and safe to remove (a live instance still accepts connections).
+  const removeIfStale = () =>
+    new Promise<boolean>((resolve) => {
+      if (process.platform === "linux" || process.platform === "win32")
+        return resolve(false);
+      const probe = connect(address);
+      probe.once("connect", () => {
+        probe.destroy();
+        resolve(false);
+      });
+      probe.once("error", (error: NodeJS.ErrnoException) => {
+        if (error.code !== "ECONNREFUSED") return resolve(false);
+        try {
+          unlinkSync(address);
+          resolve(true);
+        } catch {
+          resolve(false);
+        }
+      });
     });
-    server.listen(address, resolve);
-  });
+  const listen = (): Promise<ReturnType<typeof createServer>> =>
+    new Promise((resolve, reject) => {
+      const candidate = createServer((socket) => socket.destroy());
+      candidate.once("error", reject);
+      candidate.listen(address, () => resolve(candidate));
+    });
+  let server: ReturnType<typeof createServer>;
+  try {
+    try {
+      server = await listen();
+    } catch (error) {
+      if (
+        (error as NodeJS.ErrnoException).code !== "EADDRINUSE" ||
+        !(await removeIfStale())
+      )
+        throw error;
+      server = await listen();
+    }
+  } catch (cause) {
+    const error = cause as NodeJS.ErrnoException;
+    throw new Error(
+      error.code === "EADDRINUSE"
+        ? "Another bridge instance for this Discord bot is already running (or a local IPC lock remains). Stop the existing instance before starting another."
+        : `Cannot acquire bridge instance lock (${error.code || "unknown error"}).`,
+    );
+  }
   server.unref();
   const cleanup = () => {
     server.close();
