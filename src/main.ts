@@ -2,6 +2,7 @@ import { acquireInstanceLock } from "./instance-lock.js";
 import { PROGRESS_UPDATE_MS, formatElapsed } from "./progress-time.js";
 import { prepareImages } from "./attachments.js";
 import { join } from "node:path";
+import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { splitFinalMarkdown } from "./final-format.js";
 import {
@@ -1961,6 +1962,8 @@ export async function streamAgent(
   const started = Date.now();
   let lastOutput = "";
   let longestOutput = "";
+  let lastRaw = "";
+  let lastReadError = "";
   let lastCard = "";
   let lastEdit = started - PROGRESS_UPDATE_MS;
   let collectingSince = 0;
@@ -2068,6 +2071,8 @@ export async function streamAgent(
           runtime.config.outputLines,
         );
       }
+      lastRaw = output;
+      lastReadError = "";
       const latest = latestAgentResponse(
         current.agent,
         prompt,
@@ -2079,6 +2084,7 @@ export async function streamAgent(
       lastOutput = latest;
       if (latest.length > longestOutput.length) longestOutput = latest;
     } catch (error) {
+      lastReadError = safeError(error);
       console.error(`Terminal capture failed: ${safeError(error)}`);
     }
     const settled = settlement.observe(current.agent_status, readOk, changed);
@@ -2107,6 +2113,18 @@ export async function streamAgent(
     if (complete && current.agent_status !== "blocked") {
       const elapsed = formatElapsed(Date.now() - started);
       const final = transcript?.turn.completed ? transcript.turn.final : "";
+      if (!final)
+        await writeCaptureDiagnostic({
+          current,
+          prompt,
+          started,
+          lastRaw,
+          lastOutput,
+          longestOutput,
+          lastReadError,
+          hasTranscript: Boolean(transcript),
+          transcriptCompleted: Boolean(transcript?.turn.completed),
+        });
       const body =
         final ||
         (longestOutput
@@ -2371,4 +2389,52 @@ function installShutdown(stop: () => void, routing: RoutingStore): void {
 
 function safeError(error: unknown): string {
   return error instanceof Error ? error.message.slice(0, 300) : "unknown error";
+}
+
+/** Keep the raw screen behind a capture failure so the parser can be fixed from evidence. */
+async function writeCaptureDiagnostic(info: {
+  current: AgentRecord;
+  prompt: string;
+  started: number;
+  lastRaw: string;
+  lastOutput: string;
+  longestOutput: string;
+  lastReadError: string;
+  hasTranscript: boolean;
+  transcriptCompleted: boolean;
+}): Promise<void> {
+  try {
+    const dir = join(stateDirectory(), "capture-diagnostics");
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+    const name = `${new Date().toISOString().replace(/[:.]/g, "-")}-${info.current.pane_id.replace(/[^\w-]/g, "_")}.json`;
+    await writeFile(
+      join(dir, name),
+      JSON.stringify(
+        {
+          pane_id: info.current.pane_id,
+          agent: info.current.agent,
+          agent_status: info.current.agent_status,
+          agent_session: info.current.agent_session,
+          cwd: info.current.cwd,
+          elapsed_ms: Date.now() - info.started,
+          prompt: info.prompt.slice(0, 2000),
+          has_transcript: info.hasTranscript,
+          transcript_completed: info.transcriptCompleted,
+          last_read_error: info.lastReadError,
+          extracted_last: info.lastOutput.slice(-2000),
+          extracted_longest_length: info.longestOutput.length,
+          raw_screen_tail: info.lastRaw.slice(-8000),
+        },
+        null,
+        2,
+      ),
+      { mode: 0o600 },
+    );
+    const files = (await readdir(dir)).sort();
+    for (const old of files.slice(0, -20))
+      await rm(join(dir, old), { force: true });
+    console.error(`Capture diagnostic saved: ${join(dir, name)}`);
+  } catch (error) {
+    console.error(`Capture diagnostic failed: ${safeError(error)}`);
+  }
 }
