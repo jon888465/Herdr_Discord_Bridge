@@ -12,7 +12,17 @@ if [[ $# -gt 1 ]]; then
 fi
 case "$mode" in
   "")
-    echo "Starting existing installed plugin..."
+    # A plugin linked from another checkout would keep running (and logging
+    # in) that checkout; relink to this directory when the paths differ.
+    linked_path="$(herdr plugin list 2>/dev/null | grep -F -e "$plugin_id " | sed -n 's/.*\[local:\(.*\)\].*/\1/p' | head -n 1 || true)"
+    if [[ -n "$linked_path" && "$(cd -- "$linked_path" 2>/dev/null && pwd -P)" != "$(pwd -P)" ]]; then
+      echo "Plugin is linked to $linked_path; relinking to $project_dir..."
+      mode="-r"
+      [[ -d node_modules ]] || npm ci
+      npm run build
+    else
+      echo "Starting existing installed plugin..."
+    fi
     ;;
   -r)
     echo "Installing local dependencies..."
