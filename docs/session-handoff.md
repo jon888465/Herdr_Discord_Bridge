@@ -6,7 +6,7 @@
 
 2026-10-01：skill 的來源 adapter 補上 Grok Build（`grok` CLI）。接手優先讀 `grok export <exact-session-id>` 寫出的本機 Markdown；無法匯出時才過濾 `updates.jsonl` 的 user／assistant／tool 更新，排除 thought／reasoning。`grok usage` 與 context window 不是帳戶 quota。這仍是 Agent 讀檔流程。Bridge runtime 不自動解碼 Grok session 檔，仍用 public-export-v1 或 checkpoint。Live 接手未做，見 [ISSUE-017](known-issues.md)。
 
-2026-09-18 提供 [session-handoff skill](../skills/session-handoff/SKILL.md)、[adapter 指引](../skills/session-handoff/references/adapters.md)與 [HANDOFF.md 範本](../skills/session-handoff/assets/HANDOFF.md)。它是 Agent 執行的 Markdown 流程，不是背景服務或 bridge runtime 新功能。真實跨 CLI 驗收待完成，見 [ISSUE-017](known-issues.md)。
+2026-09-18 提供 [handoff-session skill](../skills/handoff-session/SKILL.md)、[adapter 指引](../skills/handoff-session/references/adapters.md)與 [HANDOFF.md 範本](../skills/handoff-session/assets/HANDOFF.md)。它是 Agent 執行的 Markdown 流程，不是背景服務或 bridge runtime 新功能。真實跨 CLI 驗收待完成，見 [ISSUE-017](known-issues.md)。
 
 ## 與現有 bridge handoff 的差異
 
@@ -34,7 +34,7 @@ AgentPool 的 `same-session` 是重用既有 CLI；新 session 的任務／Worke
 來源額度快用完：
 
 ```text
-請讀取 skills/session-handoff/SKILL.md，為目前任務準備交接。
+請讀取 skills/handoff-session/SKILL.md，為目前任務準備交接。
 保存 checkpoint、原生 session ID、工作樹狀態與下一步；完成後停止本次任務的修改，
 告訴我交接檔的絕對路徑，讓另一個 CLI 接手。
 ```
@@ -44,7 +44,7 @@ AgentPool 的 `same-session` 是重用既有 CLI；新 session 的任務／Worke
 接手方：
 
 ```text
-請讀取 <skill 絕對路徑>/SKILL.md，使用 session-handoff 接手
+請讀取 <skill 絕對路徑>/SKILL.md，使用 handoff-session 接手
 Claude Code 名為 <session-name> 的 session，workspace 是 <絕對路徑>。
 交接檔在 <HANDOFF.md 絕對路徑>。優先讀取原生歷史，核對檔案與 writer 狀態後繼續。
 ```
@@ -55,14 +55,14 @@ Claude Code 名為 <session-name> 的 session，workspace 是 <絕對路徑>。
 
 ## 手動安裝與相容性
 
-整個 `skills/session-handoff/` 可單獨複製，附件皆在目錄內。依使用者指定位置，稍後可自行執行；目標已存在時先比較，不直接覆蓋：
+整個 `skills/handoff-session/` 可單獨複製，附件皆在目錄內。依使用者指定位置，稍後可自行執行；目標已存在時先比較，不直接覆蓋：
 
 ```sh
 mkdir -p ~/.agent/skills
-cp -R -n skills/session-handoff ~/.agent/skills/
+cp -R -n skills/handoff-session ~/.agent/skills/
 ```
 
-本次沒有執行安裝。`~/.agent/skills` 是使用者選定的保存位置，**不是所有 CLI 保證自動搜尋的共同路徑**。未自動發現時，直接要求讀取 `~/.agent/skills/session-handoff/SKILL.md`；前提是 Agent 有讀檔權限。自動發現需依 CLI 版本配置，不能將 `$session-handoff` 或 `/session-handoff` 視為通用語法。
+本次沒有執行安裝。`~/.agent/skills` 是使用者選定的保存位置，**不是所有 CLI 保證自動搜尋的共同路徑**。未自動發現時，直接要求讀取 `~/.agent/skills/handoff-session/SKILL.md`；前提是 Agent 有讀檔權限。自動發現需依 CLI 版本配置，不能將 `$session-handoff` 或 `/session-handoff` 視為通用語法。
 
 Claude Code、Codex、Copilot、OpenCode、Grok Build 的本機歷史／匯出方式與官方來源見 adapter 指引。AGY 能作來源與接手方，但 `--conversation` 只證明同 harness resume。本機 `agy --help` 未提供通用歷史 export 子命令；無可讀歷史介面時使用 checkpoint／可讀匯出。AGY 與 `gemini` CLI 分開處理，不能假設共用 history 格式。Grok 的 `grok export` 是公開 Markdown 摘要，不是完整 raw tool result，也不是 Bridge runtime adapter。
 

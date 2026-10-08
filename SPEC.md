@@ -432,7 +432,7 @@ Lead 仍由已選取的 live Agent 擔任。可不委派而直接完成工作；
 
 ## Session handoff skill（2026-09-18）
 
-`skills/session-handoff/` 是獨立可攜技能，不改變 Bridge 的 bounded handoff、routing、AgentPool 或 quota 行為。流程契約：
+`skills/handoff-session/` 是獨立可攜技能，不改變 Bridge 的 bounded handoff、routing、AgentPool 或 quota 行為。流程契約：
 
 - Prepare 在可見 quota 警告、使用者要求或明確門檻時保存 checkpoint；無訊號時 quota 記 unknown，不把 context 剩餘量當 account quota。
 - Takeover 以確切來源 identity／workspace 選擇可讀原生歷史，依序 fallback 到本機匯出、checkpoint＋專案證據、終端摘錄。來源已無額度時不要求它再次推論。
@@ -508,7 +508,7 @@ Discord preview／fallback 使用最新可辨識完整回答；與 dispatch base
 這不是 Grok structured transcript adapter；不還原一般內文軟折行、不讀 hidden reasoning。
 框線被截斷、格式版本改變、相同答案與 baseline 無法區分時，保守回報擷取缺失；
 終端已捲出的內容無法恢復。模型清單不在本 parser 範圍。跨 CLI 的 Grok session
-讀取由 [session-handoff skill](skills/session-handoff/SKILL.md) 描述；Bridge runtime
+讀取由 [handoff-session skill](skills/handoff-session/SKILL.md) 描述；Bridge runtime
 仍不自動解碼 Grok session 檔。驗證／部署狀態見 ISSUE-023。
 
 ## Claude terminal adapter（2026-10-05）

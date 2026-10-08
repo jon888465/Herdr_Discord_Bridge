@@ -20,7 +20,7 @@ Discord 加 `/herdr` 前綴。`checkpoint` 只保存資料，不呼叫來源模�
 
 `verify` 的 `confirm-source-stopped` 是操作者對來源與背景 writer 已停止的明確聲明。Bridge 另外確認整個 workspace 的 Agent 均 idle/done、無 Team／stream reservation，再保留該 workspace 的交接控制權。若原 Team Task 尚有 reservation，先依 `team status`／`team cancel` 解決；不修改 frozen roster、不在 active Assignment 中偷偷換 owner。
 
-目的地收到唯讀復原指令與 bundled session-handoff skill，回傳本次 marker 內的 JSON receipt，包括 checkpoint ID、HEAD、fingerprint、destination session ID、接受與否及第一個 next action。Bridge 另行核對实际 repository，不能只信任模型回覆。驗證通過仍由 source 持有邏輯 ownership；`accept` 再核對後持久移交 destination，更新此命令來源的 conversation route；`continue` 再核對一次後才派送工作。Console 的 workspace active routing 優先規則不變；接手以明確 handoff destination 為準，可用 `current` 檢查一般對話目標。
+目的地收到唯讀復原指令與 bundled handoff-session skill，回傳本次 marker 內的 JSON receipt，包括 checkpoint ID、HEAD、fingerprint、destination session ID、接受與否及第一個 next action。Bridge 另行核對实际 repository，不能只信任模型回覆。驗證通過仍由 source 持有邏輯 ownership；`accept` 再核對後持久移交 destination，更新此命令來源的 conversation route；`continue` 再核對一次後才派送工作。Console 的 workspace active routing 優先規則不變；接手以明確 handoff destination 為準，可用 `current` 檢查一般對話目標。
 
 `cancel` 釋放交接紀錄的 reservation，不送 Ctrl-C、不關 pane、不重送 prompt。執行中的 verify/continue 不能被另一個 cancel command 搶先釋放；操作完成或 timeout 後若 session 仍 active，需操作者在 Herdr 核對／停止，才能 cancel。舊 `handoff <from> <to> [instruction]` 保留為有界 terminal 摘錄功能，**不是**新 ownership protocol。
 
@@ -52,7 +52,7 @@ Registry 位於 state directory 的 `session-handoffs/<id>.json`；同步產生 
 | Claude、Copilot、OpenCode、AGY、Gemini | 明確 public-export-v1 或 checkpoint/artifact fallback                                                                                   | 未自動解碼各 CLI 原生 DB／私有格式，不呼叫來源模型或 export CLI                    |
 | 其他 CLI                               | 同一公開匯出契約或 checkpoint fallback                                                                                                  | 目的地需遵守現有 Bridge marker；版本相容待 live 驗收                               |
 
-AGY 與 Gemini 分開識別，沒有把 AGY 當成 Gemini CLI 的 history。Grok 的 `grok export` 與 `updates.jsonl` 只由 [session-handoff skill](../skills/session-handoff/SKILL.md) 在 Agent 側讀取；本 runtime 不自動解碼該格式，Grok 仍走 public-export-v1 或 checkpoint。缺失、歧義、不支援或過大的 Codex native history 會標示 partial fallback；不自行選最近一次對話。所有模式保留 exact source session identity；未知身份不可接手。
+AGY 與 Gemini 分開識別，沒有把 AGY 當成 Gemini CLI 的 history。Grok 的 `grok export` 與 `updates.jsonl` 只由 [handoff-session skill](../skills/handoff-session/SKILL.md) 在 Agent 側讀取；本 runtime 不自動解碼該格式，Grok 仍走 public-export-v1 或 checkpoint。缺失、歧義、不支援或過大的 Codex native history 會標示 partial fallback；不自行選最近一次對話。所有模式保留 exact source session identity；未知身份不可接手。
 
 需要匯入公開訊息時，在 task repository 內準備 UTF-8 JSON（最多 4 MiB）：
 

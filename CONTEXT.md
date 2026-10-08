@@ -82,7 +82,7 @@ instances; legacy processes without the lock still require explicit migration.
 
 ## Agent profiles and sessions
 
-- [Cross-CLI session handoff](docs/session-handoff.md): portable [skill](skills/session-handoff/SKILL.md), native-history-first recovery and quota checkpoints, including Grok Build via `grok export` or filtered `updates.jsonl`; comparison with bounded Bridge handoff. The standalone skill has no quota watcher and does not make the Bridge runtime decode Grok session files. Bridge Phase 4 uses explicit observations below. Live skill acceptance is tracked in ISSUE-017.
+- [Cross-CLI session handoff](docs/session-handoff.md): portable [skill](skills/handoff-session/SKILL.md), native-history-first recovery and quota checkpoints, including Grok Build via `grok export` or filtered `updates.jsonl`; comparison with bounded Bridge handoff. The standalone skill has no quota watcher and does not make the Bridge runtime decode Grok session files. Bridge Phase 4 uses explicit observations below. Live skill acceptance is tracked in ISSUE-017.
 
 - [Agent Pool and console separation](docs/agent-pool-console.md): 2026-09-18 implementation of per-workspace profile permissions, lazy persistent CLI startup, explicit existing-session binding, session continuity checks, dynamic Lead replanning, and console selection/inspection modes.
 - Profiles are definitions, sessions hold CLI context, panes host processes. Removing a profile from a Team does not stop its session.
@@ -109,7 +109,7 @@ instances; legacy processes without the lock still require explicit migration.
 `src/cli-adapter.ts` parses Grok 1.0.46 boxed and completed unboxed answers for Discord fallback and
 normalizes terminal text for the shared turn receiver's nonce markers. That parser
 is not a Grok transcript reader. Portable Grok session recovery lives in the
-session-handoff skill and does not change runtime decoding. [ISSUE-023](docs/known-issues.md)
+handoff-session skill and does not change runtime decoding. [ISSUE-023](docs/known-issues.md)
 tracks captured terminal evidence, regression checks and live acceptance.
 
 ## Current image/capture checkpoint

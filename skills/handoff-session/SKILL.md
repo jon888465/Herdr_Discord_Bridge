@@ -1,5 +1,5 @@
 ---
-name: session-handoff
+name: handoff-session
 description: Prepares quota-aware checkpoints and takes over a named coding-agent session across Claude Code, Codex CLI, GitHub Copilot CLI, Gemini Antigravity (agy), OpenCode, Grok Build (grok CLI), or another harness. Use when asked to hand off, 接手, 交接, continue another agent's session, or preserve progress before quota/rate/context limits. Prefers accessible native history and verifies workspace state before continuing.
 ---
 
@@ -52,7 +52,7 @@ Never silently substitute the most recent session.
    Report the absolute path and a copyable receiving prompt:
 
    ```text
-   Read <absolute-skill-directory>/SKILL.md and use session-handoff to take over
+   Read <absolute-skill-directory>/SKILL.md and use handoff-session to take over
    <source-harness> session <exact-id> in <workspace>. Read <HANDOFF.md-path>,
    recover accessible native history, verify current files, then continue.
    ```
