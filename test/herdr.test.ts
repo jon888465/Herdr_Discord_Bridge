@@ -149,3 +149,55 @@ test("approval falls back to official pane.send_input on newer blocked Herdr", a
   await new Promise<void>((resolve) => server.close(() => resolve()));
   fs.rmSync(directory, { recursive: true, force: true });
 });
+
+test("approval falls back when Herdr 0.9 rejects agent.send as an unknown variant", async () => {
+  const directory = fs.mkdtempSync(
+    path.join(os.tmpdir(), "herdr-unknown-variant-"),
+  );
+  const socketPath = path.join(directory, "herdr.sock");
+  const methods: string[] = [];
+  const server = net.createServer((socket) => {
+    let buffer = "";
+    socket.on("data", (chunk) => {
+      buffer += chunk.toString();
+      const newline = buffer.indexOf("\n");
+      if (newline < 0) return;
+      const request = JSON.parse(buffer.slice(0, newline)) as {
+        id: string;
+        method: string;
+      };
+      methods.push(request.method);
+      if (request.method === "agent.send") {
+        socket.write(
+          JSON.stringify({
+            id: request.id,
+            error: {
+              code: "invalid_request",
+              message:
+                "invalid request: unknown variant `agent.send`, expected one of `ping`",
+            },
+          }) + "\n",
+        );
+      } else if (request.method === "agent.prompt") {
+        socket.write(
+          JSON.stringify({
+            id: request.id,
+            error: { code: "agent_blocked", message: "blocked" },
+          }) + "\n",
+        );
+      } else {
+        socket.write(JSON.stringify({ id: request.id, result: {} }) + "\n");
+      }
+    });
+  });
+  await new Promise<void>((resolve, reject) =>
+    server.listen(socketPath, () => resolve()).once("error", reject),
+  );
+  await new HerdrClient(socketPath, 1000, 1).sendAgent(
+    "w1:p1",
+    "approval text",
+  );
+  assert.deepEqual(methods, ["agent.send", "agent.prompt", "pane.send_input"]);
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  fs.rmSync(directory, { recursive: true, force: true });
+});

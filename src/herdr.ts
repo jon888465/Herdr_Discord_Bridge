@@ -167,7 +167,7 @@ export class HerdrClient {
       );
       return normalizeArray<WorkspaceRecord>(result, "workspaces");
     } catch (error) {
-      if (!(error instanceof HerdrError) || !isMissingMethod(error.code))
+      if (!(error instanceof HerdrError) || !isMissingMethod(error))
         throw error;
       const result = await this.snapshot();
       return result.workspaces ?? [];
@@ -312,7 +312,7 @@ export class HerdrClient {
     try {
       await this.request("agent.prompt", { target, text }, { retries: 0 });
     } catch (error) {
-      if (!(error instanceof HerdrError) || !isMissingMethod(error.code))
+      if (!(error instanceof HerdrError) || !isMissingMethod(error))
         throw error;
       await this.request("agent.send", { target, text }, { retries: 0 });
     }
@@ -341,7 +341,7 @@ export class HerdrClient {
       );
       return result.agent;
     } catch (error) {
-      if (!(error instanceof HerdrError) || !isMissingMethod(error.code))
+      if (!(error instanceof HerdrError) || !isMissingMethod(error))
         throw error;
       await this.promptAgent(target, text);
       // 舊版 Herdr 沒有 prompt(wait)，才拆成發送後再等待。
@@ -362,7 +362,7 @@ export class HerdrClient {
     try {
       await this.request("agent.send", { target, text }, options);
     } catch (error) {
-      if (!(error instanceof HerdrError) || !isMissingMethod(error.code))
+      if (!(error instanceof HerdrError) || !isMissingMethod(error))
         throw error;
       try {
         await this.request("agent.prompt", { target, text }, options);
@@ -449,9 +449,13 @@ function normalizeArray<T>(result: Record<string, unknown>, key: string): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
 }
 
-function isMissingMethod(code: string): boolean {
-  return ["method_not_found", "unknown_method", "unsupported_method"].includes(
-    code,
+function isMissingMethod(error: HerdrError): boolean {
+  // Herdr 0.9 reports a removed method as invalid_request "unknown variant".
+  return (
+    ["method_not_found", "unknown_method", "unsupported_method"].includes(
+      error.code,
+    ) ||
+    (error.code === "invalid_request" && /unknown variant/.test(error.message))
   );
 }
 
