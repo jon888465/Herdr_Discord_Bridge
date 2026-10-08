@@ -391,7 +391,7 @@ for (const outcome of ["timeout", "replacement"] as const) {
 }
 
 for (const unchanged of [false, true]) {
-  test(`Claude Discord fallback ${unchanged ? "does not replay old answers" : "delivers a cleaned excerpt without claiming structured final"}`, async (t) => {
+  test(`Claude Discord fallback ${unchanged ? "does not replay old answers" : "delivers a settled answer as the final response"}`, async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
     const agent = {
       terminal_id: "claude-terminal",
@@ -435,11 +435,18 @@ for (const unchanged of [false, true]) {
     const output = sent.join("\n");
     assert.ok(!output.includes("old answer"));
     assert.ok(!output.includes("auto mode"));
-    assert.ok(!cards.some((card) => card.includes("final response delivered")));
-    if (unchanged) assert.match(output, /capture failure/);
-    else {
+    if (unchanged) {
+      assert.match(output, /capture failure/);
+      assert.ok(
+        !cards.some((card) => card.includes("final response delivered")),
+      );
+    } else {
       assert.match(output, /new answer/);
-      assert.match(output, /may include progress or be incomplete/);
+      assert.ok(!output.includes("Final response unavailable"));
+      assert.ok(!output.includes("may include progress or be incomplete"));
+      assert.ok(
+        cards.some((card) => card.includes("final response delivered")),
+      );
     }
   });
 }

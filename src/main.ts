@@ -2106,13 +2106,24 @@ export async function streamAgent(
       if (delivered) lastCard = card;
       lastEdit = Date.now();
     }
+    const settledComplete = settled && Date.now() - collectingSince >= 10000;
     const complete =
       transcript?.turn.completed ||
-      (settled && Date.now() - collectingSince >= 10000) ||
+      settledComplete ||
       (idleSince > 0 && Date.now() - idleSince >= IDLE_FORCE_COMPLETE_MS);
     if (complete && current.agent_status !== "blocked") {
       const elapsed = formatElapsed(Date.now() - started);
-      const final = transcript?.turn.completed ? transcript.turn.final : "";
+      // Claude has no transcript reader, but its screen parser keeps only the
+      // assistant's own messages; once the screen has settled, that text is the
+      // answer, not a progress excerpt.
+      const terminalFinal =
+        settledComplete &&
+        (current.agent || "").toLowerCase().includes("claude")
+          ? longestOutput
+          : "";
+      const final =
+        (transcript?.turn.completed ? transcript.turn.final : "") ||
+        terminalFinal;
       if (!final)
         await writeCaptureDiagnostic({
           current,
