@@ -142,17 +142,40 @@ function claudeResponseText(output: string): string {
   return body.join("\n").trim();
 }
 
+/**
+ * Claude's bottom input box (rule, "❯ draft", rule, status line) holds whatever
+ * the user has typed next. It is not a conversation turn, so drop it before
+ * looking for the echoed prompt.
+ */
+function stripClaudeInputBox(output: string): string {
+  const lines = stripAnsi(output).replace(/\r/g, "").split("\n");
+  const isRule = (line: string) => /^[─━]{8,}\s*$/.test(line);
+  let bottom = -1;
+  for (let i = lines.length - 1; i >= 0; i--)
+    if (isRule(lines[i]!)) {
+      bottom = i;
+      break;
+    }
+  if (bottom < 0) return output;
+  let top = -1;
+  for (let i = bottom - 1; i >= 0; i--)
+    if (isRule(lines[i]!)) {
+      top = i;
+      break;
+    }
+  // The live input box puts a no-break space after the prompt glyph.
+  if (top < 0 || !/^ ?[❯>](?:[  ]|$)/.test(lines[top + 1] ?? "")) return output;
+  return lines.slice(0, top).join("\n");
+}
+
 /** Only the latest nonempty user block can establish this prompt's scope. */
 function claudePromptTail(prompt: string, output: string): string | undefined {
   const lines = stripAnsi(output).replace(/\r/g, "").split("\n");
   let start = -1;
-  let echoed = "";
   let end = 0;
   for (let i = 0; i < lines.length; i++) {
-    const match = /^ ?[❯>] (.+)$/.exec(lines[i]!);
-    if (!match) continue;
+    if (!/^ ?[❯>] (.+)$/.test(lines[i]!)) continue;
     start = i;
-    echoed = match[1]!;
     end = i + 1;
     while (
       end < lines.length &&
@@ -160,7 +183,6 @@ function claudePromptTail(prompt: string, output: string): string | undefined {
     ) {
       // Tool output and the input status area are not multiline user text.
       if (/^\s*[⎿⏵]/.test(lines[end]!)) break;
-      echoed += "\n" + lines[end]!.slice(2);
       end++;
     }
     i = end - 1;
@@ -179,13 +201,37 @@ function claudePromptTail(prompt: string, output: string): string | undefined {
   // A terminal wrap may split a Chinese phrase or an English word without a
   // space. Only displayed row boundaries are optional whitespace; keep the
   // characters and spaces within each row intact.
-  const rows = echoed.split("\n").map(normalized).filter(Boolean);
-  const escaped = rows.map((row) => row.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const wanted = normalized(prompt);
+  // Indented lines after the echo may be a tool summary (e.g. "Ran 1 shell
+  // command") rather than user text, so accept the longest prefix that matches.
+  for (let last = end; last > start; last--) {
+    const echoed = lines
+      .slice(start, last)
+      .map((line, index) =>
+        index === 0 ? line.replace(/^ ?[❯>] /, "") : line.slice(2),
+      );
+    const rows = echoed.map(normalized).filter(Boolean);
+    const escaped = rows.map((row) =>
+      row.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    );
+    if (new RegExp("^" + escaped.join("\\s*") + "$", "u").test(wanted))
+      return lines.slice(last).join("\n");
+  }
+  return;
+}
+
+/** A clipped screen can start mid-message; restore the "⏺ " marker its first line lost. */
+function restoreClippedClaudeMessage(output: string): string {
+  const lines = stripAnsi(output).replace(/\r/g, "").split("\n");
+  const first = lines.findIndex((line) => line.trim());
   if (
-    !new RegExp("^" + escaped.join("\\s*") + "$", "u").test(normalized(prompt))
+    first < 0 ||
+    !lines[first]!.startsWith("  ") ||
+    /^\s*[⎿⏵]/.test(lines[first]!)
   )
-    return;
-  return lines.slice(end).join("\n");
+    return lines.join("\n");
+  lines[first] = "⏺ " + lines[first]!.slice(2);
+  return lines.join("\n");
 }
 
 class ClaudeCliAdapter implements CliOutputAdapter {
@@ -198,13 +244,26 @@ class ClaudeCliAdapter implements CliOutputAdapter {
     output: string,
     baseline: string,
   ): string {
+    const live = stripClaudeInputBox(output);
+    const hadInputBox = live !== output;
+    output = live;
     const tail = claudePromptTail(prompt, output);
     // A visible different user turn must never be bypassed by baseline diffing.
     const hasUser = /^ ?[❯>] .+/m.test(stripAnsi(output));
     if (tail === undefined && hasUser) return "";
-    const text = claudeResponseText(
-      tail ?? (baseline.trim() ? outputSinceBaseline(baseline, output) : ""),
-    );
+    let source = tail;
+    if (source === undefined && baseline.trim())
+      source = outputSinceBaseline(baseline, output);
+    // A long answer scrolls its own prompt echo and first lines out of a
+    // visible-only read of the live screen. With no user turn on screen and
+    // a screen that differs from the baseline, the visible text is the answer.
+    if (
+      !source?.trim() &&
+      hadInputBox &&
+      stripAnsi(output).trim() !== stripAnsi(baseline).trim()
+    )
+      source = restoreClippedClaudeMessage(output);
+    const text = claudeResponseText(source ?? "");
     const old = claudeResponseText(
       claudePromptTail(prompt, baseline) ?? baseline,
     );

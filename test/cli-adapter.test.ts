@@ -374,3 +374,46 @@ test("Claude matches an echoed prompt whose image paths became [Image #n] attach
     "檔案裡已經有，所以這次沒再改程式。",
   );
 });
+
+const claudeBox = (draft: string) =>
+  `${"─".repeat(40)}\n❯ ${draft}\n${"─".repeat(40)}\n  ⏵⏵ auto mode on (shift+tab to cycle)`;
+
+test("Claude ignores a next-message draft in the input box and a tool summary after the echo", () => {
+  const screen = [
+    "❯ clone repo",
+    "",
+    "  Ran 1 shell command",
+    "",
+    "⏺ cloned the repo.",
+    "",
+    "✻ Brewed for 1m · done 1:50 PM",
+    "",
+    claudeBox("next question"),
+  ].join("\n");
+  assert.equal(
+    latestAgentResponse("claude", "clone repo", screen, "old screen"),
+    "cloned the repo.",
+  );
+});
+
+test("Claude recovers a long answer whose prompt echo scrolled out of a visible-only read", () => {
+  const clipped = [
+    "",
+    "  step two of the long answer",
+    "",
+    "⏺ closing paragraph",
+    "",
+    "✻ Baked for 10s · done 1:53 PM",
+    "",
+    claudeBox("next question"),
+  ].join("\n");
+  const baseline = "⏺ previous answer\n\n" + claudeBox("");
+  const text = latestAgentResponse(
+    "claude",
+    "long question",
+    clipped,
+    baseline,
+  );
+  assert.match(text, /step two of the long answer/);
+  assert.match(text, /closing paragraph/);
+});
