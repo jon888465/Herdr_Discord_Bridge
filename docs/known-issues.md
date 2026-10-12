@@ -35,6 +35,8 @@
 
 | ISSUE-029 | thread 只有 herdr bot 在線時仍需 mention（功能請求） | 已驗收 | 2026-10-12 使用者於 openab/test 確認可用；後續觀察 30 秒快取延遲 |
 
+| ISSUE-030 | blocked 等待選擇／回答時，Discord 打字回覆被 `agent is busy` 擋下 | 已修正、待驗收 | 重啟後在 Claude 選單（AskUserQuestion）卡片過期後仍以文字回答驗收 |
+
 | ISSUE-022 | Phase 4 Quota / Failover Manager | 已修正、待驗收 | 2026-09-21 新增 28 項通過；完整 181/184，ISSUE-007／021 待調查，live 待驗收 |
 
 | ISSUE-023 | Grok 回答框與折行標記無法解析 | 已修正、待驗收 | Grok live turn probe 通過；Discord 交付、長文及 blocked 續答待驗收 |
@@ -1275,3 +1277,15 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 ### ISSUE-029 驗收（2026-10-12）
 
 使用者在重啟後的 bridge（pid 14792，含 Server Members／Presence Intent 與 `soloThreadNoMention: true`）回報「修好了」，環境為 Discord openab/test 未綁定 Agent 的討論串。此為使用者口頭驗收，未提供截圖；ISSUE-027（頻道 mention）、ISSUE-028（final 截斷）尚未收到實測結果，維持已修正、待驗收。
+
+## ISSUE-030：blocked 等待回答時文字回覆被 busy 擋下
+
+更新日期：2026-10-12。狀態：已修正、待驗收。
+
+症狀：Claude 以 TUI 選單（Discord 顯示 blocked 卡片與「Approve / continue」按鈕，該按鈕只送 `continue`）等待使用者選擇時，使用者希望直接在 Discord 打字回答（如選項編號），不需要客製下拉選單。
+
+根因（程式閱讀確認）：打字回答只在 thread 內有「作用中核准卡片」時才走 approval 路徑。卡片過期（預設 15 分鐘）、已關閉或不在同一 thread 時，文字落入一般 prompt 流程，`assertAgentAvailable` 因原發問的串流仍在監看該 terminal（`activeStreams`）而回報 `agent is busy`，即使 Agent 已是 blocked。
+
+修正：`promptMappedAgent` 對「blocked 且串流仍在監看」的 Agent，把文字當作回答經 `sendAgent` 送入並關閉該 terminal 的核准卡片，不經 busy 檢查；handoff 持有、Team task 擁有的 Agent 與附圖仍拒絕。working 狀態仍視為 busy。不新增選項解析或下拉選單 UI（ISSUE-010 的點選 UI 維持待做）。
+
+驗證（2026-10-12，macOS）：新增 `test/blocked-reply.test.ts` 2 項（blocked 時文字送入、working 仍 busy），2/2 通過。未重跑完整套件；未重啟；未 live 驗收。限制：若 Herdr 沒把該 TUI 選單辨識為 blocked（如 agy，見 SPEC），仍會是 working／busy；文字以 `sendAgent` 送出（含 Enter），是否正確選中該 Claude 選單項需 live 確認。

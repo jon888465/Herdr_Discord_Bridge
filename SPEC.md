@@ -394,7 +394,7 @@ acceptance 的 issue。提議中的 feature 必須與已實作行為分開，並
 
 working/unknown 時一般 prompt 會明確拒絕；`help`、`current`、`agent`、`agent use`、`wk` 等控制指令仍可操作，無須等 blocked。若答案開頭恰為指令，以 `ask <answer>` 明確指定。觀察輸出會重畫 `bridge>` 並保留正在編輯的輸入。`cancel` 是另行明確的 Ctrl-C 操作。本機新 prompt 使用與 Team 相同的 runTeamTurn 接收器，優先相符 Codex transcript final，否則僅接受本次隨機 marker 內的完整回覆；不把任意 CLI 片段當回答。blocked 時保留擷取直到回答後完成或逾時。既有 Discord 單 Agent progress/final 路徑不變。
 
-各 CLI 的本機回答使用上述共同回覆流程；agy 等 CLI 需遵守 marker 格式，無可靠回覆時明示 capture incomplete，可用 read/attach 診斷。多 Agent question ID／排隊／明確 reply 已實作；其他 Worker 不因提問被中斷。點選 UI、agy 未被 Herdr 辨識為 blocked 的選單按鍵、直接 pane → Discord mirror 仍待做。
+各 CLI 的本機回答使用上述共同回覆流程；agy 等 CLI 需遵守 marker 格式，無可靠回覆時明示 capture incomplete，可用 read/attach 診斷。多 Agent question ID／排隊／明確 reply 已實作；其他 Worker 不因提問被中斷。Agent 為 blocked 且原串流仍在監看時，Discord 文字回覆一律當作回答送入，不受 busy 擋下（ISSUE-030；handoff、Team task 與附圖仍拒絕）。點選 UI、agy 未被 Herdr 辨識為 blocked 的選單按鍵、直接 pane → Discord mirror 仍待做。
 
 本機專用 `threads` 列出已映射且符合 guild/channel/workspace allowlist 的 thread；
 `thread <thread ID>` 明確選定共用路由，`thread off` 回到原本本機路由。

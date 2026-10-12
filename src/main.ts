@@ -1682,13 +1682,36 @@ async function handoffAgent(
   runtime.routing.bind(context.routing, agentTarget(destination));
 }
 
-async function promptMappedAgent(
+export async function promptMappedAgent(
   prompt: string,
   context: CommandContext,
   runtime: Runtime,
 ): Promise<void> {
   validatePrompt(prompt);
   const agent = await resolveContextAgent("", context, runtime);
+  // blocked 的 Agent 正在等回答；原串流仍在監看，不可被 busy 擋下，文字直接當作回答。
+  if (
+    agent.agent_status === "blocked" &&
+    runtime.activeStreams.has(agent.terminal_id)
+  ) {
+    if (runtime.handoffs?.blocks(agent))
+      throw new Error(
+        "Workspace is held by a session handoff; use handoff status/continue/cancel",
+      );
+    if (runtime.tasks?.owns(agent))
+      throw new Error(
+        "Use team questions <task-id> and team reply <task-id> <question-id> <answer> for Team Task replies",
+      );
+    if (context.message.attachments.size)
+      throw new Error("Agent 正等待回答；請先回答問題，再傳送圖片。");
+    await runtime.herdr.sendAgent(agent.pane_id, prompt.slice(0, 12000));
+    runtime.routing.deactivateForTerminal(agent.terminal_id);
+    await runtime.discord.reply(
+      context.message,
+      `📨 已將回答送給等待中的 **${agentLabel(agent)}**（\`${agent.pane_id}\`）。`,
+    );
+    return;
+  }
   await dispatchPrompt(
     agent,
     prompt,
