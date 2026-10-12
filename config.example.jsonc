@@ -10,6 +10,7 @@
     "allowedUserIds": [],
     "messageContent": true,
     "requireMention": true,
+    "soloThreadNoMention": false,
     "commandPrefix": "/herdr",
   },
   // Profiles are definitions, not running panes. Enable them per workspace with team select.

@@ -21,6 +21,7 @@ function fixture() {
       messageContent: true,
       commandPrefix: "/herdr",
       requireMention: true,
+      soloThreadNoMention: true,
     },
     routing,
   );
@@ -108,4 +109,97 @@ test("unmentioned channel chatter is ignored", async () => {
   await f.adapter["handleMessage"](f.message);
   assert.deepEqual(f.prompts, []);
   assert.deepEqual(f.replies, []);
+});
+
+function soloFixture(
+  members: { id: string; bot: boolean }[],
+  online: string[] = [],
+  bound = true,
+) {
+  const f = fixture();
+  Object.assign(f.message, {
+    content: "no mention",
+    reference: null,
+    channel: {
+      id: "t",
+      parentId: "c",
+      isThread: () => true,
+      guild: {
+        presences: {
+          cache: {
+            get: (id: string) =>
+              online.includes(id) ? { status: "online" } : undefined,
+          },
+        },
+      },
+      members: {
+        fetch: async () => {
+          const list = members.map((m) => ({
+            id: m.id,
+            guildMember: { user: { bot: m.bot } },
+          }));
+          return Object.assign(list, {
+            every: list.every.bind(list),
+            has: (id: string) => list.some((m) => m.id === id),
+          });
+        },
+      },
+    },
+  });
+  if (bound)
+    f.adapter["routing"].bindThread(
+      { guildId: "g", channelId: "c", userId: "u" },
+      "t",
+      { workspaceId: "w4", paneId: "w4:p1", terminalId: "t" } as never,
+    );
+  return f;
+}
+test("thread with only this bot accepts text without mention", async () => {
+  const f = soloFixture([
+    { id: "bot", bot: true },
+    { id: "u", bot: false },
+  ]);
+  await f.adapter["handleMessage"](f.message);
+  assert.deepEqual(f.prompts, ["no mention"]);
+});
+test("thread with another bot online still requires mention", async () => {
+  const f = soloFixture(
+    [
+      { id: "bot", bot: true },
+      { id: "other", bot: true },
+      { id: "u", bot: false },
+    ],
+    ["other"],
+  );
+  await f.adapter["handleMessage"](f.message);
+  assert.deepEqual(f.prompts, []);
+});
+test("offline other bots do not block mention-free replies", async () => {
+  const f = soloFixture([
+    { id: "bot", bot: true },
+    { id: "other", bot: true },
+    { id: "u", bot: false },
+  ]);
+  await f.adapter["handleMessage"](f.message);
+  assert.deepEqual(f.prompts, ["no mention"]);
+});
+test("solo thread without a bound Agent still handles commands and text without mention", async () => {
+  const f = soloFixture(
+    [
+      { id: "bot", bot: true },
+      { id: "u", bot: false },
+    ],
+    [],
+    false,
+  );
+  const commands: string[] = [];
+  f.adapter.onCommand(async (_ctx, name) => {
+    commands.push(name);
+  });
+  f.message.content = "agent";
+  await f.adapter["handleMessage"](f.message);
+  f.message.content = "hi";
+  await f.adapter["handleMessage"](f.message);
+  assert.deepEqual(commands, ["agent"]);
+  assert.deepEqual(f.prompts, ["hi"]);
 });

@@ -91,6 +91,10 @@ export class DiscordAdapter {
   private commandHandler: CommandHandler | null = null;
   private approvalHandler: ApprovalHandler | null = null;
   private promptHandler: PromptHandler | null = null;
+  private readonly soloThreads = new Map<
+    string,
+    { solo: boolean; at: number }
+  >();
   private modelSelectHandler: ModelSelectHandler | null = null;
   private paused = false;
 
@@ -104,6 +108,12 @@ export class DiscordAdapter {
       intents.push(
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
+      );
+    // 特權 intent；未在 Developer Portal 開啟就加入會導致登入失敗，故需明確設定。
+    if (config.messageContent && config.soloThreadNoMention)
+      intents.push(
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildPresences,
       );
     this.client = new Client({ intents });
     this.ready = new Promise((resolve) =>
@@ -300,7 +310,12 @@ export class DiscordAdapter {
       !this.isAllowed(message.guildId, channelId, message.author.id)
     )
       return;
-    const command = this.parseCommand(message);
+    // 只有本 bot 在線的 thread 視同已 mention（指令與一般文字皆免 mention）。
+    const solo =
+      this.config.soloThreadNoMention &&
+      message.channel.isThread() &&
+      (await this.threadHasNoOtherBots(message.channel));
+    const command = this.parseCommand(message, solo);
     if (command) {
       if (this.paused && command.name !== "discord") return;
       if (!this.commandHandler) return;
@@ -368,7 +383,7 @@ export class DiscordAdapter {
       }
       return;
     }
-    const prompt = this.parsePrompt(message, replyToBot);
+    const prompt = this.parsePrompt(message, replyToBot || solo);
     if (!prompt || !this.promptHandler) return;
     try {
       await this.promptHandler({ message, routing: context }, prompt);
@@ -488,12 +503,13 @@ export class DiscordAdapter {
 
   private parseCommand(
     message: Message,
+    solo = false,
   ): { context: CommandContext; name: string; args: string[] } | null {
     let content = message.content.trim();
     const mention = this.client.user
       ? new RegExp(`<@!?${this.client.user.id}>`, "g")
       : null;
-    const mentioned = mention ? mention.test(content) : false;
+    const mentioned = (mention ? mention.test(content) : false) || solo;
     if (mention) content = content.replace(mention, "").trim();
     const parsed = parseCommandText(
       content,
@@ -523,6 +539,27 @@ export class DiscordAdapter {
       name: parts[0].toLowerCase(),
       args: parts.slice(1),
     };
+  }
+
+  /** thread 成員中除本 bot 外沒有「在線」的 bot；無法確認時回傳 false（仍須 mention）。 */
+  private async threadHasNoOtherBots(thread: ThreadChannel): Promise<boolean> {
+    const selfId = this.client.user?.id;
+    if (!selfId) return false;
+    const cached = this.soloThreads.get(thread.id);
+    if (cached && Date.now() - cached.at < 30000) return cached.solo;
+    let solo = false;
+    try {
+      const members = await thread.members.fetch({ withMember: true });
+      solo = members.every((m) => {
+        if (m.id === selfId || !m.guildMember?.user.bot) return true;
+        const status = thread.guild.presences.cache.get(m.id)?.status;
+        return !status || status === "offline";
+      });
+    } catch {
+      solo = false;
+    }
+    this.soloThreads.set(thread.id, { solo, at: Date.now() });
+    return solo;
   }
 
   private parsePrompt(message: Message, replyToBot = false): string | null {

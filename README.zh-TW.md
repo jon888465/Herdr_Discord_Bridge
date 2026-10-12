@@ -26,7 +26,7 @@ herdr plugin config-dir herdr-discord-bridge
 cp config.example.jsonc <confiig-dr>/config.json
 ```
 
-在 `config.json` 填入 Discord bot token，以及明確的 guild/channel/user allowlist。也可以使用 `HERDR_DISCORD_BOT_TOKEN` 或 `DISCORD_BOT_TOKEN` 環境變數。不要把真實設定檔或 token commit 進 Git。必須在 Discord Developer Portal 開啟 Message Content Intent。
+在 `config.json` 填入 Discord bot token，以及明確的 guild/channel/user allowlist。也可以使用 `HERDR_DISCORD_BOT_TOKEN` 或 `DISCORD_BOT_TOKEN` 環境變數。不要把真實設定檔或 token commit 進 Git。必須在 Discord Developer Portal 開啟 Message Content Intent。若要讓沒有其他 bot 在線的已綁定 thread 免 mention，另需開啟 Server Members Intent 與 Presence Intent，並設定 `discord.soloThreadNoMention: true`。
 
 啟動 bridge：
 

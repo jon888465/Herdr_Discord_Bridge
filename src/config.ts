@@ -13,6 +13,8 @@ export interface DiscordConfig {
   messageContent: boolean;
   commandPrefix: string;
   requireMention: boolean;
+  /** thread 只有本 bot 時免 mention；需 Server Members 與 Presence Intent。 */
+  soloThreadNoMention?: boolean;
 }
 
 export interface Config {
@@ -55,6 +57,7 @@ const DEFAULTS: Config = {
     messageContent: true,
     commandPrefix: "/herdr",
     requireMention: false,
+    soloThreadNoMention: false,
   },
 };
 
@@ -274,6 +277,9 @@ export function loadConfig(): Config {
   if (messageContent !== undefined) cfg.discord.messageContent = messageContent;
   const requireMention = parseBoolean(env.HERDR_DISCORD_REQUIRE_MENTION);
   if (requireMention !== undefined) cfg.discord.requireMention = requireMention;
+  const soloNoMention = parseBoolean(env.HERDR_DISCORD_SOLO_THREAD_NO_MENTION);
+  if (soloNoMention !== undefined)
+    cfg.discord.soloThreadNoMention = soloNoMention;
 
   cfg.discord.enabled = cfg.discord.enabled && cfg.discord.botToken.length > 0;
   return cfg;

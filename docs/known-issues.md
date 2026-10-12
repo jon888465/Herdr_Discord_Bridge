@@ -33,6 +33,8 @@
 
 | ISSUE-028 | Discord「final response delivered」內容停在作業中途，不是 Claude 最後回覆 | 已修正、待驗收 | 重啟後以長工具鏈（>2 分鐘）Claude 任務驗收；根因為推論，未確認 |
 
+| ISSUE-029 | thread 只有 herdr bot 在線時仍需 mention（功能請求） | 已驗收 | 2026-10-12 使用者於 openab/test 確認可用；後續觀察 30 秒快取延遲 |
+
 | ISSUE-022 | Phase 4 Quota / Failover Manager | 已修正、待驗收 | 2026-09-21 新增 28 項通過；完整 181/184，ISSUE-007／021 待調查，live 待驗收 |
 
 | ISSUE-023 | Grok 回答框與折行標記無法解析 | 已修正、待驗收 | Grok live turn probe 通過；Discord 交付、長文及 blocked 續答待驗收 |
@@ -1243,3 +1245,33 @@ Team 任務；圖片本機路徑交付已加入 allowlist，仍待 Discord 端�
 驗證（2026-10-12，macOS）：新增 `Claude answer is not final while the raw screen keeps redrawing`，修正前失敗、修正後通過；`node --test dist/test/response-delivery.test.js dist/test/response-stream.test.js dist/test/cli-adapter.test.js` 35/35 通過。未重跑完整套件（先前 6 項 coding-workflow 失敗與本次無關）。
 
 未驗證：執行中 bridge 未重啟；無 live 驗收；已投遞的不完整訊息不補送。下一步：重啟後以長任務重現，若仍截斷需記錄當時 Herdr agent_status 序列。
+
+## ISSUE-029：thread 只有 herdr bot 時免 mention
+
+更新日期：2026-10-12。狀態：已修正、待驗收。
+
+需求：已綁定 Agent 的 thread 中，若成員只有 herdr bot（沒有其他 bot），不需 mention 也能回應。實作：新設定 `discord.soloThreadNoMention`（預設 false，env `HERDR_DISCORD_SOLO_THREAD_NO_MENTION`）；啟用時加入 GuildMembers intent，並對已綁定 Agent 的 thread 取得 thread 成員（30 秒快取），除本 bot 外沒有 bot 成員、且本 bot 在成員內才免 mention。無法取得成員（intent 未開、API 失敗）時退回要求 mention。指令仍需 mention／prefix；頻道（非 thread）仍需 mention。
+
+重要限制：Server Members Intent 是特權 intent，須先在 Discord Developer Portal 開啟，否則啟用設定後 bot 登入會失敗，故預設關閉。
+
+驗證（2026-10-12，macOS）：`test/inbound.test.ts` 新增 2 項（僅本 bot 免 mention、另有 bot 仍需 mention），該檔 8/8；`npm run check` 232 項：225 通過、6 失敗，全為既有 coding-workflow 失敗（見 ISSUE-025）。未驗證：真實 Discord 的 `thread.members.fetch` 行為、bot 加入／離開 thread 後的 30 秒內快取延遲；執行中 bridge 未重啟，未 commit。
+
+### ISSUE-029 重新開啟（2026-10-12）
+
+使用者於 openab/test 討論串（已綁定 w1:p3）重啟新版後傳「hi」仍未回應。以 Discord REST 查該 thread 成員：herdr、兩位使用者，另有 `opencode`、`gcp-hermes` 兩個 bot 為成員（離線）。確認根因：首版以「thread 成員無其他 bot」判斷，但使用者要求的是「沒有其他 bot 在線上」，離線 bot 不應阻擋。
+
+修正：改為其他 bot 成員只要 presence 非 offline／未知才視為在線並要求 mention；需加入 GuildPresences（Presence Intent，特權），與 GuildMembers 一同僅在 `soloThreadNoMention` 啟用時要求。移除「本 bot 必須是 thread 成員」條件。未取得 presence 視為離線。
+
+驗證（2026-10-12）：`test/inbound.test.ts` 9/9（含離線 bot 不阻擋、在線 bot 仍需 mention）。尚未重跑完整套件、未重啟、未 live 驗收；須先在 Developer Portal 開 Presence Intent，否則登入失敗。
+
+### ISSUE-029 第二次重新開啟（2026-10-12）
+
+Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討論串傳「hi」仍未回應。查 Discord REST：`test` thread id 為 1559030640689545307，不在 `routing.json` 的 threadRoutes（只有 1550807543910105181），即**該 thread 未綁定 Agent**；先前修正要求 thread 已綁定才免 mention，因此被擋下。另外，不 mention 的指令（如 `agent`）原本也不走免 mention 規則。根因已確認為這兩點（前一次「離線 bot 阻擋」修正仍有效，未被推翻）。
+
+修正：solo 判定提前到指令解析前，solo thread 的指令與文字皆視同已 mention，並移除「已綁定」條件；未綁定且無 user／channel route 時由既有 prompt 流程回報錯誤。副作用：solo thread 內的普通對話若以 `agent`、`status`、`help` 等已知指令字開頭，會被當成指令。
+
+驗證（2026-10-12）：`test/inbound.test.ts` 10/10（新增未綁定 thread 的指令與文字）。完整套件與 live 驗收見最終回報／下一輪紀錄。
+
+### ISSUE-029 驗收（2026-10-12）
+
+使用者在重啟後的 bridge（pid 14792，含 Server Members／Presence Intent 與 `soloThreadNoMention: true`）回報「修好了」，環境為 Discord openab/test 未綁定 Agent 的討論串。此為使用者口頭驗收，未提供截圖；ISSUE-027（頻道 mention）、ISSUE-028（final 截斷）尚未收到實測結果，維持已修正、待驗收。
