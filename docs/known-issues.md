@@ -29,6 +29,8 @@
 | ISSUE-025 | 本機 Git coding workflow 首版 | 已修正、待驗收 | 2026-10-02 重新開啟後已補 read-only 起迄指紋與 finding id；live 未驗收 |
 | ISSUE-026 | Claude 模型／終端擷取與附圖相容性；完成後持續滾動 | 重新開啟／待調查 | 附圖修正待 Discord 驗收；idle 30 秒收尾已改，滾動根因未確認；2026-10-05 targeted 37/37 |
 
+| ISSUE-027 | 頻道（非 thread）mention bot 的一般文字無回應 | 已修正、待驗收 | 重啟後在頻道 `@bot agent use <pane>` 再 `@bot hi` 驗收 |
+
 | ISSUE-022 | Phase 4 Quota / Failover Manager | 已修正、待驗收 | 2026-09-21 新增 28 項通過；完整 181/184，ISSUE-007／021 待調查，live 待驗收 |
 
 | ISSUE-023 | Grok 回答框與折行標記無法解析 | 已修正、待驗收 | Grok live turn probe 通過；Discord 交付、長文及 blocked 續答待驗收 |
@@ -1211,3 +1213,17 @@ Team 任務；圖片本機路徑交付已加入 allowlist，仍待 Discord 端�
 - `npm run lint`（53 TypeScript files）、`npm run typecheck`、修改 TypeScript 的 Prettier check 與 `git diff --check` 通過；文件核對差異與本機連結。
 
 既有 response-stream 測試通過不等同於新增 idle 30 秒上限有專用回歸測試；該上限的實機行為仍待驗證。沒有重啟、部署、push 或再次操作 Claude／Herdr pane；執行中 bridge 是否載入新版未確認，舊訊息與舊任務不補送。ISSUE-026 整體因滾動子問題保留重新開啟／待調查，其他修正維持待驗收。
+
+## ISSUE-027：頻道（非 thread）mention bot 的一般文字無回應
+
+更新日期：2026-10-12。狀態：已修正、待驗收。
+
+症狀：使用者在 Discord 頻道（不是 thread）`@herdr agent use w4:p1` 成功，bridge 回報「Subsequent messages in this user route will be sent only to this Agent」；隨後 `@herdr hi`、`@herdr 在嗎` 完全沒有回應。預期：user route 已選取 Agent 時，頻道內 mention 的文字送給該 Agent；沒有 route 時要有提示而不是靜默。
+
+已確認根因（程式閱讀）：`src/discord.ts` `handleMessage` 對非 thread 訊息在未回覆 bot、無附件時直接 return，`parsePrompt` 也要求 `isThread()`；SPEC §5 原寫「只有 mapped thread 才當 direct prompt」，與 `agent use` 回報的 user route 文案矛盾。未用 live Discord 重現當時的 bridge 版本。
+
+修正：非 thread 且訊息明確 mention bot（不論 `requireMention`）時，若 `routing.resolve` 有 user／channel route 則走既有 prompt 流程；無 route 回覆「尚未選取 Agent」提示；未 mention 的頻道閒聊仍忽略。Approval 與附圖仍只在 thread 處理（頻道附圖無 mention 時維持原錯誤提示）。
+
+驗證（2026-10-12，macOS）：`test/inbound.test.ts` 新增 3 項（route 轉送、無 route 提示、未 mention 忽略），該檔 6/6 通過。`npm run check` 為 229 項：222 通過、6 失敗，全為 `coding-workflow.test` 既有失敗（stash 本次變更後同檔仍 9 通過／6 失敗，與本次無關，ISSUE-025 範疇，未修）。
+
+未驗證：執行中 bridge（pid 43529，`dist/src/index.js`）尚未重啟，仍是舊版；未做 live Discord 驗收；舊訊息不補送。

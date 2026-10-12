@@ -142,7 +142,7 @@ mapping 過期時，一律 fail closed。
 文字指令 prefix 預設為 `/herdr`；可用 `requireMention` 或
 `HERDR_DISCORD_REQUIRE_MENTION` 啟用 mention 要求。提及 bridge bot 時，已知
 指令可省略 prefix，因此 `@bridge agents` 與 `@bridge /herdr agents` 都接受。
-未知的 mention 文字只有在訊息位於已映射 thread 時才會當成 direct prompt；這
+未知的 mention 文字在已映射 thread，或頻道內已有 user／channel route 且明確 mention bot 時，才會當成 direct prompt；頻道內無 route 時回覆「尚未選取 Agent」提示，未 mention 的閒聊忽略；這
 可避免普通對話意外成為指令，同時支援較短語法。`help` 會說明這些形式與所有
 支援的操作。
 

@@ -323,9 +323,27 @@ export class DiscordAdapter {
       }
     }
     if (!message.channel.isThread()) {
-      if (replyToBot || message.attachments.size)
+      const channelContext = this.contextFor(message);
+      const hasRoute = Boolean(this.routing.resolve(channelContext));
+      const mentioned = this.client.user
+        ? new RegExp(`<@!?${this.client.user.id}>`).test(message.content)
+        : false;
+      // 頻道內不是專屬 thread，只有明確 mention 的訊息才視為 prompt。
+      const prompt = mentioned ? this.parsePrompt(message, replyToBot) : null;
+      if (prompt && hasRoute && this.promptHandler) {
+        try {
+          await this.promptHandler(
+            { message, routing: channelContext },
+            prompt,
+          );
+        } catch (error) {
+          await message.reply(`❌ Prompt rejected: ${safeError(error)}`);
+        }
+        return;
+      }
+      if (prompt || replyToBot || message.attachments.size)
         await message.reply(
-          "❌ 請在已綁定 Agent 的 Discord thread 內發問或傳送圖片。",
+          "❌ 尚未選取 Agent；請先 `@bot agent use <pane>`，或在已綁定 Agent 的 Discord thread 內發問或傳送圖片。",
         );
       return;
     }
@@ -508,7 +526,6 @@ export class DiscordAdapter {
   }
 
   private parsePrompt(message: Message, replyToBot = false): string | null {
-    if (!message.channel.isThread()) return null;
     let content = message.content.trim();
     const mention = this.client.user
       ? new RegExp(`<@!?${this.client.user.id}>`, "g")

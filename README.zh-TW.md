@@ -178,7 +178,7 @@ Agent 完成後，回覆會更新原本的 progress message；預設不會另外
 /herdr team ask [--coding] <prompt>
 ```
 
-設定 `requireMention` 後，兩種 command 都必須 mention bot，例如 `@bridge agents` 或 `@bridge /herdr agents`。在已 mapping 的 thread 中，普通文字會被當作 active Agent 的 prompt。
+設定 `requireMention` 後，兩種 command 都必須 mention bot，例如 `@bridge agents` 或 `@bridge /herdr agents`。在已 mapping 的 thread 中，普通文字會被當作 active Agent 的 prompt；在頻道中選取 Agent（`agent use`）後，`@bot 文字` 也會送給該 Agent，無選取時 bot 會提示。
 在 `bridge>` 執行 `agent use <pane>` 後，只保存對話目標，不自動刷出 CLI 畫面。本次發問只顯示相符的回答；`attach [pane]` 才顯示終端快照（40 行／6,000 字元），`watch [pane]` 顯示狀態變化，`detach` 回對話模式。檢視其他 pane 不改對話目標。blocked 問題仍會顯示並可回答。attach 是有界快照 inspector，不是完整 stdout/stderr 或原生 PTY attach；不自動送往 Discord。
 
 直接輸入 `ask <文字>` 或非指令文字：idle/done 時發問，blocked 時回答 bridge 已顯示的問題。問題已變更或尚未顯示時，先看新問題再回答；同一問題不重複送答。`help`、`current`、`agent`、`agent use`、`wk` 等控制指令在 working／blocked 時仍可用；working/unknown 時不插入新 prompt。答案開頭若是指令名稱，請用 `ask current` 等明確格式。顯示輸出時保留正在編輯的輸入。多 Agent 以 team questions/reply 明確指定問題；Discord mirror 仍待做。
