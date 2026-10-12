@@ -2071,6 +2071,9 @@ export async function streamAgent(
           runtime.config.outputLines,
         );
       }
+      // 解析結果只含 assistant 訊息；長時間工具執行時它不變，但原始畫面（spinner、
+      // 計時）仍在重繪。兩者都靜止才算穩定，避免 Claude 作業中途被當成最終回覆。
+      const rawChanged = lastRaw !== "" && output !== lastRaw;
       lastRaw = output;
       lastReadError = "";
       const latest = latestAgentResponse(
@@ -2080,7 +2083,7 @@ export async function streamAgent(
         baselineOutput,
       );
       readOk = true;
-      changed = latest !== lastOutput;
+      changed = latest !== lastOutput || rawChanged;
       lastOutput = latest;
       if (latest.length > longestOutput.length) longestOutput = latest;
     } catch (error) {

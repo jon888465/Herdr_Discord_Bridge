@@ -450,3 +450,48 @@ for (const unchanged of [false, true]) {
     }
   });
 }
+
+test("Claude answer is not final while the raw screen keeps redrawing", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const agent = {
+    terminal_id: "claude-terminal",
+    pane_id: "w:p",
+    workspace_id: "w",
+    tab_id: "w:tab",
+    agent: "claude",
+    agent_status: "idle",
+  };
+  let frame = 0;
+  const screen = () =>
+    `❯ question\n\n⏺ partial\n\n✻ Running… (${frame++}s)\n────────────────────\n❯\n────────────────────`;
+  const sent: string[] = [];
+  const cards: string[] = [];
+  const runtime = {
+    config: { streamIntervalMs: 1000, outputLines: 40 },
+    herdr: {
+      listAgentsWithWorkspaceNames: async () => [agent],
+      readAgent: async () => screen(),
+    },
+    discord: {
+      editProgress: async (_message: unknown, text: string) => {
+        cards.push(text);
+      },
+      postOutput: async (_message: unknown, text: string) => {
+        sent.push(text);
+      },
+    },
+  } as unknown as Parameters<typeof streamAgent>[2];
+  void streamAgent(
+    agent,
+    {} as Parameters<typeof streamAgent>[1],
+    runtime,
+    "question",
+    "",
+  );
+  for (let second = 0; second < 25; second++) {
+    t.mock.timers.tick(1000);
+    for (let i = 0; i < 60; i++) await Promise.resolve();
+  }
+  assert.deepEqual(sent, []);
+  assert.ok(!cards.some((card) => card.includes("final response delivered")));
+});

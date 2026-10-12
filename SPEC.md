@@ -257,7 +257,7 @@ idle 後繼續嘗試 `recent_unwrapped`。Visible 仍須通過 prompt scope 擷�
 不是完整 transcript，不能據此宣稱已取得完整 final。
 
 Terminal fallback 保留最長的、限定於 prompt scope 的已觀察摘錄；不會宣稱此
-摘錄是完整 final 或累積 transcript。一般在 idle/done 狀態連續四次未變且成功的
+摘錄是完整 final 或累積 transcript。一般在 idle/done 狀態連續四次未變（解析結果與原始畫面皆不變，ISSUE-028）且成功的
 read，再持續 settlement 十秒，允許 fallback 完成。另於 idle/done 連續 30 秒後
 強制收尾，避免畫面重繪造成持續輪詢；缺少擷取內容仍標示 capture incomplete。
 blocked、unknown、輸出變動或 read failure 都會重設 settlement。Structured completion 可在沒有成功

@@ -31,6 +31,8 @@
 
 | ISSUE-027 | 頻道（非 thread）mention bot 的一般文字無回應 | 已修正、待驗收 | 重啟後在頻道 `@bot agent use <pane>` 再 `@bot hi` 驗收 |
 
+| ISSUE-028 | Discord「final response delivered」內容停在作業中途，不是 Claude 最後回覆 | 已修正、待驗收 | 重啟後以長工具鏈（>2 分鐘）Claude 任務驗收；根因為推論，未確認 |
+
 | ISSUE-022 | Phase 4 Quota / Failover Manager | 已修正、待驗收 | 2026-09-21 新增 28 項通過；完整 181/184，ISSUE-007／021 待調查，live 待驗收 |
 
 | ISSUE-023 | Grok 回答框與折行標記無法解析 | 已修正、待驗收 | Grok live turn probe 通過；Discord 交付、長文及 blocked 續答待驗收 |
@@ -1227,3 +1229,17 @@ Team 任務；圖片本機路徑交付已加入 allowlist，仍待 Discord 端�
 驗證（2026-10-12，macOS）：`test/inbound.test.ts` 新增 3 項（route 轉送、無 route 提示、未 mention 忽略），該檔 6/6 通過。`npm run check` 為 229 項：222 通過、6 失敗，全為 `coding-workflow.test` 既有失敗（stash 本次變更後同檔仍 9 通過／6 失敗，與本次無關，ISSUE-025 範疇，未修）。
 
 未驗證：執行中 bridge（pid 43529，`dist/src/index.js`）尚未重啟，仍是舊版；未做 live Discord 驗收；舊訊息不補送。
+
+## ISSUE-028：Claude final 在作業中途被判定完成
+
+更新日期：2026-10-12。狀態：已修正、待驗收（根因為推論，未確認）。與 ISSUE-026 的「完成後滾動／idle 收尾」同屬 Claude 擷取，但症狀不同，分開記錄。
+
+症狀：頻道中對 Claude（w1:p1）發問，Discord 顯示「✅ finished — final response delivered · 總耗時 2分50秒」，內容只到作業中途（最後一行「Running grep -n …」），缺少 Claude 在終端機實際給出的最後回覆（原因／修正／驗證／文件／下一步）。預期：Claude 還在作業時不得完成；final 須含最後一則回覆。
+
+證據與推論：`longestOutput` 取歷次解析最長者，最後回覆比已投遞內容長卻沒進去，表示輪詢從未讀到它，即在 Claude 仍作業時就判定 settled。解析器只保留 assistant 訊息，長工具執行期間解析結果不變；若 Herdr 同時回報 idle／done（確切狀態未取得），`Settlement` 4 次不變加 10 秒即完成（commit 3ca695e 後視為正式 final）。尚未取得當時 Herdr 狀態序列，無法證明 Herdr 回報了 idle。
+
+修正：`src/main.ts` 的 `streamAgent` 另比對原始畫面，解析結果或原始畫面任一變動（spinner、計時重繪）都重設穩定計數。原始畫面持續重繪時，完成只剩既有 30 秒 idle 強制收尾（附警告）。風險：若 idle 畫面本身持續重繪，會改走強制收尾而不是正式 final。
+
+驗證（2026-10-12，macOS）：新增 `Claude answer is not final while the raw screen keeps redrawing`，修正前失敗、修正後通過；`node --test dist/test/response-delivery.test.js dist/test/response-stream.test.js dist/test/cli-adapter.test.js` 35/35 通過。未重跑完整套件（先前 6 項 coding-workflow 失敗與本次無關）。
+
+未驗證：執行中 bridge 未重啟；無 live 驗收；已投遞的不完整訊息不補送。下一步：重啟後以長任務重現，若仍截斷需記錄當時 Herdr agent_status 序列。
