@@ -1,3 +1,6 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { HerdrError } from "../src/herdr.js";
@@ -494,4 +497,77 @@ test("Claude answer is not final while the raw screen keeps redrawing", async (t
   }
   assert.deepEqual(sent, []);
   assert.ok(!cards.some((card) => card.includes("final response delivered")));
+});
+
+test("a forced finish resumes capture when the Agent produces new output", async (t) => {
+  const stateDir = mkdtempSync(join(tmpdir(), "bridge-diagnostics-"));
+  const previousStateDir = process.env.HERDR_PLUGIN_STATE_DIR;
+  process.env.HERDR_PLUGIN_STATE_DIR = stateDir;
+  t.after(() => {
+    if (previousStateDir === undefined)
+      delete process.env.HERDR_PLUGIN_STATE_DIR;
+    else process.env.HERDR_PLUGIN_STATE_DIR = previousStateDir;
+  });
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const agent = {
+    terminal_id: "codex-terminal",
+    pane_id: "w:p",
+    workspace_id: "w",
+    tab_id: "w:tab",
+    agent: "codex",
+    agent_status: "done",
+  };
+  let screen = "› question\n• step one";
+  const replies: string[] = [];
+  const edits: string[] = [];
+  const posted: string[] = [];
+  const runtime = {
+    config: { streamIntervalMs: 1000, outputLines: 40 },
+    activeStreams: new Set<string>(),
+    herdr: {
+      listAgentsWithWorkspaceNames: async () => [agent],
+      readAgent: async () => screen,
+    },
+    discord: {
+      editProgress: async (_m: unknown, text: string) => {
+        edits.push(text);
+      },
+      postOutput: async (_m: unknown, text: string) => {
+        posted.push(text);
+      },
+      reply: async (_m: unknown, text: string) => {
+        replies.push(text);
+        return {};
+      },
+    },
+  } as unknown as Parameters<typeof streamAgent>[2];
+  const tick = async (seconds: number) => {
+    for (let second = 0; second < seconds; second++) {
+      t.mock.timers.tick(1000);
+      for (let i = 0; i < 60; i++) await Promise.resolve();
+    }
+  };
+  // 診斷檔寫入是真實 I/O；以事件迴圈讓出輪詢條件，避免負載下的時序差異。
+  const until = async (condition: () => boolean) => {
+    for (let i = 0; i < 5000 && !condition(); i++)
+      await new Promise<void>((resolve) => setImmediate(resolve));
+  };
+  void streamAgent(
+    agent,
+    {} as Parameters<typeof streamAgent>[1],
+    runtime,
+    "question",
+    "",
+  );
+  await tick(40);
+  await until(() => edits.some((text) => text.includes("capture incomplete")));
+  assert.ok(edits.some((text) => text.includes("capture incomplete")));
+  assert.deepEqual(replies, []);
+  screen = "› question\n• step one\n• step two after the pause";
+  for (let i = 0; i < 10 && replies.length === 0; i++) {
+    await tick(1);
+    await until(() => replies.length > 0 || i < 9);
+  }
+  assert.equal(replies.length, 1);
+  assert.match(replies[0], /再度運作/);
 });

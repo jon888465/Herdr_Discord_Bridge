@@ -259,7 +259,7 @@ idle 後繼續嘗試 `recent_unwrapped`。Visible 仍須通過 prompt scope 擷�
 Terminal fallback 保留最長的、限定於 prompt scope 的已觀察摘錄；不會宣稱此
 摘錄是完整 final 或累積 transcript。一般在 idle/done 狀態連續四次未變（解析結果與原始畫面皆不變，ISSUE-028）且成功的
 read，再持續 settlement 十秒，允許 fallback 完成。另於 idle/done 連續 30 秒後
-強制收尾，避免畫面重繪造成持續輪詢；缺少擷取內容仍標示 capture incomplete。
+強制收尾，避免畫面重繪造成持續輪詢；缺少擷取內容仍標示 capture incomplete。強制收尾後仍輕量觀察 15 分鐘，Agent 再度 working／blocked 或回覆內容改變時接續擷取（最多 5 次，ISSUE-031）。
 blocked、unknown、輸出變動或 read failure 都會重設 settlement。Structured completion 可在沒有成功
 terminal read 時完成。Agent session 被替換後停止觀察；identity 比較 terminal、pane、workspace、agent kind，以及 session 的 kind/value，不以 source、欄位順序或其他 metadata 判斷替換。缺少或無法辨識的 session 不自動認定為新的相同 session。
 2026-10-02：Discord 單 Agent 回覆觀察若 Agent 暫時未列出，或已知 session 的 metadata 暫時缺失／無效，先顯示等待核對，最多等待 30 秒並在下一輪成功查詢判定逾時。等待期間不讀 terminal／transcript、不送 final，並重設 settlement；原完整 identity 回來才續接。明確 session ID 或 pane／terminal／workspace／agent kind 改變仍立即停止。初始未知 session 不因稍後出現 ID 就自動接納為原 session。此邏輯不重送 prompt，也不變更 thread mapping。

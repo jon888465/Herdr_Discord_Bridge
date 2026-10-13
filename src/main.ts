@@ -1973,6 +1973,89 @@ function effectiveTarget(
 }
 
 const IDLE_FORCE_COMPLETE_MS = 30000;
+const REWATCH_WINDOW_MS = 15 * 60 * 1000;
+const REWATCH_INTERVAL_MS = 5000;
+const MAX_REWATCH_RESUMES = 5;
+
+/**
+ * 強制收尾後不佔用 activeStreams，僅輕量觀察；Agent 回到 working／blocked，或解析後的
+ * 回覆內容改變時，才重新擷取並在 Discord 回報。
+ */
+async function rewatchAfterForcedFinish(
+  finished: AgentRecord,
+  progress: import("discord.js").Message,
+  runtime: Runtime,
+  prompt: string,
+  baselineOutput: string,
+  transcript: CodexTranscript | undefined,
+  lastOutput: string,
+  resumes: number,
+): Promise<void> {
+  const until = Date.now() + REWATCH_WINDOW_MS;
+  while (Date.now() < until) {
+    // unref：觀察迴圈不應阻止程序（或測試）結束。
+    await new Promise((resolve) =>
+      setTimeout(resolve, REWATCH_INTERVAL_MS)?.unref?.(),
+    );
+    if (runtime.activeStreams.has(finished.terminal_id)) return;
+    let agents: AgentRecord[];
+    try {
+      agents = await runtime.herdr.listAgentsWithWorkspaceNames();
+    } catch {
+      continue;
+    }
+    const agent = agents.find(
+      (a) =>
+        a.terminal_id === finished.terminal_id &&
+        a.pane_id === finished.pane_id &&
+        a.workspace_id === finished.workspace_id,
+    );
+    if (
+      !agent ||
+      !sameAgentSession(agent.agent_session, finished.agent_session)
+    )
+      return;
+    let resume = ["working", "blocked"].includes(agent.agent_status);
+    if (!resume) {
+      try {
+        const output = await runtime.herdr.readAgent(
+          agent.pane_id,
+          "recent_unwrapped",
+          Math.max(runtime.config.outputLines, 2000),
+        );
+        const latest = latestAgentResponse(
+          agent.agent,
+          prompt,
+          output,
+          baselineOutput,
+        );
+        resume = latest !== "" && latest !== lastOutput;
+      } catch {
+        continue;
+      }
+    }
+    if (!resume) continue;
+    runtime.activeStreams.add(agent.terminal_id);
+    try {
+      const next = await runtime.discord.reply(
+        progress,
+        `${agentHeaderFor(agent)}\n▶️ Agent 再度運作，繼續擷取回覆…`,
+      );
+      await streamAgent(
+        agent,
+        next,
+        runtime,
+        prompt,
+        baselineOutput,
+        transcript,
+        resumes + 1,
+      );
+    } finally {
+      runtime.activeStreams.delete(agent.terminal_id);
+    }
+    return;
+  }
+}
 
 export async function streamAgent(
   initial: AgentRecord,
@@ -1981,6 +2064,7 @@ export async function streamAgent(
   prompt: string,
   baselineOutput: string,
   transcript?: CodexTranscript,
+  resumes = 0,
 ): Promise<void> {
   const started = Date.now();
   let lastOutput = "";
@@ -2179,6 +2263,20 @@ export async function streamAgent(
           `${agentHeaderFor(current)}\n⚠️ Agent ended, but Discord delivery failed or was partial. Already delivered chunks were not resent.`,
         );
       }
+      // 沒有正式 final 的強制收尾可能是 Herdr 誤報 idle/done；Agent 之後若又有新輸出，接續擷取。
+      if (!final && resumes < MAX_REWATCH_RESUMES)
+        void rewatchAfterForcedFinish(
+          current,
+          progress,
+          runtime,
+          prompt,
+          baselineOutput,
+          transcript,
+          lastOutput,
+          resumes,
+        ).catch((error) =>
+          console.error(`Stream rewatch failed: ${safeError(error)}`),
+        );
       return;
     }
   }

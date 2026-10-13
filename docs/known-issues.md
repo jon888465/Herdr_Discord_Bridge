@@ -37,6 +37,8 @@
 
 | ISSUE-030 | blocked 等待選擇／回答時，Discord 打字回覆被 `agent is busy` 擋下 | 已修正、待驗收 | 重啟後在 Claude 選單（AskUserQuestion）卡片過期後仍以文字回答驗收 |
 
+| ISSUE-031 | CLI 互動選擇經 Discord 回答後 CLI 繼續運作，但 Discord 不再更新 | 已修正、待驗收 | 重啟後以 Codex／Claude 互動選擇重現；根因為診斷檔佐證的推論 |
+
 | ISSUE-022 | Phase 4 Quota / Failover Manager | 已修正、待驗收 | 2026-09-21 新增 28 項通過；完整 181/184，ISSUE-007／021 待調查，live 待驗收 |
 
 | ISSUE-023 | Grok 回答框與折行標記無法解析 | 已修正、待驗收 | Grok live turn probe 通過；Discord 交付、長文及 blocked 續答待驗收 |
@@ -1289,3 +1291,15 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 修正：`promptMappedAgent` 對「blocked 且串流仍在監看」的 Agent，把文字當作回答經 `sendAgent` 送入並關閉該 terminal 的核准卡片，不經 busy 檢查；handoff 持有、Team task 擁有的 Agent 與附圖仍拒絕。working 狀態仍視為 busy。不新增選項解析或下拉選單 UI（ISSUE-010 的點選 UI 維持待做）。
 
 驗證（2026-10-12，macOS）：新增 `test/blocked-reply.test.ts` 2 項（blocked 時文字送入、working 仍 busy），2/2 通過。未重跑完整套件；未重啟；未 live 驗收。限制：若 Herdr 沒把該 TUI 選單辨識為 blocked（如 agy，見 SPEC），仍會是 working／busy；文字以 `sendAgent` 送出（含 Enter），是否正確選中該 Claude 選單項需 live 確認。
+
+## ISSUE-031：強制收尾後 CLI 繼續運作，Discord 不再更新
+
+更新日期：2026-10-13。狀態：已修正、待驗收（根因為推論）。
+
+症狀：CLI 顯示互動選擇，使用者在 Discord 輸入選擇後 CLI 繼續運作，但 Discord 沒有再更新回覆內容。預期：CLI 後續輸出仍回報到 Discord。
+
+證據：bridge 於 2026-10-13 產生 4 份 capture diagnostic（`~/.local/state/herdr/plugins/herdr-discord-bridge/capture-diagnostics/`）。其中 w5:p2（Codex，`has_transcript: false`）兩份顯示：`agent_status` 為 `done`，elapsed 分別為 49.9 秒與 228 秒，但畫面仍有「Browsing the web」等進行中內容，最終為 capture incomplete。與 `idle/done 連續 30 秒強制收尾`吻合：Herdr 在 CLI 等待選擇或長時間工具等待時回報 `done` 而不是 `blocked`／`working`，bridge 強制結束串流，之後使用者回答、CLI 續跑時已沒有串流。這是推論；尚未取得使用者當次 Discord 畫面與 Herdr 狀態序列，無法證明使用者回報的就是這兩份。
+
+修正：強制收尾（沒有 structured final）後，不佔用 `activeStreams`，改以 5 秒間隔輕量觀察最多 15 分鐘；Agent 回到 working／blocked，或解析後的回覆內容改變時，回覆「▶️ Agent 再度運作，繼續擷取回覆…」並重新擷取，單一發問最多接續 5 次。身分改變、其他串流啟動或逾時即停止。Claude 的畫面持續重繪（ISSUE-026）不會觸發，因為只比對解析後內容與狀態。既有強制收尾與 ISSUE-028 判定不變。
+
+驗證（2026-10-13，macOS）：`test/response-delivery.test.ts` 新增「強制收尾後有新輸出會接續擷取」，該檔 14/14 通過；`npm run check` 為 237 項：230 通過、6 失敗，全為既有 coding-workflow 失敗（ISSUE-025）。未驗證：live 互動選擇、重啟後行為；接續後的 final 會重送整段回答（以原 prompt 為錨），可能與先前已送出的摘錄重複。
