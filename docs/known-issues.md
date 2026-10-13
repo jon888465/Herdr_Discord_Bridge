@@ -39,6 +39,8 @@
 
 | ISSUE-031 | CLI 互動選擇經 Discord 回答後 CLI 繼續運作，但 Discord 不再更新 | 已修正、待驗收 | 重啟後以 Codex／Claude 互動選擇重現；根因為診斷檔佐證的推論 |
 
+| ISSUE-032 | CLI 內可點擊的超連結（OSC 8）在 Discord 只剩連結文字，URL 遺失 | 已緩解、待驗收（程式未修） | 以 AGENTS.md 回覆格式規範要求 Agent 輸出完整純文字網址；其他專案需自行加入同樣規範 |
+
 | ISSUE-022 | Phase 4 Quota / Failover Manager | 已修正、待驗收 | 2026-09-21 新增 28 項通過；完整 181/184，ISSUE-007／021 待調查，live 待驗收 |
 
 | ISSUE-023 | Grok 回答框與折行標記無法解析 | 已修正、待驗收 | Grok live turn probe 通過；Discord 交付、長文及 blocked 續答待驗收 |
@@ -1303,3 +1305,19 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 修正：強制收尾（沒有 structured final）後，不佔用 `activeStreams`，改以 5 秒間隔輕量觀察最多 15 分鐘；Agent 回到 working／blocked，或解析後的回覆內容改變時，回覆「▶️ Agent 再度運作，繼續擷取回覆…」並重新擷取，單一發問最多接續 5 次。身分改變、其他串流啟動或逾時即停止。Claude 的畫面持續重繪（ISSUE-026）不會觸發，因為只比對解析後內容與狀態。既有強制收尾與 ISSUE-028 判定不變。
 
 驗證（2026-10-13，macOS）：`test/response-delivery.test.ts` 新增「強制收尾後有新輸出會接續擷取」，該檔 14/14 通過；`npm run check` 為 237 項：230 通過、6 失敗，全為既有 coding-workflow 失敗（ISSUE-025）。未驗證：live 互動選擇、重啟後行為；接續後的 final 會重送整段回答（以原 prompt 為錨），可能與先前已送出的摘錄重複。
+
+## ISSUE-032：CLI 超連結在 Discord 變成無法得知的純文字
+
+更新日期：2026-10-13。狀態：待調查（尚未修正）。
+
+症狀：Codex 回覆中「開啟 Open WebUI」在 Herdr CLI 內是可點擊的 URL，Discord 只顯示該文字，使用者無法得知網址。預期：Discord 能看到實際 URL。
+
+已確認（2026-10-13，Herdr 0.9.1，macOS）：在暫時 pane 輸出 OSC 8 超連結後讀取，`herdr pane read` 的 text／ansi／detection／visible 都只回傳連結文字，**URL 被 Herdr 剝除**（只有 `--raw` 會回傳字面上的 printf 指令，不是終端機內容）；bridge 因此無從從畫面讀回 URL。Herdr 0.9 有 `pane.link.resolve`／`pane.link.activate`（回傳 `{handled, url}`），但實測回 `stale_target: pane is no longer visible`，需要該 pane 正顯示在 Herdr 客戶端視窗，且 activate 可能觸發開啟連結，不適合作為 bridge 的穩定來源。這些為實測結果，不是根因推論。
+
+可行方向（未實作）：Codex rollout jsonl／Claude 的 transcript 含原始 markdown 連結，可讓 final 保留 URL。限制：2026-10-13 的 Codex capture diagnostic（w5:p1／p2）顯示 `has_transcript: false`，原因未確認，因此對該情境不一定有效；Claude 尚無 transcript reader。
+
+未修正、未驗證；本次只做實驗與記錄，沒有改程式。實驗用的暫時 pane 已關閉。
+
+### ISSUE-032 處置決定（2026-10-13）
+
+使用者決定不改程式，改以專案說明檔規範：在 `AGENTS.md` 新增「回覆格式」，要求 Agent 回覆一律附完整純文字 URL。此為緩解，不是修正：bridge 仍無法還原被剝除的超連結；規範只對讀取此 repo `AGENTS.md` 的 Agent 有效。例如 2026-10-13 截圖中的 colab_llm 專案（Codex）屬另一個 repo，需在該專案的 `AGENTS.md` 加入同樣規範，才會生效。尚未驗收：須用新 session 驗證 Agent 實際遵守規範並在 Discord 看到完整網址。

@@ -31,6 +31,11 @@
 
 不得把 build、unit test 通過等同於 Discord／Herdr／CLI 端到端驗收通過。分別說明原始碼、build、執行中的 bridge、部署／重啟與驗收狀態；未重啟或舊訊息無法補送必須明載。所有測試數字均附日期，不把舊結果當成最新結果。
 
+## 回覆格式（Discord／Herdr bridge）
+
+- 回覆中的 URL 一律以完整純文字網址呈現（如 `https://example.com/path`），不可只給「開啟 xxx」之類的超連結文字。終端機的可點擊超連結（OSC 8）經 Herdr 讀取後只剩文字、網址會遺失，Discord 使用者無法得知（ISSUE-032）。
+- 需要說明連結用途時，在文字後面附上完整網址，例如 `Open WebUI：https://example.com/path`。
+
 ## 交付前
 
 - 執行與變更相關的檢查；程式變更依 `SPEC.md` 完成所需驗證。純文件更新檢查內容、連結與差異，不必重跑程式測試。
