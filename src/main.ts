@@ -2223,12 +2223,16 @@ export async function streamAgent(
       (idleSince > 0 && Date.now() - idleSince >= IDLE_FORCE_COMPLETE_MS);
     if (complete && current.agent_status !== "blocked") {
       const elapsed = formatElapsed(Date.now() - started);
-      // Claude has no transcript reader, but its screen parser keeps only the
+      // Claude and pi have no transcript reader here, but its screen parser keeps only the
       // assistant's own messages; once the screen has settled, that text is the
       // answer, not a progress excerpt.
       const terminalFinal =
         settledComplete &&
-        (current.agent || "").toLowerCase().includes("claude")
+        ["claude", "pi"].some((kind) =>
+          kind === "pi"
+            ? (current.agent || "").toLowerCase() === "pi"
+            : (current.agent || "").toLowerCase().includes(kind),
+        )
           ? longestOutput
           : "";
       const final =

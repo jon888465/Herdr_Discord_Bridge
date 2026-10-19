@@ -417,3 +417,75 @@ test("Claude recovers a long answer whose prompt echo scrolled out of a visible-
   assert.match(text, /step two of the long answer/);
   assert.match(text, /closing paragraph/);
 });
+
+// Synthetic pi TUI fixtures modelled on a 2026-10-19 pi 1.2.0 screen read: no
+// glyph before user/assistant text, ` $ cmd`/` Took` tool blocks, rule-framed input box.
+const rule = "─".repeat(40);
+const piScreen = (prompt: string, body: string, draft = "") =>
+  [
+    ` ${prompt.split("\n").join("\n ")}`,
+    "",
+    " $ git status --short",
+    "",
+    "  M src/a.ts",
+    "",
+    " Took 1.2s",
+    "",
+    ` ${body.split("\n").join("\n ")}`,
+    "",
+    rule,
+    draft,
+    rule,
+    "~/wk/demo (main)",
+    "↑1k ↓2k $0.01 (sub)    (openai-codex) gpt-6.1-sol • medium",
+  ].join("\n");
+
+test("pi extracts the reply after its prompt echo, minus tool blocks and chrome", () => {
+  const answer = "Done.\n```ts\n  const n = 1;\n```";
+  assert.equal(
+    latestAgentResponse(
+      "pi",
+      "check status",
+      piScreen("check status", answer),
+      "",
+    ),
+    answer,
+  );
+  assert.equal(modelCommandFor("pi", "gpt-6.1-sol"), "/model gpt-6.1-sol");
+  assert.equal(
+    normalizeTerminalResponse("pi", piScreen("p", "hello")).includes("Took"),
+    false,
+  );
+});
+
+test("pi tolerates soft-wrapped prompt echoes and ignores the input-box draft", () => {
+  const screen = piScreen(
+    "inspect the bri\ndge and report",
+    "ok",
+    "next draft",
+  );
+  assert.equal(
+    latestAgentResponse("pi", "inspect the bridge and report", screen, ""),
+    "ok",
+  );
+});
+
+test("pi rejects redraws of an old answer and unrelated prompts", () => {
+  const old = piScreen("probe", "old answer");
+  assert.equal(latestAgentResponse("pi", "probe", old, old), "");
+  assert.equal(
+    latestAgentResponse(
+      "pi",
+      "probe",
+      old.replace("Took 1.2s", "Took 1.3s"),
+      old,
+    ),
+    "",
+  );
+  assert.equal(latestAgentResponse("pi", "probe", "", ""), "");
+});
+
+test("pi keeps a reply that follows an unfinished tool header", () => {
+  const screen = " go\n\n $ sleep 5\n\n Working\n";
+  assert.equal(latestAgentResponse("pi", "go", screen, ""), "Working");
+});

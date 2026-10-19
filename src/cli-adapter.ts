@@ -271,12 +271,128 @@ class ClaudeCliAdapter implements CliOutputAdapter {
   }
 }
 
+/**
+ * pi (https://pi.dev) 的 TUI 沒有 user／assistant 前綴符號：兩者都只縮排一個
+ * 空白（user 以背景色區分，純文字讀取看不到）。底部依序是輸入框（上下兩條
+ * 分隔線）與頁尾狀態列；工具區塊以 ` $ cmd` 之類標題開頭，以 ` Took <時間>` 結尾。
+ */
+const piRule = (line: string) => /^[─━]{8,}\s*$/.test(line);
+
+function piLines(output: string): string[] {
+  return stripAnsi(output).replace(/\r/g, "").split("\n");
+}
+
+/** 去除底部輸入框與頁尾狀態列（含其中尚未送出的草稿）。 */
+function stripPiInputBox(output: string): string {
+  const lines = piLines(output);
+  let bottom = -1;
+  for (let i = lines.length - 1; i >= 0; i--)
+    if (piRule(lines[i]!)) {
+      bottom = i;
+      break;
+    }
+  if (bottom < 0) return output;
+  let top = -1;
+  for (let i = bottom - 1; i >= 0; i--)
+    if (piRule(lines[i]!)) {
+      top = i;
+      break;
+    }
+  // 輸入框之下只可能是頁尾（路徑、用量、extension status），不是對話內容。
+  return lines.slice(0, top < 0 ? bottom : top).join("\n");
+}
+
+/** 單列：移除 pi 的一欄 gutter。 */
+const piUngutter = (line: string) =>
+  line.startsWith(" ") ? line.slice(1) : line;
+
+const PI_TOOL_HEADER = /^ (?:\$ |(?:read|write|edit|grep|find|ls) \S)/;
+const PI_SPINNER = /^\s*[⠁-⣿]\s+\S.*$/u;
+
+/** 移除 spinner 與已完成的工具區塊；回答本文維持原有縮排。 */
+function piResponseText(source: string): string {
+  const lines = piLines(source);
+  const body: string[] = [];
+  let inCode = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (!inCode && PI_SPINNER.test(line)) continue;
+    const afterBlank = i === 0 || !lines[i - 1]!.trim();
+    if (!inCode && afterBlank && PI_TOOL_HEADER.test(line)) {
+      const took = lines.findIndex(
+        (item, index) => index > i && /^ Took \S/.test(item),
+      );
+      // 沒有 Took 結尾（仍在執行或格式不同）時只丟標題列，不冒險吞掉回答。
+      if (took >= 0) i = took;
+      continue;
+    }
+    const text = piUngutter(line);
+    if (/^```/.test(text.trimStart())) inCode = !inCode;
+    body.push(text.trimEnd());
+  }
+  return body
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/** 找出最後一次出現的 prompt 回顯，回傳其後的文字。 */
+function piPromptTail(prompt: string, output: string): string | undefined {
+  const lines = piLines(output);
+  const compact = (text: string) => text.replace(/\s+/g, " ").trim();
+  const wanted = compact(prompt);
+  if (!wanted) return;
+  const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  let found: number | undefined;
+  for (let start = 0; start < lines.length; start++) {
+    const first = compact(lines[start]!);
+    if (!first || !wanted.startsWith(first)) continue;
+    const rows: string[] = [];
+    for (let end = start; end < lines.length && end < start + 200; end++) {
+      const row = compact(lines[end]!);
+      if (row) rows.push(escape(row));
+      // 軟折行可能切在英文單字或中文詞中間，只在顯示列邊界容許空白。
+      const joined = rows.join("\\s*");
+      if (new RegExp("^" + joined + "$", "u").test(wanted)) {
+        found = end + 1;
+        break;
+      }
+      if (!new RegExp("^" + joined, "u").test(wanted)) break;
+    }
+  }
+  return found === undefined ? undefined : lines.slice(found).join("\n");
+}
+
+class PiCliAdapter implements CliOutputAdapter {
+  modelCommand(model: string): string {
+    return "/model " + model;
+  }
+
+  extractLatestResponse(
+    prompt: string,
+    output: string,
+    baseline: string,
+  ): string {
+    const live = stripPiInputBox(output);
+    const tail = piPromptTail(prompt, live);
+    let source = tail;
+    // 看不到 prompt 回顯時，只接受相對非空 baseline 的新增內容。
+    if (source === undefined && baseline.trim())
+      source = outputSinceBaseline(stripPiInputBox(baseline), live);
+    const text = piResponseText(source ?? "");
+    const oldBase = stripPiInputBox(baseline);
+    const old = piResponseText(piPromptTail(prompt, oldBase) ?? oldBase);
+    return text && text !== old ? text : "";
+  }
+}
+
 export function normalizeTerminalResponse(
   agentKind: string | undefined,
   output: string,
 ): string {
   const kind = (agentKind || "").toLowerCase();
   if (kind.includes("claude")) return claudeResponseText(output);
+  if (kind === "pi") return piResponseText(stripPiInputBox(output));
   return kind === "grok" ? grokResponses(output).join("\n\n") : output;
 }
 
@@ -300,6 +416,7 @@ class GrokCliAdapter implements CliOutputAdapter {
 
 const grokAdapter = new GrokCliAdapter();
 const claudeAdapter = new ClaudeCliAdapter();
+const piAdapter = new PiCliAdapter();
 
 const codexAdapter = new MarkerCliAdapter(["› ", "❯ "]);
 const antigravityAdapter = new MarkerCliAdapter(["> "]);
@@ -356,6 +473,7 @@ export function latestAgentResponse(
 function adapterFor(agentKind: string | undefined): CliOutputAdapter {
   const kind = (agentKind || "").toLowerCase();
   if (kind === "grok") return grokAdapter;
+  if (kind === "pi") return piAdapter;
   if (kind.includes("claude")) return claudeAdapter;
   if (kind.includes("opencode")) return opencodeAdapter;
   if (kind.includes("antigravity") || kind === "agy") return antigravityAdapter;
