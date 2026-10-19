@@ -268,3 +268,7 @@ Discord 回覆擷取遇到原 Agent 或已知 session 資料暫時消失時，�
 Claude 圖片交付已改為本機路徑交付（2026-10-05，待 Discord 實機驗收）。Herdr 未回報 Claude session identity 時，coding reviewer、
 session handoff／failover 保持已知 session 的要求；不猜測最近歷史檔。Claude
 實際 Discord 回覆仍待驗收，詳見 [ISSUE-026](docs/known-issues.md)。
+
+## 回送檔案到 Discord
+
+Agent 可在最終回覆中單獨一行寫 `[[discord-attach: /絕對路徑]]`，Bridge 會把檔案以附件送回 Discord。檔案須為一般檔案、非空、每個 ≤ 8 MiB、每則至多 10 個，且位於 Agent 工作目錄之下（`.env`、`.git` 等敏感路徑會被拒絕）。請在 Agent 的 `AGENTS.md` 告知此約定。詳見 SPEC.md 與 ISSUE-034。

@@ -296,3 +296,7 @@ an observed excerpt, not a native transcript. Claude image delivery now uses loc
 If Herdr omits Claude session identity, coding review and session handoff/failover
 keep their known-session requirements. Live acceptance is pending in
 [ISSUE-026](docs/known-issues.md); build and fixture tests do not establish Discord acceptance.
+
+## Sending files back to Discord
+
+An Agent can attach files to its final reply by putting `[[discord-attach: /absolute/path]]` on its own line. Files must be regular, non-empty, ≤ 8 MiB, at most 10 per reply, and located under the Agent's working directory (secrets such as `.env` and `.git` are refused). Tell your Agent about this convention (e.g. in its `AGENTS.md`). See SPEC.md and ISSUE-034.

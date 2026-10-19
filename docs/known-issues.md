@@ -41,7 +41,8 @@
 
 | ISSUE-032 | CLI 內可點擊的超連結（OSC 8）在 Discord 只剩連結文字，URL 遺失 | 已緩解、待驗收（程式未修） | 以 AGENTS.md 回覆格式規範要求 Agent 輸出完整純文字網址；其他專案需自行加入同樣規範 |
 | ISSUE-033 | 新增 pi agent 終端畫面 parser adapter | 已修正、待驗收 | 原始碼與 fixture 測試完成；尚未用真實 pi pane 經 Discord／Console 驗收，bridge 未重啟 |
-
+| ISSUE-034 | Agent 檔案回送 Discord（discord-attach 標記） | 已修正、待驗收 | 原始碼與單元測試完成；尚未 Discord 端到端驗收 |
+| ISSUE-035 | coding-workflow 測試在 macOS 有 6 項失敗 | 待調查 | 基準亦失敗，根因未確認 |
 | ISSUE-022 | Phase 4 Quota / Failover Manager | 已修正、待驗收 | 2026-09-21 新增 28 項通過；完整 181/184，ISSUE-007／021 待調查，live 待驗收 |
 
 | ISSUE-023 | Grok 回答框與折行標記無法解析 | 已修正、待驗收 | Grok live turn probe 通過；Discord 交付、長文及 blocked 續答待驗收 |
@@ -1339,3 +1340,21 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 - Coding reviewer／session handoff 的已知 session gate 未針對 pi 路徑型 session 調整。
 
 驗證（2026-10-19）：`node --test dist/test/cli-adapter.test.js` 22 通過、0 失敗（含 4 個 pi 測試；fixture 為依實機畫面仿製的合成資料，非真實回答）。`npm run check`（typecheck + build + 全部測試）241 通過、0 失敗。尚未驗收：真實 pi pane 經 Discord、Console、Team turn 的端到端回覆；bridge 未重啟，舊訊息無法補送。下一步：重啟 bridge 後在 pi pane 以短回答、含工具呼叫、長回答各驗收一次，並蒐集其他工具區塊格式。
+
+## ISSUE-034：Bridge 無法把 Agent 產生的檔案回送 Discord
+
+更新日期：2026-10-19。狀態：已修正、待驗收（原始碼已改，自動化檢查見下；未重啟 bridge、未做 Discord 端到端驗收）。
+
+症狀：Agent 產生圖片、報告等檔案後，Discord 只能看到文字，無法取得檔案。預期：Agent 可請 bridge 把檔案以 Discord 附件回送。
+
+修正（新功能）：Agent 在最終回覆單獨一行輸出 `[[discord-attach: /絕對路徑]]`。Bridge 於最終回覆送出前解析並移除標記，驗證後以附件送到同一 thread。細節見 SPEC「Agent 檔案回送 Discord」。範圍：`src/outbound-attachments.ts`（新）、`src/discord.ts`（`postFiles`）、`src/main.ts`（最終交付）、`test/outbound-attachments.test.ts`（新）。
+
+驗證（2026-10-19，macOS，Node 本機）：`npm run lint` 通過；`node --test dist/test/outbound-attachments.test.js` 2/2 通過。完整 `npm test`：239 項、232 通過、6 失敗；失敗項為 `test/coding-workflow.test.ts`（coding review／verify drift、artifact reads 等），在未含本次變更的基準（`git stash` 後）也出現相同失敗名稱，判定與本功能無關，但根因未調查，另需追蹤（見 ISSUE-035）。
+
+未驗證：真實 Discord 上傳（含 Discord 伺服器上傳大小上限，程式保守限 8 MiB）、Codex／Claude／agy 是否實際輸出標記、Claude 畫面擷取路徑被換行截斷的情況。標記僅在取得正式 final（transcript 或 Claude 已 settled）時處理；僅有擷取片段的後備訊息不處理。需重啟 bridge 後才生效。
+
+## ISSUE-035：coding-workflow 測試在 macOS 有 6 項失敗
+
+更新日期：2026-10-19。狀態：待調查。
+
+症狀：`npm test` 在 macOS（Darwin 25.5.0）有 6 項 `test/coding-workflow.test.ts` 失敗（如「artifact reads stay inside the task directory and reject escapes」）。基準（無 ISSUE-034 變更）重現相同失敗。根因未確認（可能與 macOS `/tmp`／`/private` realpath 或 git 環境有關，僅為推測）。下一步：單獨執行並檢視失敗訊息。
