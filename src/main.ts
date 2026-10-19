@@ -6,6 +6,10 @@ import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { splitFinalMarkdown } from "./final-format.js";
 import {
+  extractAttachMarkers,
+  resolveOutboundFiles,
+} from "./outbound-attachments.js";
+import {
   CodexTranscript,
   Settlement,
   rollingPreview,
@@ -2250,14 +2254,29 @@ export async function streamAgent(
           hasTranscript: Boolean(transcript),
           transcriptCompleted: Boolean(transcript?.turn.completed),
         });
+      const outbound = final
+        ? extractAttachMarkers(final)
+        : { text: "", requested: [] as string[] };
       const body =
-        final ||
+        (final && (outbound.text || (outbound.requested.length ? "📎" : ""))) ||
         (longestOutput
           ? `⚠️ Final response unavailable; captured CLI excerpt (may include progress or be incomplete):\n${longestOutput}`
           : "⚠️ Agent ended, but Bridge could not capture its final response. This is a capture failure, not proof of an empty answer.");
       try {
         for (const chunk of splitFinalMarkdown(body))
           await runtime.discord.postOutput(progress, chunk);
+        if (outbound.requested.length) {
+          const roots = [current.cwd, current.foreground_cwd].filter(
+            (dir): dir is string => Boolean(dir),
+          );
+          const sent = await resolveOutboundFiles(outbound.requested, roots);
+          await runtime.discord.postFiles(progress, sent.files);
+          if (sent.rejected.length)
+            await runtime.discord.postOutput(
+              progress,
+              `⚠️ 以下附件未送出：\n${sent.rejected.map((r) => `- ${r}`).join("\n")}`,
+            );
+        }
         await edit(
           `${agentHeaderFor(current)}\n${final ? "✅ finished — final response delivered" : "⚠️ finished — capture incomplete; diagnostic delivered"} · 總耗時 ${elapsed}`,
         );

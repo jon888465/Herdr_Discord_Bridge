@@ -1,5 +1,6 @@
 import {
   ActionRowBuilder,
+  AttachmentBuilder,
   ButtonBuilder,
   ButtonInteraction,
   ButtonStyle,
@@ -210,6 +211,18 @@ export class DiscordAdapter {
     const channel = message.channel as TextChannel | ThreadChannel;
     for (const chunk of splitDiscordText(content))
       await channel.send({ content: chunk, allowedMentions: { parse: [] } });
+  }
+
+  async postFiles(
+    message: Message,
+    files: { path: string; name: string }[],
+  ): Promise<void> {
+    if (!files.length) return;
+    const channel = message.channel as TextChannel | ThreadChannel;
+    await channel.send({
+      files: files.map((f) => new AttachmentBuilder(f.path, { name: f.name })),
+      allowedMentions: { parse: [] },
+    });
   }
 
   async postAgentTransition(
