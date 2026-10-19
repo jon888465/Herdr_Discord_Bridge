@@ -40,6 +40,7 @@
 | ISSUE-031 | CLI 互動選擇經 Discord 回答後 CLI 繼續運作，但 Discord 不再更新 | 已修正、待驗收 | 重啟後以 Codex／Claude 互動選擇重現；根因為診斷檔佐證的推論 |
 
 | ISSUE-032 | CLI 內可點擊的超連結（OSC 8）在 Discord 只剩連結文字，URL 遺失 | 已緩解、待驗收（程式未修） | 以 AGENTS.md 回覆格式規範要求 Agent 輸出完整純文字網址；其他專案需自行加入同樣規範 |
+| ISSUE-033 | 新增 pi agent 終端畫面 parser adapter | 已修正、待驗收 | 原始碼與 fixture 測試完成；尚未用真實 pi pane 經 Discord／Console 驗收，bridge 未重啟 |
 
 | ISSUE-022 | Phase 4 Quota / Failover Manager | 已修正、待驗收 | 2026-09-21 新增 28 項通過；完整 181/184，ISSUE-007／021 待調查，live 待驗收 |
 
@@ -1321,3 +1322,20 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 ### ISSUE-032 處置決定（2026-10-13）
 
 使用者決定不改程式，改以專案說明檔規範：在 `AGENTS.md` 新增「回覆格式」，要求 Agent 回覆一律附完整純文字 URL。此為緩解，不是修正：bridge 仍無法還原被剝除的超連結；規範只對讀取此 repo `AGENTS.md` 的 Agent 有效。例如 2026-10-13 截圖中的 colab_llm 專案（Codex）屬另一個 repo，需在該專案的 `AGENTS.md` 加入同樣規範，才會生效。尚未驗收：須用新 session 驗證 Agent 實際遵守規範並在 Discord 看到完整網址。
+
+## ISSUE-033：接入 pi agent（終端畫面 parser adapter）
+
+更新日期：2026-10-19。狀態：已修正、待驗收（僅原始碼與自動化檢查）。
+
+症狀：Herdr 已回報 `agent: "pi"` 與 `agent_session`（kind `path`，指向 `~/.pi/agent/sessions/.../*.jsonl`），但 bridge 無專用 adapter，落入 generic marker adapter，無法辨識 pi 畫面而擷取不到回覆。預期：pi pane 的 Discord／Console 回覆能擷取本次回答。
+
+實作範圍：`src/cli-adapter.ts` 新增 `PiCliAdapter`（Herdr kind 嚴格等於 `pi`，大小寫不敏感）；`/model <name>`；`normalizeTerminalResponse` 支援 pi；`src/main.ts` 的 settled 終端 final 由 Claude 擴及 pi。依 2026-10-19 讀取 pi 1.2.0 實際 pane（w5:p1，Herdr 0.8.0）觀察到的畫面格式：user／assistant 皆無前綴符號、僅縮排一欄（user 靠背景色區分，純文字讀不到）；工具區塊以 ` $ cmd` 開頭、` Took <時間>` 結尾；底部為兩條 `─` 分隔線包住的輸入框與頁尾狀態列。Adapter 因此以「prompt 回顯（容許軟折行）」為邊界取其後文字，去除輸入框／頁尾（含草稿）、spinner 與已完成工具區塊，並與 baseline 的舊回答比對避免重畫重播。
+
+限制（未解決）：
+- 沒有 pi structured transcript reader（session 檔為 jsonl，格式見 pi `docs/session-format.md`，未實作）；Discord 仍標示為擷取摘要，不能宣稱 semantic final。
+- 工具標題只認 `$ `、`read|write|edit|grep|find|ls <arg>`；僅實際見過 `$` 區塊。其他工具區塊格式與缺少 `Took` 結尾時只丟標題列，其輸出可能混入回覆。
+- 模型選單 `modelOptionsFor` 未針對 pi 設定（落入預設清單）；`/model` 指令格式未在實機驗證。pi 以 provider 切換帳號（pi-acc-switcher），名稱需由操作者指定。
+- 圖片附件交付 allowlist 未加入 pi（`src/main.ts`），未驗證 pi 讀圖方式。
+- Coding reviewer／session handoff 的已知 session gate 未針對 pi 路徑型 session 調整。
+
+驗證（2026-10-19）：`node --test dist/test/cli-adapter.test.js` 22 通過、0 失敗（含 4 個 pi 測試；fixture 為依實機畫面仿製的合成資料，非真實回答）。`npm run check`（typecheck + build + 全部測試）241 通過、0 失敗。尚未驗收：真實 pi pane 經 Discord、Console、Team turn 的端到端回覆；bridge 未重啟，舊訊息無法補送。下一步：重啟 bridge 後在 pi pane 以短回答、含工具呼叫、長回答各驗收一次，並蒐集其他工具區塊格式。

@@ -222,7 +222,7 @@ source pane. No full Discord or CLI history is copied to another Agent.
 For Discord single-Agent prompt replies, the bridge records the terminal snapshot before sending the
 prompt and forwards only output after that prompt. CLI-specific prompt markers
 and terminal chrome are handled by adapters in `src/cli-adapter.ts`; Codex,
-Antigravity (`agy`), OpenCode, Grok, and Claude have separate adapters, while unknown CLIs use
+Antigravity (`agy`), OpenCode, Grok, Claude, and pi have separate adapters, while unknown CLIs use
 a safe generic adapter. If no reliable prompt boundary is found, historical output is
 not forwarded. The default `notifyOn` setting is `["blocked"]`, so a separate
 `done` notification is not posted after a completed prompt.

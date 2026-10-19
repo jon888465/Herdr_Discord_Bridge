@@ -543,3 +543,10 @@ blocked 問答、長回答與實際 Discord delivery 尚未驗收，bridge 未�
 Discord 回覆串流在 Agent 進入 idle／done 連續 30 秒後必須強制收尾，不得無止境輪詢 pane（ISSUE-026，待實機驗收）。
 Claude 會把貼上的圖片路徑轉成 [Image #n] 附件並可能吞掉 Enter，bridge 會偵測輸入框殘留並補送 Enter（ISSUE-026）。
 Claude 圖片交付已加入本機路徑交付 allowlist（2026-10-05，原始碼已改、待實際 Discord 驗收）；fixture 證據與本次 CLI 短回答證據分別記錄。
+
+## pi terminal adapter（2026-10-19）
+
+Herdr kind 等於 `pi`（大小寫不敏感）使用專用 adapter，模型指令為 `/model <name>`。pi TUI 的 user／assistant 文字都沒有前綴符號，只縮排一欄，因此 adapter 以最後一次出現的 prompt 回顯（容許顯示列邊界的軟折行與空白差異）為邊界，取其後文字；移除底部輸入框（含草稿）與頁尾狀態列、spinner，以及以 ` $ cmd`／`read|write|edit|grep|find|ls` 標題開頭、至 ` Took <時間>` 結束的工具區塊（沒有 `Took` 結尾時只丟標題列），並去除一欄 gutter、保留 code 縮排。prompt 不可見時只接受相對非空 baseline 的新增內容；與 baseline 舊回答相同視為重繪，不重播。
+
+Console／Team turn 使用同一清理器，仍須本次隨機 begin/end envelope 與 idle/done；Discord 在畫面穩定後以清理後文字為 final。沒有 pi structured transcript reader，仍是擷取摘要。工具格式改變、捲出畫面的內容與無法辨識的工具輸出可能失敗或混入。驗證與限制見 ISSUE-033（原始碼與 fixture 測試完成，待實機驗收）。
+
