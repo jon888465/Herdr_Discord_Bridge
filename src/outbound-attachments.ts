@@ -4,7 +4,8 @@ import { basename, isAbsolute, relative } from "node:path";
 export const MAX_OUTBOUND_FILES = 10;
 export const MAX_OUTBOUND_BYTES = 8 * 1024 * 1024;
 
-const MARKER = /^[ \t]*\[\[discord-attach:\s*(.+?)\s*\]\][ \t]*$/gim;
+const MARKER =
+  /^[ \t]*(?:[⏺●•][ \t]*)?\[\[discord-attach:\s*(.+?)\s*\]\][ \t]*$/gim;
 const SENSITIVE =
   /(^|[\\/])(\.env(\..*)?|\.git|\.ssh|\.aws|\.gnupg|id_rsa[^\\/]*|id_ed25519[^\\/]*)([\\/]|$)/i;
 
@@ -68,4 +69,37 @@ export async function resolveOutboundFiles(
     }
   }
   return { files, rejected };
+}
+
+const SEND_BLOCK =
+  /^[ \t]*(?:[⏺●•][ \t]*)?\[\[discord-send\]\][ \t]*\n([\s\S]*?)\n[ \t]*\[\[\/discord-send\]\][ \t]*$/gim;
+const PROMPT_LINE = /^\s*[❯›>]\s+\S/;
+
+export interface DirectMarkers {
+  /** key → payload; key is stable for de-duplication. */
+  messages: { key: string; text: string }[];
+  files: { key: string; path: string }[];
+}
+
+/**
+ * Herdr 直接互動（非 Discord 發起）時，只看最後一次使用者輸入列之後的畫面，
+ * 取出 `[[discord-send]]…[[/discord-send]]` 文字區塊與 `[[discord-attach: 路徑]]`。
+ */
+export function extractDirectMarkers(screen: string): DirectMarkers {
+  const lines = screen.replace(/\r/g, "").split("\n");
+  let last = -1;
+  lines.forEach((line, i) => {
+    if (PROMPT_LINE.test(line)) last = i;
+  });
+  const region = lines.slice(last + 1).join("\n");
+  const messages: DirectMarkers["messages"] = [];
+  for (const m of region.matchAll(SEND_BLOCK)) {
+    const text = m[1].replace(/^[ \t]{0,2}/gm, "").trim();
+    if (text) messages.push({ key: `send:${text}`, text });
+  }
+  const files = extractAttachMarkers(region).requested.map((path) => ({
+    key: `file:${path}`,
+    path,
+  }));
+  return { messages, files };
 }

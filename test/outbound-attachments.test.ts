@@ -49,3 +49,28 @@ test("only regular files inside the root are accepted", async () => {
     await rm(base, { recursive: true, force: true });
   }
 });
+
+test("direct markers are read only after the last user prompt line", async () => {
+  const { extractDirectMarkers } =
+    await import("../src/outbound-attachments.js");
+  const screen = [
+    "❯ 舊問題",
+    "⏺ [[discord-attach: /old.txt]]",
+    "❯ 傳給 discord 一段話和檔案",
+    "⏺ [[discord-send]]",
+    "  第一行",
+    "  第二行",
+    "  [[/discord-send]]",
+    "  [[discord-attach: /new.txt]]",
+    "❯ ",
+  ].join("\n");
+  const r = extractDirectMarkers(screen);
+  assert.deepEqual(
+    r.messages.map((m) => m.text),
+    ["第一行\n第二行"],
+  );
+  assert.deepEqual(
+    r.files.map((f) => f.path),
+    ["/new.txt"],
+  );
+});

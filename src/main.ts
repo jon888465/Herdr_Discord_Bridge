@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { splitFinalMarkdown } from "./final-format.js";
 import {
   extractAttachMarkers,
+  extractDirectMarkers,
   resolveOutboundFiles,
 } from "./outbound-attachments.js";
 import {
@@ -330,6 +331,17 @@ async function startBridge(
   watcher.on("transition", (transition: AgentTransition) => {
     if (!tasks.owns(transition.agent) && !handoffs.blocks(transition.agent))
       void handleTransition(transition, { config, herdr, routing, discord });
+    if (
+      ["idle", "done"].includes(transition.to) &&
+      !activeStreams.has(transition.agent.terminal_id)
+    )
+      void relayDirectMarkers(transition.agent, {
+        herdr,
+        routing,
+        discord,
+      }).catch((error) =>
+        console.error(`Direct relay failed: ${safeError(error)}`),
+      );
   });
   watcher.on("removed", (removed: AgentRemoved) => {
     void handleRemoved(removed, { routing, discord });
@@ -2272,6 +2284,10 @@ export async function streamAgent(
           const roots = [current.cwd, current.foreground_cwd].filter(
             (dir): dir is string => Boolean(dir),
           );
+          const done =
+            relayedMarkers.get(current.terminal_id) || new Set<string>();
+          relayedMarkers.set(current.terminal_id, done);
+          for (const raw of outbound.requested) done.add(`file:${raw}`);
           const sent = await resolveOutboundFiles(outbound.requested, roots);
           await runtime.discord.postFiles(progress, sent.files);
           if (sent.rejected.length)
@@ -2309,6 +2325,50 @@ export async function streamAgent(
   await edit(
     `${agentHeaderFor(initial)}\n⏱️ Monitoring timed out; use /herdr read for the current CLI output.`,
   );
+}
+
+/** terminal_id → 已處理的標記 key，避免 idle／done 重複轉換或 streamAgent 已送過時再送。 */
+const relayedMarkers = new Map<string, Set<string>>();
+
+/**
+ * 使用者直接在 Herdr 對 Agent 說「傳給 Discord」時，Agent 輸出的標記由 bridge 代送到
+ * 已對應的 Discord thread（ISSUE-037）。沒有對應 Discord 目的地則不送。
+ */
+async function relayDirectMarkers(
+  agent: AgentRecord,
+  runtime: Pick<Runtime, "herdr" | "routing" | "discord">,
+): Promise<void> {
+  const targets = mappingsForAgent(agent, runtime.routing.allMappings());
+  if (!targets.length) return;
+  const screen = await runtime.herdr.readAgent(
+    agent.pane_id,
+    "recent_unwrapped",
+    500,
+  );
+  const found = extractDirectMarkers(screen);
+  const done = relayedMarkers.get(agent.terminal_id) || new Set<string>();
+  relayedMarkers.set(agent.terminal_id, done);
+  const messages = found.messages.filter((m) => !done.has(m.key));
+  const requested = found.files.filter((f) => !done.has(f.key));
+  if (!messages.length && !requested.length) return;
+  for (const item of [...messages, ...requested]) done.add(item.key);
+  const roots = [agent.cwd, agent.foreground_cwd].filter((dir): dir is string =>
+    Boolean(dir),
+  );
+  const sent = await resolveOutboundFiles(
+    requested.map((f) => f.path),
+    roots,
+  );
+  const notes = sent.rejected.length
+    ? [`⚠️ 以下附件未送出：\n${sent.rejected.map((r) => `- ${r}`).join("\n")}`]
+    : [];
+  const header = agentHeaderFor(agent);
+  for (const target of targets.slice(0, 1))
+    await runtime.discord.postDirect(
+      target,
+      [...messages.map((m) => `${header}\n${m.text}`), ...notes],
+      sent.files,
+    );
 }
 
 async function handleTransition(

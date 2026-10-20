@@ -225,6 +225,34 @@ export class DiscordAdapter {
     });
   }
 
+  /** 把 Herdr 端 Agent 要求的文字與檔案送到已對應的 Discord 目的地。 */
+  async postDirect(
+    target: TargetMapping,
+    content: string[],
+    files: { path: string; name: string }[],
+  ): Promise<void> {
+    const channel = await this.client.channels.fetch(
+      target.discordThreadId || target.discordChannelId,
+    );
+    if (
+      !channel ||
+      (!(channel instanceof TextChannel) && !(channel instanceof ThreadChannel))
+    )
+      throw new Error(
+        "configured Discord destination is not a text channel or thread",
+      );
+    for (const text of content)
+      for (const chunk of splitDiscordText(text))
+        await channel.send({ content: chunk, allowedMentions: { parse: [] } });
+    if (files.length)
+      await channel.send({
+        files: files.map(
+          (f) => new AttachmentBuilder(f.path, { name: f.name }),
+        ),
+        allowedMentions: { parse: [] },
+      });
+  }
+
   async postAgentTransition(
     agent: AgentRecord,
     context: string,
