@@ -2258,13 +2258,12 @@ export async function streamAgent(
           hasTranscript: Boolean(transcript),
           transcriptCompleted: Boolean(transcript?.turn.completed),
         });
-      const outbound = final
-        ? extractAttachMarkers(final)
-        : { text: "", requested: [] as string[] };
+      // 標記在正式 final 與後備擷取片段都處理；片段仍受同一套路徑沙箱限制（ISSUE-034）。
+      const outbound = extractAttachMarkers(final || longestOutput);
       const body =
         (final && (outbound.text || (outbound.requested.length ? "📎" : ""))) ||
         (longestOutput
-          ? `⚠️ Final response unavailable; captured CLI excerpt (may include progress or be incomplete):\n${longestOutput}`
+          ? `⚠️ Final response unavailable; captured CLI excerpt (may include progress or be incomplete):\n${outbound.text}`
           : "⚠️ Agent ended, but Bridge could not capture its final response. This is a capture failure, not proof of an empty answer.");
       try {
         for (const chunk of splitFinalMarkdown(body))
