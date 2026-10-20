@@ -43,7 +43,7 @@
 | ISSUE-033 | 新增 pi agent 終端畫面 parser adapter | 已修正、待驗收 | 原始碼與 fixture 測試完成；尚未用真實 pi pane 經 Discord／Console 驗收，bridge 未重啟 |
 | ISSUE-034 | Agent 檔案回送 Discord（discord-attach 標記） | 已驗收（2026-10-20） | 後備片段修正後 Discord 實機收到附件；範圍僅 Claude／文字檔 |
 | ISSUE-035 | coding-workflow 測試在 macOS 有 6 項失敗 | 待調查 | 基準亦失敗，根因未確認 |
-| ISSUE-037 | 使用者直接在 Herdr 要求 Agent 傳給 Discord，bridge 不代送 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟、未實機驗收 |
+| ISSUE-037 | 使用者直接在 Herdr 要求 Agent 傳給 Discord，bridge 不代送 | 重新開啟（驗收失敗，2026-10-20） | bridge 已重啟；colab_llm 的 Claude 不知道標記約定，只在 Herdr 內貼出網址，未送 Discord |
 | ISSUE-036 | 強制收尾後的 rewatch 在使用者直接於 pane 輸入新內容後仍重複擷取舊 prompt，Discord 被洗版 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟 |
 | ISSUE-022 | Phase 4 Quota / Failover Manager | 已修正、待驗收 | 2026-09-21 新增 28 項通過；完整 181/184，ISSUE-007／021 待調查，live 待驗收 |
 
@@ -1396,3 +1396,9 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 驗證（2026-10-20）：lint、build 通過；完整 `npm test` 245 項、238 通過、6 失敗（ISSUE-035 既有）；新增 direct marker 單元測試通過。
 
 限制／未驗證：只在狀態轉換時掃描，Agent 持續 working 時不即時送；若使用者在輸入框有未送出的草稿，會被視為最後輸入列而截斷區域；bridge 重啟後記憶體去重清空，但舊標記位於最後輸入列之前不會重送；未實機驗證 Claude／Codex 畫面對標記行的實際呈現（如 ⏺ 前綴、換行縮排）。多個對應目的地時只送第一個。notifyOn 設定不影響此功能。
+
+### ISSUE-037 驗收失敗（2026-10-20）
+
+環境：重啟後的 bridge（commit 61391f5，pane w2:p1F）；使用者在 Herdr 對 w5:p1（Claude，cwd `colab_llm`，另一個 repo）輸入「網址傳給discord」。結果：Agent 只在 Herdr 畫面回覆一行 URL，沒有輸出 `[[discord-send]]` 標記，Discord 沒收到。
+
+已確認原因（由畫面截圖）：Agent 沒輸出標記。`colab_llm` 沒有本 repo `AGENTS.md` 的約定，Agent 無從得知標記格式；bridge 程式本身未被觸發，**不是**掃描邏輯錯誤（該路徑尚未以含標記的真實回合驗證，仍未知）。這是設計限制：bridge 讀畫面，無法理解自然語言「傳給 Discord」，必須有 Agent 端約定或明確的 Agent 可呼叫介面。狀態改為重新開啟，待決定方案（全域 Agent 指示檔，或提供 Agent 可執行的 CLI 指令／IPC）。
