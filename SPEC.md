@@ -557,3 +557,5 @@ Agent 要回送檔案時，在最終回覆中單獨一行輸出 `[[discord-attac
 限制（fail closed）：路徑須為絕對路徑；以 realpath 解析後必須位於該 Agent 的 `cwd` 或 `foreground_cwd` 之下（symlink 指向外部會被拒絕）；僅限一般檔案、非空、每個至多 8 MiB、每則至多 10 個；拒絕 `.env*`、`.git`、`.ssh`、`.aws`、`.gnupg`、`id_rsa*`、`id_ed25519*` 路徑；重複路徑只送一次。被拒檔案以一則警告列出原因，不影響文字回覆。正式 final 與「擷取片段」後備訊息都會處理標記（2026-10-20 起；原先僅處理正式 final，Claude 閒置強制收尾時標記會被原樣貼出）；標記一律受上述路徑沙箱限制。Agent 需被告知此約定（例如寫入該專案 `AGENTS.md`）；Bridge 不自動改寫 prompt。驗收尚待 Discord 端到端，見 ISSUE-034。
 
 強制收尾後的 rewatch（ISSUE-036，2026-10-20）：每輪先讀畫面，若本次 prompt 最後出現位置之後已有其他使用者輸入列，視為對話已前進並結束觀察，不再以舊 prompt 重新擷取或貼回 Discord。
+
+Herdr 直接互動回送（ISSUE-037，2026-10-20）：Agent 轉為 idle／done 且無進行中的 Discord stream 時，bridge 讀取畫面，僅取最後一次使用者輸入列之後的 `[[discord-send]]…[[/discord-send]]` 文字區塊與 `[[discord-attach: 路徑]]`，送到該 Agent 對應的 Discord 目的地（第一個；無對應則不送）。檔案沿用上述沙箱；以 terminal 記憶體去重。僅在狀態轉換時掃描；實機驗收尚待。

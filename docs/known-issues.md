@@ -43,6 +43,7 @@
 | ISSUE-033 | 新增 pi agent 終端畫面 parser adapter | 已修正、待驗收 | 原始碼與 fixture 測試完成；尚未用真實 pi pane 經 Discord／Console 驗收，bridge 未重啟 |
 | ISSUE-034 | Agent 檔案回送 Discord（discord-attach 標記） | 已驗收（2026-10-20） | 後備片段修正後 Discord 實機收到附件；範圍僅 Claude／文字檔 |
 | ISSUE-035 | coding-workflow 測試在 macOS 有 6 項失敗 | 待調查 | 基準亦失敗，根因未確認 |
+| ISSUE-037 | 使用者直接在 Herdr 要求 Agent 傳給 Discord，bridge 不代送 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟、未實機驗收 |
 | ISSUE-036 | 強制收尾後的 rewatch 在使用者直接於 pane 輸入新內容後仍重複擷取舊 prompt，Discord 被洗版 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟 |
 | ISSUE-022 | Phase 4 Quota / Failover Manager | 已修正、待驗收 | 2026-09-21 新增 28 項通過；完整 181/184，ISSUE-007／021 待調查，live 待驗收 |
 
@@ -1383,3 +1384,15 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 驗證（2026-10-20）：lint 通過；完整 `npm test` 244 項、237 通過、6 失敗（同 ISSUE-035 的 coding-workflow 既有失敗）；新增單元測試通過。
 
 未驗證／限制：未重啟 bridge 與實機驗收；已送出的訊息無法收回。若使用者在輸入框打字尚未送出，也會被視為「已前進」而停止觀察（可接受的保守行為）。Claude 無 transcript 時 rewatch 的片段跳動根因（為何 `extracted_last` 在片段間變動）未另行修正。
+
+## ISSUE-037：直接在 Herdr 要求 Agent 傳訊息／檔案給 Discord 時 bridge 不代送
+
+更新日期：2026-10-20。狀態：已修正、待驗收（原始碼已改；執行中的 bridge 為重啟前版本，**未重啟、未實機驗收**）。
+
+症狀：ISSUE-034 的 `[[discord-attach]]` 只在 Discord 發起的回合（`streamAgent`）處理；使用者在 Herdr 直接對 Agent 說「傳給 Discord」時，標記不會被代送。預期：與傳檔相同，由 bridge 代送到該 Agent 對應的 Discord thread。
+
+修正：Agent 輸出 `[[discord-send]]` ⏎ 文字 ⏎ `[[/discord-send]]`（文字）或 `[[discord-attach: /絕對路徑]]`（檔案）。Watcher 偵測 Agent 轉為 idle／done 且無進行中的 Discord stream 時，讀取畫面，**只看最後一次使用者輸入列（`❯`）之後**的標記，送到 `mappingsForAgent` 的第一個對應目的地（無對應則不送）。檔案沿用 ISSUE-034 的路徑沙箱。以 terminal 為單位在記憶體中去重（streamAgent 已送者也登記），避免重複轉換重送。範圍：`src/outbound-attachments.ts`（`extractDirectMarkers`）、`src/discord.ts`（`postDirect`）、`src/main.ts`（`relayDirectMarkers`）、測試。
+
+驗證（2026-10-20）：lint、build 通過；完整 `npm test` 245 項、238 通過、6 失敗（ISSUE-035 既有）；新增 direct marker 單元測試通過。
+
+限制／未驗證：只在狀態轉換時掃描，Agent 持續 working 時不即時送；若使用者在輸入框有未送出的草稿，會被視為最後輸入列而截斷區域；bridge 重啟後記憶體去重清空，但舊標記位於最後輸入列之前不會重送；未實機驗證 Claude／Codex 畫面對標記行的實際呈現（如 ⏺ 前綴、換行縮排）。多個對應目的地時只送第一個。notifyOn 設定不影響此功能。

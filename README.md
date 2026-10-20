@@ -300,3 +300,5 @@ keep their known-session requirements. Live acceptance is pending in
 ## Sending files back to Discord
 
 An Agent can attach files to its final reply by putting `[[discord-attach: /absolute/path]]` on its own line. Files must be regular, non-empty, ≤ 8 MiB, at most 10 per reply, and located under the Agent's working directory (secrets such as `.env` and `.git` are refused). Tell your Agent about this convention (e.g. in its `AGENTS.md`). See SPEC.md and ISSUE-034.
+
+If you talk to an Agent directly in Herdr, it can also ask the bridge to post to the Discord thread mapped to it: `[[discord-send]]` / text / `[[/discord-send]]` for a message, or `[[discord-attach: /path]]` for a file. The bridge relays them when the Agent becomes idle (ISSUE-037; pending live acceptance).
