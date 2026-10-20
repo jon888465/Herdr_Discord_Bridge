@@ -555,3 +555,5 @@ Console／Team turn 使用同一清理器，仍須本次隨機 begin/end envelop
 Agent 要回送檔案時，在最終回覆中單獨一行輸出 `[[discord-attach: /絕對路徑]]`（可多行，路徑可加引號）。Bridge 在送出最終回覆前移除這些標記行，文字照常送出，再以 Discord 附件把檔案送到同一 thread（不 ping 任何人）。
 
 限制（fail closed）：路徑須為絕對路徑；以 realpath 解析後必須位於該 Agent 的 `cwd` 或 `foreground_cwd` 之下（symlink 指向外部會被拒絕）；僅限一般檔案、非空、每個至多 8 MiB、每則至多 10 個；拒絕 `.env*`、`.git`、`.ssh`、`.aws`、`.gnupg`、`id_rsa*`、`id_ed25519*` 路徑；重複路徑只送一次。被拒檔案以一則警告列出原因，不影響文字回覆。只處理正式 final（transcript 完成或 Claude 畫面 settled）；擷取失敗的後備片段不處理標記。Agent 需被告知此約定（例如寫入該專案 `AGENTS.md`）；Bridge 不自動改寫 prompt。驗收尚待 Discord 端到端，見 ISSUE-034。
+
+強制收尾後的 rewatch（ISSUE-036，2026-10-20）：每輪先讀畫面，若本次 prompt 最後出現位置之後已有其他使用者輸入列，視為對話已前進並結束觀察，不再以舊 prompt 重新擷取或貼回 Discord。

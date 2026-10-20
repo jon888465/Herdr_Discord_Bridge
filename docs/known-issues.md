@@ -43,6 +43,7 @@
 | ISSUE-033 | 新增 pi agent 終端畫面 parser adapter | 已修正、待驗收 | 原始碼與 fixture 測試完成；尚未用真實 pi pane 經 Discord／Console 驗收，bridge 未重啟 |
 | ISSUE-034 | Agent 檔案回送 Discord（discord-attach 標記） | 已修正、待驗收 | 原始碼與單元測試完成；尚未 Discord 端到端驗收 |
 | ISSUE-035 | coding-workflow 測試在 macOS 有 6 項失敗 | 待調查 | 基準亦失敗，根因未確認 |
+| ISSUE-036 | 強制收尾後的 rewatch 在使用者直接於 pane 輸入新內容後仍重複擷取舊 prompt，Discord 被洗版 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟 |
 | ISSUE-022 | Phase 4 Quota / Failover Manager | 已修正、待驗收 | 2026-09-21 新增 28 項通過；完整 181/184，ISSUE-007／021 待調查，live 待驗收 |
 
 | ISSUE-023 | Grok 回答框與折行標記無法解析 | 已修正、待驗收 | Grok live turn probe 通過；Discord 交付、長文及 blocked 續答待驗收 |
@@ -1358,3 +1359,19 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 更新日期：2026-10-19。狀態：待調查。
 
 症狀：`npm test` 在 macOS（Darwin 25.5.0）有 6 項 `test/coding-workflow.test.ts` 失敗（如「artifact reads stay inside the task directory and reject escapes」）。基準（無 ISSUE-034 變更）重現相同失敗。根因未確認（可能與 macOS `/tmp`／`/private` realpath 或 git 環境有關，僅為推測）。下一步：單獨執行並檢視失敗訊息。
+
+## ISSUE-036：rewatch 對已過時的 prompt 重複擷取並洗版 Discord
+
+更新日期：2026-10-20。狀態：已修正、待驗收（原始碼已改；執行中的 bridge 仍是 2026-10-19 17:16 的舊 build，**未重啟，仍會洗版**）。
+
+症狀：w5:p1（Claude）的 Discord 持續收到「▶️ Agent 再度運作，繼續擷取回覆…」與回覆內容，畫面一直滾動。預期：Agent 回覆一次後不再重複送。
+
+重現／證據（2026-10-20，macOS，bridge pane w2:p1C）：`capture-diagnostics` 在 02:51–03:01Z 為 w5:p1 連續產生 13 份，皆 `prompt: "gemma4呢"`、`has_transcript: false`、每份約 33 秒；`extracted_last` 在回覆的不同片段間跳動。當時使用者已直接在 pane 輸入下一個問題（「開新分支 feat/roleplay…」）。
+
+已確認根因（由 diagnostics 與 `rewatchAfterForcedFinish` 程式推得，尚未以修正後 bridge 實機驗證）：ISSUE-031 的 rewatch 只要 Agent 回到 working，或畫面解析結果與上次不同，就以**舊 prompt** 重新擷取；使用者直接在 pane 操作時 Agent 反覆 working／畫面滾動，每次都被當成「再度運作」而重送。
+
+修正：新增 `conversationMovedPast(prompt, output)`（`src/cli-adapter.ts`）；rewatch 每輪先讀畫面，若 prompt 之後已出現其他使用者輸入列即結束該觀察。範圍：`src/cli-adapter.ts`、`src/main.ts`、`test/cli-adapter.test.ts`。
+
+驗證（2026-10-20）：lint 通過；完整 `npm test` 244 項、237 通過、6 失敗（同 ISSUE-035 的 coding-workflow 既有失敗）；新增單元測試通過。
+
+未驗證／限制：未重啟 bridge 與實機驗收；已送出的訊息無法收回。若使用者在輸入框打字尚未送出，也會被視為「已前進」而停止觀察（可接受的保守行為）。Claude 無 transcript 時 rewatch 的片段跳動根因（為何 `extracted_last` 在片段間變動）未另行修正。
