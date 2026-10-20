@@ -1,4 +1,5 @@
 import { acquireInstanceLock } from "./instance-lock.js";
+import { startSendServer } from "./send-ipc.js";
 import { PROGRESS_UPDATE_MS, formatElapsed } from "./progress-time.js";
 import { prepareImages } from "./attachments.js";
 import { join } from "node:path";
@@ -350,7 +351,14 @@ async function startBridge(
     console.error(`Herdr watch unavailable: ${safeError(error)}`),
   );
   watcher.start();
+  const stopSend = await startSendServer((request) =>
+    handleSendRequest(request, { config, herdr, routing, discord }),
+  ).catch((error) => {
+    console.error(`Send socket unavailable: ${safeError(error)}`);
+    return () => undefined;
+  });
   installShutdown(() => {
+    stopSend();
     watcher.stop();
     consoleControl.stop();
     consoleAgent?.stop();
@@ -2352,23 +2360,64 @@ async function relayDirectMarkers(
   const requested = found.files.filter((f) => !done.has(f.key));
   if (!messages.length && !requested.length) return;
   for (const item of [...messages, ...requested]) done.add(item.key);
+  await deliverToAgentThread(
+    agent,
+    messages.map((m) => m.text),
+    requested.map((f) => f.path),
+    runtime,
+  );
+}
+
+/** 送文字／檔案到 Agent 對應的 Discord 目的地（第一個）；回傳給呼叫端的說明。 */
+async function deliverToAgentThread(
+  agent: AgentRecord,
+  texts: string[],
+  filePaths: string[],
+  runtime: Pick<Runtime, "routing" | "discord">,
+): Promise<{ ok: boolean; message: string }> {
+  const targets = mappingsForAgent(agent, runtime.routing.allMappings());
+  if (!targets.length)
+    return { ok: false, message: "this pane has no mapped Discord thread" };
   const roots = [agent.cwd, agent.foreground_cwd].filter((dir): dir is string =>
     Boolean(dir),
   );
-  const sent = await resolveOutboundFiles(
-    requested.map((f) => f.path),
-    roots,
-  );
+  const sent = await resolveOutboundFiles(filePaths, roots);
   const notes = sent.rejected.length
     ? [`⚠️ 以下附件未送出：\n${sent.rejected.map((r) => `- ${r}`).join("\n")}`]
     : [];
   const header = agentHeaderFor(agent);
-  for (const target of targets.slice(0, 1))
-    await runtime.discord.postDirect(
-      target,
-      [...messages.map((m) => `${header}\n${m.text}`), ...notes],
-      sent.files,
-    );
+  if (!texts.length && !sent.files.length && !notes.length)
+    return { ok: false, message: "nothing to send" };
+  await runtime.discord.postDirect(
+    targets[0],
+    [...texts.map((t) => `${header}\n${t}`), ...notes],
+    sent.files,
+  );
+  const failed = sent.rejected.length;
+  return {
+    ok: texts.length > 0 || sent.files.length > 0,
+    message: `sent ${texts.length} message(s), ${sent.files.length} file(s)${failed ? `; rejected: ${sent.rejected.join("; ")}` : ""}`,
+  };
+}
+
+/** `herdr-discord-send` 指令的處理：以 pane ID 找 Agent，沿用同一套路徑沙箱（ISSUE-037）。 */
+async function handleSendRequest(
+  request: import("./send-ipc.js").SendRequest,
+  runtime: Pick<Runtime, "config" | "herdr" | "routing" | "discord">,
+): Promise<{ ok: boolean; message: string }> {
+  const text = (request.text || "").trim();
+  const files = request.files || [];
+  if (text.length > 8000 || files.length > 10)
+    return { ok: false, message: "text over 8000 chars or more than 10 files" };
+  const agents = await runtime.herdr.listAgentsWithWorkspaceNames();
+  const agent = agents.find((a) => a.pane_id === request.paneId);
+  if (!agent) return { ok: false, message: `unknown pane ${request.paneId}` };
+  if (
+    runtime.config.allowedWorkspaceIds.length &&
+    !runtime.config.allowedWorkspaceIds.includes(agent.workspace_id)
+  )
+    return { ok: false, message: "workspace is not allowed" };
+  return deliverToAgentThread(agent, text ? [text] : [], files, runtime);
 }
 
 async function handleTransition(
