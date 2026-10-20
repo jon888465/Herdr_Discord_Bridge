@@ -274,3 +274,7 @@ session handoff／failover 保持已知 session 的要求；不猜測最近歷�
 Agent 可在最終回覆中單獨一行寫 `[[discord-attach: /絕對路徑]]`，Bridge 會把檔案以附件送回 Discord。檔案須為一般檔案、非空、每個 ≤ 8 MiB、每則至多 10 個，且位於 Agent 工作目錄之下（`.env`、`.git` 等敏感路徑會被拒絕）。請在 Agent 的 `AGENTS.md` 告知此約定。詳見 SPEC.md 與 ISSUE-034。
 
 直接在 Herdr 對 Agent 說話時，Agent 也能請 bridge 送到對應的 Discord thread：訊息用 `[[discord-send]]`／文字／`[[/discord-send]]`，檔案用 `[[discord-attach: /路徑]]`；Agent 轉為 idle 時由 bridge 代送（ISSUE-037，待實機驗收）。
+
+標記約定已包成 [discord-send skill](skills/discord-send/SKILL.md)；請連結到 Agent 的 skills 目錄（如 `ln -s "$PWD/skills/discord-send" ~/.claude/skills/discord-send`），各專案的 Agent 才會知道。
+
+建議 Agent 使用 `herdr-discord-send` 指令（`scripts/herdr-discord-send`，請連結到 PATH，如 `ln -s "$PWD/scripts/herdr-discord-send" ~/.local/bin/herdr-discord-send`）：`herdr-discord-send "文字"`、`--file 路徑`、`--stdin`。它經由僅限本機使用者的 socket（`~/.config/herdr-discord-bridge/send.sock`）請執行中的 bridge 發送，以 `HERDR_PANE_ID` 識別 pane；pane 沒有對應 thread 時會明確報錯。待實機驗收（ISSUE-037）。

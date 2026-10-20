@@ -1402,3 +1402,15 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 環境：重啟後的 bridge（commit 61391f5，pane w2:p1F）；使用者在 Herdr 對 w5:p1（Claude，cwd `colab_llm`，另一個 repo）輸入「網址傳給discord」。結果：Agent 只在 Herdr 畫面回覆一行 URL，沒有輸出 `[[discord-send]]` 標記，Discord 沒收到。
 
 已確認原因（由畫面截圖）：Agent 沒輸出標記。`colab_llm` 沒有本 repo `AGENTS.md` 的約定，Agent 無從得知標記格式；bridge 程式本身未被觸發，**不是**掃描邏輯錯誤（該路徑尚未以含標記的真實回合驗證，仍未知）。這是設計限制：bridge 讀畫面，無法理解自然語言「傳給 Discord」，必須有 Agent 端約定或明確的 Agent 可呼叫介面。狀態改為重新開啟，待決定方案（全域 Agent 指示檔，或提供 Agent 可執行的 CLI 指令／IPC）。
+
+### ISSUE-037 處置（2026-10-20）：改為 skill
+
+使用者要求以 skill 提供約定。新增 `skills/discord-send/SKILL.md`（repo 內，隨版本控管），並在本機以 symlink 安裝到 `~/.claude/skills/discord-send`，使各專案的 Claude 皆可載入。Codex／agy 尚未安裝（需另行連結到其 skills 目錄）。更正（2026-10-20）：先前此處寫「python_test 的訊息來自該專案自己的 ComfyUI bot、與 bridge 無關」為未查證的推測，已撤回。python_test 確有自己的 Discord bot 程式（`src/comfyui_bot.py` 印出 tunnel URL），但使用者那次傳 URL 實際走哪條路徑未確認；較可能是從 Discord 對該 Agent 發話、由 bridge 貼回回覆。bridge 本身掛有 Discord bot，故可代送；Herdr 直接輸入沒有 Discord 發起的回合，只能靠 Agent 端標記或 Agent 可呼叫的介面觸發。**未驗收**：須開新的 Claude session（skill 清單在 session 啟動時載入）在 colab_llm 重試「網址傳給 discord」，確認 Agent 輸出標記且 Discord 收到。狀態維持「重新開啟」。
+
+### ISSUE-037 處置（2026-10-20）：新增 `herdr-discord-send` 指令
+
+使用者決定做指令版本。新增：`src/send-ipc.ts`（bridge 的專用 send socket：預設 `~/.config/herdr-discord-bridge/send.sock`，目錄 0700／socket 0600，僅同一 OS 使用者可連；可用 `HERDR_DISCORD_SEND_SOCKET` 覆寫）、`src/send-cli.ts` + `scripts/herdr-discord-send`（以 `HERDR_PANE_ID` 識別 Agent；`--file`、`--stdin`、文字參數）、`src/main.ts` 的 `handleSendRequest`／`deliverToAgentThread`（找 pane、檢查 allowedWorkspaceIds、必須有對應 Discord thread、沿用 ISSUE-034 路徑沙箱；沒有對應時明確回錯誤而非沉默）。標記版本保留為指令不存在時的後備。skill 已改為指令優先。本機安裝：`~/.local/bin/herdr-discord-send` 為 symlink。
+
+驗證（2026-10-20，macOS）：lint、typecheck 通過；完整 `npm test` 247 項、240 通過、6 失敗（ISSUE-035 既有）；新增 IPC 測試（往返、socket 權限 0600、無效請求、bridge 未啟動的錯誤訊息）通過。bridge 未執行時指令回「bridge is not running」exit 1（實測）。
+
+未驗證：**bridge 尚未重啟（執行中仍是舊 build，沒有 send socket）**，Discord 端到端、Claude 在新 session 實際呼叫指令未驗收。限制：同一 OS 使用者的任何程序都能冒用任一 pane ID 發送（與其可直接讀 bot 設定同權，僅在單人本機環境可接受）；Windows named pipe 路徑未實測；僅送到第一個對應目的地；Codex／agy 的 skills 目錄尚未安裝 skill。

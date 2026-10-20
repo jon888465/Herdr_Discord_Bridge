@@ -302,3 +302,7 @@ keep their known-session requirements. Live acceptance is pending in
 An Agent can attach files to its final reply by putting `[[discord-attach: /absolute/path]]` on its own line. Files must be regular, non-empty, ≤ 8 MiB, at most 10 per reply, and located under the Agent's working directory (secrets such as `.env` and `.git` are refused). Tell your Agent about this convention (e.g. in its `AGENTS.md`). See SPEC.md and ISSUE-034.
 
 If you talk to an Agent directly in Herdr, it can also ask the bridge to post to the Discord thread mapped to it: `[[discord-send]]` / text / `[[/discord-send]]` for a message, or `[[discord-attach: /path]]` for a file. The bridge relays them when the Agent becomes idle (ISSUE-037; pending live acceptance).
+
+The marker convention is packaged as the [discord-send skill](skills/discord-send/SKILL.md); link it into your agent's skills directory (e.g. `ln -s "$PWD/skills/discord-send" ~/.claude/skills/discord-send`) so every project's agent knows it.
+
+Preferred for Agents: the `herdr-discord-send` command (`scripts/herdr-discord-send`; link it onto PATH, e.g. `ln -s "$PWD/scripts/herdr-discord-send" ~/.local/bin/herdr-discord-send`). `herdr-discord-send "text"`, `--file PATH`, `--stdin`. It talks to the running bridge over a user-only local socket (`~/.config/herdr-discord-bridge/send.sock`), identifies the pane by `HERDR_PANE_ID`, and fails clearly when the pane has no mapped thread. Pending live acceptance (ISSUE-037).

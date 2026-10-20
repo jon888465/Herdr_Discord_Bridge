@@ -318,7 +318,7 @@ command 或 process log，不會停止遠端工作。長時間 assignment stream
 正常啟動在讀取 routing state 與 Discord login 前取得本機 IPC 排他鎖，第二個
 相同 bot 實例立即失敗；鎖不依賴 cwd、workspace 或 config directory。以 token
 的 bot ID 建立雜湊 key（無有效 ID 時使用 token 雜湊），不輸出 token；token 輪替
-但 bot ID 相同也互斥。鎖只占用本機 IPC 名稱，不提供 command API 或 HTTP。
+但 bot ID 相同也互斥。鎖只占用本機 IPC 名稱，不提供 command API 或 HTTP（Agent 回送用的 send socket 是另一個專用端點，見「Agent 指令回送」）。
 Linux 使用 abstract Unix socket，Windows 使用 named pipe，程序退出由 OS 釋放；
 其他 Unix 使用 temporary-directory socket，若在 macOS（Darwin）或路徑長度超過 104 位元組時使用 `/tmp` 避免超出 `sockaddr_un` 限制觸發 `EINVAL`；異常退出殘留時 fail closed，需確認
 舊程序已退出後清除殘留 socket。不能防止舊版未實作鎖的 bridge 或另一台主機
@@ -559,3 +559,5 @@ Agent 要回送檔案時，在最終回覆中單獨一行輸出 `[[discord-attac
 強制收尾後的 rewatch（ISSUE-036，2026-10-20）：每輪先讀畫面，若本次 prompt 最後出現位置之後已有其他使用者輸入列，視為對話已前進並結束觀察，不再以舊 prompt 重新擷取或貼回 Discord。
 
 Herdr 直接互動回送（ISSUE-037，2026-10-20）：Agent 轉為 idle／done 且無進行中的 Discord stream 時，bridge 讀取畫面，僅取最後一次使用者輸入列之後的 `[[discord-send]]…[[/discord-send]]` 文字區塊與 `[[discord-attach: 路徑]]`，送到該 Agent 對應的 Discord 目的地（第一個；無對應則不送）。檔案沿用上述沙箱；以 terminal 記憶體去重。僅在狀態轉換時掃描；實機驗收尚待。
+
+Agent 指令回送（ISSUE-037，2026-10-20）：bridge 另開僅限「送到 Discord」的本機 socket（預設 `~/.config/herdr-discord-bridge/send.sock`；Unix 目錄 0700、socket 0600；`HERDR_DISCORD_SEND_SOCKET` 可覆寫；Windows 為 named pipe）。`herdr-discord-send [--file 路徑]... [--stdin] [文字]` 以 `HERDR_PANE_ID` 識別 Agent；bridge 查出該 pane、檢查 `allowedWorkspaceIds`、要求有對應 Discord thread（否則明確回錯誤），文字至多 8000 字元，檔案沿用 ISSUE-034 沙箱。請求大小上限 256 KiB。Agent 不需 Discord token。標記版本為指令不存在時的後備。實機驗收尚待。

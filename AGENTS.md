@@ -35,7 +35,7 @@
 
 - 回覆中的 URL 一律以完整純文字網址呈現（如 `https://example.com/path`），不可只給「開啟 xxx」之類的超連結文字。終端機的可點擊超連結（OSC 8）經 Herdr 讀取後只剩文字、網址會遺失，Discord 使用者無法得知（ISSUE-032）。
 - 需要說明連結用途時，在文字後面附上完整網址，例如 `Open WebUI：https://example.com/path`。
-- 需要把檔案（圖片、報告等）回送 Discord 時，在最終回覆單獨一行寫 `[[discord-attach: /絕對路徑]]`；檔案須在目前專案目錄內、≤ 8 MiB、每則至多 10 個（ISSUE-034）。
+- 要把訊息、網址或檔案傳給 Discord 時，優先執行 `herdr-discord-send "文字"` 或 `herdr-discord-send --file 路徑`（檔案須在目前專案目錄內、≤ 8 MiB、每次至多 10 個；ISSUE-034／037）。指令不存在時才在最終回覆輸出標記：單獨一行 `[[discord-attach: /絕對路徑]]`，或 `[[discord-send]]`、文字、`[[/discord-send]]` 各佔一行。
 
 ## 交付前
 
