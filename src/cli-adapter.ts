@@ -470,6 +470,24 @@ export function latestAgentResponse(
   return adapterFor(agentKind).extractLatestResponse(prompt, output, baseline);
 }
 
+/**
+ * 畫面上最後一次出現本次 prompt 之後，若又出現其他使用者輸入列（如 `❯ 其他內容`），
+ * 代表對話已前進（使用者直接在 pane 輸入），舊 prompt 的 rewatch 不應再擷取。
+ */
+export function conversationMovedPast(prompt: string, output: string): boolean {
+  const key = stripAnsi(prompt).trim().split("\n")[0].slice(0, 40);
+  if (!key) return false;
+  const lines = stripAnsi(output).replace(/\r/g, "").split("\n");
+  let last = -1;
+  lines.forEach((line, i) => {
+    if (/^\s*[❯›>]\s/.test(line) && line.includes(key)) last = i;
+  });
+  if (last < 0) return false;
+  return lines
+    .slice(last + 1)
+    .some((line) => /^\s*[❯›>]\s+\S/.test(line) && !line.includes(key));
+}
+
 function adapterFor(agentKind: string | undefined): CliOutputAdapter {
   const kind = (agentKind || "").toLowerCase();
   if (kind === "grok") return grokAdapter;

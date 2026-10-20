@@ -489,3 +489,14 @@ test("pi keeps a reply that follows an unfinished tool header", () => {
   const screen = " go\n\n $ sleep 5\n\n Working\n";
   assert.equal(latestAgentResponse("pi", "go", screen, ""), "Working");
 });
+
+test("conversationMovedPast detects a newer user input line after the prompt", async () => {
+  const { conversationMovedPast } = await import("../src/cli-adapter.js");
+  const screen = "❯ gemma4呢\n\n⏺ 回答\n\n❯ 開新分支 feat/roleplay\n";
+  assert.equal(conversationMovedPast("gemma4呢", screen), true);
+  assert.equal(
+    conversationMovedPast("gemma4呢", "❯ gemma4呢\n\n⏺ 回答\n\n❯ \n"),
+    false,
+  );
+  assert.equal(conversationMovedPast("不在畫面", screen), false);
+});

@@ -19,6 +19,7 @@ import { AgentPool } from "./agent-pool.js";
 import { runTeamTurn } from "./team-turn.js";
 import { loadConfig, statePath, stateDirectory } from "./config.js";
 import {
+  conversationMovedPast,
   latestAgentResponse,
   modelCommandFor,
   modelOptionsFor,
@@ -2019,24 +2020,27 @@ async function rewatchAfterForcedFinish(
       !sameAgentSession(agent.agent_session, finished.agent_session)
     )
       return;
+    let output: string;
+    try {
+      output = await runtime.herdr.readAgent(
+        agent.pane_id,
+        "recent_unwrapped",
+        Math.max(runtime.config.outputLines, 2000),
+      );
+    } catch {
+      continue;
+    }
+    // 使用者已在 pane 直接輸入新內容：舊 prompt 的觀察到此為止，避免重複洗版（ISSUE-036）。
+    if (conversationMovedPast(prompt, output)) return;
     let resume = ["working", "blocked"].includes(agent.agent_status);
     if (!resume) {
-      try {
-        const output = await runtime.herdr.readAgent(
-          agent.pane_id,
-          "recent_unwrapped",
-          Math.max(runtime.config.outputLines, 2000),
-        );
-        const latest = latestAgentResponse(
-          agent.agent,
-          prompt,
-          output,
-          baselineOutput,
-        );
-        resume = latest !== "" && latest !== lastOutput;
-      } catch {
-        continue;
-      }
+      const latest = latestAgentResponse(
+        agent.agent,
+        prompt,
+        output,
+        baselineOutput,
+      );
+      resume = latest !== "" && latest !== lastOutput;
     }
     if (!resume) continue;
     runtime.activeStreams.add(agent.terminal_id);
