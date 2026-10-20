@@ -41,7 +41,7 @@
 
 | ISSUE-032 | CLI 內可點擊的超連結（OSC 8）在 Discord 只剩連結文字，URL 遺失 | 已緩解、待驗收（程式未修） | 以 AGENTS.md 回覆格式規範要求 Agent 輸出完整純文字網址；其他專案需自行加入同樣規範 |
 | ISSUE-033 | 新增 pi agent 終端畫面 parser adapter | 已修正、待驗收 | 原始碼與 fixture 測試完成；尚未用真實 pi pane 經 Discord／Console 驗收，bridge 未重啟 |
-| ISSUE-034 | Agent 檔案回送 Discord（discord-attach 標記） | 已修正、待驗收 | 原始碼與單元測試完成；尚未 Discord 端到端驗收 |
+| ISSUE-034 | Agent 檔案回送 Discord（discord-attach 標記） | 重新開啟 → 已修正、待驗收 | 2026-10-20 實機驗收失敗（後備片段不處理標記），已修；尚未重啟與再驗收 |
 | ISSUE-035 | coding-workflow 測試在 macOS 有 6 項失敗 | 待調查 | 基準亦失敗，根因未確認 |
 | ISSUE-036 | 強制收尾後的 rewatch 在使用者直接於 pane 輸入新內容後仍重複擷取舊 prompt，Discord 被洗版 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟 |
 | ISSUE-022 | Phase 4 Quota / Failover Manager | 已修正、待驗收 | 2026-09-21 新增 28 項通過；完整 181/184，ISSUE-007／021 待調查，live 待驗收 |
@@ -1353,6 +1353,10 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 驗證（2026-10-19，macOS，Node 本機）：`npm run lint` 通過；`node --test dist/test/outbound-attachments.test.js` 2/2 通過。完整 `npm test`：239 項、232 通過、6 失敗；失敗項為 `test/coding-workflow.test.ts`（coding review／verify drift、artifact reads 等），在未含本次變更的基準（`git stash` 後）也出現相同失敗名稱，判定與本功能無關，但根因未調查，另需追蹤（見 ISSUE-035）。
 
 未驗證：真實 Discord 上傳（含 Discord 伺服器上傳大小上限，程式保守限 8 MiB）、Codex／Claude／agy 是否實際輸出標記、Claude 畫面擷取路徑被換行截斷的情況。標記僅在取得正式 final（transcript 或 Claude 已 settled）時處理；僅有擷取片段的後備訊息不處理。需重啟 bridge 後才生效。
+
+### ISSUE-034 驗收失敗與重新開啟（2026-10-20）
+
+實機（Discord thread → w1:p1 Claude，bridge 重啟後的新版）：Agent 回覆含 `[[discord-attach: …/hello.txt]]`，Discord 沒有附件，標記文字被原樣貼出。已確認根因：該回合 Claude 閒置 30 秒被強制收尾（總耗時 37 秒、「capture incomplete」），沒有正式 final，走「擷取片段」後備路徑，而原實作只在正式 final 處理標記。修正：後備片段同樣解析標記（`src/main.ts`），沙箱規則不變。驗證：lint、build 通過（2026-10-20）；**未重啟 bridge、未重新實機驗收**。另觀察：Claude 為何常拿不到正式 final（無 transcript reader）仍是既有限制。
 
 ## ISSUE-035：coding-workflow 測試在 macOS 有 6 項失敗
 
