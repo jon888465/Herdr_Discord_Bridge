@@ -1418,3 +1418,7 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 ### ISSUE-037 驗收（2026-10-20）
 
 環境：macOS，bridge commit 69896ae（pane w2:p1G）重啟後。本 session（w1:p1）執行 `herdr-discord-send "bridge 指令測試"` 回報 sent 1 message(s)；使用者回報「傳送成功」。**範圍說明**：使用者未指明確認的是此測試訊息還是 w5:p1（colab_llm）新 session 以 skill 呼叫指令的情境，後者未另行確認。**未驗收**：`--file` 附件經指令送出、Codex／agy、沒有對應 thread 時的錯誤呈現、標記版本後備路徑（Herdr 直接輸入）。這些保留為後續驗收項目。
+
+### ISSUE-037 附件驗收（2026-10-20）
+
+環境：macOS，bridge commit 69896ae。本 session（w1:p1，Claude）執行 `herdr-discord-send --file .herdr-discord-bridge/outbox/helloworld.txt "helloworld 檔案"`（16:47），使用者確認 Discord 收到文字與附件。已驗收：指令版 `--file` 附件路徑（Claude、文字檔）。仍未驗收：Codex／agy、沒有對應 thread 時的錯誤呈現、Herdr 直接輸入的標記後備路徑、圖片與大檔。
