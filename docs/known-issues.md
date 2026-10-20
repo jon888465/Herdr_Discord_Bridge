@@ -41,7 +41,7 @@
 
 | ISSUE-032 | CLI 內可點擊的超連結（OSC 8）在 Discord 只剩連結文字，URL 遺失 | 已緩解、待驗收（程式未修） | 以 AGENTS.md 回覆格式規範要求 Agent 輸出完整純文字網址；其他專案需自行加入同樣規範 |
 | ISSUE-033 | 新增 pi agent 終端畫面 parser adapter | 已修正、待驗收 | 原始碼與 fixture 測試完成；尚未用真實 pi pane 經 Discord／Console 驗收，bridge 未重啟 |
-| ISSUE-034 | Agent 檔案回送 Discord（discord-attach 標記） | 重新開啟 → 已修正、待驗收 | 2026-10-20 實機驗收失敗（後備片段不處理標記），已修；尚未重啟與再驗收 |
+| ISSUE-034 | Agent 檔案回送 Discord（discord-attach 標記） | 已驗收（2026-10-20） | 後備片段修正後 Discord 實機收到附件；範圍僅 Claude／文字檔 |
 | ISSUE-035 | coding-workflow 測試在 macOS 有 6 項失敗 | 待調查 | 基準亦失敗，根因未確認 |
 | ISSUE-036 | 強制收尾後的 rewatch 在使用者直接於 pane 輸入新內容後仍重複擷取舊 prompt，Discord 被洗版 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟 |
 | ISSUE-022 | Phase 4 Quota / Failover Manager | 已修正、待驗收 | 2026-09-21 新增 28 項通過；完整 181/184，ISSUE-007／021 待調查，live 待驗收 |
@@ -1357,6 +1357,10 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 ### ISSUE-034 驗收失敗與重新開啟（2026-10-20）
 
 實機（Discord thread → w1:p1 Claude，bridge 重啟後的新版）：Agent 回覆含 `[[discord-attach: …/hello.txt]]`，Discord 沒有附件，標記文字被原樣貼出。已確認根因：該回合 Claude 閒置 30 秒被強制收尾（總耗時 37 秒、「capture incomplete」），沒有正式 final，走「擷取片段」後備路徑，而原實作只在正式 final 處理標記。修正：後備片段同樣解析標記（`src/main.ts`），沙箱規則不變。驗證：lint、build 通過（2026-10-20）；**未重啟 bridge、未重新實機驗收**。另觀察：Claude 為何常拿不到正式 final（無 transcript reader）仍是既有限制。
+
+### ISSUE-034 驗收（2026-10-20）
+
+重啟 bridge（含 commit 85075b0）後，使用者從 Discord thread 請 w1:p1（Claude）傳送 hello.txt（11:14），Discord 成功收到附件。環境：macOS、Claude Code、文字檔。**未驗收**：Codex／agy、圖片／大檔、多檔、被拒路徑的警告訊息、路徑被換行截斷的情況。
 
 ## ISSUE-035：coding-workflow 測試在 macOS 有 6 項失敗
 
