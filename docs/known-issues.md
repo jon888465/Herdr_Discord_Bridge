@@ -43,7 +43,7 @@
 | ISSUE-033 | 新增 pi agent 終端畫面 parser adapter | 已修正、待驗收 | 原始碼與 fixture 測試完成；尚未用真實 pi pane 經 Discord／Console 驗收，bridge 未重啟 |
 | ISSUE-034 | Agent 檔案回送 Discord（discord-attach 標記） | 已驗收（2026-10-20） | 後備片段修正後 Discord 實機收到附件；範圍僅 Claude／文字檔 |
 | ISSUE-035 | coding-workflow 測試在 macOS 有 6 項失敗 | 待調查 | 基準亦失敗，根因未確認 |
-| ISSUE-037 | 使用者直接在 Herdr 要求 Agent 傳給 Discord，bridge 不代送 | 重新開啟（驗收失敗，2026-10-20） | bridge 已重啟；colab_llm 的 Claude 不知道標記約定，只在 Herdr 內貼出網址，未送 Discord |
+| ISSUE-037 | 使用者直接在 Herdr 要求 Agent 傳給 Discord，bridge 不代送 | 已驗收（2026-10-20，指令版） | 重啟後使用者確認 Discord 收到；範圍見驗收紀錄 |
 | ISSUE-036 | 強制收尾後的 rewatch 在使用者直接於 pane 輸入新內容後仍重複擷取舊 prompt，Discord 被洗版 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟 |
 | ISSUE-022 | Phase 4 Quota / Failover Manager | 已修正、待驗收 | 2026-09-21 新增 28 項通過；完整 181/184，ISSUE-007／021 待調查，live 待驗收 |
 
@@ -1414,3 +1414,7 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 驗證（2026-10-20，macOS）：lint、typecheck 通過；完整 `npm test` 247 項、240 通過、6 失敗（ISSUE-035 既有）；新增 IPC 測試（往返、socket 權限 0600、無效請求、bridge 未啟動的錯誤訊息）通過。bridge 未執行時指令回「bridge is not running」exit 1（實測）。
 
 未驗證：**bridge 尚未重啟（執行中仍是舊 build，沒有 send socket）**，Discord 端到端、Claude 在新 session 實際呼叫指令未驗收。限制：同一 OS 使用者的任何程序都能冒用任一 pane ID 發送（與其可直接讀 bot 設定同權，僅在單人本機環境可接受）；Windows named pipe 路徑未實測；僅送到第一個對應目的地；Codex／agy 的 skills 目錄尚未安裝 skill。
+
+### ISSUE-037 驗收（2026-10-20）
+
+環境：macOS，bridge commit 69896ae（pane w2:p1G）重啟後。本 session（w1:p1）執行 `herdr-discord-send "bridge 指令測試"` 回報 sent 1 message(s)；使用者回報「傳送成功」。**範圍說明**：使用者未指明確認的是此測試訊息還是 w5:p1（colab_llm）新 session 以 skill 呼叫指令的情境，後者未另行確認。**未驗收**：`--file` 附件經指令送出、Codex／agy、沒有對應 thread 時的錯誤呈現、標記版本後備路徑（Herdr 直接輸入）。這些保留為後續驗收項目。
