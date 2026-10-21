@@ -1422,3 +1422,15 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 ### ISSUE-037 附件驗收（2026-10-20）
 
 環境：macOS，bridge commit 69896ae。本 session（w1:p1，Claude）執行 `herdr-discord-send --file .herdr-discord-bridge/outbox/helloworld.txt "helloworld 檔案"`（16:47），使用者確認 Discord 收到文字與附件。已驗收：指令版 `--file` 附件路徑（Claude、文字檔）。仍未驗收：Codex／agy、沒有對應 thread 時的錯誤呈現、Herdr 直接輸入的標記後備路徑、圖片與大檔。
+
+### ISSUE-037 補充（2026-10-21）：沒有對應 thread 的 pane（Discord 私訊對話）
+
+症狀：使用者透過 Discord 私訊與 colab_llm、python_test 專案的 Claude pane 對話時，`herdr-discord-send` 回「this pane has no mapped Discord thread」，Agent 因而回報傳送失敗。使用者指出這是設計不足：沒有對應 thread 的 pane 就是私訊對話，送出邏輯應自行處理，不該靠 Agent 端慣例。
+
+根因：`deliverToAgentThread` 只查 `mappingsForAgent`（thread 對應），完全沒有「這個 Agent 最近是被哪個 Discord 對話派發」的資訊，私訊沒有對應記錄，一律回錯誤。標記後備路徑（`relayDirectMarkers`）同樣在沒有對應時直接略過。
+
+修正（2026-10-21，待驗收）：新增 `src/agent-origin.ts`（記憶體中的 terminal_id → 最近一次 Discord 派發的來源對話，TTL 12 小時）；`dispatchPrompt` 在 Discord 派發時記錄（console 來源不記）；`deliverToAgentThread` 沒有 thread 對應時改用 `DiscordAdapter.postToChannel` 送回來源對話（文字與檔案皆可，沿用 ISSUE-034 路徑沙箱）；`relayDirectMarkers` 同樣接受來源對話。有 thread 對應時行為不變，仍優先。沒有對應也沒有來源時回「this pane has no mapped Discord thread and no recent Discord conversation」。
+
+驗證（2026-10-21，macOS，原始碼）：`npm run typecheck`、`npm run lint` 通過；新增 `test/agent-origin.test.ts` 3 項通過（TTL、無對應時送回來源、有對應時優先 thread）；完整 `node --test dist/test/*.test.js` 250 項、243 通過、6 失敗，失敗項為既有的 coding-workflow／team-task 項目（與此修改無關，修改前同樣失敗）。
+
+未驗證：**bridge 尚未重啟（執行中仍是舊 build）**；私訊實機端到端（含 `--file`）未驗收；bridge 重啟後記憶體中的來源清空，須再由 Discord 發話一次才有來源；同一 Agent 若同時被多個對話使用，只送回最近一個；Herdr 直接輸入（非 Discord 發起）且沒有 thread 對應時仍會失敗，這是預期。狀態：已修正（程式）、待驗收。

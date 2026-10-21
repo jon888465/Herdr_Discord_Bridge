@@ -22,6 +22,13 @@ printf '%s\n' "多行內容" | herdr-discord-send --stdin
   Create generated files there first, for example `.herdr-discord-bridge/outbox/`.
 - Text is limited to 8000 characters. Never include secrets or tokens.
 
+**Discord DM conversations work too.** If the pane has no mapped thread, the bridge
+sends back to the Discord conversation (for example the DM) that most recently
+prompted this agent, within the last 12 hours. The error "no mapped Discord thread
+and no recent Discord conversation" therefore means nobody has prompted this pane
+from Discord recently; in that case put the full plain-text URLs in your normal reply
+instead of treating it as a hard failure.
+
 The command prints the result and exits non-zero on failure. Report that result
 to the user as is: "pane has no mapped Discord thread" and "bridge is not
 running" are real failures, not something to retry blindly or claim as sent.
