@@ -500,3 +500,25 @@ test("conversationMovedPast detects a newer user input line after the prompt", a
   );
   assert.equal(conversationMovedPast("不在畫面", screen), false);
 });
+
+test("agy multi-line prompt echo with indented continuation still yields the answer", async () => {
+  const { latestAgentResponse } = await import("../src/cli-adapter.js");
+  const prompt =
+    'Webui修圖想多增加一個功能\n\n使用者附圖（本機檔案）：\n"/p/1.png"\n請使用圖片檢視工具讀取這些檔案；若無法讀取，請明確告知，不要假設已看見圖片。';
+  const screen = [
+    "舊回覆內容",
+    "────────────────",
+    "> Webui修圖想多增加一個功能",
+    "",
+    "  使用者附圖（本機檔案）：",
+    '  "/p/1.png"',
+    "  請使用圖片檢視工具讀取這些檔案；若無法讀取，請明確告知，不要假設已看見圖片。",
+    "────────── Conversation compacted ──────────",
+    "",
+    "○ Thought for 14m",
+    "  已完成所有程式碼的清理與測試。",
+  ].join("\n");
+  const out = latestAgentResponse("agy", prompt, screen, "");
+  assert.match(out, /已完成所有程式碼的清理與測試/);
+  assert.doesNotMatch(out, /使用者附圖|舊回覆內容/);
+});

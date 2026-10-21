@@ -38,7 +38,41 @@ class MarkerCliAdapter implements CliOutputAdapter {
         normalizedOutput.slice(markerIndex + marker.length),
       );
     }
+    const echoed = this.extractAfterEchoedFirstLine(prompt, normalizedOutput);
+    if (echoed !== undefined) return echoed;
     return outputSinceBaseline(baseline, normalizedOutput);
+  }
+
+  /**
+   * 多行 prompt 回顯時，CLI（如 agy）會縮排續行或插入分隔線，整段比對失敗；
+   * 改以第一行定位，並略過縮排後的 prompt 續行與壓縮分隔線（ISSUE-038）。
+   */
+  private extractAfterEchoedFirstLine(
+    prompt: string,
+    output: string,
+  ): string | undefined {
+    const promptLines = stripAnsi(prompt)
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const first = promptLines[0]?.slice(0, 80);
+    if (!first || promptLines.length < 2) return undefined;
+    const lines = output.split("\n");
+    let at = -1;
+    lines.forEach((line, i) => {
+      if (this.markers.some((m) => line.startsWith(`${m}${first}`))) at = i;
+    });
+    if (at < 0) return undefined;
+    const known = new Set(promptLines);
+    let i = at + 1;
+    while (
+      i < lines.length &&
+      (!lines[i]!.trim() ||
+        known.has(lines[i]!.trim()) ||
+        /^\s*─+[^─\n]*─+\s*$/.test(lines[i]!))
+    )
+      i += 1;
+    return stripCliChrome(lines.slice(i).join("\n"));
   }
 }
 
