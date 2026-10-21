@@ -1434,3 +1434,22 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 驗證（2026-10-21，macOS，原始碼）：`npm run typecheck`、`npm run lint` 通過；新增 `test/agent-origin.test.ts` 3 項通過（TTL、無對應時送回來源、有對應時優先 thread）；完整 `node --test dist/test/*.test.js` 250 項、243 通過、6 失敗，失敗項為既有的 coding-workflow／team-task 項目（與此修改無關，修改前同樣失敗）。
 
 未驗證：**bridge 尚未重啟（執行中仍是舊 build）**；私訊實機端到端（含 `--file`）未驗收；bridge 重啟後記憶體中的來源清空，須再由 Discord 發話一次才有來源；同一 Agent 若同時被多個對話使用，只送回最近一個；Herdr 直接輸入（非 Discord 發起）且沒有 thread 對應時仍會失敗，這是預期。狀態：已修正（程式）、待驗收。
+
+### ISSUE-037 重新開啟（2026-10-21）：私訊對話的送回來源未生效，來源路徑未確認
+
+症狀：bridge 重啟（11:33，PID 52843，載入含 `agent-origin` 的 build）後，使用者從 Discord 傳了新訊息給 pane `w5:p3`（colab_llm 的 Claude），隨後在該 pane 執行 `herdr-discord-send` 仍回「no mapped Discord thread and no recent Discord conversation」，表示 `recordAgentOrigin` 沒有被觸發（同一 pane 在約 11:35 至 12:50 多次重試皆同）。
+
+已確認：`src/discord.ts` 的 `handleMessage` 對 `!message.guildId`（私訊）直接 return，因此真正的 Discord 私訊不會進入 `dispatchPrompt`。bridge 的 pane console 在重啟後沒有任何入站紀錄。
+
+### ISSUE-037 驗收進度（2026-10-21，13:2x）
+
+環境：macOS，bridge commit b73e8ad（同一個重啟後的 process，未再重啟），pane `w5:p3`。使用者之後又從 Discord 傳了幾則訊息，約 13:20 在該 pane 執行 `herdr-discord-send "acc2 新網址 …"`，回報 `sent 1 message(s), 0 file(s)`、exit 0。
+
+結論：**送回來源的程式路徑在實機上成功過一次**（`deliverToAgentThread` 走到 `postToChannel` 並送出）。**使用者尚未明確確認 Discord 端有收到**（只有指令回報成功），所以不算已驗收。
+
+仍未釐清：
+- 同一個 bridge process 在 11:35 至 12:50 失敗、13:20 成功，中間差異未查明。最可能是「最近一則 Discord 訊息」到 13:20 前才經過 `dispatchPrompt`（先前的訊息走了別的入口或在重啟前送達），但未以 log 證實；bridge 沒有入站 log，要查需先加診斷輸出。
+- 訊息來源是私訊、伺服器頻道還是 thread 未確認；`handleMessage` 丟棄私訊的行為仍在，若使用者實際用私訊，這條路徑不會成功，須再釐清。
+- `--file` 附件經此路徑送出、12 小時 TTL 到期後的錯誤呈現、bridge 重啟後的再次行為皆未驗收。
+
+狀態：已修正、待驗收（指令回報成功，Discord 端接收未經使用者確認；根因仍有未解疑點）。下一步：請使用者確認 13:20 那則訊息是否出現在 Discord；必要時為入站派發加上診斷 log。
