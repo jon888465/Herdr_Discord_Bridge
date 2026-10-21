@@ -43,6 +43,7 @@
 | ISSUE-033 | 新增 pi agent 終端畫面 parser adapter | 已修正、待驗收 | 原始碼與 fixture 測試完成；尚未用真實 pi pane 經 Discord／Console 驗收，bridge 未重啟 |
 | ISSUE-034 | Agent 檔案回送 Discord（discord-attach 標記） | 已驗收（2026-10-20） | 後備片段修正後 Discord 實機收到附件；範圍僅 Claude／文字檔 |
 | ISSUE-035 | coding-workflow 測試在 macOS 有 6 項失敗 | 待調查 | 基準亦失敗，根因未確認 |
+| ISSUE-038 | agy 多行 prompt（含附圖）回顯後擷取不到回覆，Discord 只得「capture failure」 | 已修正、待驗收 | 原始碼、單元測試與實際畫面重放完成；bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-037 | 使用者直接在 Herdr 要求 Agent 傳給 Discord，bridge 不代送 | 已驗收（2026-10-20，指令版） | 重啟後使用者確認 Discord 收到；範圍見驗收紀錄 |
 | ISSUE-036 | 強制收尾後的 rewatch 在使用者直接於 pane 輸入新內容後仍重複擷取舊 prompt，Discord 被洗版 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟 |
 | ISSUE-022 | Phase 4 Quota / Failover Manager | 已修正、待驗收 | 2026-09-21 新增 28 項通過；完整 181/184，ISSUE-007／021 待調查，live 待驗收 |
@@ -1453,3 +1454,19 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 - `--file` 附件經此路徑送出、12 小時 TTL 到期後的錯誤呈現、bridge 重啟後的再次行為皆未驗收。
 
 狀態：已修正、待驗收（指令回報成功，Discord 端接收未經使用者確認；根因仍有未解疑點）。下一步：請使用者確認 13:20 那則訊息是否出現在 Discord；必要時為入站派發加上診斷 log。
+
+## ISSUE-038：agy 多行 prompt 回顯後擷取不到最終回覆
+
+更新日期：2026-10-21。狀態：已修正、待驗收（原始碼已改並以實際畫面重放驗證；執行中的 bridge 仍是舊 build，**未重啟**；已送出的失敗訊息無法補送）。
+
+症狀：Discord thread「python test repo」對 w4:p5（agy）發出含附圖的 Webui 修圖需求，25 分 10 秒後回報「finished — capture incomplete」與「Agent ended, but Bridge could not capture its final response」。Agent 實際已完成並在畫面輸出完整總結。預期：Discord 收到最終回覆。
+
+證據（2026-10-21 本機）：`capture-diagnostics/2026-10-21T08-07-04-830Z-w4_p5.json`：`prompt` 為多行（第一行需求、空行、「使用者附圖」、路徑、「請使用圖片檢視工具…」），`extracted_last` 空、`extracted_longest_length: 0`、`has_transcript: false`；`raw_screen_tail` 顯示 Agent 已輸出完整回覆。
+
+已確認根因：`MarkerCliAdapter` 以 `> ` + 完整 prompt 字串比對畫面定位回覆。agy 回顯多行 prompt 時把續行縮排兩格，且（本次經 context 壓縮）插入「Conversation compacted」分隔線，整段比對失敗；退回的「基準差異」比對也找不到重疊，結果回傳空字串。以 w4:p5 當時的畫面與該 prompt 重放，修正前為空、修正後擷取 1598 字元（單元測試與重放為 2026-10-21）。
+
+修正：找不到完整比對且 prompt 為多行時，改以第一行定位最後一次回顯，略過縮排後的 prompt 續行、空行與壓縮分隔線，其後內容視為回覆（`src/cli-adapter.ts` 的 `extractAfterEchoedFirstLine`，所有 `MarkerCliAdapter` 共用）。測試：`test/cli-adapter.test.ts` 新增 agy 縮排續行案例。
+
+驗證（2026-10-21）：lint 通過；完整 `npm test` 251 項、244 通過、6 失敗（ISSUE-035 既有）。
+
+限制／未驗證：agy 擷取內容仍含 `○ Thought`／`● Ran …` 等進度列（沿用原行為，未過濾）；單行 prompt 與其他 CLI 不受影響但未逐一實機驗證；未重啟、未在 Discord 重新驗收；為何 25 分鐘期間進度卡預覽也為空未另行調查。
