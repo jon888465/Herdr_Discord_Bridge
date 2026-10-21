@@ -100,3 +100,67 @@ test("cross-format image content normalizes extension and saves successfully", a
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("non-image files are saved under a sanitized name; images stay strict", async () => {
+  const { prepareAttachments, safeFileName } =
+    await import("../src/attachments.js");
+  const dir = await mkdtemp(join(tmpdir(), "bridge-file-test-"));
+  const body = Buffer.from('{"a":1}');
+  const request = (async () => new Response(body)) as typeof fetch;
+  try {
+    const out = await prepareAttachments(
+      [
+        {
+          url: "https://cdn.discordapp.com/attachments/1/2/chat.json",
+          size: body.length,
+          contentType: "application/json; charset=utf-8",
+          name: "../../chat 記錄.json",
+        },
+      ],
+      dir,
+      request,
+    );
+    assert.equal(out[0].kind, "file");
+    assert.match(out[0].path, /1-chat_記錄\.json$/);
+    assert.ok(out[0].path.startsWith(dir));
+    assert.deepEqual(await readFile(out[0].path), body);
+    assert.equal(safeFileName("../.env", "f"), "env");
+    assert.equal(safeFileName("", "f"), "f");
+    await assert.rejects(
+      prepareAttachments(
+        [
+          {
+            url: "https://evil.test/a.json",
+            size: 5,
+            contentType: "application/json",
+          },
+        ],
+        dir,
+        request,
+      ),
+    );
+    await assert.rejects(
+      prepareAttachments(
+        [
+          {
+            url: "https://cdn.discordapp.com/a/b/big.bin",
+            size: 11 * 1024 * 1024,
+            contentType: "application/octet-stream",
+          },
+        ],
+        dir,
+        request,
+      ),
+    );
+    // A declared image with non-image bytes is still rejected.
+    await assert.rejects(
+      prepareAttachments(
+        [image],
+        dir,
+        (async () => new Response(body)) as typeof fetch,
+      ),
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

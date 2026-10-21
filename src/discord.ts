@@ -630,7 +630,11 @@ export class DiscordAdapter {
     if (mention) content = content.replace(mention, "").trim();
     if (this.config.requireMention && !mentioned && !replyToBot) return null;
     if (!content && message.attachments.size)
-      content = "請檢視附上的圖片並回覆。";
+      content = [...message.attachments.values()].every((a) =>
+        (a.contentType || "").toLowerCase().startsWith("image/"),
+      )
+        ? "請檢視附上的圖片並回覆。"
+        : "請讀取附上的檔案並回覆。";
     if (!content || content.startsWith(this.config.commandPrefix)) return null;
     return content;
   }

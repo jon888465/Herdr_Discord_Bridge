@@ -1,5 +1,5 @@
 import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 export interface ImageAttachment {
   url: string;
@@ -99,12 +99,145 @@ export async function prepareImages(
       const bytes = Buffer.concat(chunks);
       const actualExt = detectImageFormat(bytes);
       if (!actualExt)
-        throw new Error("Image content does not match a supported image format");
+        throw new Error(
+          "Image content does not match a supported image format",
+        );
       const path = join(dir, `${i + 1}.${actualExt}`);
       await writeFile(path, bytes, { mode: 0o600, flag: "wx" });
       paths.push(path);
     }
     return paths;
+  } catch (error) {
+    await rm(dir, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const IMAGE_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/jpg",
+  "image/webp",
+]);
+
+export interface InboundAttachment extends ImageAttachment {
+  name?: string | null;
+}
+export interface PreparedAttachment {
+  path: string;
+  kind: "image" | "file";
+}
+
+export function isSupportedImageType(contentType?: string | null): boolean {
+  return IMAGE_TYPES.has(
+    (contentType || "").split(";")[0].trim().toLowerCase(),
+  );
+}
+
+function assertDiscordUrl(raw: string): void {
+  const url = new URL(raw);
+  if (
+    url.protocol !== "https:" ||
+    !["cdn.discordapp.com", "media.discordapp.net"].includes(url.hostname) ||
+    url.port ||
+    url.username ||
+    url.password
+  )
+    throw new Error("Attachment URL must be a Discord HTTPS attachment URL");
+}
+
+/** Keep the original name readable but never let it escape the directory. */
+export function safeFileName(
+  name: string | null | undefined,
+  fallback: string,
+): string {
+  const base = basename((name || "").replace(/\\/g, "/"))
+    .replace(/[^\p{L}\p{N}._-]+/gu, "_")
+    .replace(/^\.+/, "")
+    .slice(0, 80);
+  return base || fallback;
+}
+
+async function download(
+  url: string,
+  limit: number,
+  request: typeof fetch,
+): Promise<Buffer> {
+  const response = await request(url, {
+    redirect: "error",
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok || !response.body)
+    throw new Error("Attachment download failed");
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const item = await reader.read();
+      if (item.done) break;
+      size += item.value.length;
+      if (size > limit)
+        throw new Error(
+          `Attachment download exceeds ${limit / 1024 / 1024} MiB`,
+        );
+      chunks.push(item.value);
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  return Buffer.concat(chunks);
+}
+
+/**
+ * Images (PNG/JPEG/WebP) keep the strict checks above; every other Discord
+ * attachment is saved as a plain file (at most 10 MiB) under a sanitized name.
+ * The bridge never executes or interprets file contents.
+ */
+export async function prepareAttachments(
+  items: InboundAttachment[],
+  root: string,
+  request: typeof fetch = fetch,
+): Promise<PreparedAttachment[]> {
+  if (items.length > 4)
+    throw new Error("At most four attachments per message are supported");
+  for (const item of items) {
+    if (isSupportedImageType(item.contentType)) validateImage(item);
+    else {
+      assertDiscordUrl(item.url);
+      if (
+        !Number.isFinite(item.size) ||
+        item.size <= 0 ||
+        item.size > MAX_FILE_BYTES
+      )
+        throw new Error("Each file must be non-empty and at most 10 MiB");
+    }
+  }
+  if (!items.length) return [];
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  const dir = await mkdtemp(join(root, "message-"));
+  const prepared: PreparedAttachment[] = [];
+  try {
+    for (const [i, item] of items.entries()) {
+      if (isSupportedImageType(item.contentType)) {
+        const bytes = await download(item.url, MAX_BYTES, request);
+        const ext = detectImageFormat(bytes);
+        if (!ext)
+          throw new Error(
+            "Image content does not match a supported image format",
+          );
+        const path = join(dir, `${i + 1}.${ext}`);
+        await writeFile(path, bytes, { mode: 0o600, flag: "wx" });
+        prepared.push({ path, kind: "image" });
+      } else {
+        const bytes = await download(item.url, MAX_FILE_BYTES, request);
+        const path = join(dir, `${i + 1}-${safeFileName(item.name, "file")}`);
+        await writeFile(path, bytes, { mode: 0o600, flag: "wx" });
+        prepared.push({ path, kind: "file" });
+      }
+    }
+    return prepared;
   } catch (error) {
     await rm(dir, { recursive: true, force: true });
     throw error;

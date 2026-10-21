@@ -1,7 +1,7 @@
 import { acquireInstanceLock } from "./instance-lock.js";
 import { startSendServer } from "./send-ipc.js";
 import { PROGRESS_UPDATE_MS, formatElapsed } from "./progress-time.js";
-import { prepareImages } from "./attachments.js";
+import { prepareAttachments } from "./attachments.js";
 import { agentOrigin, recordAgentOrigin } from "./agent-origin.js";
 import { join } from "node:path";
 import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
@@ -1729,7 +1729,7 @@ export async function promptMappedAgent(
         "Use team questions <task-id> and team reply <task-id> <question-id> <answer> for Team Task replies",
       );
     if (context.message.attachments.size)
-      throw new Error("Agent 正等待回答；請先回答問題，再傳送圖片。");
+      throw new Error("Agent 正等待回答；請先回答問題，再傳送附件。");
     await runtime.herdr.sendAgent(agent.pane_id, prompt.slice(0, 12000));
     runtime.routing.deactivateForTerminal(agent.terminal_id);
     await runtime.discord.reply(
@@ -1760,14 +1760,9 @@ async function dispatchPrompt(
     recordAgentOrigin(agent.terminal_id, context.message.channel);
   try {
     const attachments = [...context.message.attachments.values()];
+    let hasImages = false;
     if (attachments.length) {
-      if (
-        !["codex", "claude", "agy", "antigravity"].some((kind) =>
-          agent.agent?.toLowerCase().includes(kind),
-        )
-      )
-        throw new Error("此 Agent 尚未支援本機圖片交付。");
-      const paths = await prepareImages(
+      const prepared = await prepareAttachments(
         attachments,
         join(
           agent.cwd || process.cwd(),
@@ -1775,12 +1770,28 @@ async function dispatchPrompt(
           "attachments",
         ),
       );
-      prompt +=
-        "\n\n使用者附圖（本機檔案）：\n" +
-        paths.map((path) => JSON.stringify(path)).join("\n") +
-        "\n請使用圖片檢視工具讀取這些檔案；若無法讀取，請明確告知，不要假設已看見圖片。";
+      const images = prepared.filter((item) => item.kind === "image");
+      const files = prepared.filter((item) => item.kind === "file");
+      hasImages = images.length > 0;
+      if (
+        hasImages &&
+        !["codex", "claude", "agy", "antigravity"].some((kind) =>
+          agent.agent?.toLowerCase().includes(kind),
+        )
+      )
+        throw new Error("此 Agent 尚未支援本機圖片交付。");
+      if (images.length)
+        prompt +=
+          "\n\n使用者附圖（本機檔案）：\n" +
+          images.map((item) => JSON.stringify(item.path)).join("\n") +
+          "\n請使用圖片檢視工具讀取這些檔案；若無法讀取，請明確告知，不要假設已看見圖片。";
+      if (files.length)
+        prompt +=
+          "\n\n使用者附檔（本機檔案）：\n" +
+          files.map((item) => JSON.stringify(item.path)).join("\n") +
+          "\n請用檔案讀取工具開啟這些檔案；若無法讀取，請明確告知，不要假設已看過內容。";
     }
-    if (attachments.length && agent.agent?.toLowerCase().includes("claude"))
+    if (hasImages && agent.agent?.toLowerCase().includes("claude"))
       void runtime.herdr
         .submitStuckImagePrompt(agent.pane_id)
         .catch((error) =>
