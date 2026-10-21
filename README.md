@@ -306,3 +306,5 @@ If you talk to an Agent directly in Herdr, it can also ask the bridge to post to
 The marker convention is packaged as the [discord-send skill](skills/discord-send/SKILL.md); link it into your agent's skills directory (e.g. `ln -s "$PWD/skills/discord-send" ~/.claude/skills/discord-send`) so every project's agent knows it.
 
 Preferred for Agents: the `herdr-discord-send` command (`scripts/herdr-discord-send`; link it onto PATH, e.g. `ln -s "$PWD/scripts/herdr-discord-send" ~/.local/bin/herdr-discord-send`). `herdr-discord-send "text"`, `--file PATH`, `--stdin`. It talks to the running bridge over a user-only local socket (`~/.config/herdr-discord-bridge/send.sock`), identifies the pane by `HERDR_PANE_ID`, and fails clearly when the pane has no mapped thread. Pending live acceptance (ISSUE-037).
+
+Inbound attachments: besides PNG/JPEG/WebP images, any other Discord file (≤ 10 MiB, up to four per message) is saved under the Agent cwd and its path is given to the Agent (ISSUE-039; pending live acceptance).

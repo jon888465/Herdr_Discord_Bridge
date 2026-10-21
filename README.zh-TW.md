@@ -278,3 +278,5 @@ Agent 可在最終回覆中單獨一行寫 `[[discord-attach: /絕對路徑]]`�
 標記約定已包成 [discord-send skill](skills/discord-send/SKILL.md)；請連結到 Agent 的 skills 目錄（如 `ln -s "$PWD/skills/discord-send" ~/.claude/skills/discord-send`），各專案的 Agent 才會知道。
 
 建議 Agent 使用 `herdr-discord-send` 指令（`scripts/herdr-discord-send`，請連結到 PATH，如 `ln -s "$PWD/scripts/herdr-discord-send" ~/.local/bin/herdr-discord-send`）：`herdr-discord-send "文字"`、`--file 路徑`、`--stdin`。它經由僅限本機使用者的 socket（`~/.config/herdr-discord-bridge/send.sock`）請執行中的 bridge 發送，以 `HERDR_PANE_ID` 識別 pane；pane 沒有對應 thread 時會明確報錯。待實機驗收（ISSUE-037）。
+
+傳入附件：除 PNG/JPEG/WebP 圖片外，其他 Discord 檔案（≤ 10 MiB、每則至多四個）會存到 Agent cwd 並把路徑交給 Agent（ISSUE-039，待實機驗收）。

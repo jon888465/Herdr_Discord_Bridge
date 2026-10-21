@@ -43,6 +43,7 @@
 | ISSUE-033 | 新增 pi agent 終端畫面 parser adapter | 已修正、待驗收 | 原始碼與 fixture 測試完成；尚未用真實 pi pane 經 Discord／Console 驗收，bridge 未重啟 |
 | ISSUE-034 | Agent 檔案回送 Discord（discord-attach 標記） | 已驗收（2026-10-20） | 後備片段修正後 Discord 實機收到附件；範圍僅 Claude／文字檔 |
 | ISSUE-035 | coding-workflow 測試在 macOS 有 6 項失敗 | 待調查 | 基準亦失敗，根因未確認 |
+| ISSUE-039 | Discord 傳入非圖片檔案（如 chat.json）被拒絕 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-038 | agy 多行 prompt（含附圖）回顯後擷取不到回覆，Discord 只得「capture failure」 | 已修正、待驗收 | 原始碼、單元測試與實際畫面重放完成；bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-037 | 使用者直接在 Herdr 要求 Agent 傳給 Discord，bridge 不代送 | 已驗收（2026-10-20，指令版） | 重啟後使用者確認 Discord 收到；範圍見驗收紀錄 |
 | ISSUE-036 | 強制收尾後的 rewatch 在使用者直接於 pane 輸入新內容後仍重複擷取舊 prompt，Discord 被洗版 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟 |
@@ -1470,3 +1471,17 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 驗證（2026-10-21）：lint 通過；完整 `npm test` 251 項、244 通過、6 失敗（ISSUE-035 既有）。
 
 限制／未驗證：agy 擷取內容仍含 `○ Thought`／`● Ran …` 等進度列（沿用原行為，未過濾）；單行 prompt 與其他 CLI 不受影響但未逐一實機驗證；未重啟、未在 Discord 重新驗收；為何 25 分鐘期間進度卡預覽也為空未另行調查。
+
+## ISSUE-039：Discord 傳入的非圖片檔案被拒絕
+
+更新日期：2026-10-21。狀態：已修正、待驗收（原始碼已改；執行中的 bridge 為舊 build，**未重啟**）。
+
+症狀：使用者在 thread「colab-llm」附上 `chat.json`（35.17 KB）提問，bridge 回「❌ Only PNG, JPEG and WebP image attachments are supported」。預期：一般檔案也能交給 Agent 讀取。
+
+已確認根因：`prepareImages` 對所有附件套用圖片驗證，非 PNG/JPEG/WebP 的 content type 一律丟錯（程式與截圖一致，屬原設計限制，非 bug 回歸）。
+
+修正：新增 `prepareAttachments`（`src/attachments.ts`）。PNG/JPEG/WebP 維持原嚴格檢查（≤ 5 MiB、簽章比對）；其他附件視為檔案：≤ 10 MiB、非空、Discord HTTPS CDN host、禁止 redirect、timeout 與串流上限，存成 `<agent cwd>/.herdr-discord-bridge/attachments/message-*/<序號>-<清理後檔名>`（檔名去除路徑與特殊字元、不允許前導 `.`）。每則最多 4 個附件。prompt 另附「使用者附檔（本機檔案）」路徑並要求用檔案讀取工具開啟、讀不到要明說。純檔案（無圖片）不再受 codex／claude／agy 白名單限制；僅含圖片時維持原限制與 Claude 補送 Enter 行為。只傳檔案、無文字時預設 prompt 為「請讀取附上的檔案並回覆。」。bridge 不執行也不解析檔案內容。`src/main.ts`、`src/discord.ts`、測試同步調整。
+
+驗證（2026-10-21）：lint 通過；完整 `npm test` 252 項、245 通過、6 失敗（ISSUE-035 既有）；新增測試涵蓋檔名清理、路徑逃逸、非 Discord host、超過 10 MiB、宣告為圖片但內容不是圖片仍拒絕。
+
+未驗證／限制：Discord 端到端未驗收；Agent 是否真的讀取檔案取決於其工具；成功檔案不會自動清理（沿用圖片行為，無 retention）；二進位大檔與壓縮檔只存檔、不處理；blocked 等待回答時仍不接受附件。
