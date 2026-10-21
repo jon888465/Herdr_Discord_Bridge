@@ -253,6 +253,24 @@ export class DiscordAdapter {
       });
   }
 
+  /** 把文字與檔案送回某個已知的來源對話（例如私訊）；用於沒有 thread 對應的 Agent。 */
+  async postToChannel(
+    channel: { send(payload: unknown): Promise<unknown> },
+    content: string[],
+    files: { path: string; name: string }[],
+  ): Promise<void> {
+    for (const text of content)
+      for (const chunk of splitDiscordText(text))
+        await channel.send({ content: chunk, allowedMentions: { parse: [] } });
+    if (files.length)
+      await channel.send({
+        files: files.map(
+          (f) => new AttachmentBuilder(f.path, { name: f.name }),
+        ),
+        allowedMentions: { parse: [] },
+      });
+  }
+
   async postAgentTransition(
     agent: AgentRecord,
     context: string,

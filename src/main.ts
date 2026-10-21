@@ -2,6 +2,7 @@ import { acquireInstanceLock } from "./instance-lock.js";
 import { startSendServer } from "./send-ipc.js";
 import { PROGRESS_UPDATE_MS, formatElapsed } from "./progress-time.js";
 import { prepareImages } from "./attachments.js";
+import { agentOrigin, recordAgentOrigin } from "./agent-origin.js";
 import { join } from "node:path";
 import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
@@ -1755,6 +1756,8 @@ async function dispatchPrompt(
 ): Promise<void> {
   assertAgentAvailable(agent, runtime);
   runtime.activeStreams.add(agent.terminal_id);
+  if (context.source !== "console")
+    recordAgentOrigin(agent.terminal_id, context.message.channel);
   try {
     const attachments = [...context.message.attachments.values()];
     if (attachments.length) {
@@ -2347,7 +2350,7 @@ async function relayDirectMarkers(
   runtime: Pick<Runtime, "herdr" | "routing" | "discord">,
 ): Promise<void> {
   const targets = mappingsForAgent(agent, runtime.routing.allMappings());
-  if (!targets.length) return;
+  if (!targets.length && !agentOrigin(agent.terminal_id)) return;
   const screen = await runtime.herdr.readAgent(
     agent.pane_id,
     "recent_unwrapped",
@@ -2369,15 +2372,21 @@ async function relayDirectMarkers(
 }
 
 /** 送文字／檔案到 Agent 對應的 Discord 目的地（第一個）；回傳給呼叫端的說明。 */
-async function deliverToAgentThread(
+export async function deliverToAgentThread(
   agent: AgentRecord,
   texts: string[],
   filePaths: string[],
   runtime: Pick<Runtime, "routing" | "discord">,
 ): Promise<{ ok: boolean; message: string }> {
   const targets = mappingsForAgent(agent, runtime.routing.allMappings());
-  if (!targets.length)
-    return { ok: false, message: "this pane has no mapped Discord thread" };
+  // 沒有 thread 對應：改送回最近把 prompt 派給此 Agent 的 Discord 對話（通常是私訊）。
+  const origin = targets.length ? undefined : agentOrigin(agent.terminal_id);
+  if (!targets.length && !origin)
+    return {
+      ok: false,
+      message:
+        "this pane has no mapped Discord thread and no recent Discord conversation",
+    };
   const roots = [agent.cwd, agent.foreground_cwd].filter((dir): dir is string =>
     Boolean(dir),
   );
@@ -2388,11 +2397,9 @@ async function deliverToAgentThread(
   const header = agentHeaderFor(agent);
   if (!texts.length && !sent.files.length && !notes.length)
     return { ok: false, message: "nothing to send" };
-  await runtime.discord.postDirect(
-    targets[0],
-    [...texts.map((t) => `${header}\n${t}`), ...notes],
-    sent.files,
-  );
+  const body = [...texts.map((t) => `${header}\n${t}`), ...notes];
+  if (origin) await runtime.discord.postToChannel(origin, body, sent.files);
+  else await runtime.discord.postDirect(targets[0], body, sent.files);
   const failed = sent.rejected.length;
   return {
     ok: texts.length > 0 || sent.files.length > 0,
