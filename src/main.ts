@@ -1,11 +1,16 @@
 import { acquireInstanceLock } from "./instance-lock.js";
 import { startSendServer } from "./send-ipc.js";
 import { PROGRESS_UPDATE_MS, formatElapsed } from "./progress-time.js";
-import { prepareAttachments } from "./attachments.js";
+import {
+  prepareAttachments,
+  type InboundAttachment,
+  type PreparedAttachment,
+} from "./attachments.js";
 import { agentOrigin, recordAgentOrigin } from "./agent-origin.js";
-import { join } from "node:path";
-import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { basename, join } from "node:path";
+import { tmpdir } from "node:os";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { randomBytes, randomUUID } from "node:crypto";
 import { splitFinalMarkdown } from "./final-format.js";
 import {
   extractAttachMarkers,
@@ -1756,6 +1761,31 @@ export async function promptMappedAgent(
   );
 }
 
+/** 遠端 Agent：先在本機暫存並驗證，再經 ssh 上傳到遠端 cwd 底下，最後刪除本機暫存。 */
+async function prepareRemoteAttachments(
+  attachments: InboundAttachment[],
+  hub: HerdrHub,
+  machine: string,
+  remoteRoot: string,
+): Promise<PreparedAttachment[]> {
+  const staging = await mkdtemp(join(tmpdir(), "herdr-discord-att-"));
+  try {
+    const local = await prepareAttachments(attachments, staging);
+    const remoteDir = `${remoteRoot}/message-${randomBytes(6).toString("hex")}`;
+    const paths = await hub.uploadTo(
+      machine,
+      remoteDir,
+      local.map((item) => ({
+        localPath: item.path,
+        name: basename(item.path),
+      })),
+    );
+    return local.map((item, index) => ({ ...item, path: paths[index] }));
+  } finally {
+    await rm(staging, { recursive: true, force: true });
+  }
+}
+
 async function dispatchPrompt(
   agent: AgentRecord,
   prompt: string,
@@ -1771,14 +1801,27 @@ async function dispatchPrompt(
     const attachments = [...context.message.attachments.values()];
     let hasImages = false;
     if (attachments.length) {
-      const prepared = await prepareAttachments(
-        attachments,
-        join(
-          agent.cwd || process.cwd(),
-          ".herdr-discord-bridge",
-          "attachments",
-        ),
-      );
+      const machine =
+        typeof agent.machine === "string" ? agent.machine : undefined;
+      if (machine && !(runtime.herdr instanceof HerdrHub))
+        throw new Error("遠端機器未設定，無法交付附件。");
+      if (machine && !agent.cwd)
+        throw new Error("遠端 Agent 沒有 cwd，無法決定附件存放位置。");
+      const prepared = machine
+        ? await prepareRemoteAttachments(
+            attachments,
+            runtime.herdr as HerdrHub,
+            machine,
+            join(agent.cwd as string, ".herdr-discord-bridge", "attachments"),
+          )
+        : await prepareAttachments(
+            attachments,
+            join(
+              agent.cwd || process.cwd(),
+              ".herdr-discord-bridge",
+              "attachments",
+            ),
+          );
       const images = prepared.filter((item) => item.kind === "image");
       const files = prepared.filter((item) => item.kind === "file");
       hasImages = images.length > 0;

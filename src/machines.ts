@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -131,6 +132,63 @@ export class MachineTunnel {
   }
 }
 
+export function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/** 把本機檔案經 ssh 串流寫到遠端目錄（遠端 0700／0600）；回傳遠端絕對路徑。 */
+export async function uploadFiles(
+  machine: MachineConfig,
+  remoteDir: string,
+  files: Array<{ localPath: string; name: string }>,
+  sshCommand = "ssh",
+  timeoutMs = 60000,
+): Promise<string[]> {
+  if (!remoteDir.startsWith("/") || remoteDir.includes("\0"))
+    throw new Error("remote directory must be an absolute path");
+  const out: string[] = [];
+  for (const file of files) {
+    if (!/^[A-Za-z0-9._-]+$/.test(file.name) || file.name.startsWith("."))
+      throw new Error("unsafe attachment file name");
+    const remotePath = `${remoteDir.replace(/\/+$/, "")}/${file.name}`;
+    const bytes = await readFile(file.localPath);
+    const command = `umask 077 && mkdir -p ${shellQuote(remoteDir)} && cat > ${shellQuote(remotePath)}`;
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(
+        sshCommand,
+        ["-o", "BatchMode=yes", machine.ssh, command],
+        { stdio: ["pipe", "ignore", "pipe"] },
+      );
+      let stderr = "";
+      const timer = setTimeout(() => {
+        child.kill("SIGKILL");
+        reject(new Error(`upload to ${machine.id} timed out`));
+      }, timeoutMs);
+      child.stderr?.on("data", (chunk: Buffer) => {
+        stderr = (stderr + chunk.toString()).slice(-300);
+      });
+      child.once("error", (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+      child.once("exit", (code) => {
+        clearTimeout(timer);
+        if (code === 0) resolve();
+        else
+          reject(
+            new Error(
+              `upload to ${machine.id} failed (exit ${code}) ${stderr.trim()}`,
+            ),
+          );
+      });
+      child.stdin?.on("error", () => undefined);
+      child.stdin?.end(bytes);
+    });
+    out.push(remotePath);
+  }
+  return out;
+}
+
 const ID_KEYS = new Set([
   "terminal_id",
   "pane_id",
@@ -196,6 +254,17 @@ export class HerdrHub extends HerdrClient {
 
   stopTunnels(): void {
     for (const remote of this.remotes.values()) remote.tunnel.stop();
+  }
+
+  /** 把本機檔案上傳到該機器上的目錄；機器不存在時回報錯誤。 */
+  async uploadTo(
+    machineId: string,
+    remoteDir: string,
+    files: Array<{ localPath: string; name: string }>,
+  ): Promise<string[]> {
+    const remote = this.remotes.get(machineId);
+    if (!remote) throw new Error(`unknown machine ${machineId}`);
+    return uploadFiles(remote.config, remoteDir, files);
   }
 
   machineIds(): string[] {

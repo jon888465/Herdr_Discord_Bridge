@@ -142,3 +142,46 @@ test("an unreachable machine keeps its last known agents and never breaks local"
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("uploadFiles streams bytes to the remote path and rejects unsafe names", async () => {
+  const { shellQuote, uploadFiles } = await import("../src/machines.js");
+  const { writeFile, readFile, chmod } = await import("node:fs/promises");
+  assert.equal(shellQuote("a'b"), `'a'\\''b'`);
+  const dir = await mkdtemp(join(tmpdir(), "bu-"));
+  try {
+    // 以 sh 取代 ssh：忽略選項與主機，直接執行最後一個參數（遠端指令）。
+    const stub = join(dir, "fakessh");
+    await writeFile(
+      stub,
+      '#!/bin/sh\nfor a; do last="$a"; done\nexec sh -c "$last"\n',
+    );
+    await chmod(stub, 0o755);
+    const src = join(dir, "src.txt");
+    await writeFile(src, "hello remote");
+    const remoteDir = join(dir, "remote", "message-1");
+    const [path] = await uploadFiles(
+      { id: "agy", ssh: "x", socket: "/s" },
+      remoteDir,
+      [{ localPath: src, name: "1-note.txt" }],
+      stub,
+      10000,
+    );
+    assert.equal(path, join(remoteDir, "1-note.txt"));
+    assert.equal(await readFile(path, "utf8"), "hello remote");
+    await assert.rejects(
+      uploadFiles(
+        { id: "agy", ssh: "x", socket: "/s" },
+        remoteDir,
+        [{ localPath: src, name: "../evil" }],
+        stub,
+      ),
+      /unsafe/,
+    );
+    await assert.rejects(
+      uploadFiles({ id: "agy", ssh: "x", socket: "/s" }, "relative", [], stub),
+      /absolute/,
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
