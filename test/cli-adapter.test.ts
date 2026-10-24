@@ -522,3 +522,21 @@ test("agy multi-line prompt echo with indented continuation still yields the ans
   assert.match(out, /已完成所有程式碼的清理與測試/);
   assert.doesNotMatch(out, /使用者附圖|舊回覆內容/);
 });
+
+test("claude turn footer detection and update banner removal (ISSUE-040)", async () => {
+  const { claudeTurnComplete, latestAgentResponse } =
+    await import("../src/cli-adapter.js");
+  const rule = "─".repeat(40);
+  const box = `${rule}\n❯ \n${rule}\n  ⏵⏵ auto mode on`;
+  const streaming = `❯ 問題\n\n⏺ 接下來：\n  1. 第一點\n  2.\n          Update available! Run: brew upgrade claude-code\n${box}`;
+  const done = `❯ 問題\n\n⏺ 接下來：\n  1. 第一點\n  2. 第二點\n\n✻ Cogitated for 10m 56s · done 下午1:04\n          Update available! Run: brew upgrade claude-code\n${box}`;
+  assert.equal(claudeTurnComplete(streaming), false);
+  assert.equal(claudeTurnComplete(done), true);
+  const text = latestAgentResponse("claude", "問題", done, "");
+  assert.match(text, /2\. 第二點/);
+  assert.doesNotMatch(text, /Update available/);
+  assert.doesNotMatch(
+    latestAgentResponse("claude", "問題", streaming, ""),
+    /Update available/,
+  );
+});

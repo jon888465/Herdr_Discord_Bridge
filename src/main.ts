@@ -22,6 +22,7 @@ import { AgentPool } from "./agent-pool.js";
 import { runTeamTurn } from "./team-turn.js";
 import { loadConfig, statePath, stateDirectory } from "./config.js";
 import {
+  claudeTurnComplete,
   conversationMovedPast,
   latestAgentResponse,
   modelCommandFor,
@@ -2258,7 +2259,13 @@ export async function streamAgent(
       if (delivered) lastCard = card;
       lastEdit = Date.now();
     }
-    const settledComplete = settled && Date.now() - collectingSince >= 10000;
+    // Claude 回合結束才會印出「✻ … for <時間>」；沒看到它代表回覆可能仍在串流（ISSUE-040）。
+    const claudeStreaming =
+      (current.agent || "").toLowerCase().includes("claude") &&
+      !transcript &&
+      !claudeTurnComplete(lastRaw);
+    const settledComplete =
+      settled && Date.now() - collectingSince >= 10000 && !claudeStreaming;
     const complete =
       transcript?.turn.completed ||
       settledComplete ||

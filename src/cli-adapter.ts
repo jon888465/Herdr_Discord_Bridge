@@ -135,6 +135,22 @@ function grokResponses(output: string): string[] {
   return responses;
 }
 
+const CLAUDE_BANNER = /^\s*Update available!/;
+const CLAUDE_TURN_FOOTER = /^\s*[✻✽✶✳✢·] \S+ for (?:\d+h )?(?:\d+m )?\d+s\b/;
+
+/**
+ * Claude 回合結束後會在回覆下方印出 `✻ <動詞> for <時間>`。畫面上最後一個內容列
+ * （略過更新提示與輸入框）若不是它，回覆可能仍在串流，不能當成最終回覆（ISSUE-040）。
+ */
+export function claudeTurnComplete(raw: string): boolean {
+  const lines = stripAnsi(stripClaudeInputBox(raw))
+    .replace(/\r/g, "")
+    .split("\n")
+    .filter((line) => line.trim() && !CLAUDE_BANNER.test(line));
+  const last = lines.at(-1);
+  return last !== undefined && CLAUDE_TURN_FOOTER.test(last);
+}
+
 /** Claude's two-column message gutter is presentation, not body indentation. */
 function claudeResponseText(output: string): string {
   const body: string[] = [];
@@ -142,6 +158,7 @@ function claudeResponseText(output: string): string {
   let inCode = false;
   let messageStart = 0;
   for (const line of stripAnsi(output).replace(/\r/g, "").split("\n")) {
+    if (!inCode && CLAUDE_BANNER.test(line)) continue;
     if (!inCode && /^(?: ?[❯>](?: |$)|[─━]{8,}|[✻✽✶✳✢·] )/.test(line)) {
       inMessage = false;
       continue;
