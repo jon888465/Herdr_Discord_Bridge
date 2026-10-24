@@ -224,6 +224,8 @@ npm run build
 
 正常啟動會在登入 Discord 前拒絕同一 bot 的第二個本機實例，鎖不依賴 workspace 或 config directory；Linux 即使異常退出也會釋放。舊版沒有此鎖，首次升級仍需先處理舊 bridge 程序。
 
+附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*` 超過 3 天會自動清理（啟動時與每 6 小時，本機與遠端皆是；ISSUE-043）。
+
 ## 遠端 Herdr 機器
 
 用 `herdr machine add` 加入遠端機器後，在 plugin `config.json` 加入 `machines`（見 [設定範例](config.example.jsonc)）：`id`、`ssh`（`~/.ssh/config` 的 Host）與遠端 Herdr API socket 的絕對路徑 `socket`。bridge 會以 `ssh -L` 轉發該 socket，遠端 Agent 的 ID 帶 `<id>:` 前綴（如 `agy-pod:w2:p1`），沒帶前綴的一律是本機。支援文字對話與 Discord → 遠端 Agent 的附件（經 ssh 上傳到遠端 cwd）；不支援 Agent → Discord 的檔案回送與 `herdr-discord-send`。文字對話已驗收，遠端附件待驗收（ISSUE-041）。

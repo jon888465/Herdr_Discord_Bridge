@@ -570,3 +570,7 @@ Claude 回合完成判定（ISSUE-040，2026-10-24）：無 transcript 的 Claud
 ## 遠端 Herdr 機器（2026-10-24，ISSUE-041）
 
 設定 `machines: [{ "id": "agy-pod", "ssh": "agy-pod", "socket": "/root/.config/herdr/herdr.sock" }]`。沒帶機器前綴的 ID 一律是本機；`<機器>:` 前綴的 ID（如 `agy-pod:w2:p1`、`agy-pod:term_xxx`）轉給該機器並去掉前綴，回傳的 ID 補上前綴，因此 thread 對應、routing.json 與 `allowedWorkspaceIds` 都用同一種字串 ID，既有本機資料不需遷移。bridge 為每台機器維持 `ssh -N -L` 轉發（斷線退避重連），遠端暫時不通時沿用上次 Agent 清單、本機不受影響。機器 ID 須為 `[A-Za-z][A-Za-z0-9_-]{1,31}` 且不可像本機 ID；`ssh` 不可以 `-` 開頭、`socket` 須為遠端絕對路徑。混用本機與遠端 ID 的請求被拒絕。Discord → 遠端 Agent 的附件：本機暫存驗證後經 `ssh` 串流上傳到遠端 `<cwd>/.herdr-discord-bridge/attachments/message-*/`（0700／0600、檔名白名單），prompt 帶遠端路徑。Agent → Discord 的檔案回送與 `herdr-discord-send` 不支援遠端。文字對話已驗收，遠端附件實機驗收尚待，見 ISSUE-041。
+
+## 附件保留期限（2026-10-25，ISSUE-043）
+
+Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*/` 超過 3 天（mtime）即清理：bridge 啟動時與每 6 小時，對目前 `agent.list` 內每個（機器, cwd）掃描；本機直接刪除，遠端經 ssh `find … -mmin +4320`。僅刪名稱為 `message-<英數>` 的真目錄，不跟隨 symlink，其他內容不動。已不在列表中的 Agent 的 cwd 不會被掃描。實機驗收尚待。

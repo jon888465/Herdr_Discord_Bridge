@@ -45,6 +45,8 @@
 | ISSUE-035 | coding-workflow 測試在 macOS 有 6 項失敗 | 待調查 | 基準亦失敗，根因未確認 |
 | ISSUE-040 | Claude 最終回覆在串流中途被截斷，並混入「Update available!」提示 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 已於 2026-10-24 重啟（w2:p1V）；根因為推論；Discord 未驗收 |
 | ISSUE-041 | bridge 不支援 Herdr 遠端機器（如 agy-pod）的 Agent | 已驗收（文字對話，2026-10-24） | 關閉遠端面板後重問，Discord 收到正確回覆；斷線重連、附件、Team Worker 等未驗收 |
+| ISSUE-042 | 從 Discord 驅動的 Agent 自己重啟 bridge 時，該回合的串流與最終回覆遺失 | 待調查（限制已確認、尚無修正） | 2026-10-24 發生一次；重啟後不會接續進行中的回覆 |
+| ISSUE-043 | 傳入附件沒有保留期限，本機與遠端會一直累積 | 已修正、待驗收 | 已於 2026-10-25 重啟（w2:p1Y，程式尚未 commit）；本機啟動清理已實際刪除過期目錄；遠端刪除未驗證 |
 | ISSUE-039 | Discord 傳入非圖片檔案（如 chat.json）被拒絕 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-038 | agy 多行 prompt（含附圖）回顯後擷取不到回覆，Discord 只得「capture failure」 | 已修正、待驗收 | 原始碼、單元測試與實際畫面重放完成；bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-037 | 使用者直接在 Herdr 要求 Agent 傳給 Discord，bridge 不代送 | 已驗收（2026-10-20，指令版） | 重啟後使用者確認 Discord 收到；範圍見驗收紀錄 |
@@ -1529,3 +1531,31 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 
 遠端附件（2026-10-24，Discord → 遠端 Agent）：先前遠端 Agent 的 `cwd`（如 `/root`）不在本機，若沿用本機流程會在本機嘗試建立 `/root/...`。現改為：下載與驗證沿用本機流程（Discord CDN host、無 redirect、大小與簽章檢查，圖片 ≤ 5 MiB、檔案 ≤ 10 MiB、最多 4 個）寫到本機暫存目錄；再以 `ssh <target> 'umask 077 && mkdir -p DIR && cat > FILE'` 串流上傳到遠端 `<遠端 cwd>/.herdr-discord-bridge/attachments/message-<隨機>/`（目錄 0700、檔案 0600；檔名僅允許 `[A-Za-z0-9._-]` 且不得以 `.` 開頭；指令參數一律 shell quote）；最後刪除本機暫存，prompt 內放遠端路徑。無遠端 cwd 時明確拒絕。每個檔案各開一次 ssh 連線（經 kubectl ProxyCommand，會多幾秒）；遠端上傳失敗時整則附件失敗並回報錯誤。範圍：`src/machines.ts`（`uploadFiles`、`HerdrHub.uploadTo`）、`src/main.ts`（`prepareRemoteAttachments`）。
 驗證（2026-10-24）：lint、`npm run check` 型別檢查通過；`test/machines.test.ts` 新增上傳測試（以 sh 取代 ssh：位元組內容、不安全檔名、非絕對路徑）通過；完整 `npm test` 僅剩 ISSUE-035 既有 6 項失敗。以真實 ssh 上傳測試檔到 agy-pod：檔案落在預期目錄，目錄 `drwx------`、檔案 `-rw-------`，內容正確（測試檔已刪除）。**未驗收**：Discord 端到端（含圖片與一般檔案）、遠端 Agent 是否真的讀得到並回應、大檔（接近 10 MiB）在 kubectl 連線上的耗時、遠端附件不會自動清理（沿用本機行為，無 retention）。狀態：遠端附件已修正、待驗收；bridge 尚未以此 build 重啟。
+
+## ISSUE-042：Agent 在 Discord 驅動的回合中重啟 bridge，該回合的回覆遺失
+
+更新日期：2026-10-25。狀態：待調查（現象與直接原因已確認；尚無修正或緩解）。
+
+症狀：2026-10-24 23:54，使用者在 thread「git repo Herdr_Discord_Bridge」（對應 w1:p1，Claude）回「好」授權 commit／push／重啟。Discord 上該則進度訊息停在「working · 已耗時 1秒／Running 1 shell command…」，之後沒有任何更新與最終回覆；使用者回報「沒回應」。預期：回合結束後仍收到最終回覆，或至少看到明確的「bridge 已重啟」說明。
+
+已確認：該回合內，Agent 自己執行 `./scripts/run.sh -r`，它關閉舊的 bridge pane 並開新的；負責該回合串流（`streamAgent`）的行程隨舊 bridge 結束，新 bridge 沒有接續進行中的串流（記憶體中的 activeStreams 不持久化），所以最終回覆沒有送出。Agent 端的工作本身完成（commit、push、重啟皆成功）。**未確認**：是否也有其他時機（例如 bridge 崩潰、手動重啟）造成同樣的遺失——推論相同，未另行重現。
+
+限制／暫行作法：由 Discord 驅動的 Agent 要重啟 bridge 時，最後一則回覆不會送達，請在 Herdr 直接看，或重啟後再要求 Agent 重述結果。可能的修正方向（未實作）：重啟前把進行中的串流（terminal、prompt、Discord 訊息 ID）寫入狀態檔，新 bridge 啟動後接續擷取；或在關閉前先送出「bridge 重啟中」並於啟動後補送最終回覆。
+
+驗證：2026-10-25 對照使用者截圖與當時時間線（重啟指令與該則訊息同在 23:54）；未做自動化重現。
+
+遠端圖片附件驗收（2026-10-25，Discord thread「Agy-pod」→ 遠端 agy `agy-pod:w2:p1`）：使用者傳一張圖片，遠端 agy 正確描述圖片內容（bridge 為 2026-10-24 重啟的 w2:p1X）。圖片附件已驗收。**仍未驗收**：一般（非圖片）檔案附件、接近 10 MiB 的大檔耗時、遠端附件無自動清理。
+
+## ISSUE-043：傳入附件沒有保留期限
+
+更新日期：2026-10-25。狀態：已修正、待驗收（原始碼已改；bridge 已於 2026-10-25 00:29 之後以此 build 重啟為 w2:p1Y；此 build 的程式**尚未 commit**）。
+
+症狀：Discord 傳入的附件存在 `<Agent cwd>/.herdr-discord-bridge/attachments/message-*/`（本機與遠端皆是），沒有清理，會一直累積（ISSUE-039／041 已註記為限制）。使用者要求：超過三天就清理。
+
+修正：`cleanupOldAttachments`（`src/attachments.ts`）：刪除 root 直接子項中名稱符合 `message-<英數>`、為真目錄（`lstat`，不跟隨 symlink）且 mtime 超過 3 天（`ATTACHMENT_RETENTION_MS`）的目錄；其他檔案與目錄一律不動。遠端 `cleanupRemoteAttachments`（`src/machines.ts`）以 ssh 執行 `find <root> -mindepth 1 -maxdepth 1 -type d -name 'message-*' -mmin +4320 -exec rm -rf {} +`（root 以 shell quote、須為絕對路徑）。`startAttachmentCleanup`（`src/main.ts`）於 bridge 啟動時與之後每 6 小時，對 `agent.list` 內每個不重複的（機器, cwd）掃描一次；失敗只記錄、不影響其他項目，結束時停止計時器。
+
+限制：只掃目前仍存在的 Agent 的 cwd；Agent 已關閉或 cwd 不再出現在列表的目錄不會被清理（需要時手動刪）。遠端不通時該輪略過、下一輪再試。以 mtime 判斷，目錄內容被後續修改會延後清理。刪除不可復原。
+
+驗證（2026-10-25）：lint 通過；`npm run check` 型別檢查通過；新增測試通過：本機只刪過期 `message-*`、保留較新者與其他名稱目錄與 symlink 指向的外部目錄；遠端以 sh 取代 ssh 驗證 find 範圍、不存在的目錄與輸入驗證。完整 `npm test` 僅剩 ISSUE-035 既有 6 項失敗。真實 ssh 對 agy-pod 執行清理：成功完成，未過期的目錄仍保留。**未驗收**：重啟後實際刪除過期目錄（含遠端）；6 小時週期；本機現有舊目錄在重啟後會被刪除（符合要求）。
+
+實測（2026-10-25，bridge w2:p1Y 啟動後）：主控台依序出現「Removed 6／11／1／4 expired attachment folder(s)」，即本機各 Agent cwd 底下共 22 個過期 `message-*` 目錄已被刪除；專案目錄的 `.herdr-discord-bridge/attachments/` 只剩 3 個較新的。遠端 agy-pod 的 `attachments/` 只有 1 個（2026-10-25 00:07 上傳的圖片，未滿 3 天），符合預期但**沒有實際刪除過遠端過期目錄**，所以遠端刪除仍只有單元測試與真實 ssh 執行成功（無過期目錄）的證據。

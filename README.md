@@ -256,6 +256,8 @@ this does not enable direct Agent conversation mirroring to Discord.
 
 Normal startup rejects a second local instance for the same Discord bot before login. The lock is independent of workspace and config directory. Linux releases it even after a crash. Older bridge builds without this lock must still be stopped during the first upgrade.
 
+Inbound attachment folders (`<cwd>/.herdr-discord-bridge/attachments/message-*`) older than 3 days are removed automatically, locally and on remote machines, at startup and every 6 hours (ISSUE-043).
+
 ## Remote Herdr machines
 
 After `herdr machine add`, list the machine under `machines` in the plugin config (see [config.example.jsonc](config.example.jsonc)): `id`, `ssh` (a Host from `~/.ssh/config`) and `socket`, the absolute path of the remote Herdr API socket. The bridge forwards that socket with `ssh -L`; remote IDs carry an `<id>:` prefix (for example `agy-pod:w2:p1`) and unprefixed IDs are always local. Supported: text conversation and Discord → remote-agent attachments (uploaded over ssh into the remote cwd). Not supported: agent → Discord file return and `herdr-discord-send` for remote agents. Text conversation is accepted; remote attachments await acceptance (ISSUE-041).
