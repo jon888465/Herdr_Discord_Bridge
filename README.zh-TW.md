@@ -226,7 +226,7 @@ npm run build
 
 ## 遠端 Herdr 機器
 
-用 `herdr machine add` 加入遠端機器後，在 plugin `config.json` 加入 `machines`（見 [設定範例](config.example.jsonc)）：`id`、`ssh`（`~/.ssh/config` 的 Host）與遠端 Herdr API socket 的絕對路徑 `socket`。bridge 會以 `ssh -L` 轉發該 socket，遠端 Agent 的 ID 帶 `<id>:` 前綴（如 `agy-pod:w2:p1`），沒帶前綴的一律是本機。第一版僅支援文字對話，不支援附件與 `herdr-discord-send`；實機驗收尚待（ISSUE-041）。
+用 `herdr machine add` 加入遠端機器後，在 plugin `config.json` 加入 `machines`（見 [設定範例](config.example.jsonc)）：`id`、`ssh`（`~/.ssh/config` 的 Host）與遠端 Herdr API socket 的絕對路徑 `socket`。bridge 會以 `ssh -L` 轉發該 socket，遠端 Agent 的 ID 帶 `<id>:` 前綴（如 `agy-pod:w2:p1`），沒帶前綴的一律是本機。支援文字對話與 Discord → 遠端 Agent 的附件（經 ssh 上傳到遠端 cwd）；不支援 Agent → Discord 的檔案回送與 `herdr-discord-send`。文字對話已驗收，遠端附件待驗收（ISSUE-041）。
 
 ## 可用 Agent 池與動態分工
 
