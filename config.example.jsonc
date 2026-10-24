@@ -13,6 +13,11 @@
     "soloThreadNoMention": false,
     "commandPrefix": "/herdr",
   },
+  // Remote Herdr machines (ISSUE-041). IDs without a "<id>:" prefix are always local.
+  // `socket` is the remote Herdr API socket; the bridge forwards it over `ssh -L`.
+  "machines": [
+    { "id": "agy-pod", "ssh": "agy-pod", "socket": "/root/.config/herdr/herdr.sock" },
+  ],
   // Profiles are definitions, not running panes. Enable them per workspace with team select.
   // Model names must be supported by your installed CLI/account; no model is forced here.
   "agentProfiles": [

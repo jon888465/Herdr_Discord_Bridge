@@ -39,6 +39,7 @@ import {
   statusEmoji,
 } from "./format.js";
 import { HerdrClient, HerdrError } from "./herdr.js";
+import { HerdrHub } from "./machines.js";
 import type { OrchestrationEvent } from "./team-orchestration.js";
 import { TeamTaskEngine } from "./team-task-engine.js";
 import { SessionHandoffRuntime } from "./session-handoff.js";
@@ -89,11 +90,13 @@ async function startBridge(
   config: ReturnType<typeof loadConfig>,
   dryRun: boolean,
 ): Promise<void> {
-  const herdr = new HerdrClient(
+  const herdr = new HerdrHub(
+    config.machines,
     undefined,
     config.requestTimeoutMs,
     config.reconnectBaseMs,
   );
+  herdr.startTunnels();
   const routing = new RoutingStore(
     statePath(config),
     config.maxTrackedApprovals,
@@ -112,6 +115,7 @@ async function startBridge(
   );
 
   if (!(await herdr.ping())) {
+    herdr.stopTunnels();
     throw new Error(
       "Herdr socket is not reachable; the bridge cannot control agents. Herdr itself is left untouched.",
     );
@@ -129,7 +133,10 @@ async function startBridge(
       console.error(`Herdr watch unavailable: ${safeError(error)}`),
     );
     watcher.start();
-    installShutdown(() => watcher.stop(), routing);
+    installShutdown(() => {
+      herdr.stopTunnels();
+      watcher.stop();
+    }, routing);
     console.log(
       "herdr-discord-bridge: dry-run; no Discord messages will be sent",
     );
@@ -360,6 +367,7 @@ async function startBridge(
     return () => undefined;
   });
   installShutdown(() => {
+    herdr.stopTunnels();
     stopSend();
     watcher.stop();
     consoleControl.stop();

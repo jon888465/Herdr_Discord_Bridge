@@ -3,6 +3,7 @@ import { validateProfiles, type AgentProfile } from "./agent-pool.js";
 import os from "node:os";
 import path from "node:path";
 import type { AgentStatus } from "./types.js";
+import { validateMachines, type MachineConfig } from "./machines.js";
 
 export interface DiscordConfig {
   enabled: boolean;
@@ -19,6 +20,8 @@ export interface DiscordConfig {
 
 export interface Config {
   agentProfiles?: AgentProfile[];
+  /** 遠端 Herdr 機器；未列出的 ID 一律是本機。 */
+  machines: MachineConfig[];
   notifyOn: AgentStatus[];
   pollIntervalMs: number;
   requestTimeoutMs: number;
@@ -35,6 +38,7 @@ export interface Config {
 }
 
 const DEFAULTS: Config = {
+  machines: [],
   notifyOn: ["blocked"],
   pollIntervalMs: 2000,
   requestTimeoutMs: 5000,
@@ -189,6 +193,7 @@ export function loadConfig(): Config {
     ...DEFAULTS,
     ...source,
     agentProfiles: validateProfiles(source.agentProfiles),
+    machines: validateMachines(source.machines),
     notifyOn: stringArray(source.notifyOn, DEFAULTS.notifyOn),
     pollIntervalMs: positiveInt(
       source.pollIntervalMs,
