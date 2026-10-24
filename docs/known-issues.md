@@ -44,7 +44,7 @@
 | ISSUE-034 | Agent 檔案回送 Discord（discord-attach 標記） | 已驗收（2026-10-20） | 後備片段修正後 Discord 實機收到附件；範圍僅 Claude／文字檔 |
 | ISSUE-035 | coding-workflow 測試在 macOS 有 6 項失敗 | 待調查 | 基準亦失敗，根因未確認 |
 | ISSUE-040 | Claude 最終回覆在串流中途被截斷，並混入「Update available!」提示 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 已於 2026-10-24 重啟（w2:p1V）；根因為推論；Discord 未驗收 |
-| ISSUE-041 | bridge 不支援 Herdr 遠端機器（如 agy-pod）的 Agent | 已修正、待驗收 | 已設定 machines 並於 2026-10-24 重啟（w2:p1W）；Discord 已能建立 thread 並送到遠端 agy，但回覆擷取失敗（遠端 agy 停在「Models & Quota」面板）；尚待重驗 |
+| ISSUE-041 | bridge 不支援 Herdr 遠端機器（如 agy-pod）的 Agent | 已驗收（文字對話，2026-10-24） | 關閉遠端面板後重問，Discord 收到正確回覆；斷線重連、附件、Team Worker 等未驗收 |
 | ISSUE-039 | Discord 傳入非圖片檔案（如 chat.json）被拒絕 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-038 | agy 多行 prompt（含附圖）回顯後擷取不到回覆，Discord 只得「capture failure」 | 已修正、待驗收 | 原始碼、單元測試與實際畫面重放完成；bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-037 | 使用者直接在 Herdr 要求 Agent 傳給 Discord，bridge 不代送 | 已驗收（2026-10-20，指令版） | 重啟後使用者確認 Discord 收到；範圍見驗收紀錄 |
@@ -1509,7 +1509,7 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 
 ## ISSUE-041：bridge 不支援 Herdr 遠端機器的 Agent
 
-更新日期：2026-10-24。狀態：已修正、待驗收（原始碼與單元測試完成；`machines` 已寫入設定；bridge 於 2026-10-24 以此 build 重啟為 w2:p1W，tunnel 連線成功；實機對話首次嘗試見「實測」）。
+更新日期：2026-10-24。狀態：已驗收（僅限文字對話；bridge 於 2026-10-24 以此 build 重啟為 w2:p1W）。
 
 症狀：已用 `herdr machine add` 加入遠端機器 agy-pod（其 Herdr 有 agy Agent，`w2:p1`），但 Discord 端看不到該 Agent。預期：遠端 Agent 與本機 Agent 一樣可對應 thread、收發訊息。
 
@@ -1524,3 +1524,5 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 未驗證：以 `HerdrHub` 實際啟動 tunnel 的端到端；Discord 端對遠端 Agent 建立 thread 並收發；kubectl 連線中斷後自動重連；`startProfile`（Team Worker 在遠端分割 pane）；`session.snapshot` 的欄位是否全是頂層陣列（目前合併頂層陣列）。下一步：將 `machines` 寫入設定、重啟 bridge 後在 Discord 驗收。
 
 實測（2026-10-24 23:34，Discord thread「Agy-pod」）：bridge 啟動後 `machine agy-pod: connected`；Discord 看得到遠端 agy（WK `agy-pod:w2`、Pane `agy-pod:w2:p1`），建立 thread 並送出「妳是什麼模型」成功抵達遠端（經 tunnel 的 list／prompt／read 皆運作），17 秒後回報「capture incomplete; diagnostic delivered」。診斷檔（`capture-diagnostics/…agy-pod_w2_p1.json`）顯示遠端 agy 畫面停在「Models & Quota」面板（`(1–22 of 38 lines)`、`esc Close`），輸入框空白、畫面中沒有該 prompt，所以沒有可擷取的回覆。**尚未確認**這個面板是 prompt 送出前就已開著（最可能，因遠端畫面至今仍是同一個面板），還是 prompt 觸發的；因此本次失敗不能歸因於遠端傳輸，也不能算驗收通過。下一步：關閉該面板後重送一次，再看回覆能否擷取。
+
+驗收（2026-10-24，Discord thread「Agy-pod」→ 遠端 agy `agy-pod:w2:p1`）：我送 esc 關閉遠端「Models & Quota」面板後，使用者在 thread 重問，Discord 收到正確回覆。這證實上一次失敗是遠端畫面狀態所致，不是傳輸問題。**仍未驗收**：kubectl 連線中斷後自動重連、遠端 Agent 在 Discord 側持續多輪對話、`startProfile`（Team Worker）、遠端 Agent 被關閉時的清理；附件與 `herdr-discord-send` 依設計不支援遠端。
