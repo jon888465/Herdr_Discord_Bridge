@@ -43,7 +43,8 @@
 | ISSUE-033 | 新增 pi agent 終端畫面 parser adapter | 已修正、待驗收 | 原始碼與 fixture 測試完成；尚未用真實 pi pane 經 Discord／Console 驗收，bridge 未重啟 |
 | ISSUE-034 | Agent 檔案回送 Discord（discord-attach 標記） | 已驗收（2026-10-20） | 後備片段修正後 Discord 實機收到附件；範圍僅 Claude／文字檔 |
 | ISSUE-035 | coding-workflow 測試在 macOS 有 6 項失敗 | 待調查 | 基準亦失敗，根因未確認 |
-| ISSUE-040 | Claude 最終回覆在串流中途被截斷，並混入「Update available!」提示 | 已修正、待驗收 | 原始碼與單元測試完成；根因為推論；bridge 尚未重啟，Discord 未驗收 |
+| ISSUE-040 | Claude 最終回覆在串流中途被截斷，並混入「Update available!」提示 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 已於 2026-10-24 重啟（w2:p1V）；根因為推論；Discord 未驗收 |
+| ISSUE-041 | bridge 不支援 Herdr 遠端機器（如 agy-pod）的 Agent | 修正中 | 原始碼與單元測試完成；尚未設定 machines、未重啟、未實機驗收 |
 | ISSUE-039 | Discord 傳入非圖片檔案（如 chat.json）被拒絕 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-038 | agy 多行 prompt（含附圖）回顯後擷取不到回覆，Discord 只得「capture failure」 | 已修正、待驗收 | 原始碼、單元測試與實際畫面重放完成；bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-037 | 使用者直接在 Herdr 要求 Agent 傳給 Discord，bridge 不代送 | 已驗收（2026-10-20，指令版） | 重啟後使用者確認 Discord 收到；範圍見驗收紀錄 |
@@ -1338,6 +1339,7 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 實作範圍：`src/cli-adapter.ts` 新增 `PiCliAdapter`（Herdr kind 嚴格等於 `pi`，大小寫不敏感）；`/model <name>`；`normalizeTerminalResponse` 支援 pi；`src/main.ts` 的 settled 終端 final 由 Claude 擴及 pi。依 2026-10-19 讀取 pi 1.2.0 實際 pane（w5:p1，Herdr 0.8.0）觀察到的畫面格式：user／assistant 皆無前綴符號、僅縮排一欄（user 靠背景色區分，純文字讀不到）；工具區塊以 ` $ cmd` 開頭、` Took <時間>` 結尾；底部為兩條 `─` 分隔線包住的輸入框與頁尾狀態列。Adapter 因此以「prompt 回顯（容許軟折行）」為邊界取其後文字，去除輸入框／頁尾（含草稿）、spinner 與已完成工具區塊，並與 baseline 的舊回答比對避免重畫重播。
 
 限制（未解決）：
+
 - 沒有 pi structured transcript reader（session 檔為 jsonl，格式見 pi `docs/session-format.md`，未實作）；Discord 仍標示為擷取摘要，不能宣稱 semantic final。
 - 工具標題只認 `$ `、`read|write|edit|grep|find|ls <arg>`；僅實際見過 `$` 區塊。其他工具區塊格式與缺少 `Took` 結尾時只丟標題列，其輸出可能混入回覆。
 - 模型選單 `modelOptionsFor` 未針對 pi 設定（落入預設清單）；`/model` 指令格式未在實機驗證。pi 以 provider 切換帳號（pi-acc-switcher），名稱需由操作者指定。
@@ -1451,6 +1453,7 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 結論：**送回來源的程式路徑在實機上成功過一次**（`deliverToAgentThread` 走到 `postToChannel` 並送出）。**使用者尚未明確確認 Discord 端有收到**（只有指令回報成功），所以不算已驗收。
 
 仍未釐清：
+
 - 同一個 bridge process 在 11:35 至 12:50 失敗、13:20 成功，中間差異未查明。最可能是「最近一則 Discord 訊息」到 13:20 前才經過 `dispatchPrompt`（先前的訊息走了別的入口或在重啟前送達），但未以 log 證實；bridge 沒有入站 log，要查需先加診斷輸出。
 - 訊息來源是私訊、伺服器頻道還是 thread 未確認；`handleMessage` 丟棄私訊的行為仍在，若使用者實際用私訊，這條路徑不會成功，須再釐清。
 - `--file` 附件經此路徑送出、12 小時 TTL 到期後的錯誤呈現、bridge 重啟後的再次行為皆未驗收。
@@ -1489,7 +1492,7 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 
 ## ISSUE-040：Claude 最終回覆被截斷並混入更新提示
 
-更新日期：2026-10-24。狀態：已修正、待驗收（原始碼已改；執行中的 bridge 為舊 build，**未重啟**；已送出的截斷訊息無法補送或編輯）。
+更新日期：2026-10-24。狀態：已修正、待驗收（原始碼已改；bridge 已於 2026-10-24 以含此修正的 build 重啟為 w2:p1V；Discord 尚未驗收；已送出的截斷訊息無法補送或編輯）。
 
 症狀：thread「Nas討論」（對應 w3:p1，Claude）收到的最終回覆從句中開始（「因此拒絕金鑰…」）、換行與縮排混亂、結尾停在「2.」，最後一行是「Update available! Run: brew upgrade claude-code」；「2.」的內容與其後段落都沒送到。預期：完整、不含 UI 提示的回覆。
 
@@ -1503,3 +1506,19 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 驗證（2026-10-24）：lint 通過；完整 `npm test` 253 項、246 通過、6 失敗（ISSUE-035 既有）；新增測試涵蓋串流中／完成的畫面與提示過濾；以 w3:p1 當前真實畫面重放，`claudeTurnComplete` 為 true、輸出不含更新提示。
 
 未驗證／限制：Discord 端到端未驗收；沒有「✻ … for」尾巴的短回合（若存在）會多等至 30 秒強制收尾並改貼「不完整」片段，需實機觀察是否出現；折行混亂未處理；非 Claude Agent 不受影響。
+
+## ISSUE-041：bridge 不支援 Herdr 遠端機器的 Agent
+
+更新日期：2026-10-24。狀態：修正中（原始碼與單元測試完成；`machines` 尚未寫入設定、bridge 未以此 build 重啟、未實機驗收）。
+
+症狀：已用 `herdr machine add` 加入遠端機器 agy-pod（其 Herdr 有 agy Agent，`w2:p1`），但 Discord 端看不到該 Agent。預期：遠端 Agent 與本機 Agent 一樣可對應 thread、收發訊息。
+
+已確認根因：這是尚未實作的能力，不是 bug。bridge 只連本機 `~/.config/herdr/herdr.sock`；`src/` 沒有任何 machine 處理。遠端 Herdr 只能透過 `herdr --machine`（CLI）存取，本機沒有轉發到遠端的 socket。另 pane／workspace ID（如 `w2:p1`）只在單一 Herdr server 內唯一，遠端與本機會撞號。
+
+設計（使用者決定）：沒帶機器 ID 的一律是本機，帶 `<機器>:` 前綴的才找對應機器。(1) 設定 `machines: [{ id, ssh, socket }]`（`socket` 為遠端 Herdr API socket 的絕對路徑，agy-pod 實測為 `/root/.config/herdr/herdr.sock`）。(2) 對每台機器由 bridge 啟動 `ssh -N -L <本機短路徑 socket>:<遠端 socket> <ssh>`（路徑 `~/.config/herdr-discord-bridge/tunnels/<id>.sock`；`BatchMode`、`ExitOnForwardFailure`、`ServerAliveInterval=15`），斷線以 1→30 秒退避重連。(3) `HerdrHub`（`src/machines.ts`，繼承 `HerdrClient`）攔截所有 request：參數中的 ID 若帶機器前綴，去掉前綴後送到該機器，回傳的 `terminal_id`／`pane_id`／`workspace_id`／`tab_id` 再補上前綴並加 `machine` 欄位、workspace 名稱加 `<機器>:` 前綴；`agent.list`／`workspace.list`／`session.snapshot` 合併本機與所有遠端；混用本機與遠端 ID 的 request 被拒絕。遠端暫時不通時沿用上次的清單（避免 watcher 誤報 Agent 已移除，連帶清掉對應），並只在狀態改變時記錄一次；本機不受影響。機器 ID 須為 `[A-Za-z][A-Za-z0-9_-]{1,31}`，且不可長得像本機 ID（`w1`、`term_*`、`local`）。`allowedWorkspaceIds` 可寫 `agy-pod:w2`。
+
+範圍限制（第一版）：僅文字對話（收發訊息、串流回覆、approve／cancel 等沿用 Herdr API 的操作）。檔案功能不支援遠端：Discord 附件會存到本機而遠端讀不到、`herdr-discord-send` 與路徑沙箱以本機檔案系統為準；遠端 Agent 的 `cwd`（如 `/root`）不在本機。遠端 Agent 上沒有 bridge 的 `herdr-discord-send`／skill。
+
+驗證（2026-10-24）：lint 通過；`npm run check` 型別檢查通過；新增 `test/machines.test.ts`（設定驗證、本機／遠端路由與 ID 前綴、混用拒絕、遠端中斷沿用舊清單）通過；完整 `npm test` 僅剩 ISSUE-035 既有的 6 項失敗。手動確認：`ssh -L` 轉發到 `/root/.config/herdr/herdr.sock` 後送 `agent.list` 可回傳遠端 agy（2026-10-24，經 ~/.ssh/config 的 ProxyCommand＋kubectl）。
+
+未驗證：以 `HerdrHub` 實際啟動 tunnel 的端到端；Discord 端對遠端 Agent 建立 thread 並收發；kubectl 連線中斷後自動重連；`startProfile`（Team Worker 在遠端分割 pane）；`session.snapshot` 的欄位是否全是頂層陣列（目前合併頂層陣列）。下一步：將 `machines` 寫入設定、重啟 bridge 後在 Discord 驗收。

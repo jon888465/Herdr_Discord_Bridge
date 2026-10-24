@@ -566,3 +566,7 @@ Agent 指令回送（ISSUE-037，2026-10-20）：bridge 另開僅限「送到 Di
 多行 prompt 回顯（ISSUE-038，2026-10-21）：標記式 adapter 找不到「標記＋完整 prompt」時，若 prompt 為多行，改以第一行定位最後一次回顯，並略過縮排續行、空行與壓縮分隔線後取其後內容為回覆；仍找不到才退回基準差異。實機驗收尚待。
 
 Claude 回合完成判定（ISSUE-040，2026-10-24）：無 transcript 的 Claude，只有在畫面最後一個內容列（略過「Update available!」提示與輸入框）是回合尾巴「✻ <動詞> for <時間>」時，settled 才可作為最終回覆；否則繼續等待，至 30 秒閒置強制收尾（改貼不完整片段並標示）。「Update available!」列不屬回覆內容。實機驗收尚待。
+
+## 遠端 Herdr 機器（2026-10-24，ISSUE-041）
+
+設定 `machines: [{ "id": "agy-pod", "ssh": "agy-pod", "socket": "/root/.config/herdr/herdr.sock" }]`。沒帶機器前綴的 ID 一律是本機；`<機器>:` 前綴的 ID（如 `agy-pod:w2:p1`、`agy-pod:term_xxx`）轉給該機器並去掉前綴，回傳的 ID 補上前綴，因此 thread 對應、routing.json 與 `allowedWorkspaceIds` 都用同一種字串 ID，既有本機資料不需遷移。bridge 為每台機器維持 `ssh -N -L` 轉發（斷線退避重連），遠端暫時不通時沿用上次 Agent 清單、本機不受影響。機器 ID 須為 `[A-Za-z][A-Za-z0-9_-]{1,31}` 且不可像本機 ID；`ssh` 不可以 `-` 開頭、`socket` 須為遠端絕對路徑。混用本機與遠端 ID 的請求被拒絕。第一版僅支援文字對話；附件、`herdr-discord-send` 與路徑沙箱不支援遠端。實機驗收尚待，見 ISSUE-041。

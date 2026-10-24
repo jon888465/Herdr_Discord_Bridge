@@ -256,6 +256,10 @@ this does not enable direct Agent conversation mirroring to Discord.
 
 Normal startup rejects a second local instance for the same Discord bot before login. The lock is independent of workspace and config directory. Linux releases it even after a crash. Older bridge builds without this lock must still be stopped during the first upgrade.
 
+## Remote Herdr machines
+
+After `herdr machine add`, list the machine under `machines` in the plugin config (see [config.example.jsonc](config.example.jsonc)): `id`, `ssh` (a Host from `~/.ssh/config`) and `socket`, the absolute path of the remote Herdr API socket. The bridge forwards that socket with `ssh -L`; remote IDs carry an `<id>:` prefix (for example `agy-pod:w2:p1`) and unprefixed IDs are always local. First version: text conversation only — no attachments and no `herdr-discord-send` for remote agents. Live acceptance is pending (ISSUE-041).
+
 ## Agent profiles and quiet console
 
 Define `agentProfiles` in the plugin config (see [config.example.jsonc](config.example.jsonc)). Profiles configure CLI kind, optional model/arguments and capabilities; no model name is assumed valid for your account.
