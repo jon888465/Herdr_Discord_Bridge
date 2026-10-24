@@ -2,6 +2,9 @@ import { acquireInstanceLock } from "./instance-lock.js";
 import { startSendServer } from "./send-ipc.js";
 import { PROGRESS_UPDATE_MS, formatElapsed } from "./progress-time.js";
 import {
+  ATTACHMENT_RETENTION_MS,
+  ATTACHMENT_SUBDIR,
+  cleanupOldAttachments,
   prepareAttachments,
   type InboundAttachment,
   type PreparedAttachment,
@@ -365,6 +368,7 @@ async function startBridge(
     console.error(`Herdr watch unavailable: ${safeError(error)}`),
   );
   watcher.start();
+  const stopCleanup = startAttachmentCleanup(herdr);
   const stopSend = await startSendServer((request) =>
     handleSendRequest(request, { config, herdr, routing, discord }),
   ).catch((error) => {
@@ -372,6 +376,7 @@ async function startBridge(
     return () => undefined;
   });
   installShutdown(() => {
+    stopCleanup();
     herdr.stopTunnels();
     stopSend();
     watcher.stop();
@@ -1759,6 +1764,48 @@ export async function promptMappedAgent(
     runtime,
     `📨 Sent to **${agentLabel(agent)}** in \`${agent.workspace_id}\` / \`${agent.pane_id}\`.`,
   );
+}
+
+/** 啟動時與每 6 小時，清理各 Agent cwd 底下超過 3 天的附件目錄（本機與遠端，ISSUE-043）。 */
+function startAttachmentCleanup(herdr: HerdrClient): () => void {
+  const sweep = async () => {
+    let agents: AgentRecord[];
+    try {
+      agents = await herdr.listAgents();
+    } catch {
+      return;
+    }
+    const seen = new Set<string>();
+    for (const agent of agents) {
+      if (!agent.cwd) continue;
+      const machine =
+        typeof agent.machine === "string" ? agent.machine : undefined;
+      const root = join(agent.cwd, ...ATTACHMENT_SUBDIR);
+      const key = `${machine ?? ""}|${root}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      try {
+        if (machine) {
+          if (herdr instanceof HerdrHub)
+            await herdr.cleanupAttachments(
+              machine,
+              root,
+              Math.round(ATTACHMENT_RETENTION_MS / 60000),
+            );
+        } else {
+          const removed = await cleanupOldAttachments(root);
+          if (removed)
+            console.log(`Removed ${removed} expired attachment folder(s)`);
+        }
+      } catch (error) {
+        console.error(`Attachment cleanup failed: ${safeError(error)}`);
+      }
+    }
+  };
+  void sweep();
+  const timer = setInterval(() => void sweep(), 6 * 60 * 60 * 1000);
+  timer.unref();
+  return () => clearInterval(timer);
 }
 
 /** 遠端 Agent：先在本機暫存並驗證，再經 ssh 上傳到遠端 cwd 底下，最後刪除本機暫存。 */

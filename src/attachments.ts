@@ -1,4 +1,11 @@
-import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  writeFile,
+  rm,
+} from "node:fs/promises";
 import { basename, join } from "node:path";
 
 export interface ImageAttachment {
@@ -242,4 +249,40 @@ export async function prepareAttachments(
     await rm(dir, { recursive: true, force: true });
     throw error;
   }
+}
+
+/** 附件保留期限：超過 3 天的 message-* 目錄會被清理（ISSUE-043）。 */
+export const ATTACHMENT_RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
+
+export const ATTACHMENT_SUBDIR = [".herdr-discord-bridge", "attachments"];
+
+/**
+ * 刪除 root 底下超過保留期限的 `message-*` 目錄。只處理 root 的直接子項、名稱符合
+ * `message-<英數>`、為真正的目錄（不跟隨 symlink）；其他檔案一律不動。回傳刪除數量。
+ */
+export async function cleanupOldAttachments(
+  root: string,
+  maxAgeMs = ATTACHMENT_RETENTION_MS,
+  now = Date.now(),
+): Promise<number> {
+  let names: string[];
+  try {
+    names = await readdir(root);
+  } catch {
+    return 0;
+  }
+  let removed = 0;
+  for (const name of names) {
+    if (!/^message-[A-Za-z0-9]+$/.test(name)) continue;
+    const path = join(root, name);
+    try {
+      const info = await lstat(path);
+      if (!info.isDirectory() || now - info.mtimeMs <= maxAgeMs) continue;
+      await rm(path, { recursive: true, force: true });
+      removed += 1;
+    } catch {
+      // 清理失敗不影響其他目錄；下一輪再試。
+    }
+  }
+  return removed;
 }

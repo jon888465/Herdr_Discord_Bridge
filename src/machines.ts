@@ -132,6 +132,52 @@ export class MachineTunnel {
   }
 }
 
+/** 遠端清理：只刪 root 直接子項中超過 minutes 分鐘的 `message-*` 真目錄。 */
+export async function cleanupRemoteAttachments(
+  machine: MachineConfig,
+  root: string,
+  minutes: number,
+  sshCommand = "ssh",
+  timeoutMs = 60000,
+): Promise<void> {
+  if (!root.startsWith("/") || root.includes("\0"))
+    throw new Error("remote directory must be an absolute path");
+  if (!Number.isInteger(minutes) || minutes < 1)
+    throw new Error("invalid retention");
+  const command = `[ -d ${shellQuote(root)} ] && find ${shellQuote(root)} -mindepth 1 -maxdepth 1 -type d -name 'message-*' -mmin +${minutes} -exec rm -rf {} + ; true`;
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(
+      sshCommand,
+      ["-o", "BatchMode=yes", machine.ssh, command],
+      {
+        stdio: ["ignore", "ignore", "pipe"],
+      },
+    );
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error(`cleanup on ${machine.id} timed out`));
+    }, timeoutMs);
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderr = (stderr + chunk.toString()).slice(-300);
+    });
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once("exit", (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve();
+      else
+        reject(
+          new Error(
+            `cleanup on ${machine.id} failed (exit ${code}) ${stderr.trim()}`,
+          ),
+        );
+    });
+  });
+}
+
 export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
@@ -265,6 +311,16 @@ export class HerdrHub extends HerdrClient {
     const remote = this.remotes.get(machineId);
     if (!remote) throw new Error(`unknown machine ${machineId}`);
     return uploadFiles(remote.config, remoteDir, files);
+  }
+
+  async cleanupAttachments(
+    machineId: string,
+    root: string,
+    minutes: number,
+  ): Promise<void> {
+    const remote = this.remotes.get(machineId);
+    if (!remote) throw new Error(`unknown machine ${machineId}`);
+    await cleanupRemoteAttachments(remote.config, root, minutes);
   }
 
   machineIds(): string[] {

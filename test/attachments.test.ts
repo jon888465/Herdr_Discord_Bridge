@@ -164,3 +164,37 @@ test("non-image files are saved under a sanitized name; images stay strict", asy
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("cleanupOldAttachments removes only expired message-* directories", async () => {
+  const { cleanupOldAttachments } = await import("../src/attachments.js");
+  const { mkdtemp, mkdir, writeFile, utimes, stat, rm, symlink } =
+    await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "bc-"));
+  const outside = await mkdtemp(join(tmpdir(), "bc-out-"));
+  const day = 24 * 60 * 60 * 1000;
+  try {
+    const old = join(root, "message-old1");
+    const fresh = join(root, "message-new1");
+    const other = join(root, "keep-me");
+    for (const dir of [old, fresh, other]) {
+      await mkdir(dir);
+      await writeFile(join(dir, "f.txt"), "x");
+    }
+    await symlink(outside, join(root, "message-link"));
+    const past = new Date(Date.now() - 4 * day);
+    await utimes(old, past, past);
+    await utimes(other, past, past);
+    await utimes(join(root, "message-link"), past, past).catch(() => undefined);
+    assert.equal(await cleanupOldAttachments(root), 1);
+    await assert.rejects(stat(old));
+    await stat(fresh);
+    await stat(other);
+    await stat(outside);
+    assert.equal(await cleanupOldAttachments(join(root, "nope")), 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+});

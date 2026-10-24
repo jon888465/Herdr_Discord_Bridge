@@ -185,3 +185,42 @@ test("uploadFiles streams bytes to the remote path and rejects unsafe names", as
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("cleanupRemoteAttachments runs a scoped find and validates input", async () => {
+  const { cleanupRemoteAttachments } = await import("../src/machines.js");
+  const { writeFile, chmod, mkdir, utimes, stat } =
+    await import("node:fs/promises");
+  const dir = await mkdtemp(join(tmpdir(), "bq-"));
+  const machine = { id: "agy", ssh: "x", socket: "/s" };
+  try {
+    const stub = join(dir, "fakessh");
+    await writeFile(
+      stub,
+      '#!/bin/sh\nfor a; do last="$a"; done\nexec sh -c "$last"\n',
+    );
+    await chmod(stub, 0o755);
+    const root = join(dir, "attachments");
+    const old = join(root, "message-old");
+    const fresh = join(root, "message-new");
+    const other = join(root, "other");
+    for (const d of [old, fresh, other]) await mkdir(d, { recursive: true });
+    const past = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+    await utimes(old, past, past);
+    await utimes(other, past, past);
+    await cleanupRemoteAttachments(machine, root, 4320, stub);
+    await assert.rejects(stat(old));
+    await stat(fresh);
+    await stat(other);
+    await cleanupRemoteAttachments(machine, join(dir, "missing"), 4320, stub);
+    await assert.rejects(
+      cleanupRemoteAttachments(machine, "relative", 4320, stub),
+      /absolute/,
+    );
+    await assert.rejects(
+      cleanupRemoteAttachments(machine, root, 0, stub),
+      /retention/,
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
