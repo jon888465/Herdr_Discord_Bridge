@@ -43,6 +43,7 @@
 | ISSUE-033 | 新增 pi agent 終端畫面 parser adapter | 已修正、待驗收 | 原始碼與 fixture 測試完成；尚未用真實 pi pane 經 Discord／Console 驗收，bridge 未重啟 |
 | ISSUE-034 | Agent 檔案回送 Discord（discord-attach 標記） | 已驗收（2026-10-20） | 後備片段修正後 Discord 實機收到附件；範圍僅 Claude／文字檔 |
 | ISSUE-035 | coding-workflow 測試在 macOS 有 6 項失敗 | 待調查 | 基準亦失敗，根因未確認 |
+| ISSUE-040 | Claude 最終回覆在串流中途被截斷，並混入「Update available!」提示 | 已修正、待驗收 | 原始碼與單元測試完成；根因為推論；bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-039 | Discord 傳入非圖片檔案（如 chat.json）被拒絕 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-038 | agy 多行 prompt（含附圖）回顯後擷取不到回覆，Discord 只得「capture failure」 | 已修正、待驗收 | 原始碼、單元測試與實際畫面重放完成；bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-037 | 使用者直接在 Herdr 要求 Agent 傳給 Discord，bridge 不代送 | 已驗收（2026-10-20，指令版） | 重啟後使用者確認 Discord 收到；範圍見驗收紀錄 |
@@ -1485,3 +1486,20 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 驗證（2026-10-21）：lint 通過；完整 `npm test` 252 項、245 通過、6 失敗（ISSUE-035 既有）；新增測試涵蓋檔名清理、路徑逃逸、非 Discord host、超過 10 MiB、宣告為圖片但內容不是圖片仍拒絕。
 
 未驗證／限制：Discord 端到端未驗收；Agent 是否真的讀取檔案取決於其工具；成功檔案不會自動清理（沿用圖片行為，無 retention）；二進位大檔與壓縮檔只存檔、不處理；blocked 等待回答時仍不接受附件。
+
+## ISSUE-040：Claude 最終回覆被截斷並混入更新提示
+
+更新日期：2026-10-24。狀態：已修正、待驗收（原始碼已改；執行中的 bridge 為舊 build，**未重啟**；已送出的截斷訊息無法補送或編輯）。
+
+症狀：thread「Nas討論」（對應 w3:p1，Claude）收到的最終回覆從句中開始（「因此拒絕金鑰…」）、換行與縮排混亂、結尾停在「2.」，最後一行是「Update available! Run: brew upgrade claude-code」；「2.」的內容與其後段落都沒送到。預期：完整、不含 UI 提示的回覆。
+
+證據（2026-10-24 本機）：w3:p1 現在的 `recent_unwrapped` 畫面完整包含第 2 點（「舊的 nas workspace 還是用 ssh … kubectl exec 那個 pane，可以關掉。」）、「還有兩件事沒處理…」與回合尾巴「✻ Cogitated for 10m 56s · done 下午1:04」，其下才是「Update available!」與輸入框；Discord 那份在不同的折行位置（`-E/root/.local/` vs 畫面的 `-E` ⏎ `/root/.local/…`），代表它是更早、不同寬度時的畫面。此次最終回覆成功送出，所以沒有 capture-diagnostic 可佐證。pane 高度只有 25 列（`viewport_rows: 25`）。
+
+已確認：(1) 「Update available!」是右縮排的 UI 列，被 `claudeResponseText` 當成回覆的縮排續行收進去（重放確認）。(2) 回覆確實在尚未完成的畫面被送出（Discord 內容少於畫面最終內容）。
+**未確認（推論）**：為何在串流中途就被判定完成。最可能是 Herdr 在回覆串流停頓時暫報 idle／done、畫面連續數次輪詢不變，達成 settled＋10 秒；未取得當時的狀態紀錄，無法證實。折行／縮排混亂疑為較窄或不同寬度下 Claude 自行折行，未另行修正。
+
+修正：(1) `claudeResponseText` 忽略「Update available!」列。(2) 新增 `claudeTurnComplete`（`src/cli-adapter.ts`）：Claude 回合結束會在回覆下方印出「✻ <動詞> for <時間>」；畫面最後一個內容列（略過更新提示與輸入框）不是它時，Claude（無 transcript）不得以 settled 為由收尾，需等到出現尾巴；若始終沒有，仍由既有 30 秒閒置強制收尾（此時只貼擷取片段並標示不完整）。範圍：`src/cli-adapter.ts`、`src/main.ts`、`test/cli-adapter.test.ts`。
+
+驗證（2026-10-24）：lint 通過；完整 `npm test` 253 項、246 通過、6 失敗（ISSUE-035 既有）；新增測試涵蓋串流中／完成的畫面與提示過濾；以 w3:p1 當前真實畫面重放，`claudeTurnComplete` 為 true、輸出不含更新提示。
+
+未驗證／限制：Discord 端到端未驗收；沒有「✻ … for」尾巴的短回合（若存在）會多等至 30 秒強制收尾並改貼「不完整」片段，需實機觀察是否出現；折行混亂未處理；非 Claude Agent 不受影響。

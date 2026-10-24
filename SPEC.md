@@ -564,3 +564,5 @@ Herdr 直接互動回送（ISSUE-037，2026-10-20）：Agent 轉為 idle／done 
 Agent 指令回送（ISSUE-037，2026-10-20）：bridge 另開僅限「送到 Discord」的本機 socket（預設 `~/.config/herdr-discord-bridge/send.sock`；Unix 目錄 0700、socket 0600；`HERDR_DISCORD_SEND_SOCKET` 可覆寫；Windows 為 named pipe）。`herdr-discord-send [--file 路徑]... [--stdin] [文字]` 以 `HERDR_PANE_ID` 識別 Agent；bridge 查出該 pane、檢查 `allowedWorkspaceIds`、要求有對應 Discord thread（否則明確回錯誤），文字至多 8000 字元，檔案沿用 ISSUE-034 沙箱。請求大小上限 256 KiB。Agent 不需 Discord token。標記版本為指令不存在時的後備。實機驗收尚待。沒有對應 thread 時，改送回最近（12 小時內）把 prompt 派給該 Agent 的 Discord 對話（私訊亦可，文字與檔案皆可）；thread 對應優先；兩者皆無才回錯誤（ISSUE-037 2026-10-21 補充，待驗收）。
 
 多行 prompt 回顯（ISSUE-038，2026-10-21）：標記式 adapter 找不到「標記＋完整 prompt」時，若 prompt 為多行，改以第一行定位最後一次回顯，並略過縮排續行、空行與壓縮分隔線後取其後內容為回覆；仍找不到才退回基準差異。實機驗收尚待。
+
+Claude 回合完成判定（ISSUE-040，2026-10-24）：無 transcript 的 Claude，只有在畫面最後一個內容列（略過「Update available!」提示與輸入框）是回合尾巴「✻ <動詞> for <時間>」時，settled 才可作為最終回覆；否則繼續等待，至 30 秒閒置強制收尾（改貼不完整片段並標示）。「Update available!」列不屬回覆內容。實機驗收尚待。
