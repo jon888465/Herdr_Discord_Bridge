@@ -1559,3 +1559,5 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 驗證（2026-10-25）：lint 通過；`npm run check` 型別檢查通過；新增測試通過：本機只刪過期 `message-*`、保留較新者與其他名稱目錄與 symlink 指向的外部目錄；遠端以 sh 取代 ssh 驗證 find 範圍、不存在的目錄與輸入驗證。完整 `npm test` 僅剩 ISSUE-035 既有 6 項失敗。真實 ssh 對 agy-pod 執行清理：成功完成，未過期的目錄仍保留。**未驗收**：重啟後實際刪除過期目錄（含遠端）；6 小時週期；本機現有舊目錄在重啟後會被刪除（符合要求）。
 
 實測（2026-10-25，bridge w2:p1Y 啟動後）：主控台依序出現「Removed 6／11／1／4 expired attachment folder(s)」，即本機各 Agent cwd 底下共 22 個過期 `message-*` 目錄已被刪除；專案目錄的 `.herdr-discord-bridge/attachments/` 只剩 3 個較新的。遠端 agy-pod 的 `attachments/` 只有 1 個（2026-10-25 00:07 上傳的圖片，未滿 3 天），符合預期但**沒有實際刪除過遠端過期目錄**，所以遠端刪除仍只有單元測試與真實 ssh 執行成功（無過期目錄）的證據。
+
+遠端一般檔案附件驗收（2026-10-25，Discord thread「Agy-pod」→ 遠端 agy `agy-pod:w2:p1`）：使用者傳一個非圖片檔案，遠端 agy 正確讀取內容並回覆（bridge w2:p1Y）。遠端圖片與一般檔案附件皆已驗收。**仍未驗收**：接近 10 MiB 大檔的耗時、遠端過期目錄的實際刪除（ISSUE-043）。
