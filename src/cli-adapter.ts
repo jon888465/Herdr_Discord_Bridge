@@ -198,7 +198,7 @@ function claudeResponseText(output: string): string {
  * the user has typed next. It is not a conversation turn, so drop it before
  * looking for the echoed prompt.
  */
-function stripClaudeInputBox(output: string): string {
+export function stripClaudeInputBox(output: string): string {
   const lines = stripAnsi(output).replace(/\r/g, "").split("\n");
   const isRule = (line: string) => /^[─━]{8,}\s*$/.test(line);
   let bottom = -1;
@@ -583,4 +583,20 @@ function outputSinceBaseline(baseline: string, output: string): string {
       return stripCliChrome(outputLines.slice(overlap).join("\n"));
   }
   return "";
+}
+
+/**
+ * 判斷畫面是否「實質上沒變」：忽略行尾空白／不換行空白，並（Claude）排除輸入框與其下的狀態列。
+ * 輸入框游標閃爍會讓 `❯` 與 `❯\u00a0` 交替出現，原始比較會誤以為畫面一直在變（ISSUE-044）。
+ */
+export function stableScreen(agent: string | undefined, raw: string): string {
+  const text = (agent || "").toLowerCase().includes("claude")
+    ? stripClaudeInputBox(raw)
+    : raw;
+  return text
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => line.replace(/[\u00a0\s]+$/u, ""))
+    .join("\n")
+    .replace(/\n+$/, "");
 }

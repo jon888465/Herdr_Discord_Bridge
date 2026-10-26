@@ -540,3 +540,27 @@ test("claude turn footer detection and update banner removal (ISSUE-040)", async
     /Update available/,
   );
 });
+
+test("stableScreen ignores a blinking Claude input cursor and trailing whitespace", async () => {
+  const { stableScreen } = await import("../src/cli-adapter.js");
+  const rule = "─".repeat(40);
+  const screen = (cursor: string, answer = "answer") =>
+    [
+      `⏺ ${answer}`,
+      "",
+      "✻ Baked for 16s",
+      rule,
+      cursor,
+      rule,
+      "  ⏵⏵ auto mode on",
+    ].join("\n");
+  assert.equal(
+    stableScreen("claude", screen("❯")),
+    stableScreen("claude", screen("❯ ")),
+  );
+  assert.notEqual(
+    stableScreen("claude", screen("❯")),
+    stableScreen("claude", screen("❯", "answer 2")),
+  );
+  assert.equal(stableScreen("agy", "a  \nb \n\n"), "a\nb");
+});

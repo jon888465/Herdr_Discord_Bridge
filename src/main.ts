@@ -31,6 +31,7 @@ import { runTeamTurn } from "./team-turn.js";
 import { loadConfig, statePath, stateDirectory } from "./config.js";
 import {
   claudeTurnComplete,
+  stableScreen,
   conversationMovedPast,
   latestAgentResponse,
   modelCommandFor,
@@ -2173,7 +2174,9 @@ async function rewatchAfterForcedFinish(
         output,
         baselineOutput,
       );
-      resume = latest !== "" && latest !== lastOutput;
+      // 只有內容真的往後延伸才續傳；較短或已包含在先前片段內的擷取（版面抖動造成）不算新輸出。
+      resume =
+        latest !== "" && latest !== lastOutput && !lastOutput.includes(latest);
     }
     if (!resume) continue;
     runtime.activeStreams.add(agent.terminal_id);
@@ -2321,7 +2324,10 @@ export async function streamAgent(
       }
       // 解析結果只含 assistant 訊息；長時間工具執行時它不變，但原始畫面（spinner、
       // 計時）仍在重繪。兩者都靜止才算穩定，避免 Claude 作業中途被當成最終回覆。
-      const rawChanged = lastRaw !== "" && output !== lastRaw;
+      const rawChanged =
+        lastRaw !== "" &&
+        stableScreen(current.agent, output) !==
+          stableScreen(current.agent, lastRaw);
       lastRaw = output;
       lastReadError = "";
       const latest = latestAgentResponse(
@@ -2399,14 +2405,27 @@ export async function streamAgent(
         });
       // 標記在正式 final 與後備擷取片段都處理；片段仍受同一套路徑沙箱限制（ISSUE-034）。
       const outbound = extractAttachMarkers(final || longestOutput);
+      // 強制收尾的擷取片段若已送過同一 prompt 的相同或更長內容，不再重複貼（ISSUE-044）。
+      const previous = excerptDelivered.get(current.terminal_id);
+      const duplicateExcerpt =
+        !final &&
+        Boolean(longestOutput) &&
+        previous?.prompt === prompt &&
+        previous.text.includes(outbound.text);
       const body =
         (final && (outbound.text || (outbound.requested.length ? "📎" : ""))) ||
         (longestOutput
           ? `⚠️ Final response unavailable; captured CLI excerpt (may include progress or be incomplete):\n${outbound.text}`
           : "⚠️ Agent ended, but Bridge could not capture its final response. This is a capture failure, not proof of an empty answer.");
       try {
-        for (const chunk of splitFinalMarkdown(body))
-          await runtime.discord.postOutput(progress, chunk);
+        if (!final && longestOutput && !duplicateExcerpt)
+          excerptDelivered.set(current.terminal_id, {
+            prompt,
+            text: outbound.text,
+          });
+        if (!duplicateExcerpt)
+          for (const chunk of splitFinalMarkdown(body))
+            await runtime.discord.postOutput(progress, chunk);
         if (outbound.requested.length) {
           const roots = [current.cwd, current.foreground_cwd].filter(
             (dir): dir is string => Boolean(dir),
@@ -2453,6 +2472,9 @@ export async function streamAgent(
     `${agentHeaderFor(initial)}\n⏱️ Monitoring timed out; use /herdr read for the current CLI output.`,
   );
 }
+
+/** terminal_id → 最近一次強制收尾貼出的擷取片段，用來避免同一回覆重複貼出。 */
+const excerptDelivered = new Map<string, { prompt: string; text: string }>();
 
 /** terminal_id → 已處理的標記 key，避免 idle／done 重複轉換或 streamAgent 已送過時再送。 */
 const relayedMarkers = new Map<string, Set<string>>();
