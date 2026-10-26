@@ -47,6 +47,7 @@
 | ISSUE-041 | bridge 不支援 Herdr 遠端機器（如 agy-pod）的 Agent | 已驗收（文字對話，2026-10-24） | 關閉遠端面板後重問，Discord 收到正確回覆；斷線重連、附件、Team Worker 等未驗收 |
 | ISSUE-042 | 從 Discord 驅動的 Agent 自己重啟 bridge 時，該回合的串流與最終回覆遺失 | 待調查（限制已確認、尚無修正） | 2026-10-24 發生一次；重啟後不會接續進行中的回覆 |
 | ISSUE-043 | 傳入附件沒有保留期限，本機與遠端會一直累積 | 已修正、待驗收 | 已於 2026-10-25 重啟（w2:p1Y，程式尚未 commit）；本機啟動清理已實際刪除過期目錄；遠端刪除未驗證 |
+| ISSUE-044 | Claude 回覆在 Discord 被重複貼出多則 | 已修正、待驗收 | 原始碼與單元測試完成；根因部分為推論；bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-039 | Discord 傳入非圖片檔案（如 chat.json）被拒絕 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-038 | agy 多行 prompt（含附圖）回顯後擷取不到回覆，Discord 只得「capture failure」 | 已修正、待驗收 | 原始碼、單元測試與實際畫面重放完成；bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-037 | 使用者直接在 Herdr 要求 Agent 傳給 Discord，bridge 不代送 | 已驗收（2026-10-20，指令版） | 重啟後使用者確認 Discord 收到；範圍見驗收紀錄 |
@@ -1561,3 +1562,19 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 實測（2026-10-25，bridge w2:p1Y 啟動後）：主控台依序出現「Removed 6／11／1／4 expired attachment folder(s)」，即本機各 Agent cwd 底下共 22 個過期 `message-*` 目錄已被刪除；專案目錄的 `.herdr-discord-bridge/attachments/` 只剩 3 個較新的。遠端 agy-pod 的 `attachments/` 只有 1 個（2026-10-25 00:07 上傳的圖片，未滿 3 天），符合預期但**沒有實際刪除過遠端過期目錄**，所以遠端刪除仍只有單元測試與真實 ssh 執行成功（無過期目錄）的證據。
 
 遠端一般檔案附件驗收（2026-10-25，Discord thread「Agy-pod」→ 遠端 agy `agy-pod:w2:p1`）：使用者傳一個非圖片檔案，遠端 agy 正確讀取內容並回覆（bridge w2:p1Y）。遠端圖片與一般檔案附件皆已驗收。**仍未驗收**：接近 10 MiB 大檔的耗時、遠端過期目錄的實際刪除（ISSUE-043）。
+
+## ISSUE-044：同一則 Claude 回覆在 Discord 被重複貼出多則
+
+更新日期：2026-10-26。狀態：已修正、待驗收（原始碼已改；執行中的 bridge 為 w2:p1Y，**未重啟**；已送出的重複訊息無法收回）。
+
+症狀：使用者在「git repo Herdr_Discord_Bridge」thread 問「Openab 是靠 acp…」，同一個回答在 Discord 出現多則。預期：回覆只貼一次。
+
+證據（2026-10-26 本機）：`capture-diagnostics` 在 13:53:30–13:57:55 之間為 w1:p1 連續存了 6 份，間隔約 1 分鐘，prompt 相同，elapsed 35–50 秒。畫面其實早已完整，且回合尾巴「✻ Baked for 16s · done」已出現，`claudeTurnComplete` 對該畫面重放為 true；診斷檔 `agent_status` 為 idle。表示每一輪都是走 30 秒閒置強制收尾（沒有「settled」），收尾又因 rewatch 續傳而重來一輪，每輪都貼一次擷取片段。其中三份的 `extracted_last` 是從句中開始的截短版（895 字，全文為 1187 字），其餘為完整版。畫面最後一行輸入框在 `❯` 與 `❯` + 不換行空白（U+00A0）之間交替，與游標閃爍相符。
+
+已確認：(1) 原始畫面比較把游標閃爍當成「畫面在變」，settled 永遠不成立，只能靠 30 秒強制收尾；(2) 強制收尾後的 rewatch 只要本次擷取與上次不同就續傳並再貼一次，截短版與完整版交替出現就會一直續傳，直到 `MAX_REWATCH_RESUMES`（5 次）。**未確認（推論）**：游標閃爍是畫面不穩定的唯一原因；截短版擷取（895 字）的成因——診斷檔的 `raw_screen_tail` 長度不一，無法用它重放當時的完整畫面，故未重現。
+
+修正：(1) `stableScreen`（`src/cli-adapter.ts`）：比較畫面時忽略行尾空白／U+00A0，Claude 並排除輸入框與其下狀態列，只有回覆內容變動才算畫面改變。(2) rewatch 續傳條件加上「新擷取不得已被上次片段包含」，截短版不再觸發續傳。(3) 強制收尾貼出的片段記錄在 `excerptDelivered`，同一 prompt 若新片段已包含於先前貼過的內容，不再貼出。範圍：`src/cli-adapter.ts`、`src/main.ts`、`test/cli-adapter.test.ts`。
+
+驗證（2026-10-26）：lint 通過；`npm run check` 型別檢查通過；新增 `stableScreen` 測試（游標閃爍與行尾空白視為相同、內容改變視為不同）通過；完整 `npm test` 僅剩 ISSUE-035 既有 6 項失敗。
+
+未驗證：Discord 端到端（回覆應只貼一次、約 10 秒內以「✅ final response delivered」收尾）；截短擷取的根因；排除輸入框後是否有其他會抖動的畫面區域（例如 spinner 以外的狀態列）；先前 ISSUE-036／040 的驗收仍待。
