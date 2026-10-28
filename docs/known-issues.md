@@ -1693,7 +1693,7 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 使用者確認（2026-10-28）：送問前沒有 `/new`。
 新證據（2026-10-28，讀 `~/.codex/sessions/2026/10/28/`）：`rollout-…13-32-27-01a180fe-…jsonl` 的建立時間（台北 13:32:27）與 Discord 送問時間（下午 1:32）吻合，session_meta 為 Codex 0.165.0、cwd `python_test`；前一個 session `01a180eb` 建立於 13:11:35。也就是說，Codex 在這個 prompt 到達時才建立新 session（檔案在第一個 prompt 才產生），Herdr 的 `agent_session` 在串流期間由舊 id 換成新 id。
 推測（未驗證）：該 Codex 為重新啟動或新執行緒，session 於第一個 prompt 才實體化，因此 bridge 記下的 `initial.agent_session` 仍是舊值。尚無送問當下 `initial.agent_session` 的紀錄，無法證明舊值就是 `01a180eb`。
-修正：`sessionCreatedSince`（`src/response-stream.ts`）判斷 UUIDv7 session id 是否建立於送問時間（容忍 5 秒）之後；`streamAgent` 對 Codex 在同 pane／terminal／workspace 下遇到這種新 id 時改追蹤新 id（log：`Codex session materialized during turn`），其餘 id 變動仍停止擷取。新增 1 項測試。2026-10-28：lint 通過；完整 `npm test` 272 項、265 通過、6 失敗（ISSUE-035 既有項目）。注意：`CodexTranscript` 仍綁定舊 session 檔，換 session 後完成判斷靠 Stop hook 或畫面 parser。
+修正：`sessionCreatedSince`（`src/response-stream.ts`）判斷 UUIDv7 session id 是否建立於送問時間（容忍 5 秒）之後；`streamAgent` 對 Codex 在同 pane／terminal／workspace 下遇到這種新 id 時改追蹤新 id（log：`<agent> session created during turn pane=…`，codex／agy／pi 通用），其餘 id 變動仍停止擷取。新增 1 項測試。2026-10-28：lint 通過；完整 `npm test` 272 項、265 通過、6 失敗（ISSUE-035 既有項目）。注意：`CodexTranscript` 仍綁定舊 session 檔，換 session 後完成判斷靠 Stop hook 或畫面 parser。
 下一步：使用者重新送問驗收；另記錄送問當下與換 id 當下的 `agent_session`以確認觸發原因。修正做法是在同一 pane／terminal／cwd 下，若新 session id（UUIDv7 內含毫秒時間）的時間不早於本次送問時間，視為同一回合的 session 實體化而改採新 id，其餘情況仍停止擷取，避免轉發其他對話。
 
 ### ISSUE-042 修正（2026-10-28，已實作、待驗收）

@@ -2472,7 +2472,7 @@ export async function streamAgent(
       )
     ) {
       console.log(
-        `Codex session materialized during turn pane=${initial.pane_id}; following new session`,
+        `${initial.agent} session created during turn pane=${initial.pane_id}; following new session`,
       );
       trackedSession = candidate.agent_session;
     }
