@@ -287,13 +287,13 @@ Agent 可在最終回覆中單獨一行寫 `[[discord-attach: /絕對路徑]]`�
 
 預設 bridge 從終端畫面解析回覆（parser）。CLI hook 能直接提供回覆內容與權限請求，比較可靠。**hook 優先，parser 永遠保留為備用**，所以 hook 沒裝或事件遺失都不會壞掉。
 
-| CLI           | 要開啟的 hook               | 設定位置                  | 額外步驟                                               |
-| ------------- | --------------------------- | ------------------------- | ------------------------------------------------------ |
-| Claude        | `Stop`、`PermissionRequest` | `~/.claude/settings.json` | 無                                                     |
-| Codex         | 只開 `Stop`（權限走 `y`／`esc` 快捷鍵；開 `PermissionRequest` 會擋住 Codex 的核准提示） | `~/.codex/hooks.json` | 在 Codex 內輸入 `/hooks`，信任這一項（信任前會被略過） |
-| agy           | 只開 `Stop`（權限仍走畫面 parser） | `~/.gemini/config/hooks.json`（群組 `herdr-discord-bridge`：`{ "Stop": [{ "command": ".../scripts/herdr-discord-hook", "timeout": 10, "type": "command" }] }`） | 無 |
-| pi            | 擴充 `agent_settled`（pi 沒有內建權限提示） | `~/.pi/agent/extensions/herdr-discord-bridge.ts` | `cp scripts/pi/herdr-discord-bridge.ts ~/.pi/agent/extensions/`，再重開 pi 或輸入 `/reload` |
-| 其他          | 尚不支援                    | —                         | 只用 parser |
+| CLI    | 要開啟的 hook                                                                           | 設定位置                                                                                                                                                        | 額外步驟                                                                                    |
+| ------ | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Claude | `Stop`、`PermissionRequest`                                                             | `~/.claude/settings.json`                                                                                                                                       | 無                                                                                          |
+| Codex  | 只開 `Stop`（權限走 `y`／`esc` 快捷鍵；開 `PermissionRequest` 會擋住 Codex 的核准提示） | `~/.codex/hooks.json`                                                                                                                                           | 在 Codex 內輸入 `/hooks`，信任這一項（信任前會被略過）                                      |
+| agy    | 只開 `Stop`（權限仍走畫面 parser）                                                      | `~/.gemini/config/hooks.json`（群組 `herdr-discord-bridge`：`{ "Stop": [{ "command": ".../scripts/herdr-discord-hook", "timeout": 10, "type": "command" }] }`） | 無                                                                                          |
+| pi     | 擴充 `agent_settled`（pi 沒有內建權限提示）                                             | `~/.pi/agent/extensions/herdr-discord-bridge.ts`                                                                                                                | `cp scripts/pi/herdr-discord-bridge.ts ~/.pi/agent/extensions/`，再重開 pi 或輸入 `/reload` |
+| 其他   | 尚不支援                                                                                | —                                                                                                                                                               | 只用 parser                                                                                 |
 
 兩個事件都指向 `scripts/herdr-discord-hook` 的絕對路徑（`Stop` 逾時可短，`PermissionRequest` 建議約 300 秒）：
 
