@@ -43,6 +43,10 @@ Herdr 現有 `herdr-agent-state.sh` 只處理 `SessionStart`（回報 session id
 
 未驗證：deny 與 `updatedPermissions`、hook 逾時後 TUI 的行為、`http` 型 hook、bridge 以外程序偽造事件的防護、`Stop` 事件與 bridge 現有 turn 的關聯（可用 `prompt_id`／session）、遠端 machine。Codex／agy／pi 仍完全未測。
 
+## 權限請求與 TUI 先決定（設計約束）
+
+parser 路徑已有處理：agent 離開 `blocked` 時 `handleTransition` 作廢待回覆的請求並貼恢復通知，之後 Discord 才回答會被 `deliverApproval` 拒絕（「agent is no longer blocked」）。已貼出的通知訊息不會被刪除。hook 路徑多一個問題：等待決定的 hook 行程不會被 CLI 取消。`PermissionRequest` 實作時須：hook 設合理 timeout；沿用 `blocked` 離開事件作廢 Discord 請求，同時讓 bridge 結束對該 hook 的等待並關閉連線；hook 在 bridge 無回應或逾時時不輸出決定（回到 TUI 原流程），不得預設 allow。
+
 ## 待驗證項目（依序）
 
 1. Claude `Stop` hook 在本機實際觸發、`last_assistant_message` 內容與 parser 擷取一致，且與 `※ recap` 等畫面雜訊無關。
