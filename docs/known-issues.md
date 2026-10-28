@@ -1758,10 +1758,12 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 2. `agent is busy (w1:p1)`：`assertAgentAvailable` 在 Agent 狀態為 `working` 或該 terminal 在 `activeStreams` 時拒絕。w1:p1 是正在執行本專案工作的 Claude，回報當下狀態為 working（本輪查核時也是 working，`active-streams.json` 為空），依此判斷是設計上的忙碌拒絕；但**無法排除**記憶體中 `activeStreams` 殘留舊項目（尚無對應證據，Agent 閒置時再試仍 busy 才需調查）。
 驗證（2026-10-28）：lint 通過；新增 1 項測試；完整 `npm test` 280 項、273 通過、6 失敗（ISSUE-035 既有項目）。驗收（2026-10-28）：以 Herdr API 對 Codex w4:p1 直接輸入需核准的指令（無 Discord 串流），Discord 收到核准通知，使用者回覆後 Codex 完成，核准 thread 補貼了最終回覆（`FOLLOWUP-OK`），使用者回報「有補貼了，ok」（未逐項記錄是否只貼一次）。
 
-### ISSUE-045 遠端 hook 事件到了但沒被採用（2026-10-28，已修正、待驗收）
+### ISSUE-045 遠端 hook 事件到了但沒被採用（2026-10-28，已修正；bridge log 驗證 hook 送達，Discord 卡片結果待使用者確認）
 
 重現：修正 tunnel 後遠端 agy 從 Discord 問「今天東京氣溫」，bridge log 有 `hook Stop session=2d61b30e pane=w2:p1 chars=116`，但同回合的 `capture-diagnostics/…agy-pod_w2_p1.json` 顯示 `agent_session = None`、耗時 44959 ms，表示這回合仍由畫面 parser 收尾，hook 沒被用到——先前「收尾正常」的驗收其實是 parser 的結果，遠端 hook 驗收需重做。
 根因（已確認）：遠端 Herdr 沒有 session 回報（遠端 agy 的 hooks.json 沒有 Herdr 自己的 session hook），`agent_session` 為空；bridge 只用 session id 比對 Stop 事件，所以事件被忽略。另外 log 的 `pane=w2:p1` 沒有 machine 前綴，與 bridge 看到的 `agy-pod:w2:p1` 不同。
 修正：遠端腳本新增 `--machine <id>` 參數，事件的 paneId 帶 `<id>:` 前綴；`HookEventStore.stopForPane` 以 pane ID 保存最近的 Stop；`streamAgent` 與核准後補貼在 **沒有 `agent_session`** 時改用 pane ID 比對（有 session 的仍嚴格比對 session）。遠端 hooks.json 的 command 改為 `/root/.local/bin/herdr-discord-hook.py --machine agy-pod`，腳本已重新上傳。
 驗證（2026-10-28）：lint 通過；新增 1 項 pane 比對測試；完整 `npm test` 281 項、274 通過、6 失敗（ISSUE-035 既有項目）。**未驗證**：修正後遠端 agy 在 Discord 以 hook 收尾（應在 log 看到 `hook Stop … pane=agy-pod:w2:p1`，耗時遠小於 parser 的約 45 秒）。ISSUE-045 遠端 machine 的「已驗收」狀態因此撤回，改為待驗收。
+
+重測（2026-10-28，bridge 32d4e0a）：使用者對遠端 agy 從 Discord 提問；bridge log 出現 `hook Stop session=2d61b30e pane=agy-pod:w2:p1 chars=178`（帶機器前綴），且 `capture-diagnostics` 沒有新增該 pane 的診斷檔（上一回合走 parser 時會產生），顯示這次由 hook 收尾。使用者只回報「問了」，Discord 卡片的實際顯示與耗時尚未記錄，因此不標為已驗收。
 
