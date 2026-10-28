@@ -1,3 +1,4 @@
+import { hookEvents, startHookServer } from "./hook-events.js";
 import { acquireInstanceLock } from "./instance-lock.js";
 import { startSendServer } from "./send-ipc.js";
 import { PROGRESS_UPDATE_MS, formatElapsed } from "./progress-time.js";
@@ -370,6 +371,10 @@ async function startBridge(
   );
   watcher.start();
   const stopCleanup = startAttachmentCleanup(herdr);
+  const stopHooks = await startHookServer().catch((error) => {
+    console.error(`Hook socket unavailable: ${safeError(error)}`);
+    return () => undefined;
+  });
   const stopSend = await startSendServer((request) =>
     handleSendRequest(request, { config, herdr, routing, discord }),
   ).catch((error) => {
@@ -380,6 +385,7 @@ async function startBridge(
     stopCleanup();
     herdr.stopTunnels();
     stopSend();
+    stopHooks();
     watcher.stop();
     consoleControl.stop();
     consoleAgent?.stop();
@@ -2370,8 +2376,20 @@ export async function streamAgent(
       !claudeTurnComplete(lastRaw);
     const settledComplete =
       settled && Date.now() - collectingSince >= 10000 && !claudeStreaming;
+    // Claude 的 Stop hook（ISSUE-045）：事件抵達且帶有最終回覆時直接收尾，不等畫面穩定；
+    // 沒裝 hook、事件遺失或訊息為空時 hookFinal 為空，完全維持原本的 parser 流程。
+    const hookSession = current.agent_session as
+      { kind?: string; value?: string } | undefined;
+    const hookFinal =
+      (current.agent || "").toLowerCase().includes("claude") &&
+      hookSession?.kind === "id"
+        ? (
+            hookEvents.stopSince(hookSession.value, started)?.message ?? ""
+          ).trim()
+        : "";
     const complete =
       transcript?.turn.completed ||
+      Boolean(hookFinal) ||
       settledComplete ||
       (idleSince > 0 && Date.now() - idleSince >= IDLE_FORCE_COMPLETE_MS);
     if (complete && current.agent_status !== "blocked") {
@@ -2389,6 +2407,7 @@ export async function streamAgent(
           ? longestOutput
           : "";
       const final =
+        hookFinal ||
         (transcript?.turn.completed ? transcript.turn.final : "") ||
         terminalFinal;
       if (!final)

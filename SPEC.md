@@ -574,3 +574,11 @@ Claude 回合完成判定（ISSUE-040，2026-10-24）：無 transcript 的 Claud
 ## 附件保留期限（2026-10-25，ISSUE-043）
 
 Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*/` 超過 3 天（mtime）即清理：bridge 啟動時與每 6 小時，對目前 `agent.list` 內每個（機器, cwd）掃描；本機直接刪除，遠端經 ssh `find … -mmin +4320`。僅刪名稱為 `message-<英數>` 的真目錄，不跟隨 symlink，其他內容不動。已不在列表中的 Agent 的 cwd 不會被掃描。實機驗收尚待。
+
+## Claude Stop hook 通道（2026-10-28，ISSUE-045，首版）
+
+- bridge 啟動時在 `~/.config/herdr-discord-bridge/hooks.sock`（目錄 0700、socket 0600）接收 hook 事件；`scripts/herdr-discord-hook` 讀 Claude hook 的 stdin，只轉送主 agent 的 `Stop`（含 `session_id`、`last_assistant_message`、`prompt_id`、`HERDR_PANE_ID`），任何失敗都靜默 exit 0。
+- `streamAgent` 對 Claude：若在本次回合開始後收到同一 `agent_session`（kind `id`）的 `Stop` 且訊息非空，立即以該訊息為最終回覆收尾，不等畫面穩定或 30 秒閒置強制收尾。
+- **Parser 永遠保留**：沒裝 hook、事件遺失（bridge 重啟、socket 斷）、訊息為空或非 Claude agent 時，行為與原本完全相同（畫面 parser、強制收尾、rewatch）。事件只存記憶體。
+- 尚未實作：`PermissionRequest` 轉 Discord、`transport` 設定、Codex／agy／pi／遠端 machine。見 [hook-transport-proposal.md](docs/hook-transport-proposal.md)。
+- 驗收要求：實際 Claude 回合在 Discord 只貼一次、無「capture incomplete」，並確認 hook 未安裝時仍走 parser。

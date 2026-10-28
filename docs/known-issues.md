@@ -47,7 +47,7 @@
 | ISSUE-041 | bridge 不支援 Herdr 遠端機器（如 agy-pod）的 Agent | 已驗收（文字對話，2026-10-24） | 關閉遠端面板後重問，Discord 收到正確回覆；斷線重連、附件、Team Worker 等未驗收 |
 | ISSUE-042 | 從 Discord 驅動的 Agent 自己重啟 bridge 時，該回合的串流與最終回覆遺失 | 待調查（限制已確認、尚無修正） | 2026-10-24 發生一次；重啟後不會接續進行中的回覆 |
 | ISSUE-043 | 傳入附件沒有保留期限，本機與遠端會一直累積 | 已修正、待驗收 | 已於 2026-10-25 重啟（w2:p1Y，程式尚未 commit）；本機啟動清理已實際刪除過期目錄；遠端刪除未驗證 |
-| ISSUE-045 | 畫面擷取判斷完成與權限不可靠，規劃改用 CLI hook／協定，parser 保留備用 | 規劃中（尚未實作） | 見 docs/hook-transport-proposal.md；無已驗證項目 |
+| ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | 修正中（Claude Stop 首版原始碼完成，未部署） | 權限轉 Discord、Codex／agy／pi 未做；見 docs/hook-transport-proposal.md |
 | ISSUE-044 | Claude 回覆在 Discord 被重複貼出多則 | 重新開啟→已修正、待驗收 | 2026-10-28 重現，確認根因為回合尾巴後的「※ recap」行擋住完成判斷；原始碼與單元測試完成，已 commit（ccec39b）並於 2026-10-28 重啟（w2:p10），Discord 未驗收 |
 | ISSUE-039 | Discord 傳入非圖片檔案（如 chat.json）被拒絕 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-038 | agy 多行 prompt（含附圖）回顯後擷取不到回覆，Discord 只得「capture failure」 | 已修正、待驗收 | 原始碼、單元測試與實際畫面重放完成；bridge 尚未重啟，Discord 未驗收 |
@@ -1594,9 +1594,9 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 
 未驗證：Discord 端到端（應只貼一次、約 10 秒內「✅ final response delivered」）；rewatch 在其他會讓擷取飄動的情境仍可能重複（上限 5 次的洗版保護未加強）。
 
-## ISSUE-045：以 CLI hook／協定取代畫面擷取判斷完成與權限（規劃）
+## ISSUE-045：以 CLI hook／協定取代畫面擷取判斷完成與權限
 
-更新日期：2026-10-28。狀態：規劃中，尚未實作。
+更新日期：2026-10-28。狀態：修正中。Claude `Stop` 首版原始碼與單元測試完成（`src/hook-events.ts`、`src/hook-cli.ts`、`scripts/herdr-discord-hook`、`streamAgent` 整合）；**尚未 commit、未部署、Claude 設定檔尚未註冊 hook**，其餘（權限、其他 CLI）規劃中。
 
 動機：ISSUE-036／040／044 都源於從畫面猜「是否完成」「回覆內容」；權限請求同樣只能靠畫面。使用者要求 TUI 留在 Herdr，同時 bridge 走結構化事件。
 
@@ -1607,3 +1607,7 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 已驗證（2026-10-28，Claude 臨時 pane）：`Stop` 帶 `last_assistant_message`；`PermissionRequest` 可等待外部決定且 TUI 同時顯示提示，回傳 allow 後 TUI 自動執行；TUI 先決定時 hook 行程不會被取消。細節見提案文件。
 
 未驗證：deny、bridge 端接收與關聯、Codex／agy／pi 能力、遠端 machine、事件遺失的退回流程。bridge 程式尚未動。下一步：做 bridge 的 hook 事件入口與 Claude 最小版（`transport: auto`，逾時退回 parser）。
+
+首版驗證（2026-10-28）：lint 通過、`npm run build` 通過；新增 `test/hook-events.test.ts` 4 項（事件解析、store 時間門檻、socket 傳遞、Claude Stop 使無 footer 的串流直接收尾）通過；完整 `npm test` 265 項、僅剩 ISSUE-035 既有 6 項失敗（258 通過）。`format:check` 的 2 個警告（`test/session-handoff.test.ts`、`config.example.jsonc`）為既有檔案，非本次變更。
+
+首版未驗證：真實 Claude 透過已註冊的 hook 送出 `Stop` 到執行中的 bridge；Discord 端到端只貼一次；hook 未註冊或 bridge 重啟時退回 parser；Stop 與使用者直接在 pane 輸入的回合混淆的情況（目前以 session id 與回合開始時間過濾）。

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Claude hook entry (ISSUE-045). Resolve symlinks like herdr-discord-send.
+src="${BASH_SOURCE[0]}"
+while [[ -L "$src" ]]; do
+  dir="$(cd -P -- "$(dirname -- "$src")" && pwd)"
+  src="$(readlink "$src")"
+  [[ "$src" != /* ]] && src="$dir/$src"
+done
+root="$(cd -P -- "$(dirname -- "$src")/.." && pwd)"
+exec node "$root/dist/src/hook-cli.js" "$@"
