@@ -1723,3 +1723,9 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 實作：`src/hook-agy.ts`（`agyFinalMessage`、`isAgyStopInput`）；`src/hook-cli.ts` 辨識 agy 輸入（有 `conversationId`＋`terminationReason`、無 `hook_event_name`），先輸出 `{}`，只在 `NO_TOOL_CALL` 且 `fullyIdle` 不為 false 時讀 transcript（最多重試 4 次、每次 250ms）並以 `conversationId` 轉給 bridge；`hookTransport.agy`（預設 `auto`）與 `hooks` 指令支援 agy。已備份並寫入 `~/.gemini/config/hooks.json`（群組 `herdr-discord-bridge`，`Stop`、timeout 10；備份 `hooks.json.bak-hook`），README／README.zh-TW／設定範例／提案文件同步（並更正 README 中 Codex 列：只開 `Stop`）。
 驗證（2026-10-28）：lint 通過；新增 1 項 transcript 解析測試並更新 hookTransport 測試；完整 `npm test` 276 項、269 通過、6 失敗（ISSUE-035 既有項目）；以暫時工作區的真實 Stop 輸入餵給 `herdr-discord-hook`，輸出 `{}` 且 exit 0。**未驗證**：互動式 agy 實際觸發 Stop、bridge 收到後以 hook 收尾、已開啟的 agy 是否重載全域 hooks（可能需重開 agy）。
 
+### ISSUE-047 擴及 agy（2026-10-28，已實作、待驗收）
+
+重現：部署 agy Stop hook 後，使用者從 Discord 問 agy（w4:p5）：Stop hook 有觸發（log `hook Stop session=db1c4b58 pane=w4:p5 chars=26`），但卡片顯示 response capture stopped；bridge log 為 `Response capture stopped: session changed (pane=w4:p5)`。Herdr 的 agy session 由先前的 `201d48fa…` 換成 `db1c4b58-690b-4f4a-93e7-fcc260852613`；後者的對話目錄 `~/.gemini/antigravity-cli/brain/db1c4b58…` 建立於 14:10:17，與送問時間吻合（與 Codex 相同形態：新對話在送問時才建立；觸發原因同樣未確認）。agy 的 id 是 UUIDv4，不含時間。
+修正：`sessionCreatedSince` 新增 `createdAt` 查詢參數；`streamAgent` 對 agy（本機）以對話目錄的 birthtime 判斷是否為送問後建立，是則追蹤新 id，其餘仍停止。遠端 agy 無法查目錄，仍維持停止。
+驗證（2026-10-28）：lint 通過；新增 1 項測試；完整 `npm test` 277 項、270 通過、6 失敗（ISSUE-035 既有項目）。**未驗證**：Discord 端 agy 送問不再中止；bridge 尚未重啟。
+

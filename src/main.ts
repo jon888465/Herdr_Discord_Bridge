@@ -18,7 +18,8 @@ import {
 } from "./attachments.js";
 import { agentOrigin, recordAgentOrigin } from "./agent-origin.js";
 import { basename, join } from "node:path";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
+import { statSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { randomBytes, randomUUID } from "node:crypto";
 import { splitFinalMarkdown } from "./final-format.js";
@@ -2258,6 +2259,17 @@ async function rewatchAfterForcedFinish(
  * ISSUE-042: after a bridge restart, re-attach to Discord-driven turns that were
  * still running. The agent keeps working; we only rebuild the watcher.
  */
+/** agy 的對話目錄在 `~/.gemini/antigravity-cli/brain/<id>`，建立時間即對話建立時間（ISSUE-047）。 */
+function agyConversationCreatedAt(id: string): number | undefined {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return undefined;
+  try {
+    return statSync(join(homedir(), ".gemini", "antigravity-cli", "brain", id))
+      .birthtimeMs;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function resumeStreams(runtime: Runtime): Promise<void> {
   const store = runtime.streamResume;
   if (!store) return;
@@ -2385,8 +2397,12 @@ export async function streamAgent(
     if (
       sameLocation &&
       !sessionMatches &&
-      initial.agent === "codex" &&
-      sessionCreatedSince(candidate.agent_session, started)
+      (initial.agent === "codex" || initial.agent === "agy") &&
+      sessionCreatedSince(candidate.agent_session, started, (id) =>
+        initial.agent === "agy" && !initial.machine
+          ? agyConversationCreatedAt(id)
+          : undefined,
+      )
     ) {
       console.log(
         `Codex session materialized during turn pane=${initial.pane_id}; following new session`,

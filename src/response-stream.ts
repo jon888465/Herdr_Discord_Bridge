@@ -193,11 +193,17 @@ export function sameAgentSession(left: unknown, right: unknown): boolean {
  * embeds its creation time; a session created at or after the prompt was sent
  * (small clock tolerance) is the same turn's session, not another conversation.
  */
-export function sessionCreatedSince(session: unknown, since: number): boolean {
+export function sessionCreatedSince(
+  session: unknown,
+  since: number,
+  /** 非 UUIDv7 的 id（如 agy 的 UUIDv4）改由呼叫端提供建立時間（毫秒）。 */
+  createdAt?: (id: string) => number | undefined,
+): boolean {
   const s = session as { kind?: unknown; value?: unknown } | null;
   if (!s || s.kind !== "id" || typeof s.value !== "string") return false;
   const m = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-/i.exec(s.value);
-  if (!m) return false;
-  const ms = Number.parseInt(s.value.replace(/-/g, "").slice(0, 12), 16);
-  return Number.isFinite(ms) && ms >= since - 5000;
+  const ms = m
+    ? Number.parseInt(s.value.replace(/-/g, "").slice(0, 12), 16)
+    : createdAt?.(s.value);
+  return typeof ms === "number" && Number.isFinite(ms) && ms >= since - 5000;
 }

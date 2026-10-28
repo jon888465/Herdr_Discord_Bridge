@@ -88,3 +88,17 @@ test("sessionCreatedSince accepts a UUIDv7 session created at or after the promp
   );
   assert.equal(sessionCreatedSince(null, 0), false);
 });
+
+test("sessionCreatedSince uses a creation-time lookup for non-UUIDv7 ids (agy, ISSUE-047)", () => {
+  const id = "db1c4b58-690b-4f4a-93e7-fcc260852613";
+  const at = 1_000_000;
+  assert.equal(sessionCreatedSince({ kind: "id", value: id }, at), false);
+  assert.equal(
+    sessionCreatedSince({ kind: "id", value: id }, at, () => at + 1000),
+    true,
+  );
+  assert.equal(
+    sessionCreatedSince({ kind: "id", value: id }, at, () => at - 60000),
+    false,
+  );
+});
