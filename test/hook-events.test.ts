@@ -26,6 +26,8 @@ test("parseHookEvent accepts Stop and rejects malformed input (ISSUE-045)", () =
       paneId: "w1:p1",
       promptId: undefined,
       message: "hi",
+      toolName: undefined,
+      toolInput: undefined,
     },
   );
   assert.equal(
@@ -117,4 +119,60 @@ test("Claude Stop hook completes the stream without the screen footer", async (t
   t.mock.timers.tick(2000);
   await task;
   assert.deepEqual(sent, ["hook final"]);
+});
+
+test("permissionDecisionFromText maps only explicit words (ISSUE-045)", async () => {
+  const { permissionDecisionFromText } = await import("../src/hook-events.js");
+  for (const t of ["allow", "Yes", " y ", "continue", "OK"])
+    assert.equal(permissionDecisionFromText(t), "allow");
+  for (const t of ["deny", "No", "n", "cancel"])
+    assert.equal(permissionDecisionFromText(t), "deny");
+  for (const t of ["1", "4", "yes please run it", ""])
+    assert.equal(permissionDecisionFromText(t), undefined);
+});
+
+test("PermissionRequest hook waits for a Discord decision, cancel and drop leave TUI flow", async () => {
+  const { PermissionBroker, requestPermission } =
+    await import("../src/hook-events.js");
+  const dir = mkdtempSync(join(tmpdir(), "hk-"));
+  const path = join(dir, "p.sock");
+  const store = new HookEventStore();
+  const broker = new PermissionBroker();
+  const stop = await startHookServer(store, path, broker);
+  const event = {
+    event: "PermissionRequest" as const,
+    sessionId: "s",
+    paneId: "w1:p1",
+    message: "",
+    toolName: "Bash",
+  };
+  try {
+    const allowed = requestPermission(event, path, 5000);
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(broker.peek("w1:p1")?.toolName, "Bash");
+    assert.equal(broker.decide("w1:p1", "allow"), true);
+    assert.equal(await allowed, "allow");
+    assert.equal(broker.has("w1:p1"), false);
+    assert.equal(broker.decide("w1:p1", "allow"), false);
+
+    const cancelled = requestPermission(event, path, 5000);
+    await new Promise((r) => setTimeout(r, 50));
+    broker.cancel("w1:p1");
+    assert.equal(await cancelled, undefined);
+
+    // hook 行程自己結束（連線中斷）→ 不再保留等待項目
+    const lost = requestPermission(event, path, 100);
+    assert.equal(await lost, undefined);
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(broker.has("w1:p1"), false);
+
+    // 沒有 pane id 的請求不等待
+    assert.equal(
+      await requestPermission({ ...event, paneId: undefined }, path, 5000),
+      undefined,
+    );
+    assert.equal(store.stopSince("s", 0), undefined);
+  } finally {
+    stop();
+  }
 });

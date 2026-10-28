@@ -580,5 +580,6 @@ Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*
 - bridge 啟動時在 `~/.config/herdr-discord-bridge/hooks.sock`（目錄 0700、socket 0600）接收 hook 事件；`scripts/herdr-discord-hook` 讀 Claude hook 的 stdin，只轉送主 agent 的 `Stop`（含 `session_id`、`last_assistant_message`、`prompt_id`、`HERDR_PANE_ID`），任何失敗都靜默 exit 0。
 - `streamAgent` 對 Claude：若在本次回合開始後收到同一 `agent_session`（kind `id`）的 `Stop` 且訊息非空，立即以該訊息為最終回覆收尾，不等畫面穩定或 30 秒閒置強制收尾。
 - **Parser 永遠保留**：沒裝 hook、事件遺失（bridge 重啟、socket 斷）、訊息為空或非 Claude agent 時，行為與原本完全相同（畫面 parser、強制收尾、rewatch）。事件只存記憶體。
-- 尚未實作：`PermissionRequest` 轉 Discord、`transport` 設定、Codex／agy／pi／遠端 machine。見 [hook-transport-proposal.md](docs/hook-transport-proposal.md)。
+- `PermissionRequest` hook：`herdr-discord-hook` 把請求送給 bridge 並保持連線等待。Herdr 將該 agent 標為 `blocked` 後，Discord 既有的核准通知上，按鈕或在 thread 回覆 `allow／approve／yes／y／ok／continue` 即回傳 allow，`deny／reject／no／n／cancel` 回傳 deny，TUI 提示隨之消失。其他文字（含數字選項）照舊打進 TUI，並放棄對 hook 的等待。agent 離開 `blocked`（含使用者在 TUI 先決定）、pane 消失或連線逾時／中斷時，bridge 結束等待，hook 不輸出決定，Claude 回到 TUI 原流程；**絕不預設 allow**。每個 pane 同時最多一筆等待中的請求。需 Claude 以非 auto 權限模式執行才會觸發（auto mode 本來就不會提示）。
+- 尚未實作：`transport` 設定、Codex／agy／pi／遠端 machine；Discord 端沒有獨立的 Deny 按鈕（以文字回覆）；請求內容（工具與輸入）尚未顯示在 Discord 通知上（通知仍用畫面快照）。見 [hook-transport-proposal.md](docs/hook-transport-proposal.md)。
 - 驗收要求：實際 Claude 回合在 Discord 只貼一次、無「capture incomplete」，並確認 hook 未安裝時仍走 parser。

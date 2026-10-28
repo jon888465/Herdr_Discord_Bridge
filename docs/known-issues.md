@@ -47,7 +47,7 @@
 | ISSUE-041 | bridge 不支援 Herdr 遠端機器（如 agy-pod）的 Agent | 已驗收（文字對話，2026-10-24） | 關閉遠端面板後重問，Discord 收到正確回覆；斷線重連、附件、Team Worker 等未驗收 |
 | ISSUE-042 | 從 Discord 驅動的 Agent 自己重啟 bridge 時，該回合的串流與最終回覆遺失 | 待調查（限制已確認、尚無修正） | 2026-10-24 發生一次；重啟後不會接續進行中的回覆 |
 | ISSUE-043 | 傳入附件沒有保留期限，本機與遠端會一直累積 | 已修正、待驗收 | 已於 2026-10-25 重啟（w2:p1Y，程式尚未 commit）；本機啟動清理已實際刪除過期目錄；遠端刪除未驗證 |
-| ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | 修正中（Claude Stop 首版已部署，待 Discord 驗收） | 權限轉 Discord、Codex／agy／pi 未做；見 docs/hook-transport-proposal.md |
+| ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | 修正中（Claude Stop 已部署待驗收；PermissionRequest 原始碼完成，未部署） | 權限轉 Discord、Codex／agy／pi 未做；見 docs/hook-transport-proposal.md |
 | ISSUE-044 | Claude 回覆在 Discord 被重複貼出多則 | 重新開啟→已修正、待驗收 | 2026-10-28 重現，確認根因為回合尾巴後的「※ recap」行擋住完成判斷；原始碼與單元測試完成，已 commit（ccec39b）並於 2026-10-28 重啟（w2:p10），Discord 未驗收 |
 | ISSUE-039 | Discord 傳入非圖片檔案（如 chat.json）被拒絕 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-038 | agy 多行 prompt（含附圖）回顯後擷取不到回覆，Discord 只得「capture failure」 | 已修正、待驗收 | 原始碼、單元測試與實際畫面重放完成；bridge 尚未重啟，Discord 未驗收 |
@@ -1611,3 +1611,11 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 首版驗證（2026-10-28）：lint 通過、`npm run build` 通過；新增 `test/hook-events.test.ts` 4 項（事件解析、store 時間門檻、socket 傳遞、Claude Stop 使無 footer 的串流直接收尾）通過；完整 `npm test` 265 項、僅剩 ISSUE-035 既有 6 項失敗（258 通過）。`format:check` 的 2 個警告（`test/session-handoff.test.ts`、`config.example.jsonc`）為既有檔案，非本次變更。
 
 首版未驗證：真實 Claude 透過已註冊的 hook 送出 `Stop` 到執行中的 bridge；Discord 端到端只貼一次；hook 未註冊或 bridge 重啟時退回 parser；Stop 與使用者直接在 pane 輸入的回合混淆的情況（目前以 session id 與回合開始時間過濾）。
+
+### ISSUE-045 PermissionRequest 轉 Discord（2026-10-28，原始碼完成，未部署）
+
+範圍：`src/hook-events.ts`（`PermissionBroker`、server 保持連線、`requestPermission`）、`src/hook-cli.ts`、`src/main.ts`（`deliverApproval` 先嘗試把 allow／deny 回給 hook；`handleTransition` 離開 blocked 與 `handleRemoved` 取消等待）。
+
+驗證（2026-10-28）：lint 通過；新增 2 項測試（決定文字對應、broker 的 decide／cancel／連線中斷／無 pane id）通過；完整 `npm test` 267 項、260 通過，失敗的 6 項為 ISSUE-035 既有項目。**真實 Claude 端到端（不含 Discord）**：以暫時 pane 搭配獨立的 hook server 與真正的 `herdr-discord-hook`，allow 後工具執行；deny 後 Claude 回報「Denied by PermissionRequest hook」且檔案未建立；cancel 後 TUI 提示仍在，使用者按 Enter 後工具照常執行。測試檔已清除。
+
+未驗證：Discord 端（按鈕與文字回覆實際到 hook）；正在跑的 bridge 內 Herdr 的 `blocked` 轉換與 hook 事件的時序（hook 先於 blocked 通知，approval 紀錄在通知時才建立）；TUI 先決定後 Discord 補貼的恢復通知；auto mode 不會觸發，需用 default／manual 權限模式驗收；`~/.claude/settings.json` 尚未註冊 `PermissionRequest` hook。

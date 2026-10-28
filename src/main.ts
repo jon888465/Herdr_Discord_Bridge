@@ -1,4 +1,9 @@
-import { hookEvents, startHookServer } from "./hook-events.js";
+import {
+  hookEvents,
+  permissionBroker,
+  permissionDecisionFromText,
+  startHookServer,
+} from "./hook-events.js";
 import { acquireInstanceLock } from "./instance-lock.js";
 import { startSendServer } from "./send-ipc.js";
 import { PROGRESS_UPDATE_MS, formatElapsed } from "./progress-time.js";
@@ -2588,6 +2593,9 @@ async function handleTransition(
   transition: AgentTransition,
   runtime: Pick<Runtime, "config" | "herdr" | "routing" | "discord">,
 ): Promise<void> {
+  // 離開 blocked（含使用者在 TUI 先決定）：放棄等待中的 PermissionRequest hook。
+  if (transition.to !== "blocked")
+    permissionBroker.cancel(transition.agent.pane_id);
   const closed = runtime.routing.deactivateForTerminal(
     transition.agent.terminal_id,
   );
@@ -2627,8 +2635,10 @@ async function handleRemoved(
 ): Promise<void> {
   for (const approval of runtime.routing.deactivateForTerminal(
     removed.terminalId,
-  ))
+  )) {
+    permissionBroker.cancel(approval.paneId);
     await runtime.discord.postRecovery(approval, "exited");
+  }
 }
 
 async function deliverApproval(
@@ -2656,6 +2666,14 @@ async function deliverApproval(
       `agent is no longer blocked (${current.agent_status}); approval was rejected`,
     );
   }
+  // Claude PermissionRequest hook 正在等決定（ISSUE-045）：allow／deny 直接回給 hook，
+  // TUI 提示會自動消失；其他文字照舊打進 TUI，並放棄對 hook 的等待。
+  const decision = permissionDecisionFromText(text);
+  if (decision && permissionBroker.decide(current.pane_id, decision)) {
+    routing.deactivateApproval(approval.token);
+    return;
+  }
+  permissionBroker.cancel(current.pane_id);
   await herdr.sendAgent(current.pane_id, text.slice(0, 12000));
   routing.deactivateApproval(approval.token);
 }
