@@ -45,7 +45,7 @@
 | ISSUE-035 | coding-workflow 測試在 macOS 有 6 項失敗 | 待調查 | 基準亦失敗，根因未確認 |
 | ISSUE-040 | Claude 最終回覆在串流中途被截斷，並混入「Update available!」提示 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 已於 2026-10-24 重啟（w2:p1V）；根因為推論；Discord 未驗收 |
 | ISSUE-041 | bridge 不支援 Herdr 遠端機器（如 agy-pod）的 Agent | 已驗收（文字對話，2026-10-24） | 關閉遠端面板後重問，Discord 收到正確回覆；斷線重連、附件、Team Worker 等未驗收 |
-| ISSUE-042 | 從 Discord 驅動的 Agent 自己重啟 bridge 時，該回合的串流與最終回覆遺失 | 串流續傳已驗收（2026-10-28）；blocked 補發通知待驗收 | 2026-10-24、10-28 各發生一次；已改為重啟後依 active-streams.json 接續 |
+| ISSUE-042 | 從 Discord 驅動的 Agent 自己重啟 bridge 時，該回合的串流與最終回覆遺失 | 串流續傳與 blocked 補發通知已驗收（2026-10-28） | 2026-10-24、10-28 各發生一次；已改為重啟後依 active-streams.json 接續 |
 | ISSUE-043 | 傳入附件沒有保留期限，本機與遠端會一直累積 | 已修正、待驗收 | 已於 2026-10-25 重啟（w2:p1Y，程式尚未 commit）；本機啟動清理已實際刪除過期目錄；遠端刪除未驗證 |
 | ISSUE-047 | Codex 在 Discord 送問後出現「Agent identity changed (session changed); response capture stopped」，擷取在核准通知前中止 | 已驗收（2026-10-28，使用者實測 Discord 送問後不再中止、核准流程正常） | 觸發原因（Codex 第一個 prompt 才建新 session）屬推測；見 ISSUE-047 |
 | ISSUE-046 | Discord 輸入權限選項數字（3）後沒有任何反應，之後按 Approve 才有動作 | 已驗收（2026-10-28，數字／allow／deny／按鈕／📨；原 `3` 沒反應根因未確認） | 2026-10-28 重啟後數字 1／2 回覆成功且有 📨；使用者早先的 `3` 沒反應原因仍未確認 |
@@ -1740,4 +1740,14 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 做法：machine 設定新增選填 `hookSocket`（遠端絕對路徑；驗證不可含空白、`:`、引號、`..`）。bridge 為該 machine 另開 `HookReverseTunnel`：先 `ssh host mkdir -p -m 700 <目錄>`，再 `ssh -N -R <hookSocket>:<本機 hook socket>`（`StreamLocalBindUnlink=yes`、`ExitOnForwardFailure=yes`，斷線退避重連）；獨立於 `-L`，轉發失敗不影響遠端控制。遠端用 `scripts/remote/herdr-discord-hook.py`（Python 3，無 Node；agy 版與本機相同邏輯，並接受 Claude／Codex 格式 Stop）把事件寫到遠端 hook socket，經 `-R` 回到本機 hook server；比對靠 session id（UUID），不需要 pane 前綴。權限事件不支援遠端（沒有要求等待回應的路徑）。
 部署（2026-10-28）：agy-pod 為 Linux（agy 1.4.7、Python 3.14，無 Node；scp 不可用，改以 `ssh cat` 上傳）；已安裝 `/root/.local/bin/herdr-discord-hook.py`、建立 `/root/.gemini/config/hooks.json`（`Stop`，timeout 10）並在本機 config.json 的 agy-pod 加 `hookSocket`（備份 config.json.bak-hook）。
 驗證（2026-10-28）：lint 通過；新增 1 項測試（hookSocket 驗證與 `-R` 參數）；完整 `npm test` 279 項、272 通過、6 失敗（ISSUE-035 既有項目）；遠端腳本以真實 agy Stop 輸入在本機執行，輸出 `{}`、socket 不存在時 exit 0。部署後實測：`ssh -R` 建立、遠端產生 `hooks.sock`（0600）；在遠端以腳本送假 Stop，bridge log 出現 `hook Stop session=remote-e pane=? chars=4`。驗收（2026-10-28）：使用者在 Discord 問遠端 agy（agy-pod），回報「收尾正常」（未逐項記錄 log 與耗時，也未確認是否需重開遠端 agy）。遠端 Claude／Codex／pi 未安裝，未涵蓋。
+
+### ISSUE-045 遠端 hook tunnel 重啟後無法重建（2026-10-28，已修正、待驗收）
+
+重現：部署遠端 hook 後第一次啟動正常；再重啟 bridge 時 log 反覆出現 `machine agy-pod: hook tunnel closed (exit 255) Error: remote port forwarding failed for listen path /root/.config/herdr-discord-bridge/hooks.sock; retry in …`，遠端 hook 事件無法抵達（以遠端腳本送假 Stop，bridge 未收到）。遠端上一次留下的 `hooks.sock` 檔仍在。
+根因（依現象與 OpenSSH 行為判斷，未對 pod 的 sshd 做進一步查證）：`StreamLocalBindUnlink` 是 **sshd 端**選項，client 端 `-o` 對 `-R` 無效，所以遠端遺留的 socket 檔使綁定失敗；第一次因檔案不存在而成功。
+修正：啟動前的遠端準備指令改為 `mkdir -p -m 700 <目錄> && rm -f <socket>`，移除無效的 `StreamLocalBindUnlink` 參數。驗證（2026-10-28）：lint 通過；完整 `npm test` 279 項、272 通過、6 失敗（ISSUE-035 既有項目）。**未驗證**：修正後重啟能重建 tunnel 並收到遠端事件。
+
+### ISSUE-042 補發 blocked 通知驗收（2026-10-28）
+
+環境：Codex 0.165.0 w4:p1，由使用者在終端機直接輸入（非 Discord）使其停在核准提示；重啟時 `active-streams.json` 為 `[]`，無續傳串流。重啟後 bridge log 出現 `approval reply pane=w4:p1 text="1"`（使用者在 Discord 回覆選項 1，代表補發的核准通知已送達並被路由），隨後 Codex 完成、`hook Stop session=01a1813b pane=w4:p1`，`hook_test_blocked.txt` 已建立。結論：補發 blocked 通知已驗收（以 log 與結果推得；未逐項記錄 Discord 畫面）。
 

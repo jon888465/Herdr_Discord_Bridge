@@ -259,6 +259,5 @@ test("machines hookSocket validation and reverse-tunnel args (ISSUE-045)", async
     "/root/.config/hb/hooks.sock:/local/hooks.sock",
     "pod",
   ]);
-  assert.ok(args.includes("StreamLocalBindUnlink=yes"));
   assert.ok(args.includes("ExitOnForwardFailure=yes"));
 });

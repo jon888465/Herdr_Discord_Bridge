@@ -153,7 +153,7 @@ export class MachineTunnel {
   }
 }
 
-/** `ssh -R` 參數：把遠端 hook socket 轉回本機 hook socket；舊的遠端 socket 檔會被取代。 */
+/** `ssh -R` 參數：把遠端 hook socket 轉回本機 hook socket；遠端 socket 檔由啟動前的 `rm -f` 清掉（`StreamLocalBindUnlink` 是 sshd 端選項，client 端設定無效）。 */
 export function hookTunnelArgs(
   machine: MachineConfig,
   localHookSocket: string,
@@ -164,8 +164,6 @@ export function hookTunnelArgs(
     "BatchMode=yes",
     "-o",
     "ExitOnForwardFailure=yes",
-    "-o",
-    "StreamLocalBindUnlink=yes",
     "-o",
     "ServerAliveInterval=15",
     "-o",
@@ -213,7 +211,7 @@ export class HookReverseTunnel {
         "-o",
         "BatchMode=yes",
         this.machine.ssh,
-        `mkdir -p -m 700 ${shellQuote(dir)}`,
+        `mkdir -p -m 700 ${shellQuote(dir)} && rm -f ${shellQuote(this.machine.hookSocket)}`,
       ],
       { stdio: "ignore" },
     );
