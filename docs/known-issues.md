@@ -1773,7 +1773,7 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 更新日期：2026-10-28　狀態：已修正、待驗收（程式與自動化測試完成；bridge 重啟後尚未在 Discord 驗收）
 
 症狀：使用者附圖（`.herdr-discord-bridge/attachments/message-cTlPrg/1.png`，已以圖片工具讀取）顯示每則訊息開頭有 `┌─┐` 方框內三行（`agy`、`WK: agy-pod:w2 · agy-pod:~`、`Pane: agy-pod:w2:p1`），Discord 的程式碼區塊本身已有底色，方框多餘且佔高；遠端機器名在 WK 與 Pane 重複出現。使用者希望 agent、wk、pane 合成一行並在多 machine 時看得出機器。我對「在多 machine」的理解是遠端時顯示機器名（未向使用者再確認）。
-修正：`agentHeader`（`src/format.ts`）改為單行、不畫框：本機 `🤖 codex · backend │ WK: w1 · review │ Pane: w1:p2`；遠端 `🤖 agy @agy-pod │ WK: w2 · ~ │ Pane: agy-pod:w2:p1`（機器名由 pane 的 `<machine>:` 前綴判斷，WK 去掉重複前綴，Pane 保留完整 ID 方便複製）。每個欄位各自限長（名稱 24、WK 名 20、Pane 60 字元，以字元截斷不切壞 emoji），`│` 換成 `|`，先清理再比較 kind，長名稱不會把 Pane 擠掉。
+修正：`agentHeader`（`src/format.ts`）改為單行、不畫框：本機 `🤖 codex · backend │ WK: w1 · review │ Pane: w1:p2`；遠端 `🤖 agy │ WK: w2 · ~ │ Pane: agy-pod:w2:p1`（機器名只由 Pane 的 `<machine>:` 前綴呈現，WK 去掉重複前綴，Pane 保留完整 ID 方便複製；初版曾在 agent 後面加 `@機器`，使用者表示 Pane 顯示即可，已移除）。每個欄位各自限長（名稱 24、WK 名 20、Pane 60 字元，以字元截斷不切壞 emoji），`│` 換成 `|`，先清理再比較 kind，長名稱不會把 Pane 擠掉。
 協作方式（使用者要求試驗與 agy-pod 協作）：我實作初版，經 Herdr API 把需求、實作與預期輸出送給遠端 agy（agy-pod w2:p1，只做審查、不改檔），約 22 秒回覆。採用：先清理再比較 kind、各欄位限長且以字元截斷、反引號與 `│` 防護、前綴碰撞測試；未採用：移除 `WK:`／`Pane:` 標籤（保持可讀性）、把 Pane 移到最前（維持使用者要求的順序），並指出其 IPv6 疑慮不適用（pane ID 不是網址）。遠端 agy 沒有 repo，沒有改任何檔案；它的測試預期值我逐一核對後才寫入。
 驗證（2026-10-28）：lint 通過；新增／更新 2 項標頭測試（含協作建議的邊界案例）；完整 `npm test` 283 項、276 通過、6 失敗（ISSUE-035 既有項目）。**未驗證**：Discord 實際畫面（含手機版橫向捲動）。
 

@@ -30,7 +30,7 @@ export function codeBlock(value: string, language = "text"): string {
 
 /**
  * 每則訊息開頭的 Agent 識別：單行、不畫框（Discord 的程式碼區塊本身已有底色）。
- * 遠端 machine 的 ID 帶 `<machine>:` 前綴（pane 為 `m:w2:p1`），機器名另列為 `@m`，
+ * 遠端 machine 的 ID 帶 `<machine>:` 前綴（pane 為 `m:w2:p1`），機器名只由 Pane 欄位呈現；
  * WK 欄位去掉重複的前綴；Pane 保留完整 ID，方便直接複製給指令使用。
  */
 export function agentHeader(
@@ -55,7 +55,7 @@ export function agentHeader(
   // 每個欄位各自限長，長名稱不會把最後的 Pane 擠出視窗（手機版程式碼區塊不換行）。
   return codeBlock(
     [
-      `🤖 ${name}${kind}${machine ? ` @${machine}` : ""}`,
+      `🤖 ${name}${kind}`,
       `WK: ${wk}${wkName && wkName !== wk ? ` · ${wkName}` : ""}`,
       `Pane: ${pane}`,
     ].join(" │ "),

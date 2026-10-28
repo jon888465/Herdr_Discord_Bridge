@@ -52,7 +52,7 @@ test("agent header identifies the Agent, workspace, and pane", () => {
   assert.match(rendered, /Pane: w1:p2/);
 });
 
-test("agent header is one unframed line and shows the machine once for remote agents", () => {
+test("agent header is one unframed line and shows the machine only through the pane id", () => {
   const local = agentHeader("codex", "w1", "w1:p2", "backend", "review");
   assert.equal(local.split("\n").length, 3);
   assert.doesNotMatch(local, /[┌└│]\s*$|─/);
@@ -64,7 +64,7 @@ test("agent header is one unframed line and shows the machine once for remote ag
     "agy",
     "agy-pod:~",
   );
-  assert.match(remote, /🤖 agy @agy-pod │ WK: w2 · ~ │ Pane: agy-pod:w2:p1/);
+  assert.match(remote, /🤖 agy │ WK: w2 · ~ │ Pane: agy-pod:w2:p1/);
 });
 
 test("agent header (reviewed with agy-pod): clean before comparing, per-field limits, safe separators", () => {
@@ -90,7 +90,7 @@ test("agent header (reviewed with agy-pod): clean before comparing, per-field li
   // 機器名與 workspace 前綴重複時只顯示一次。
   assert.match(
     agentHeader("agy", "dev:w1", "dev:w1:p2", "", "dev:ops:test"),
-    /🤖 agy @dev │ WK: w1 · ops:test │ Pane: dev:w1:p2/,
+    /🤖 agy │ WK: w1 · ops:test │ Pane: dev:w1:p2/,
   );
 });
 
