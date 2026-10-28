@@ -47,7 +47,7 @@
 | ISSUE-041 | bridge 不支援 Herdr 遠端機器（如 agy-pod）的 Agent | 已驗收（文字對話，2026-10-24） | 關閉遠端面板後重問，Discord 收到正確回覆；斷線重連、附件、Team Worker 等未驗收 |
 | ISSUE-042 | 從 Discord 驅動的 Agent 自己重啟 bridge 時，該回合的串流與最終回覆遺失 | 串流續傳與 blocked 補發通知已驗收（2026-10-28） | 2026-10-24、10-28 各發生一次；已改為重啟後依 active-streams.json 接續 |
 | ISSUE-043 | 傳入附件沒有保留期限，本機與遠端會一直累積 | 已修正、待驗收 | 已於 2026-10-25 重啟（w2:p1Y，程式尚未 commit）；本機啟動清理已實際刪除過期目錄；遠端刪除未驗證 |
-| ISSUE-048 | Discord 訊息開頭的 Agent 識別框（agent／WK／pane 三行加框線）佔太多空間，且看不出遠端機器 | 已修正、待驗收（2026-10-28） | 重啟後看 Discord 標頭是否為單行、遠端顯示 `@機器`；見下方 ISSUE-048 |
+| ISSUE-048 | Discord 訊息開頭的 Agent 識別框（agent／WK／pane 三行加框線）佔太多空間，且看不出遠端機器 | 已驗收（2026-10-28） | 使用者在 Discord 確認標頭 OK；手機版未單獨驗證；見下方 ISSUE-048 |
 | ISSUE-047 | Codex 在 Discord 送問後出現「Agent identity changed (session changed); response capture stopped」，擷取在核准通知前中止 | 已驗收（2026-10-28，使用者實測 Discord 送問後不再中止、核准流程正常） | 觸發原因（Codex 第一個 prompt 才建新 session）屬推測；見 ISSUE-047 |
 | ISSUE-046 | Discord 輸入權限選項數字（3）後沒有任何反應，之後按 Approve 才有動作 | 已驗收（2026-10-28，數字／allow／deny／按鈕／📨；原 `3` 沒反應根因未確認） | 2026-10-28 重啟後數字 1／2 回覆成功且有 📨；使用者早先的 `3` 沒反應原因仍未確認 |
 | ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | Claude Stop 與 PermissionRequest 已驗收（2026-10-28，使用者實測）；Codex Stop 與 allow／deny（y／esc 快捷鍵）、hookTransport 設定與 hooks 指令已驗收（2026-10-28）；agy Stop、pi 擴充已驗收（2026-10-28）；遠端 machine（agy）已驗收（2026-10-28，修正後重測） | 遠端 Claude／Codex／pi 未涵蓋；見 docs/hook-transport-proposal.md |
@@ -1770,10 +1770,10 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 
 ## ISSUE-048：Discord 訊息標頭佔空間、遠端機器不明顯
 
-更新日期：2026-10-28　狀態：已修正、待驗收（程式與自動化測試完成；bridge 重啟後尚未在 Discord 驗收）
+更新日期：2026-10-28　狀態：已驗收（使用者於 2026-10-28 在 Discord 看到最新標頭後回覆「標頭 OK」；手機版橫向捲動未另行驗證）
 
 症狀：使用者附圖（`.herdr-discord-bridge/attachments/message-cTlPrg/1.png`，已以圖片工具讀取）顯示每則訊息開頭有 `┌─┐` 方框內三行（`agy`、`WK: agy-pod:w2 · agy-pod:~`、`Pane: agy-pod:w2:p1`），Discord 的程式碼區塊本身已有底色，方框多餘且佔高；遠端機器名在 WK 與 Pane 重複出現。使用者希望 agent、wk、pane 合成一行並在多 machine 時看得出機器。我對「在多 machine」的理解是遠端時顯示機器名（未向使用者再確認）。
 修正：`agentHeader`（`src/format.ts`）改為單行、不畫框：本機 `🤖 codex · backend │ WK: w1 · review │ Pane: w1:p2`；遠端 `🤖 agy │ WK: w2 · ~ │ Pane: agy-pod:w2:p1`（機器名只由 Pane 的 `<machine>:` 前綴呈現，WK 去掉重複前綴，Pane 保留完整 ID 方便複製；初版曾在 agent 後面加 `@機器`，使用者表示 Pane 顯示即可，已移除）。每個欄位各自限長（名稱 24、WK 名 20、Pane 60 字元，以字元截斷不切壞 emoji），`│` 換成 `|`，先清理再比較 kind，長名稱不會把 Pane 擠掉。
 協作方式（使用者要求試驗與 agy-pod 協作）：我實作初版，經 Herdr API 把需求、實作與預期輸出送給遠端 agy（agy-pod w2:p1，只做審查、不改檔），約 22 秒回覆。採用：先清理再比較 kind、各欄位限長且以字元截斷、反引號與 `│` 防護、前綴碰撞測試；未採用：移除 `WK:`／`Pane:` 標籤（保持可讀性）、把 Pane 移到最前（維持使用者要求的順序），並指出其 IPv6 疑慮不適用（pane ID 不是網址）。遠端 agy 沒有 repo，沒有改任何檔案；它的測試預期值我逐一核對後才寫入。
-驗證（2026-10-28）：lint 通過；新增／更新 2 項標頭測試（含協作建議的邊界案例）；完整 `npm test` 283 項、276 通過、6 失敗（ISSUE-035 既有項目）。**未驗證**：Discord 實際畫面（含手機版橫向捲動）。
+驗證（2026-10-28）：lint 通過；新增／更新 2 項標頭測試（含協作建議的邊界案例）；完整 `npm test` 283 項、276 通過、6 失敗（ISSUE-035 既有項目）。驗收：2026-10-28 使用者在 Discord 確認標頭 OK。**未驗證**：手機版橫向捲動。
 
