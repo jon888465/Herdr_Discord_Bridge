@@ -49,7 +49,7 @@
 | ISSUE-043 | 傳入附件沒有保留期限，本機與遠端會一直累積 | 已修正、待驗收 | 已於 2026-10-25 重啟（w2:p1Y，程式尚未 commit）；本機啟動清理已實際刪除過期目錄；遠端刪除未驗證 |
 | ISSUE-047 | Codex 在 Discord 送問後出現「Agent identity changed (session changed); response capture stopped」，擷取在核准通知前中止 | 已驗收（2026-10-28，使用者實測 Discord 送問後不再中止、核准流程正常） | 觸發原因（Codex 第一個 prompt 才建新 session）屬推測；見 ISSUE-047 |
 | ISSUE-046 | Discord 輸入權限選項數字（3）後沒有任何反應，之後按 Approve 才有動作 | 已驗收（2026-10-28，數字／allow／deny／按鈕／📨；原 `3` 沒反應根因未確認） | 2026-10-28 重啟後數字 1／2 回覆成功且有 📨；使用者早先的 `3` 沒反應原因仍未確認 |
-| ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | Claude Stop 與 PermissionRequest 已驗收（2026-10-28，使用者實測）；Codex Stop 與 allow／deny（y／esc 快捷鍵）、hookTransport 設定與 hooks 指令已驗收（2026-10-28）；agy／pi、遠端 machine 未做 | agy／pi 的 hook 能力未查；遠端 machine 未做；見 docs/hook-transport-proposal.md |
+| ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | Claude Stop 與 PermissionRequest 已驗收（2026-10-28，使用者實測）；Codex Stop 與 allow／deny（y／esc 快捷鍵）、hookTransport 設定與 hooks 指令已驗收（2026-10-28）；agy Stop 已驗收（2026-10-28）；pi、遠端 machine 未做 | pi 的 hook 能力未查；遠端 machine 未做；見 docs/hook-transport-proposal.md |
 | ISSUE-044 | Claude 回覆在 Discord 被重複貼出多則 | 重新開啟→已修正、待驗收 | 2026-10-28 重現，確認根因為回合尾巴後的「※ recap」行擋住完成判斷；原始碼與單元測試完成，已 commit（ccec39b）並於 2026-10-28 重啟（w2:p10），Discord 未驗收 |
 | ISSUE-039 | Discord 傳入非圖片檔案（如 chat.json）被拒絕 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-038 | agy 多行 prompt（含附圖）回顯後擷取不到回覆，Discord 只得「capture failure」 | 已修正、待驗收 | 原始碼、單元測試與實際畫面重放完成；bridge 尚未重啟，Discord 未驗收 |
@@ -1716,16 +1716,16 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 
 環境：本機，bridge 版本 8b6532b，Codex 0.165.0 w4:p1。重啟時 w4:p1 有進行中的 Discord 回合（deny 測試，13:58 開始），新 bridge log 出現 `Resuming stream pane=w4:p1`；使用者在 Discord 回報「成功」（卡片接續更新並可回覆 deny；未逐項記錄畫面細節）。該 Agent 重啟時已 blocked，是由續傳的串流顯示，不是 watcher 補發的通知，所以「補發 blocked 通知」的獨立路徑（沒有進行中串流時）仍未驗收。
 
-### ISSUE-045 agy Stop hook（2026-10-28，原始碼完成並已在本機註冊，待 Discord 驗收）
+### ISSUE-045 agy Stop hook（2026-10-28，已驗收）
 
 調查（本機 agy 1.4.7）：agy 有 hooks（`~/.gemini/config/hooks.json`，結構 `{群組: {事件: [{command,timeout,type}]}}`；工作區可用 `<workspace>/.agents/hooks.json`）。事件為 `SessionStart`、`PreInvocation`、`PostInvocation`、`PreToolUse`、`PostToolUse`、`Stop`（契約來自 agy 二進位內嵌文件）。**實測**（暫時工作區 hooks.json、`agy -p`）：`SessionStart`、`PreInvocation`、`PostInvocation`、`Stop` 都會觸發。`Stop` 輸入含 `conversationId`、`terminationReason`（正常為 `NO_TOOL_CALL`）、`fullyIdle`、`transcriptPath`、`lastUserInput`，**沒有最終回覆**；最終回覆在 transcript JSONL 的最後一個沒有 `tool_calls` 的 `PLANNER_RESPONSE.content`（實測為 `DONE`）。hook 必須在 stdout 輸出 JSON 物件，否則違反契約。`conversationId` 與 Herdr 的 `agent_session`（kind `id`）相同。`PreToolUse` 在 `agy -p` 加 matcher 後**沒有觸發**（原因未查，可能是 print 模式不走權限流程）；文件上它可回 `allow`／`deny`／`ask`／`force_ask`，但每次工具呼叫都會觸發、無法分辨是否需要核准，所以**不採用**，agy 權限仍走畫面 parser。
 
 實作：`src/hook-agy.ts`（`agyFinalMessage`、`isAgyStopInput`）；`src/hook-cli.ts` 辨識 agy 輸入（有 `conversationId`＋`terminationReason`、無 `hook_event_name`），先輸出 `{}`，只在 `NO_TOOL_CALL` 且 `fullyIdle` 不為 false 時讀 transcript（最多重試 4 次、每次 250ms）並以 `conversationId` 轉給 bridge；`hookTransport.agy`（預設 `auto`）與 `hooks` 指令支援 agy。已備份並寫入 `~/.gemini/config/hooks.json`（群組 `herdr-discord-bridge`，`Stop`、timeout 10；備份 `hooks.json.bak-hook`），README／README.zh-TW／設定範例／提案文件同步（並更正 README 中 Codex 列：只開 `Stop`）。
-驗證（2026-10-28）：lint 通過；新增 1 項 transcript 解析測試並更新 hookTransport 測試；完整 `npm test` 276 項、269 通過、6 失敗（ISSUE-035 既有項目）；以暫時工作區的真實 Stop 輸入餵給 `herdr-discord-hook`，輸出 `{}` 且 exit 0。**未驗證**：互動式 agy 實際觸發 Stop、bridge 收到後以 hook 收尾、已開啟的 agy 是否重載全域 hooks（可能需重開 agy）。
+驗證（2026-10-28）：lint 通過；新增 1 項 transcript 解析測試並更新 hookTransport 測試；完整 `npm test` 276 項、269 通過、6 失敗（ISSUE-035 既有項目）；以暫時工作區的真實 Stop 輸入餵給 `herdr-discord-hook`，輸出 `{}` 且 exit 0。驗收（2026-10-28）：使用者從 Discord 問 agy w4:p5，確認卡片很快收尾且 bridge log 有 `hook Stop session=… pane=w4:p5`（回報 1、2 項都有）；先前的「response capture stopped」由 ISSUE-047 擴及 agy 修正後，使用者回報「ok了」。已開啟的 agy 是否重載全域 hooks 未另行確認。
 
-### ISSUE-047 擴及 agy（2026-10-28，已實作、待驗收）
+### ISSUE-047 擴及 agy（2026-10-28，已驗收）
 
 重現：部署 agy Stop hook 後，使用者從 Discord 問 agy（w4:p5）：Stop hook 有觸發（log `hook Stop session=db1c4b58 pane=w4:p5 chars=26`），但卡片顯示 response capture stopped；bridge log 為 `Response capture stopped: session changed (pane=w4:p5)`。Herdr 的 agy session 由先前的 `201d48fa…` 換成 `db1c4b58-690b-4f4a-93e7-fcc260852613`；後者的對話目錄 `~/.gemini/antigravity-cli/brain/db1c4b58…` 建立於 14:10:17，與送問時間吻合（與 Codex 相同形態：新對話在送問時才建立；觸發原因同樣未確認）。agy 的 id 是 UUIDv4，不含時間。
 修正：`sessionCreatedSince` 新增 `createdAt` 查詢參數；`streamAgent` 對 agy（本機）以對話目錄的 birthtime 判斷是否為送問後建立，是則追蹤新 id，其餘仍停止。遠端 agy 無法查目錄，仍維持停止。
-驗證（2026-10-28）：lint 通過；新增 1 項測試；完整 `npm test` 277 項、270 通過、6 失敗（ISSUE-035 既有項目）。**未驗證**：Discord 端 agy 送問不再中止；bridge 尚未重啟。
+驗證（2026-10-28）：lint 通過；新增 1 項測試；完整 `npm test` 277 項、270 通過、6 失敗（ISSUE-035 既有項目）。驗收（2026-10-28）：重啟 bridge（a505bfb）後使用者從 Discord 問 agy，回報「ok了」（未逐項記錄 log 與耗時）。
 
