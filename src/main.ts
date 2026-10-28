@@ -37,6 +37,7 @@ import {
 import { AgentPool } from "./agent-pool.js";
 import { runTeamTurn } from "./team-turn.js";
 import { loadConfig, statePath, stateDirectory } from "./config.js";
+import { StreamResumeStore } from "./stream-resume.js";
 import {
   claudeTurnComplete,
   stableScreen,
@@ -124,6 +125,9 @@ async function startBridge(
     config.approvalTimeoutMs,
   );
   const activeStreams = new Set<string>();
+  const streamResume = new StreamResumeStore(
+    join(stateDirectory(), "active-streams.json"),
+  );
   const pool = new AgentPool(
     join(stateDirectory(), "agent-pool.json"),
     config.agentProfiles || [],
@@ -227,6 +231,7 @@ async function startBridge(
         routing,
         discord,
         activeStreams,
+        streamResume,
         pool,
         tasks,
         handoffs,
@@ -281,6 +286,7 @@ async function startBridge(
         routing,
         discord,
         activeStreams,
+        streamResume,
         pool,
         tasks,
         handoffs,
@@ -292,6 +298,20 @@ async function startBridge(
   });
   try {
     await discord.start();
+    void resumeStreams({
+      config,
+      herdr,
+      routing,
+      discord,
+      activeStreams,
+      streamResume,
+      pool,
+      tasks,
+      handoffs,
+      failover,
+    }).catch((error) =>
+      console.error(`Stream resume failed: ${safeError(error)}`),
+    );
   } catch (error) {
     await discord.stop();
     throw error;
@@ -322,6 +342,7 @@ async function startBridge(
           routing,
           discord,
           activeStreams,
+          streamResume,
           pool,
           tasks,
           handoffs,
@@ -414,6 +435,7 @@ interface Runtime {
   routing: RoutingStore;
   discord: DiscordAdapter;
   activeStreams: Set<string>;
+  streamResume?: StreamResumeStore;
 }
 
 export async function handleCommand(
@@ -1952,6 +1974,15 @@ async function dispatchPrompt(
     const transcript = await CodexTranscript.connect(agent, prompt);
     validatePrompt(prompt);
     await runtime.herdr.promptAgent(agent.pane_id, prompt);
+    runtime.streamResume?.add({
+      terminalId: agent.terminal_id,
+      paneId: agent.pane_id,
+      channelId: progress.channelId,
+      progressMessageId: progress.id,
+      prompt,
+      baselineOutput,
+      startedAt: Date.now(),
+    });
     void streamAgent(
       agent,
       progress,
@@ -1963,7 +1994,10 @@ async function dispatchPrompt(
       .catch((error) =>
         console.error(`Discord stream failed: ${safeError(error)}`),
       )
-      .finally(() => runtime.activeStreams.delete(agent.terminal_id));
+      .finally(() => {
+        runtime.streamResume?.remove(agent.terminal_id);
+        runtime.activeStreams.delete(agent.terminal_id);
+      });
   } catch (error) {
     runtime.activeStreams.delete(agent.terminal_id);
     throw error;
@@ -2220,6 +2254,52 @@ async function rewatchAfterForcedFinish(
   }
 }
 
+/**
+ * ISSUE-042: after a bridge restart, re-attach to Discord-driven turns that were
+ * still running. The agent keeps working; we only rebuild the watcher.
+ */
+export async function resumeStreams(runtime: Runtime): Promise<void> {
+  const store = runtime.streamResume;
+  if (!store) return;
+  for (const record of store.list()) {
+    const agent = (await runtime.herdr.listAgentsWithWorkspaceNames()).find(
+      (a) => a.terminal_id === record.terminalId,
+    );
+    const progress = agent
+      ? await runtime.discord.fetchMessage(
+          record.channelId,
+          record.progressMessageId,
+        )
+      : undefined;
+    if (!agent || !progress || runtime.activeStreams.has(record.terminalId)) {
+      store.remove(record.terminalId);
+      continue;
+    }
+    console.log(
+      `Resuming stream pane=${agent.pane_id} (started ${new Date(record.startedAt).toISOString()})`,
+    );
+    runtime.activeStreams.add(record.terminalId);
+    const transcript = await CodexTranscript.connect(agent, record.prompt);
+    void streamAgent(
+      agent,
+      progress,
+      runtime,
+      record.prompt,
+      record.baselineOutput,
+      transcript,
+      0,
+      record.startedAt,
+    )
+      .catch((error) =>
+        console.error(`Discord stream failed: ${safeError(error)}`),
+      )
+      .finally(() => {
+        store.remove(record.terminalId);
+        runtime.activeStreams.delete(record.terminalId);
+      });
+  }
+}
+
 export async function streamAgent(
   initial: AgentRecord,
   progress: import("discord.js").Message,
@@ -2228,8 +2308,9 @@ export async function streamAgent(
   baselineOutput: string,
   transcript?: CodexTranscript,
   resumes = 0,
+  startedAt?: number,
 ): Promise<void> {
-  const started = Date.now();
+  const started = startedAt ?? Date.now();
   let lastOutput = "";
   let longestOutput = "";
   let lastRaw = "";

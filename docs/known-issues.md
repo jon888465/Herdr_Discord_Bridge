@@ -45,7 +45,7 @@
 | ISSUE-035 | coding-workflow 測試在 macOS 有 6 項失敗 | 待調查 | 基準亦失敗，根因未確認 |
 | ISSUE-040 | Claude 最終回覆在串流中途被截斷，並混入「Update available!」提示 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 已於 2026-10-24 重啟（w2:p1V）；根因為推論；Discord 未驗收 |
 | ISSUE-041 | bridge 不支援 Herdr 遠端機器（如 agy-pod）的 Agent | 已驗收（文字對話，2026-10-24） | 關閉遠端面板後重問，Discord 收到正確回覆；斷線重連、附件、Team Worker 等未驗收 |
-| ISSUE-042 | 從 Discord 驅動的 Agent 自己重啟 bridge 時，該回合的串流與最終回覆遺失 | 待調查（限制已確認、尚無修正） | 2026-10-24 發生一次；重啟後不會接續進行中的回覆 |
+| ISSUE-042 | 從 Discord 驅動的 Agent 自己重啟 bridge 時，該回合的串流與最終回覆遺失 | 已修正、待驗收（2026-10-28） | 2026-10-24、10-28 各發生一次；已改為重啟後依 active-streams.json 接續，待真實重啟驗收 |
 | ISSUE-043 | 傳入附件沒有保留期限，本機與遠端會一直累積 | 已修正、待驗收 | 已於 2026-10-25 重啟（w2:p1Y，程式尚未 commit）；本機啟動清理已實際刪除過期目錄；遠端刪除未驗證 |
 | ISSUE-047 | Codex 在 Discord 送問後出現「Agent identity changed (session changed); response capture stopped」，擷取在核准通知前中止 | 已修正、待驗收（2026-10-28） | 重新對 Codex 送問，確認不再中止且 allow／deny 可進行；見 ISSUE-047 |
 | ISSUE-046 | Discord 輸入權限選項數字（3）後沒有任何反應，之後按 Approve 才有動作 | 已驗收（2026-10-28，數字／allow／deny／按鈕／📨；原 `3` 沒反應根因未確認） | 2026-10-28 重啟後數字 1／2 回覆成功且有 📨；使用者早先的 `3` 沒反應原因仍未確認 |
@@ -1538,7 +1538,7 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 
 ## ISSUE-042：Agent 在 Discord 驅動的回合中重啟 bridge，該回合的回覆遺失
 
-更新日期：2026-10-25。狀態：待調查（現象與直接原因已確認；尚無修正或緩解）。
+更新日期：2026-10-28。狀態：已修正、待驗收（原始碼與自動化測試完成；真實「Agent 在 Discord 回合中重啟 bridge」尚未驗收）。原狀態：待調查（2026-10-25）。
 
 症狀：2026-10-24 23:54，使用者在 thread「git repo Herdr_Discord_Bridge」（對應 w1:p1，Claude）回「好」授權 commit／push／重啟。Discord 上該則進度訊息停在「working · 已耗時 1秒／Running 1 shell command…」，之後沒有任何更新與最終回覆；使用者回報「沒回應」。預期：回合結束後仍收到最終回覆，或至少看到明確的「bridge 已重啟」說明。
 
@@ -1693,4 +1693,13 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 推測（未驗證）：該 Codex 為重新啟動或新執行緒，session 於第一個 prompt 才實體化，因此 bridge 記下的 `initial.agent_session` 仍是舊值。尚無送問當下 `initial.agent_session` 的紀錄，無法證明舊值就是 `01a180eb`。
 修正：`sessionCreatedSince`（`src/response-stream.ts`）判斷 UUIDv7 session id 是否建立於送問時間（容忍 5 秒）之後；`streamAgent` 對 Codex 在同 pane／terminal／workspace 下遇到這種新 id 時改追蹤新 id（log：`Codex session materialized during turn`），其餘 id 變動仍停止擷取。新增 1 項測試。2026-10-28：lint 通過；完整 `npm test` 272 項、265 通過、6 失敗（ISSUE-035 既有項目）。注意：`CodexTranscript` 仍綁定舊 session 檔，換 session 後完成判斷靠 Stop hook 或畫面 parser。
 下一步：使用者重新送問驗收；另記錄送問當下與換 id 當下的 `agent_session`以確認觸發原因。修正做法是在同一 pane／terminal／cwd 下，若新 session id（UUIDv7 內含毫秒時間）的時間不早於本次送問時間，視為同一回合的 session 實體化而改採新 id，其餘情況仍停止擷取，避免轉發其他對話。
+
+### ISSUE-042 修正（2026-10-28，已實作、待驗收）
+
+2026-10-28 重現：使用者回「好」授權後，Agent 執行 commit／push／`run.sh` 重啟，Discord 卡片停在 `working · Waiting for CLI output…`，最終回覆遺失（與 2026-10-24 相同）。
+
+修正：`src/stream-resume.ts` 的 `StreamResumeStore` 把進行中的 Discord 回合（terminalId、paneId、channelId、進度訊息 ID、prompt、baselineOutput、startedAt）寫入 `~/.config/.../active-streams.json`（`stateDirectory()` 下）；`dispatchPrompt` 送出 prompt 後登記，串流結束後移除。bridge 啟動、Discord 就緒後 `resumeStreams` 依 terminal ID 找 live Agent、以 `DiscordAdapter.fetchMessage` 取回進度訊息，並以原 `startedAt` 重新呼叫 `streamAgent`（log：`Resuming stream pane=…`）。Agent 或訊息已不存在、超過 24 小時的記錄會被丟棄。
+
+限制：Stop hook 事件只存在記憶體，重啟期間送出的 Stop 不會補回，這種情況由畫面 parser 判斷完成；進行中的 Codex 逐字稿以 `CodexTranscript.connect` 重新連線；team／console 路徑與強制收尾後的輕量觀察（`rewatchAfterForcedFinish`）不在此範圍。
+驗證（2026-10-28）：lint 通過；新增 2 項 store 測試；完整 `npm test` 274 項、267 通過、6 失敗（ISSUE-035 既有項目）。**未驗證**：真實重啟中的回合是否接續並送出最終回覆。
 

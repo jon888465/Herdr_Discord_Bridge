@@ -204,6 +204,19 @@ export class DiscordAdapter {
     return first;
   }
 
+  async fetchMessage(
+    channelId: string,
+    messageId: string,
+  ): Promise<Message | undefined> {
+    try {
+      const channel = await this.client.channels.fetch(channelId);
+      if (!channel || !("messages" in channel)) return undefined;
+      return await channel.messages.fetch(messageId);
+    } catch {
+      return undefined;
+    }
+  }
+
   async editProgress(message: Message, content: string): Promise<void> {
     await message.edit({ content: splitDiscordText(content)[0] });
   }
