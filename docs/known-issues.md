@@ -48,7 +48,7 @@
 | ISSUE-042 | 從 Discord 驅動的 Agent 自己重啟 bridge 時，該回合的串流與最終回覆遺失 | 待調查（限制已確認、尚無修正） | 2026-10-24 發生一次；重啟後不會接續進行中的回覆 |
 | ISSUE-043 | 傳入附件沒有保留期限，本機與遠端會一直累積 | 已修正、待驗收 | 已於 2026-10-25 重啟（w2:p1Y，程式尚未 commit）；本機啟動清理已實際刪除過期目錄；遠端刪除未驗證 |
 | ISSUE-046 | Discord 輸入權限選項數字（3）後沒有任何反應，之後按 Approve 才有動作 | 已驗收（2026-10-28，數字／allow／deny／按鈕／📨；原 `3` 沒反應根因未確認） | 2026-10-28 重啟後數字 1／2 回覆成功且有 📨；使用者早先的 `3` 沒反應原因仍未確認 |
-| ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | Claude Stop 與 PermissionRequest 已驗收（2026-10-28，使用者實測）；Codex／agy／pi、transport 設定、遠端 machine 未做 | 權限轉 Discord、Codex／agy／pi 未做；見 docs/hook-transport-proposal.md |
+| ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | Claude Stop 與 PermissionRequest 已驗收（2026-10-28，使用者實測）；Codex／agy／pi、transport 設定、遠端 machine 未做 | Claude 已驗收；Codex／agy／pi 未做；見 docs/hook-transport-proposal.md |
 | ISSUE-044 | Claude 回覆在 Discord 被重複貼出多則 | 重新開啟→已修正、待驗收 | 2026-10-28 重現，確認根因為回合尾巴後的「※ recap」行擋住完成判斷；原始碼與單元測試完成，已 commit（ccec39b）並於 2026-10-28 重啟（w2:p10），Discord 未驗收 |
 | ISSUE-039 | Discord 傳入非圖片檔案（如 chat.json）被拒絕 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-038 | agy 多行 prompt（含附圖）回顯後擷取不到回覆，Discord 只得「capture failure」 | 已修正、待驗收 | 原始碼、單元測試與實際畫面重放完成；bridge 尚未重啟，Discord 未驗收 |
@@ -1613,7 +1613,7 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 
 首版未驗證：真實 Claude 透過已註冊的 hook 送出 `Stop` 到執行中的 bridge；Discord 端到端只貼一次；hook 未註冊或 bridge 重啟時退回 parser；Stop 與使用者直接在 pane 輸入的回合混淆的情況（目前以 session id 與回合開始時間過濾）。
 
-### ISSUE-045 PermissionRequest 轉 Discord（2026-10-28，已部署；Discord 端 allow／deny／數字已驗收，按鈕與 Stop 未驗收）
+### ISSUE-045 PermissionRequest 轉 Discord（2026-10-28，已部署並驗收；allow／deny／數字／按鈕／恢復通知皆經使用者實測）
 
 部署：commit 2516a60；bridge 於 2026-10-28 重啟為 w2:p22；`~/.claude/settings.json` 已註冊 `PermissionRequest` hook（timeout 300 秒）。
 
