@@ -136,6 +136,8 @@ function grokResponses(output: string): string[] {
 }
 
 const CLAUDE_BANNER = /^\s*Update available!/;
+/** 回合結束且使用者離開一段時間後，Claude 會在回合尾巴下方補一行 `※ recap: …`（ISSUE-044）。 */
+const CLAUDE_RECAP = /^\s*※ /;
 const CLAUDE_TURN_FOOTER = /^\s*[✻✽✶✳✢·] \S+ for (?:\d+h )?(?:\d+m )?\d+s\b/;
 
 /**
@@ -146,7 +148,10 @@ export function claudeTurnComplete(raw: string): boolean {
   const lines = stripAnsi(stripClaudeInputBox(raw))
     .replace(/\r/g, "")
     .split("\n")
-    .filter((line) => line.trim() && !CLAUDE_BANNER.test(line));
+    .filter(
+      (line) =>
+        line.trim() && !CLAUDE_BANNER.test(line) && !CLAUDE_RECAP.test(line),
+    );
   const last = lines.at(-1);
   return last !== undefined && CLAUDE_TURN_FOOTER.test(last);
 }

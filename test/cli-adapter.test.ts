@@ -564,3 +564,13 @@ test("stableScreen ignores a blinking Claude input cursor and trailing whitespac
   );
   assert.equal(stableScreen("agy", "a  \nb \n\n"), "a\nb");
 });
+
+test("claude turn footer followed by a recap line still counts as complete (ISSUE-044)", async () => {
+  const { claudeTurnComplete, latestAgentResponse } =
+    await import("../src/cli-adapter.js");
+  const rule = "─".repeat(40);
+  const box = `${rule}\n❯ \n${rule}\n  ⏵⏵ auto mode on`;
+  const done = `❯ 問題\n\n⏺ 答案\n\n✻ Brewed for 22s · done 上午9:46\n\n※ recap: 目標是讓 Herdr 同時顯示與轉傳\n${box}`;
+  assert.equal(claudeTurnComplete(done), true);
+  assert.doesNotMatch(latestAgentResponse("claude", "問題", done, ""), /recap/);
+});

@@ -47,7 +47,7 @@
 | ISSUE-041 | bridge 不支援 Herdr 遠端機器（如 agy-pod）的 Agent | 已驗收（文字對話，2026-10-24） | 關閉遠端面板後重問，Discord 收到正確回覆；斷線重連、附件、Team Worker 等未驗收 |
 | ISSUE-042 | 從 Discord 驅動的 Agent 自己重啟 bridge 時，該回合的串流與最終回覆遺失 | 待調查（限制已確認、尚無修正） | 2026-10-24 發生一次；重啟後不會接續進行中的回覆 |
 | ISSUE-043 | 傳入附件沒有保留期限，本機與遠端會一直累積 | 已修正、待驗收 | 已於 2026-10-25 重啟（w2:p1Y，程式尚未 commit）；本機啟動清理已實際刪除過期目錄；遠端刪除未驗證 |
-| ISSUE-044 | Claude 回覆在 Discord 被重複貼出多則 | 已修正、待驗收 | 原始碼與單元測試完成；根因部分為推論；bridge 尚未重啟，Discord 未驗收 |
+| ISSUE-044 | Claude 回覆在 Discord 被重複貼出多則 | 重新開啟→已修正、待驗收 | 2026-10-28 重現，確認根因為回合尾巴後的「※ recap」行擋住完成判斷；原始碼與單元測試完成，bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-039 | Discord 傳入非圖片檔案（如 chat.json）被拒絕 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-038 | agy 多行 prompt（含附圖）回顯後擷取不到回覆，Discord 只得「capture failure」 | 已修正、待驗收 | 原始碼、單元測試與實際畫面重放完成；bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-037 | 使用者直接在 Herdr 要求 Agent 傳給 Discord，bridge 不代送 | 已驗收（2026-10-20，指令版） | 重啟後使用者確認 Discord 收到；範圍見驗收紀錄 |
@@ -1578,3 +1578,17 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 驗證（2026-10-26）：lint 通過；`npm run check` 型別檢查通過；新增 `stableScreen` 測試（游標閃爍與行尾空白視為相同、內容改變視為不同）通過；完整 `npm test` 僅剩 ISSUE-035 既有 6 項失敗。
 
 未驗證：Discord 端到端（回覆應只貼一次、約 10 秒內以「✅ final response delivered」收尾）；截短擷取的根因；排除輸入框後是否有其他會抖動的畫面區域（例如 spinner 以外的狀態列）；先前 ISSUE-036／040 的驗收仍待。
+
+### ISSUE-044 重新開啟（2026-10-28）
+
+更新日期：2026-10-28。狀態：已修正、待驗收（原始碼已改，**執行中的 bridge 仍是 6d0c53d 建置，未重啟**；已送出的重複訊息無法收回）。
+
+症狀：使用者回報 Discord「一直滾動停不下來」。2026-10-28 01:47–01:52 UTC，`capture-diagnostics` 為 w1:p1 連續存了 6 份（1 次初始＋`MAX_REWATCH_RESUMES` 5 次續傳），同一 prompt，elapsed 33–56 秒，之後因達上限自行停止。先前 10-26 的 stableScreen／rewatch 包含判斷修正已部署（6d0c53d），仍重現。
+
+已確認根因：Claude 在回合尾巴 `✻ Brewed for 22s · done` 之後，會在輸入框上方多印一行 `※ recap: …`（離開一段時間後的摘要）。`claudeTurnComplete` 要求「最後一個內容列」是回合尾巴，被這行擋住而判定未完成，每次都走 30 秒閒置強制收尾；強制收尾沒有正式 final，rewatch 又因擷取長度在 1496–1498 字之間飄動而判定「有新內容」續傳，每輪貼一次。診斷檔 `raw_screen_tail` 尾端可見該 `※ recap:` 行。**未確認**：擷取長度 1–2 字飄動的來源（可能與 recap 行或游標相關）；目前僅以「讓完成判斷不再受 recap 影響」來消除強制收尾。
+
+修正：`src/cli-adapter.ts` 的 `claudeTurnComplete` 忽略以 `※ ` 開頭的列（`CLAUDE_RECAP`）。新增測試「claude turn footer followed by a recap line still counts as complete」。
+
+驗證（2026-10-28）：`npm run build` 通過；`node --test dist/test/cli-adapter.test.js` 27 項全過。未跑完整 `npm test`。
+
+未驗證：重啟 bridge 後 Discord 端到端（應只貼一次、約 10 秒內「✅ final response delivered」）；rewatch 在其他會讓擷取飄動的情境仍可能重複（上限 5 次的洗版保護未加強）；未建議 commit／重啟，等使用者授權。
