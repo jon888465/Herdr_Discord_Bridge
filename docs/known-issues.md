@@ -47,7 +47,8 @@
 | ISSUE-041 | bridge 不支援 Herdr 遠端機器（如 agy-pod）的 Agent | 已驗收（文字對話，2026-10-24） | 關閉遠端面板後重問，Discord 收到正確回覆；斷線重連、附件、Team Worker 等未驗收 |
 | ISSUE-042 | 從 Discord 驅動的 Agent 自己重啟 bridge 時，該回合的串流與最終回覆遺失 | 待調查（限制已確認、尚無修正） | 2026-10-24 發生一次；重啟後不會接續進行中的回覆 |
 | ISSUE-043 | 傳入附件沒有保留期限，本機與遠端會一直累積 | 已修正、待驗收 | 已於 2026-10-25 重啟（w2:p1Y，程式尚未 commit）；本機啟動清理已實際刪除過期目錄；遠端刪除未驗證 |
-| ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | 修正中（Claude Stop 與 PermissionRequest 已部署，待 Discord 驗收） | 權限轉 Discord、Codex／agy／pi 未做；見 docs/hook-transport-proposal.md |
+| ISSUE-046 | Discord 輸入權限選項數字（3）後沒有任何反應，之後按 Approve 才有動作 | 已驗收（2026-10-28，數字／allow／deny／按鈕／📨；原 `3` 沒反應根因未確認） | 2026-10-28 重啟後數字 1／2 回覆成功且有 📨；使用者早先的 `3` 沒反應原因仍未確認 |
+| ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | Claude Stop 與 PermissionRequest 已驗收（2026-10-28，使用者實測）；Codex／agy／pi、transport 設定、遠端 machine 未做 | 權限轉 Discord、Codex／agy／pi 未做；見 docs/hook-transport-proposal.md |
 | ISSUE-044 | Claude 回覆在 Discord 被重複貼出多則 | 重新開啟→已修正、待驗收 | 2026-10-28 重現，確認根因為回合尾巴後的「※ recap」行擋住完成判斷；原始碼與單元測試完成，已 commit（ccec39b）並於 2026-10-28 重啟（w2:p10），Discord 未驗收 |
 | ISSUE-039 | Discord 傳入非圖片檔案（如 chat.json）被拒絕 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-038 | agy 多行 prompt（含附圖）回顯後擷取不到回覆，Discord 只得「capture failure」 | 已修正、待驗收 | 原始碼、單元測試與實際畫面重放完成；bridge 尚未重啟，Discord 未驗收 |
@@ -1596,7 +1597,7 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 
 ## ISSUE-045：以 CLI hook／協定取代畫面擷取判斷完成與權限
 
-更新日期：2026-10-28。狀態：修正中。Claude `Stop` 首版原始碼與單元測試完成（`src/hook-events.ts`、`src/hook-cli.ts`、`scripts/herdr-discord-hook`、`streamAgent` 整合）；已 commit／push（47a889a），bridge 於 2026-10-28 重啟為 w2:p21，`~/.claude/settings.json` 已註冊 `Stop` hook（備份 `settings.json.bak-hook`）；**Discord 端到端未驗收**，其餘（權限、其他 CLI）規劃中。
+更新日期：2026-10-28。狀態：Claude 部分已驗收，其餘規劃中。Claude `Stop` 首版原始碼與單元測試完成（`src/hook-events.ts`、`src/hook-cli.ts`、`scripts/herdr-discord-hook`、`streamAgent` 整合）；已 commit／push（47a889a），bridge 於 2026-10-28 重啟為 w2:p21，`~/.claude/settings.json` 已註冊 `Stop` hook（備份 `settings.json.bak-hook`）；**Discord 端到端未驗收**，其餘（權限、其他 CLI）規劃中。
 
 動機：ISSUE-036／040／044 都源於從畫面猜「是否完成」「回覆內容」；權限請求同樣只能靠畫面。使用者要求 TUI 留在 Herdr，同時 bridge 走結構化事件。
 
@@ -1612,12 +1613,28 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 
 首版未驗證：真實 Claude 透過已註冊的 hook 送出 `Stop` 到執行中的 bridge；Discord 端到端只貼一次；hook 未註冊或 bridge 重啟時退回 parser；Stop 與使用者直接在 pane 輸入的回合混淆的情況（目前以 session id 與回合開始時間過濾）。
 
-### ISSUE-045 PermissionRequest 轉 Discord（2026-10-28，已部署、待 Discord 驗收）
+### ISSUE-045 PermissionRequest 轉 Discord（2026-10-28，已部署；Discord 端 allow／deny／數字已驗收，按鈕與 Stop 未驗收）
 
 部署：commit 2516a60；bridge 於 2026-10-28 重啟為 w2:p22；`~/.claude/settings.json` 已註冊 `PermissionRequest` hook（timeout 300 秒）。
 
 範圍：`src/hook-events.ts`（`PermissionBroker`、server 保持連線、`requestPermission`）、`src/hook-cli.ts`、`src/main.ts`（`deliverApproval` 先嘗試把 allow／deny 回給 hook；`handleTransition` 離開 blocked 與 `handleRemoved` 取消等待）。
 
-驗證（2026-10-28）：lint 通過；新增 2 項測試（決定文字對應、broker 的 decide／cancel／連線中斷／無 pane id）通過；完整 `npm test` 267 項、260 通過，失敗的 6 項為 ISSUE-035 既有項目。**真實 Claude 端到端（不含 Discord）**：以暫時 pane 搭配獨立的 hook server 與真正的 `herdr-discord-hook`，allow 後工具執行；deny 後 Claude 回報「Denied by PermissionRequest hook」且檔案未建立；cancel 後 TUI 提示仍在，使用者按 Enter 後工具照常執行。測試檔已清除。
+驗證（2026-10-28）：lint 通過；新增 2 項測試（決定文字對應、broker 的 decide／cancel／連線中斷／無 pane id）通過；完整 `npm test` 267 項、260 通過，失敗的 6 項為 ISSUE-035 既有項目。**真實 Claude 端到端（不含 Discord；Discord 端見 ISSUE-046 驗證）**：以暫時 pane 搭配獨立的 hook server 與真正的 `herdr-discord-hook`，allow 後工具執行；deny 後 Claude 回報「Denied by PermissionRequest hook」且檔案未建立；cancel 後 TUI 提示仍在，使用者按 Enter 後工具照常執行。測試檔已清除。
 
 未驗證：Discord 端（按鈕與文字回覆實際到 hook）；正在跑的 bridge 內 Herdr 的 `blocked` 轉換與 hook 事件的時序（hook 先於 blocked 通知，approval 紀錄在通知時才建立）；TUI 先決定後 Discord 補貼的恢復通知；auto mode 不會觸發，需用 default／manual 權限模式驗收。
+
+## ISSUE-046：在 Discord 回覆權限選項數字沒有反應
+
+更新日期：2026-10-28。狀態：已驗收（使用者實測；📨 回饋與診斷 log 已部署於 bridge w2:p23 並於本次 commit）。原本 `3` 沒反應的根因未確認，若再發生改為重新開啟。
+
+症狀：使用者（default 權限模式的 Claude，PermissionRequest hook 已部署）在 Discord 輸入選項數字 `3` 後，沒有看到任何反應；之後按「Approve / continue」才有動作（當時 bridge 重啟為 w2:p22，log 出現 interaction `ephemeral` 警告，表示按鈕回了過期或失敗訊息）。預期：回答送進 TUI，Discord 有明確回饋。
+
+已確認：(1) 文字回答成功時 bridge 原本**完全沒有回饋**（只有按鈕有「✅ delivered」），使用者無法分辨已送出或沒收到。(2) 同一個 API 呼叫（`pane.send_input` 文字加 Enter）在暫時的 default-mode Claude pane 對權限選單送 `1` 有效，Herdr 狀態在提示出現時為 `blocked`。(3) 按鈕送的是文字 `continue`，只有 PermissionRequest hook 正在等待時才會變成允許；否則對 Claude 的編號選單無作用。(4) 選項 3 是「Yes, and switch to auto mode」，成功時會改變該 session 的權限模式。**未確認**：使用者那次數字是在哪個 thread、是否有被 bridge 收到、當時 Herdr 狀態是否仍為 `blocked`、按鈕錯誤的實際文字。
+
+已做（原始碼）：文字回答成功後在使用者訊息加 📨 反應；`deliverApproval` 記錄 `approval reply pane=… text=… hookPending=… decision=…` 到 bridge console。
+
+未驗證：重啟後重現並用 log 判斷是未收到、狀態已非 blocked，或送出後 TUI 沒反應。
+
+驗證（2026-10-28，使用者在 Discord 實測，bridge w2:p23 的 console log 為證）：(1) colab_llm（`w5:p3`）回覆 `2`：`hookPending=true decision=none`，數字送進 TUI，agent 繼續執行。(2) 本 session（`w1:p1`）回覆 `1` 兩次、`allow`、`deny`、`allow`：`allow` 與 `deny` 皆 `decision=…` 並由 hook 回傳——`allow` 後指令執行，`deny` 後 Claude 收到「Permission denied by hook」且測試檔未被刪除，再次 `allow` 後刪除成功。(3) 使用者確認文字回答後出現 📨 反應。
+
+使用者回報（2026-10-28）：「Approve / continue」按鈕、TUI 先決定後的恢復通知，以及 Claude `Stop` hook 的 Discord 端到端（回覆只貼一次、很快收尾）皆正常（以使用者口頭回報為證，無額外 log 擷取）。未驗證：早先 `3`（switch to auto mode）沒反應的原因，可能是重啟前舊版或當時狀態，無 log 佐證。

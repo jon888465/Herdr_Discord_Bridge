@@ -2669,6 +2669,9 @@ async function deliverApproval(
   // Claude PermissionRequest hook 正在等決定（ISSUE-045）：allow／deny 直接回給 hook，
   // TUI 提示會自動消失；其他文字照舊打進 TUI，並放棄對 hook 的等待。
   const decision = permissionDecisionFromText(text);
+  console.log(
+    `approval reply pane=${current.pane_id} text=${JSON.stringify(text.slice(0, 40))} hookPending=${permissionBroker.has(current.pane_id)} decision=${decision ?? "none"}`,
+  );
   if (decision && permissionBroker.decide(current.pane_id, decision)) {
     routing.deactivateApproval(approval.token);
     return;

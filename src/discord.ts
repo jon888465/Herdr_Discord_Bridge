@@ -437,6 +437,8 @@ export class DiscordAdapter {
           message.content.trim(),
           message.author.id,
         );
+        // 文字回答成功後原本完全沒有回饋，使用者無法分辨「已送出」與「沒收到」。
+        await message.react("📨").catch(() => undefined);
       } catch (error) {
         await message.reply(`❌ Approval rejected: ${safeError(error)}`);
       }
