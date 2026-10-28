@@ -47,7 +47,8 @@
 | ISSUE-041 | bridge 不支援 Herdr 遠端機器（如 agy-pod）的 Agent | 已驗收（文字對話，2026-10-24） | 關閉遠端面板後重問，Discord 收到正確回覆；斷線重連、附件、Team Worker 等未驗收 |
 | ISSUE-042 | 從 Discord 驅動的 Agent 自己重啟 bridge 時，該回合的串流與最終回覆遺失 | 待調查（限制已確認、尚無修正） | 2026-10-24 發生一次；重啟後不會接續進行中的回覆 |
 | ISSUE-043 | 傳入附件沒有保留期限，本機與遠端會一直累積 | 已修正、待驗收 | 已於 2026-10-25 重啟（w2:p1Y，程式尚未 commit）；本機啟動清理已實際刪除過期目錄；遠端刪除未驗證 |
-| ISSUE-044 | Claude 回覆在 Discord 被重複貼出多則 | 重新開啟→已修正、待驗收 | 2026-10-28 重現，確認根因為回合尾巴後的「※ recap」行擋住完成判斷；原始碼與單元測試完成，bridge 尚未重啟，Discord 未驗收 |
+| ISSUE-045 | 畫面擷取判斷完成與權限不可靠，規劃改用 CLI hook／協定，parser 保留備用 | 規劃中（尚未實作） | 見 docs/hook-transport-proposal.md；無已驗證項目 |
+| ISSUE-044 | Claude 回覆在 Discord 被重複貼出多則 | 重新開啟→已修正、待驗收 | 2026-10-28 重現，確認根因為回合尾巴後的「※ recap」行擋住完成判斷；原始碼與單元測試完成，已 commit（ccec39b）並於 2026-10-28 重啟（w2:p10），Discord 未驗收 |
 | ISSUE-039 | Discord 傳入非圖片檔案（如 chat.json）被拒絕 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-038 | agy 多行 prompt（含附圖）回顯後擷取不到回覆，Discord 只得「capture failure」 | 已修正、待驗收 | 原始碼、單元測試與實際畫面重放完成；bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-037 | 使用者直接在 Herdr 要求 Agent 傳給 Discord，bridge 不代送 | 已驗收（2026-10-20，指令版） | 重啟後使用者確認 Discord 收到；範圍見驗收紀錄 |
@@ -1581,7 +1582,7 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 
 ### ISSUE-044 重新開啟（2026-10-28）
 
-更新日期：2026-10-28。狀態：已修正、待驗收（原始碼已改，**執行中的 bridge 仍是 6d0c53d 建置，未重啟**；已送出的重複訊息無法收回）。
+更新日期：2026-10-28。狀態：已修正、待驗收（已 commit／push ccec39b，bridge 於 2026-10-28 重啟為 w2:p10 並載入新碼；Discord 端到端尚未驗收；已送出的重複訊息無法收回）。
 
 症狀：使用者回報 Discord「一直滾動停不下來」。2026-10-28 01:47–01:52 UTC，`capture-diagnostics` 為 w1:p1 連續存了 6 份（1 次初始＋`MAX_REWATCH_RESUMES` 5 次續傳），同一 prompt，elapsed 33–56 秒，之後因達上限自行停止。先前 10-26 的 stableScreen／rewatch 包含判斷修正已部署（6d0c53d），仍重現。
 
@@ -1591,4 +1592,16 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 
 驗證（2026-10-28）：`npm run build` 通過；`node --test dist/test/cli-adapter.test.js` 27 項全過。未跑完整 `npm test`。
 
-未驗證：重啟 bridge 後 Discord 端到端（應只貼一次、約 10 秒內「✅ final response delivered」）；rewatch 在其他會讓擷取飄動的情境仍可能重複（上限 5 次的洗版保護未加強）；未建議 commit／重啟，等使用者授權。
+未驗證：Discord 端到端（應只貼一次、約 10 秒內「✅ final response delivered」）；rewatch 在其他會讓擷取飄動的情境仍可能重複（上限 5 次的洗版保護未加強）。
+
+## ISSUE-045：以 CLI hook／協定取代畫面擷取判斷完成與權限（規劃）
+
+更新日期：2026-10-28。狀態：規劃中，尚未實作。
+
+動機：ISSUE-036／040／044 都源於從畫面猜「是否完成」「回覆內容」；權限請求同樣只能靠畫面。使用者要求 TUI 留在 Herdr，同時 bridge 走結構化事件。
+
+已查（文件／字串，未實測）：Claude 有 `Stop`（含 `last_assistant_message`）與可回傳決定的 `PermissionRequest`；Codex 二進位含同名事件字串，另有 app-server 共用 thread（spike 已實測 `turn/start` 與 TUI 同步）。agy／pi 等未查。細節與待驗證清單見 [hook-transport-proposal.md](hook-transport-proposal.md)。
+
+約束：**parser 路徑永遠保留為備用**；hook 事件缺失、逾時或 CLI 不支援時退回 parser，不得移除或降級。
+
+未驗證：全部（hook 實際觸發、權限等待行為、Codex／agy／pi 能力、遠端 machine、事件遺失的退回流程）。下一步：先實測 Claude `Stop`，再測 `PermissionRequest`。

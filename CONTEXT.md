@@ -54,6 +54,7 @@
   user-provided CLI/A2A approaches, installed Herdr 0.8.0 findings, unfinished
   response-correlation patch, and remaining verification after the user-requested pause.
 
+- [Hook／協定通道提案](docs/hook-transport-proposal.md)：規劃中，尚未實作。以 CLI hook（Claude `Stop`／`PermissionRequest` 等）取得回合結束、最終回覆與權限決定，TUI 留在 Herdr；**screen parser 永遠保留為備用**。各 CLI 能力與待驗證項目見文件。
 - [Herdr direct interaction mirror to Discord](docs/pending-features.md):
   explicitly relay direct Herdr prompts and Agent responses to the mapped
   Discord thread to preserve conversation context.
