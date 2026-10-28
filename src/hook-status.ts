@@ -3,12 +3,13 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 export type HookTransportMode = "auto" | "parser";
-export const HOOK_AGENTS = ["claude", "codex"] as const;
+export const HOOK_AGENTS = ["claude", "codex", "agy"] as const;
 export type HookAgent = (typeof HOOK_AGENTS)[number];
 
 export const DEFAULT_HOOK_TRANSPORT: Record<HookAgent, HookTransportMode> = {
   claude: "auto",
   codex: "auto",
+  agy: "auto",
 };
 
 /** 設定值只接受 auto／parser，且只對支援 hook 的 CLI 生效；其餘一律忽略。 */
@@ -42,6 +43,22 @@ export function hookModeFor(
 const HOOK_COMMAND = "herdr-discord-hook";
 const EVENTS = ["Stop", "PermissionRequest"] as const;
 
+/** agy 的 hooks.json 結構是 { 群組: { 事件: [{ command }] } }，與 Claude／Codex 不同。 */
+export function agyRegisteredEvents(file: string): Record<string, boolean> {
+  let parsed: Record<string, Record<string, Array<{ command?: unknown }>>> = {};
+  try {
+    if (existsSync(file)) parsed = JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    /* 無法讀取視為未註冊 */
+  }
+  const stop = Object.values(parsed).some((group) =>
+    (group?.Stop ?? []).some(
+      (h) => typeof h.command === "string" && h.command.includes(HOOK_COMMAND),
+    ),
+  );
+  return { Stop: stop };
+}
+
 interface HookFile {
   hooks?: Record<string, Array<{ hooks?: Array<{ command?: unknown }> }>>;
 }
@@ -72,29 +89,35 @@ export function hookStatusText(
   const files: Record<HookAgent, string> = {
     claude: join(home, ".claude", "settings.json"),
     codex: join(home, ".codex", "hooks.json"),
+    agy: join(home, ".gemini", "config", "hooks.json"),
   };
   const lines = [
     "**Hook 通道狀態**（hook 優先；事件缺失時自動退回畫面 parser）",
   ];
   for (const kind of HOOK_AGENTS) {
-    const reg = registeredEvents(files[kind]);
+    const reg =
+      kind === "agy"
+        ? agyRegisteredEvents(files[kind])
+        : registeredEvents(files[kind]);
     const mode = transport?.[kind] ?? "auto";
     const mark = (ok: boolean | undefined) => (ok ? "✅" : "❌ 未註冊");
     // Codex 執行 PermissionRequest hook 時不顯示核准提示（ISSUE-045），所以不建議註冊。
     const perm =
-      kind === "codex"
-        ? reg.PermissionRequest
-          ? "⚠️ 已註冊（會擋住 Codex 的核准提示，建議移除）"
-          : "未註冊（Codex 不建議開啟）"
-        : mark(reg.PermissionRequest);
+      kind === "agy"
+        ? "不使用（agy 權限走畫面 parser）"
+        : kind === "codex"
+          ? reg.PermissionRequest
+            ? "⚠️ 已註冊（會擋住 Codex 的核准提示，建議移除）"
+            : "未註冊（Codex 不建議開啟）"
+          : mark(reg.PermissionRequest);
     lines.push(
       `• **${kind}**：模式 \`${mode}\`｜Stop ${mark(reg.Stop)}｜PermissionRequest ${perm}（${files[kind]}）`,
     );
   }
   lines.push(
-    "• 其他 CLI（agy、pi、grok…）目前只用 parser。",
+    "• 其他 CLI（pi、grok…）目前只用 parser。",
     "• Codex 另需在 Codex 內輸入 `/hooks` 審查並信任 `Stop`；信任前不會執行。",
-    '• 設定：`hookTransport: { claude: "auto"|"parser", codex: "auto"|"parser" }`（config.json），改完需重啟 bridge。',
+    '• 設定：`hookTransport: { claude: "auto"|"parser", codex: "auto"|"parser", agy: "auto"|"parser" }`（config.json），改完需重啟 bridge。',
   );
   return lines.join("\n");
 }

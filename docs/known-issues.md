@@ -1716,3 +1716,10 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 
 環境：本機，bridge 版本 8b6532b，Codex 0.165.0 w4:p1。重啟時 w4:p1 有進行中的 Discord 回合（deny 測試，13:58 開始），新 bridge log 出現 `Resuming stream pane=w4:p1`；使用者在 Discord 回報「成功」（卡片接續更新並可回覆 deny；未逐項記錄畫面細節）。該 Agent 重啟時已 blocked，是由續傳的串流顯示，不是 watcher 補發的通知，所以「補發 blocked 通知」的獨立路徑（沒有進行中串流時）仍未驗收。
 
+### ISSUE-045 agy Stop hook（2026-10-28，原始碼完成並已在本機註冊，待 Discord 驗收）
+
+調查（本機 agy 1.4.7）：agy 有 hooks（`~/.gemini/config/hooks.json`，結構 `{群組: {事件: [{command,timeout,type}]}}`；工作區可用 `<workspace>/.agents/hooks.json`）。事件為 `SessionStart`、`PreInvocation`、`PostInvocation`、`PreToolUse`、`PostToolUse`、`Stop`（契約來自 agy 二進位內嵌文件）。**實測**（暫時工作區 hooks.json、`agy -p`）：`SessionStart`、`PreInvocation`、`PostInvocation`、`Stop` 都會觸發。`Stop` 輸入含 `conversationId`、`terminationReason`（正常為 `NO_TOOL_CALL`）、`fullyIdle`、`transcriptPath`、`lastUserInput`，**沒有最終回覆**；最終回覆在 transcript JSONL 的最後一個沒有 `tool_calls` 的 `PLANNER_RESPONSE.content`（實測為 `DONE`）。hook 必須在 stdout 輸出 JSON 物件，否則違反契約。`conversationId` 與 Herdr 的 `agent_session`（kind `id`）相同。`PreToolUse` 在 `agy -p` 加 matcher 後**沒有觸發**（原因未查，可能是 print 模式不走權限流程）；文件上它可回 `allow`／`deny`／`ask`／`force_ask`，但每次工具呼叫都會觸發、無法分辨是否需要核准，所以**不採用**，agy 權限仍走畫面 parser。
+
+實作：`src/hook-agy.ts`（`agyFinalMessage`、`isAgyStopInput`）；`src/hook-cli.ts` 辨識 agy 輸入（有 `conversationId`＋`terminationReason`、無 `hook_event_name`），先輸出 `{}`，只在 `NO_TOOL_CALL` 且 `fullyIdle` 不為 false 時讀 transcript（最多重試 4 次、每次 250ms）並以 `conversationId` 轉給 bridge；`hookTransport.agy`（預設 `auto`）與 `hooks` 指令支援 agy。已備份並寫入 `~/.gemini/config/hooks.json`（群組 `herdr-discord-bridge`，`Stop`、timeout 10；備份 `hooks.json.bak-hook`），README／README.zh-TW／設定範例／提案文件同步（並更正 README 中 Codex 列：只開 `Stop`）。
+驗證（2026-10-28）：lint 通過；新增 1 項 transcript 解析測試並更新 hookTransport 測試；完整 `npm test` 276 項、269 通過、6 失敗（ISSUE-035 既有項目）；以暫時工作區的真實 Stop 輸入餵給 `herdr-discord-hook`，輸出 `{}` 且 exit 0。**未驗證**：互動式 agy 實際觸發 Stop、bridge 收到後以 hook 收尾、已開啟的 agy 是否重載全域 hooks（可能需重開 agy）。
+

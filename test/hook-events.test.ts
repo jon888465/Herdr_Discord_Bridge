@@ -229,16 +229,20 @@ test("hookTransport validation, mode lookup and status text (ISSUE-045)", async 
   assert.deepEqual(validateHookTransport(undefined), {
     claude: "auto",
     codex: "auto",
+    agy: "auto",
   });
-  assert.deepEqual(validateHookTransport({ codex: "parser", agy: "auto" }), {
+  assert.deepEqual(validateHookTransport({ codex: "parser", agy: "parser" }), {
     claude: "auto",
     codex: "parser",
+    agy: "parser",
   });
   assert.throws(() => validateHookTransport({ claude: "hook" }), /auto/);
   assert.equal(hookModeFor({ claude: "parser" }, "claude"), "parser");
   assert.equal(hookModeFor({}, "claude"), "auto");
   assert.equal(hookModeFor(undefined, "codex"), "auto");
-  assert.equal(hookModeFor({ claude: "auto" }, "agy"), "parser");
+  assert.equal(hookModeFor({ agy: "parser" }, "agy"), "parser");
+  assert.equal(hookModeFor({}, "agy"), "auto");
+  assert.equal(hookModeFor({}, "pi"), "parser");
 
   const home = mkdtempSync(join(tmpdir(), "hk-home-"));
   const { mkdirSync, writeFileSync } = await import("node:fs");
@@ -357,4 +361,29 @@ test("Codex approval replies allow/deny become y/esc keys (ISSUE-045)", async ()
   calls.length = 0;
   await run("allow");
   assert.deepEqual(calls, ["text:allow"]);
+});
+
+test("agy Stop: final message comes from the transcript's last tool-free PLANNER_RESPONSE (ISSUE-045)", async () => {
+  const { agyFinalMessage, isAgyStopInput } =
+    await import("../src/hook-agy.js");
+  const line = (o: object) => JSON.stringify(o);
+  const transcript = [
+    line({ type: "USER_INPUT", content: "old" }),
+    line({ type: "PLANNER_RESPONSE", content: "old answer" }),
+    line({ type: "USER_INPUT", content: "new" }),
+    line({ type: "PLANNER_RESPONSE", tool_calls: [{ name: "run_command" }] }),
+    line({ type: "GENERIC", content: "exit 0" }),
+    line({ type: "PLANNER_RESPONSE", content: "DONE" }),
+    '{"type":"PLANNER_RESPONSE","content":"par',
+  ].join("\n");
+  assert.equal(agyFinalMessage(transcript), "DONE");
+  assert.equal(agyFinalMessage(line({ type: "USER_INPUT" })), "");
+  assert.equal(
+    isAgyStopInput({ conversationId: "c", terminationReason: "NO_TOOL_CALL" }),
+    true,
+  );
+  assert.equal(
+    isAgyStopInput({ hook_event_name: "Stop", session_id: "s" }),
+    false,
+  );
 });

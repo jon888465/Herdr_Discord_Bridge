@@ -318,8 +318,9 @@ By default the bridge reads each reply from the terminal screen (the parser). A 
 | CLI             | Hooks to enable             | Where                     | Extra step                                                                        |
 | --------------- | --------------------------- | ------------------------- | --------------------------------------------------------------------------------- |
 | Claude          | `Stop`, `PermissionRequest` | `~/.claude/settings.json` | none                                                                              |
-| Codex           | `Stop`, `PermissionRequest` | `~/.codex/hooks.json`     | run `/hooks` inside Codex and trust both entries (until trusted they are skipped) |
-| agy, pi, others | not supported yet           | —                         | parser only                                                                       |
+| Codex           | `Stop` only (permissions use `y`/`esc` hotkeys; a `PermissionRequest` hook would hide Codex's prompt) | `~/.codex/hooks.json` | run `/hooks` inside Codex and trust the entry (until trusted it is skipped) |
+| agy             | `Stop` only (permissions stay on the screen parser) | `~/.gemini/config/hooks.json` (group `herdr-discord-bridge`, `{ "Stop": [{ "command": ".../scripts/herdr-discord-hook", "timeout": 10, "type": "command" }] }`) | none |
+| pi, others      | not supported yet           | —                         | parser only |
 
 Add both events pointing at the absolute path of `scripts/herdr-discord-hook` (the `Stop` timeout can be short, the `PermissionRequest` timeout should be about 300 seconds):
 

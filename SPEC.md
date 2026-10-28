@@ -579,6 +579,7 @@ Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*
 
 - bridge 啟動時在 `~/.config/herdr-discord-bridge/hooks.sock`（目錄 0700、socket 0600）接收 hook 事件；`scripts/herdr-discord-hook` 讀 Claude hook 的 stdin，只轉送主 agent 的 `Stop`（含 `session_id`、`last_assistant_message`、`prompt_id`、`HERDR_PANE_ID`），任何失敗都靜默 exit 0。
 - `streamAgent` 對 Claude：若在本次回合開始後收到同一 `agent_session`（kind `id`）的 `Stop` 且訊息非空，立即以該訊息為最終回覆收尾，不等畫面穩定或 30 秒閒置強制收尾。
+- agy Stop hook（ISSUE-045）：`~/.gemini/config/hooks.json` 註冊 `herdr-discord-hook` 於 `Stop`；hook 先輸出 `{}`，只在 `terminationReason=NO_TOOL_CALL` 且 `fullyIdle` 不為 false 時，從 `transcriptPath` 取最後一個沒有 tool_calls 的 `PLANNER_RESPONSE.content` 當最終回覆，以 `conversationId` 轉給 bridge；`hookTransport.agy` 控制是否採用，失敗退回 parser。agy 權限不使用 hook（`PreToolUse` 每次工具呼叫都觸發），維持 parser。
 - 串流續傳（ISSUE-042）：Discord 驅動的回合在送出 prompt 後登記到 `active-streams.json`（terminal、pane、進度訊息、prompt、baseline、startedAt），結束後移除；bridge 重啟並連上 Discord 後，對仍存在的 Agent 與進度訊息重新啟動 `streamAgent`，沿用原 `startedAt`。Agent 或訊息已不存在、超過 24 小時者丟棄；重啟期間的 Stop hook 事件不補回（改由 parser 判斷）。team／console 路徑不在範圍。Codex 的 session 若在送問後才建立（UUIDv7 時間不早於送問時間），`streamAgent` 改追蹤新 session，其餘 session 變動仍停止擷取（ISSUE-047）。
 - 重啟補發（ISSUE-042）：`AgentWatcher` 首輪輪詢對已在 `blocked` 的 Agent 補發一次 `unknown → blocked` 轉換，使 Discord 收到核准通知；舊核准先被收掉，舊通知按鈕失效。
 - **Parser 永遠保留**：沒裝 hook、事件遺失（bridge 重啟、socket 斷）、訊息為空或非 Claude agent 時，行為與原本完全相同（畫面 parser、強制收尾、rewatch）。事件只存記憶體。

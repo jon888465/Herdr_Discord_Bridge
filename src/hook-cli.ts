@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
+import { agyFinalMessage, isAgyStopInput } from "./hook-agy.js";
 import { requestPermission, sendHookEvent } from "./hook-events.js";
 
 /**
@@ -11,6 +12,10 @@ async function main(): Promise<void> {
   try {
     input = JSON.parse(readFileSync(0, "utf8")) as Record<string, unknown>;
   } catch {
+    return;
+  }
+  if (isAgyStopInput(input)) {
+    await handleAgyStop(input);
     return;
   }
   const name = input.hook_event_name;
@@ -54,6 +59,31 @@ async function main(): Promise<void> {
       typeof input.last_assistant_message === "string"
         ? input.last_assistant_message
         : "",
+  });
+}
+
+/** agy 要求 hook 在 stdout 輸出 JSON 物件；回合正常結束（NO_TOOL_CALL 且無背景工作）才轉送。 */
+async function handleAgyStop(input: Record<string, unknown>): Promise<void> {
+  process.stdout.write("{}\n");
+  if (input.terminationReason !== "NO_TOOL_CALL" || input.fullyIdle === false)
+    return;
+  const path =
+    typeof input.transcriptPath === "string" ? input.transcriptPath : "";
+  let message = "";
+  for (let attempt = 0; attempt < 4 && !message && path; attempt++) {
+    try {
+      message = agyFinalMessage(readFileSync(path, "utf8"));
+    } catch {
+      /* 讀不到就維持空訊息，bridge 退回 parser */
+    }
+    if (!message) await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  if (!message) return;
+  await sendHookEvent({
+    event: "Stop",
+    sessionId: input.conversationId as string,
+    paneId: process.env.HERDR_PANE_ID || undefined,
+    message,
   });
 }
 
