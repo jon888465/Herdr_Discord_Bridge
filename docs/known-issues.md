@@ -47,9 +47,9 @@
 | ISSUE-041 | bridge 不支援 Herdr 遠端機器（如 agy-pod）的 Agent | 已驗收（文字對話，2026-10-24） | 關閉遠端面板後重問，Discord 收到正確回覆；斷線重連、附件、Team Worker 等未驗收 |
 | ISSUE-042 | 從 Discord 驅動的 Agent 自己重啟 bridge 時，該回合的串流與最終回覆遺失 | 已修正、待驗收（2026-10-28） | 2026-10-24、10-28 各發生一次；已改為重啟後依 active-streams.json 接續，待真實重啟驗收 |
 | ISSUE-043 | 傳入附件沒有保留期限，本機與遠端會一直累積 | 已修正、待驗收 | 已於 2026-10-25 重啟（w2:p1Y，程式尚未 commit）；本機啟動清理已實際刪除過期目錄；遠端刪除未驗證 |
-| ISSUE-047 | Codex 在 Discord 送問後出現「Agent identity changed (session changed); response capture stopped」，擷取在核准通知前中止 | 已修正、待驗收（2026-10-28） | 重新對 Codex 送問，確認不再中止且 allow／deny 可進行；見 ISSUE-047 |
+| ISSUE-047 | Codex 在 Discord 送問後出現「Agent identity changed (session changed); response capture stopped」，擷取在核准通知前中止 | 已驗收（2026-10-28，使用者實測 Discord 送問後不再中止、核准流程正常） | 觸發原因（Codex 第一個 prompt 才建新 session）屬推測；見 ISSUE-047 |
 | ISSUE-046 | Discord 輸入權限選項數字（3）後沒有任何反應，之後按 Approve 才有動作 | 已驗收（2026-10-28，數字／allow／deny／按鈕／📨；原 `3` 沒反應根因未確認） | 2026-10-28 重啟後數字 1／2 回覆成功且有 📨；使用者早先的 `3` 沒反應原因仍未確認 |
-| ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | Claude Stop 與 PermissionRequest 已驗收（2026-10-28，使用者實測）；Codex／agy／pi、transport 設定、遠端 machine 未做 | Claude 已驗收；Codex／agy／pi 未做；見 docs/hook-transport-proposal.md |
+| ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | Claude Stop 與 PermissionRequest 已驗收（2026-10-28，使用者實測）；Codex Stop 與 allow／deny（y／esc 快捷鍵）、hookTransport 設定與 hooks 指令已驗收（2026-10-28）；agy／pi、遠端 machine 未做 | agy／pi 的 hook 能力未查；遠端 machine 未做；見 docs/hook-transport-proposal.md |
 | ISSUE-044 | Claude 回覆在 Discord 被重複貼出多則 | 重新開啟→已修正、待驗收 | 2026-10-28 重現，確認根因為回合尾巴後的「※ recap」行擋住完成判斷；原始碼與單元測試完成，已 commit（ccec39b）並於 2026-10-28 重啟（w2:p10），Discord 未驗收 |
 | ISSUE-039 | Discord 傳入非圖片檔案（如 chat.json）被拒絕 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-038 | agy 多行 prompt（含附圖）回顯後擷取不到回覆，Discord 只得「capture failure」 | 已修正、待驗收 | 原始碼、單元測試與實際畫面重放完成；bridge 尚未重啟，Discord 未驗收 |
@@ -1675,11 +1675,13 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 
 原始碼：`HerdrClient.sendKeys`（`pane.send_keys`）、`deliverApproval`（已匯出以便測試）；新增 1 項測試（allow→`y`、deny→`esc`、數字→文字、非 Codex 不轉換）。完整 `npm test` 271 項、264 通過，失敗的 6 項為 ISSUE-035 既有項目，lint 通過（2026-10-28）。
 
-限制與未驗證：快捷鍵是 Codex 目前版本畫面上標示的 `(y)`／`(esc)`，版本改動可能失效；deny 會中斷整個回合；Discord 端（核准通知後回覆 `allow`／`deny`）尚未實測；其他核准類型（檔案變更、MCP 詢問）的快捷鍵未逐一測。
+驗收（2026-10-28）：使用者在 Discord 對 Codex 回覆 `allow`／`deny` 後回報「都ok了」（本機 Codex 0.165.0，w4:p1；未逐項記錄 📨 與檔案結果）。
+
+限制：快捷鍵是 Codex 目前版本畫面上標示的 `(y)`／`(esc)`，版本改動可能失效；deny 會中斷整個回合；其他核准類型（檔案變更、MCP 詢問）的快捷鍵未逐一測。
 
 ## ISSUE-047：Codex 送問後擷取因 session changed 中止，核准通知與 allow 驗收無法進行
 
-更新日期：2026-10-28　狀態：已修正、待驗收（session 切換的觸發原因仍屬推測；修正已部署，尚未經 Discord 端驗收）
+更新日期：2026-10-28　狀態：已驗收（2026-10-28，使用者在 Discord 重測 Codex 送問不再中止；session 切換的觸發原因仍屬推測）
 
 使用者症狀：在 Discord 對 Codex（w4:p1，python_test）送出「建立 hook_test_allow.txt」的 ISSUE-045 驗收提示後，回應卡片只顯示 `Agent identity changed (session changed); response capture stopped.`。Codex 實際停在核准提示（Herdr 狀態 blocked、標題 Action Required），但 Discord 上沒有走到 allow 的流程，因此 Codex 的 allow／deny 驗收尚未進行。
 
