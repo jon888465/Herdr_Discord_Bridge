@@ -1,6 +1,6 @@
 # Hook／協定通道提案：TUI 留在 Herdr，bridge 另走結構化事件
 
-更新日期：2026-10-28。狀態：**Claude `Stop` 與 `PermissionRequest` 已實作、部署並經使用者驗收（2026-10-28）；Codex Stop、agy Stop 已驗收；pi 擴充已驗收；遠端 machine 仍為規劃中**。以下「已查」只代表讀過文件或二進位字串，「已驗證」才表示在本機實測過。已驗證項目見下方「Claude 實測結果」，其餘皆未驗證。
+更新日期：2026-10-28。狀態：**Claude `Stop` 與 `PermissionRequest` 已實作、部署並經使用者驗收（2026-10-28）；Codex Stop、agy Stop 已驗收；pi 擴充與遠端 machine（agy）已驗收**。以下「已查」只代表讀過文件或二進位字串，「已驗證」才表示在本機實測過。已驗證項目見下方「Claude 實測結果」，其餘皆未驗證。
 
 ## 目標
 
