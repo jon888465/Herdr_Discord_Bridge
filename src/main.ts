@@ -2397,7 +2397,7 @@ export async function streamAgent(
     if (
       sameLocation &&
       !sessionMatches &&
-      (initial.agent === "codex" || initial.agent === "agy") &&
+      ["codex", "agy", "pi"].includes(initial.agent ?? "") &&
       sessionCreatedSince(candidate.agent_session, started, (id) =>
         initial.agent === "agy" && !initial.machine
           ? agyConversationCreatedAt(id)
@@ -2506,7 +2506,7 @@ export async function streamAgent(
       { kind?: string; value?: string } | undefined;
     const hookFinal =
       hookModeFor(runtime.config.hookTransport, current.agent) === "auto" &&
-      hookSession?.kind === "id"
+      (hookSession?.kind === "id" || hookSession?.kind === "path")
         ? (
             hookEvents.stopSince(hookSession.value, started)?.message ?? ""
           ).trim()

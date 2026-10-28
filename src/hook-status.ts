@@ -3,13 +3,14 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 export type HookTransportMode = "auto" | "parser";
-export const HOOK_AGENTS = ["claude", "codex", "agy"] as const;
+export const HOOK_AGENTS = ["claude", "codex", "agy", "pi"] as const;
 export type HookAgent = (typeof HOOK_AGENTS)[number];
 
 export const DEFAULT_HOOK_TRANSPORT: Record<HookAgent, HookTransportMode> = {
   claude: "auto",
   codex: "auto",
   agy: "auto",
+  pi: "auto",
 };
 
 /** 設定值只接受 auto／parser，且只對支援 hook 的 CLI 生效；其餘一律忽略。 */
@@ -90,21 +91,24 @@ export function hookStatusText(
     claude: join(home, ".claude", "settings.json"),
     codex: join(home, ".codex", "hooks.json"),
     agy: join(home, ".gemini", "config", "hooks.json"),
+    pi: join(home, ".pi", "agent", "extensions", "herdr-discord-bridge.ts"),
   };
   const lines = [
     "**Hook 通道狀態**（hook 優先；事件缺失時自動退回畫面 parser）",
   ];
   for (const kind of HOOK_AGENTS) {
     const reg =
-      kind === "agy"
-        ? agyRegisteredEvents(files[kind])
-        : registeredEvents(files[kind]);
+      kind === "pi"
+        ? { Stop: existsSync(files.pi) }
+        : kind === "agy"
+          ? agyRegisteredEvents(files[kind])
+          : registeredEvents(files[kind]);
     const mode = transport?.[kind] ?? "auto";
     const mark = (ok: boolean | undefined) => (ok ? "✅" : "❌ 未註冊");
     // Codex 執行 PermissionRequest hook 時不顯示核准提示（ISSUE-045），所以不建議註冊。
     const perm =
-      kind === "agy"
-        ? "不使用（agy 權限走畫面 parser）"
+      kind === "agy" || kind === "pi"
+        ? `不使用（${kind} 權限走畫面 parser）`
         : kind === "codex"
           ? reg.PermissionRequest
             ? "⚠️ 已註冊（會擋住 Codex 的核准提示，建議移除）"
@@ -115,9 +119,9 @@ export function hookStatusText(
     );
   }
   lines.push(
-    "• 其他 CLI（pi、grok…）目前只用 parser。",
+    "• 其他 CLI（grok…）目前只用 parser。",
     "• Codex 另需在 Codex 內輸入 `/hooks` 審查並信任 `Stop`；信任前不會執行。",
-    '• 設定：`hookTransport: { claude: "auto"|"parser", codex: "auto"|"parser", agy: "auto"|"parser" }`（config.json），改完需重啟 bridge。',
+    '• 設定：`hookTransport: { claude: "auto"|"parser", codex: "auto"|"parser", agy: "auto"|"parser", pi: "auto"|"parser" }`（config.json），改完需重啟 bridge。',
   );
   return lines.join("\n");
 }

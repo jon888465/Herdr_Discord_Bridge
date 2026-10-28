@@ -200,7 +200,18 @@ export function sessionCreatedSince(
   createdAt?: (id: string) => number | undefined,
 ): boolean {
   const s = session as { kind?: unknown; value?: unknown } | null;
-  if (!s || s.kind !== "id" || typeof s.value !== "string") return false;
+  if (!s || typeof s.value !== "string") return false;
+  if (s.kind === "path") {
+    // pi 的 session 檔名帶建立時間：<ISO 時間（: 與 . 換成 -）>_<uuid>.jsonl
+    const t =
+      /(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z_[^/]*$/.exec(
+        s.value,
+      );
+    if (!t) return false;
+    const ms = Date.parse(`${t[1]}T${t[2]}:${t[3]}:${t[4]}.${t[5]}Z`);
+    return Number.isFinite(ms) && ms >= since - 5000;
+  }
+  if (s.kind !== "id") return false;
   const m = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-/i.exec(s.value);
   const ms = m
     ? Number.parseInt(s.value.replace(/-/g, "").slice(0, 12), 16)

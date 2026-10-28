@@ -230,11 +230,13 @@ test("hookTransport validation, mode lookup and status text (ISSUE-045)", async 
     claude: "auto",
     codex: "auto",
     agy: "auto",
+    pi: "auto",
   });
   assert.deepEqual(validateHookTransport({ codex: "parser", agy: "parser" }), {
     claude: "auto",
     codex: "parser",
     agy: "parser",
+    pi: "auto",
   });
   assert.throws(() => validateHookTransport({ claude: "hook" }), /auto/);
   assert.equal(hookModeFor({ claude: "parser" }, "claude"), "parser");
@@ -242,7 +244,8 @@ test("hookTransport validation, mode lookup and status text (ISSUE-045)", async 
   assert.equal(hookModeFor(undefined, "codex"), "auto");
   assert.equal(hookModeFor({ agy: "parser" }, "agy"), "parser");
   assert.equal(hookModeFor({}, "agy"), "auto");
-  assert.equal(hookModeFor({}, "pi"), "parser");
+  assert.equal(hookModeFor({}, "pi"), "auto");
+  assert.equal(hookModeFor({}, "grok"), "parser");
 
   const home = mkdtempSync(join(tmpdir(), "hk-home-"));
   const { mkdirSync, writeFileSync } = await import("node:fs");

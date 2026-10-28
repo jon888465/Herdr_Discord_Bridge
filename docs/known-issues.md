@@ -1729,3 +1729,9 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 修正：`sessionCreatedSince` 新增 `createdAt` 查詢參數；`streamAgent` 對 agy（本機）以對話目錄的 birthtime 判斷是否為送問後建立，是則追蹤新 id，其餘仍停止。遠端 agy 無法查目錄，仍維持停止。
 驗證（2026-10-28）：lint 通過；新增 1 項測試；完整 `npm test` 277 項、270 通過、6 失敗（ISSUE-035 既有項目）。驗收（2026-10-28）：重啟 bridge（a505bfb）後使用者從 Discord 問 agy，回報「ok了」（未逐項記錄 log 與耗時）。
 
+### ISSUE-045 pi 擴充（2026-10-28，原始碼完成並已安裝，待 Discord 驗收）
+
+調查（本機 pi 1.3.0，讀內建 docs 與型別）：pi 沒有 hooks.json，而是 TypeScript 擴充（`~/.pi/agent/extensions/`，與 Herdr 的 `herdr-agent-state.ts` 同目錄）。事件有 `agent_start`、`agent_end`（含 messages）、`agent_settled`（含 `aborted`，最終且僅通知）、`tool_call`（可 block）；pi 沒有內建權限提示，權限只存在於使用者自己安裝的擴充，所以 pi 只做完成通知，不做權限。
+實作：`scripts/pi/herdr-discord-bridge.ts`（複製到擴充目錄；`HERDR_ENV=1` 才啟用；`agent_end` 取最後一則 `stopReason=stop` 的 assistant 文字，`agent_settled` 且未中止、TUI、已 idle 時以 session 檔路徑為 sessionId 傳到 hook socket，失敗靜默）；bridge 的 hook 比對由 `kind=id` 擴及 `kind=path`（pi 的 Herdr `agent_session` 是檔案路徑）；`hookTransport.pi`（預設 `auto`）與 `hooks` 指令支援 pi。ISSUE-047 的 session 切換追蹤也擴及 pi：以 session 檔名內的 ISO 時間判斷是否為送問後建立。已複製到 `~/.pi/agent/extensions/herdr-discord-bridge.ts`。
+驗證（2026-10-28）：lint 通過；新增 1 項 session 檔名時間測試並更新 hookTransport 測試；完整 `npm test` 278 項、271 通過、6 失敗（ISSUE-035 既有項目）。**未驗證**：擴充實際被 pi 載入並送出 Stop（已開啟的 pi 需重開或 `/reload`）、Discord 端以 hook 收尾、pi 送問後新 session 的追蹤。擴充是否會與 Herdr 的擴充互相影響亦未驗證。
+

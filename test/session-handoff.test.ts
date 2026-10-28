@@ -130,7 +130,12 @@ async function fixture() {
       beforeReport = fn;
     },
     close: () =>
-      fs.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }),
+      fs.rm(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      }),
   };
 }
 

@@ -14,8 +14,8 @@
     "commandPrefix": "/herdr",
   },
   // Hook channel per CLI (ISSUE-045): "auto" = hook first, screen parser as fallback;
-  // "parser" = ignore hooks for that CLI. Only claude, codex and agy support hooks.
-  "hookTransport": { "claude": "auto", "codex": "auto", "agy": "auto" },
+  // "parser" = ignore hooks for that CLI. Only claude, codex, agy and pi support hooks.
+  "hookTransport": { "claude": "auto", "codex": "auto", "agy": "auto", "pi": "auto" },
   // Remote Herdr machines (ISSUE-041). IDs without a "<id>:" prefix are always local.
   // `socket` is the remote Herdr API socket; the bridge forwards it over `ssh -L`.
   "machines": [
