@@ -45,7 +45,7 @@
 | ISSUE-035 | coding-workflow 測試在 macOS 有 6 項失敗 | 待調查 | 基準亦失敗，根因未確認 |
 | ISSUE-040 | Claude 最終回覆在串流中途被截斷，並混入「Update available!」提示 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 已於 2026-10-24 重啟（w2:p1V）；根因為推論；Discord 未驗收 |
 | ISSUE-041 | bridge 不支援 Herdr 遠端機器（如 agy-pod）的 Agent | 已驗收（文字對話，2026-10-24） | 關閉遠端面板後重問，Discord 收到正確回覆；斷線重連、附件、Team Worker 等未驗收 |
-| ISSUE-042 | 從 Discord 驅動的 Agent 自己重啟 bridge 時，該回合的串流與最終回覆遺失 | 已修正、待驗收（2026-10-28） | 2026-10-24、10-28 各發生一次；已改為重啟後依 active-streams.json 接續，待真實重啟驗收 |
+| ISSUE-042 | 從 Discord 驅動的 Agent 自己重啟 bridge 時，該回合的串流與最終回覆遺失 | 串流續傳已驗收（2026-10-28）；blocked 補發通知待驗收 | 2026-10-24、10-28 各發生一次；已改為重啟後依 active-streams.json 接續 |
 | ISSUE-043 | 傳入附件沒有保留期限，本機與遠端會一直累積 | 已修正、待驗收 | 已於 2026-10-25 重啟（w2:p1Y，程式尚未 commit）；本機啟動清理已實際刪除過期目錄；遠端刪除未驗證 |
 | ISSUE-047 | Codex 在 Discord 送問後出現「Agent identity changed (session changed); response capture stopped」，擷取在核准通知前中止 | 已驗收（2026-10-28，使用者實測 Discord 送問後不再中止、核准流程正常） | 觸發原因（Codex 第一個 prompt 才建新 session）屬推測；見 ISSUE-047 |
 | ISSUE-046 | Discord 輸入權限選項數字（3）後沒有任何反應，之後按 Approve 才有動作 | 已驗收（2026-10-28，數字／allow／deny／按鈕／📨；原 `3` 沒反應根因未確認） | 2026-10-28 重啟後數字 1／2 回覆成功且有 📨；使用者早先的 `3` 沒反應原因仍未確認 |
@@ -1538,7 +1538,7 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 
 ## ISSUE-042：Agent 在 Discord 驅動的回合中重啟 bridge，該回合的回覆遺失
 
-更新日期：2026-10-28。狀態：已修正、待驗收（原始碼與自動化測試完成；真實「Agent 在 Discord 回合中重啟 bridge」尚未驗收）。原狀態：待調查（2026-10-25）。
+更新日期：2026-10-28。狀態：串流續傳已驗收（2026-10-28）；重啟時已 blocked 的補發通知單獨路徑尚未驗收。原狀態：待調查（2026-10-25）。
 
 症狀：2026-10-24 23:54，使用者在 thread「git repo Herdr_Discord_Bridge」（對應 w1:p1，Claude）回「好」授權 commit／push／重啟。Discord 上該則進度訊息停在「working · 已耗時 1秒／Running 1 shell command…」，之後沒有任何更新與最終回覆；使用者回報「沒回應」。預期：回合結束後仍收到最終回覆，或至少看到明確的「bridge 已重啟」說明。
 
@@ -1711,4 +1711,8 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 
 修正：`AgentWatcher` 首輪輪詢時，對已在 `blocked` 的 Agent 補發一次 `unknown → blocked` 轉換，走原本的 `handleTransition`（先收掉該 terminal 的舊核准，再送新的核准通知；`notifyOn` 未含 blocked 時不送）。限制：重啟前登記的 PermissionRequest hook 連線已斷，hook 行程靜默結束，該提示改由 TUI 流程處理，回覆以文字輸入（Codex 為 y／esc 快捷鍵）；每次重啟都會對仍 blocked 的 Agent 重送一次通知，舊通知的按鈕失效。
 驗證（2026-10-28）：lint 通過；新增 1 項 watcher 測試（首輪補發、第二輪不重發、之後正常轉換）；完整 `npm test` 275 項、268 通過、6 失敗（ISSUE-035 既有項目）。**未驗證**：真實重啟時 Discord 收到補發通知。
+
+### ISSUE-042 續傳驗收（2026-10-28）
+
+環境：本機，bridge 版本 8b6532b，Codex 0.165.0 w4:p1。重啟時 w4:p1 有進行中的 Discord 回合（deny 測試，13:58 開始），新 bridge log 出現 `Resuming stream pane=w4:p1`；使用者在 Discord 回報「成功」（卡片接續更新並可回覆 deny；未逐項記錄畫面細節）。該 Agent 重啟時已 blocked，是由續傳的串流顯示，不是 watcher 補發的通知，所以「補發 blocked 通知」的獨立路徑（沒有進行中串流時）仍未驗收。
 
