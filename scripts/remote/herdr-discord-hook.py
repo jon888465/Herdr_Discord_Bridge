@@ -61,6 +61,9 @@ def main():
     if not isinstance(payload, dict):
         return
     pane = os.environ.get("HERDR_PANE_ID") or None
+    # `--machine <id>`：事件的 paneId 帶機器前綴，與 bridge 看到的遠端 pane_id 相同。
+    if pane and "--machine" in sys.argv[1:-1]:
+        pane = sys.argv[sys.argv.index("--machine") + 1] + ":" + pane
 
     if "conversationId" in payload and "terminationReason" in payload and "hook_event_name" not in payload:
         sys.stdout.write("{}\n")

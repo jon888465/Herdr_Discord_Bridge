@@ -337,4 +337,4 @@ Agent 可在最終回覆中單獨一行寫 `[[discord-attach: /絕對路徑]]`�
 
 ### 遠端 machine 的 hook
 
-遠端 Agent 預設只用 parser；在該 machine 設定 `hookSocket`（遠端的絕對路徑）後，bridge 會另外維持一條 `ssh -R <hookSocket>:<本機 hook socket>`（與 `-L` 分開，轉發失敗不會影響遠端控制），並在遠端建立 0700 目錄。遠端需安裝 `scripts/remote/herdr-discord-hook.py`（只需 Python 3，不需 Node），並註冊為該 CLI 的 `Stop` hook；agy 寫在 `~/.gemini/config/hooks.json`：`{ "herdr-discord-bridge": { "Stop": [{ "command": "/root/.local/bin/herdr-discord-hook.py", "timeout": 10, "type": "command" }] } }`。Claude／Codex 格式的 `Stop` 也接受。遠端腳本在遠端讀 agy transcript，不需要把檔案傳過 tunnel。
+遠端 Agent 預設只用 parser；在該 machine 設定 `hookSocket`（遠端的絕對路徑）後，bridge 會另外維持一條 `ssh -R <hookSocket>:<本機 hook socket>`（與 `-L` 分開，轉發失敗不會影響遠端控制），並在遠端建立 0700 目錄。遠端需安裝 `scripts/remote/herdr-discord-hook.py`（只需 Python 3，不需 Node），並註冊為該 CLI 的 `Stop` hook；agy 寫在 `~/.gemini/config/hooks.json`：`{ "herdr-discord-bridge": { "Stop": [{ "command": "/root/.local/bin/herdr-discord-hook.py --machine <id>", "timeout": 10, "type": "command" }] } }`。Claude／Codex 格式的 `Stop` 也接受。遠端腳本在遠端讀 agy transcript，不需要把檔案傳過 tunnel。

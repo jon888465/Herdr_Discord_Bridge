@@ -433,3 +433,17 @@ test("approval follow-up posts the hook Stop message once when no stream exists 
     false,
   );
 });
+
+test("agents without agent_session match Stop events by pane id (remote machines, ISSUE-045)", async () => {
+  const { HookEventStore } = await import("../src/hook-events.js");
+  const store = new HookEventStore();
+  const at = Date.now();
+  store.record(
+    { event: "Stop", sessionId: "s1", paneId: "agy-pod:w2:p1", message: "hi" },
+    at,
+  );
+  assert.equal(store.stopForPane("agy-pod:w2:p1", at - 1)?.message, "hi");
+  assert.equal(store.stopForPane("agy-pod:w2:p1", at + 1), undefined);
+  assert.equal(store.stopForPane("w2:p1", at - 1), undefined);
+  assert.equal(store.stopForPane(undefined, 0), undefined);
+});

@@ -35,7 +35,10 @@ export function hookSocketPath(): string {
 export class HookEventStore {
   private readonly stops = new Map<string, HookEvent & { at: number }>();
 
+  private readonly byPane = new Map<string, HookEvent & { at: number }>();
+
   record(event: HookEvent, at = Date.now()): void {
+    if (event.paneId) this.byPane.set(event.paneId, { ...event, at });
     this.stops.delete(event.sessionId);
     this.stops.set(event.sessionId, { ...event, at });
     while (this.stops.size > KEEP_EVENTS) {
@@ -52,6 +55,19 @@ export class HookEventStore {
   ): HookEvent | undefined {
     if (!sessionId) return undefined;
     const found = this.stops.get(sessionId);
+    return found && found.at >= since ? found : undefined;
+  }
+
+  /**
+   * 沒有 agent_session 的 Agent（例如沒裝 Herdr session hook 的遠端 machine）改以 pane ID 比對；
+   * 遠端事件的 paneId 帶 `<machine>:` 前綴，與 bridge 看到的 pane_id 相同。
+   */
+  stopForPane(
+    paneId: string | undefined,
+    since: number,
+  ): HookEvent | undefined {
+    if (!paneId) return undefined;
+    const found = this.byPane.get(paneId);
     return found && found.at >= since ? found : undefined;
   }
 }

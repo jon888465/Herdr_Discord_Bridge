@@ -49,7 +49,7 @@
 | ISSUE-043 | 傳入附件沒有保留期限，本機與遠端會一直累積 | 已修正、待驗收 | 已於 2026-10-25 重啟（w2:p1Y，程式尚未 commit）；本機啟動清理已實際刪除過期目錄；遠端刪除未驗證 |
 | ISSUE-047 | Codex 在 Discord 送問後出現「Agent identity changed (session changed); response capture stopped」，擷取在核准通知前中止 | 已驗收（2026-10-28，使用者實測 Discord 送問後不再中止、核准流程正常） | 觸發原因（Codex 第一個 prompt 才建新 session）屬推測；見 ISSUE-047 |
 | ISSUE-046 | Discord 輸入權限選項數字（3）後沒有任何反應，之後按 Approve 才有動作 | 已驗收（2026-10-28，數字／allow／deny／按鈕／📨；原 `3` 沒反應根因未確認） | 2026-10-28 重啟後數字 1／2 回覆成功且有 📨；使用者早先的 `3` 沒反應原因仍未確認 |
-| ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | Claude Stop 與 PermissionRequest 已驗收（2026-10-28，使用者實測）；Codex Stop 與 allow／deny（y／esc 快捷鍵）、hookTransport 設定與 hooks 指令已驗收（2026-10-28）；agy Stop、pi 擴充、遠端 machine（agy）已驗收（2026-10-28） | 遠端 Claude／Codex／pi 未涵蓋；見 docs/hook-transport-proposal.md |
+| ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | Claude Stop 與 PermissionRequest 已驗收（2026-10-28，使用者實測）；Codex Stop 與 allow／deny（y／esc 快捷鍵）、hookTransport 設定與 hooks 指令已驗收（2026-10-28）；agy Stop、pi 擴充已驗收（2026-10-28）；遠端 machine（agy）已修正、待重新驗收 | 遠端 Claude／Codex／pi 未涵蓋；見 docs/hook-transport-proposal.md |
 | ISSUE-044 | Claude 回覆在 Discord 被重複貼出多則 | 重新開啟→已修正、待驗收 | 2026-10-28 重現，確認根因為回合尾巴後的「※ recap」行擋住完成判斷；原始碼與單元測試完成，已 commit（ccec39b）並於 2026-10-28 重啟（w2:p10），Discord 未驗收 |
 | ISSUE-039 | Discord 傳入非圖片檔案（如 chat.json）被拒絕 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-038 | agy 多行 prompt（含附圖）回顯後擷取不到回覆，Discord 只得「capture failure」 | 已修正、待驗收 | 原始碼、單元測試與實際畫面重放完成；bridge 尚未重啟，Discord 未驗收 |
@@ -1735,7 +1735,7 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 實作：`scripts/pi/herdr-discord-bridge.ts`（複製到擴充目錄；`HERDR_ENV=1` 才啟用；`agent_end` 取最後一則 `stopReason=stop` 的 assistant 文字，`agent_settled` 且未中止、TUI、已 idle 時以 session 檔路徑為 sessionId 傳到 hook socket，失敗靜默）；bridge 的 hook 比對由 `kind=id` 擴及 `kind=path`（pi 的 Herdr `agent_session` 是檔案路徑）；`hookTransport.pi`（預設 `auto`）與 `hooks` 指令支援 pi。ISSUE-047 的 session 切換追蹤也擴及 pi：以 session 檔名內的 ISO 時間判斷是否為送問後建立。已複製到 `~/.pi/agent/extensions/herdr-discord-bridge.ts`。
 驗證（2026-10-28）：lint 通過；新增 1 項 session 檔名時間測試並更新 hookTransport 測試；完整 `npm test` 278 項、271 通過、6 失敗（ISSUE-035 既有項目）。驗收（2026-10-28）：重啟 bridge（f12892e 之後）、pi 載入擴充後，使用者從 Discord 問 pi（w4:p4），回報 bridge 有收到 hook 且「ok」（未逐項記錄 log 與耗時，也未另測送問後新 session 的追蹤路徑是否被觸發）。擴充與 Herdr 擴充互不影響屬觀察到無異常，未另行驗證。
 
-### ISSUE-045 遠端 machine hook（2026-10-28，已驗收）
+### ISSUE-045 遠端 machine hook（2026-10-28，原驗收撤回，見下方「遠端 hook 事件到了但沒被採用」）
 
 做法：machine 設定新增選填 `hookSocket`（遠端絕對路徑；驗證不可含空白、`:`、引號、`..`）。bridge 為該 machine 另開 `HookReverseTunnel`：先 `ssh host mkdir -p -m 700 <目錄>`，再 `ssh -N -R <hookSocket>:<本機 hook socket>`（`StreamLocalBindUnlink=yes`、`ExitOnForwardFailure=yes`，斷線退避重連）；獨立於 `-L`，轉發失敗不影響遠端控制。遠端用 `scripts/remote/herdr-discord-hook.py`（Python 3，無 Node；agy 版與本機相同邏輯，並接受 Claude／Codex 格式 Stop）把事件寫到遠端 hook socket，經 `-R` 回到本機 hook server；比對靠 session id（UUID），不需要 pane 前綴。權限事件不支援遠端（沒有要求等待回應的路徑）。
 部署（2026-10-28）：agy-pod 為 Linux（agy 1.4.7、Python 3.14，無 Node；scp 不可用，改以 `ssh cat` 上傳）；已安裝 `/root/.local/bin/herdr-discord-hook.py`、建立 `/root/.gemini/config/hooks.json`（`Stop`，timeout 10）並在本機 config.json 的 agy-pod 加 `hookSocket`（備份 config.json.bak-hook）。
@@ -1757,4 +1757,11 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 1. 沒有回覆：根因已確認——該回合由終端機發問，沒有 Discord 串流（`streamAgent`），bridge 只送狀態通知（`is idle/done`），不會轉發回覆內容；補發的核准通知本身不會建立串流。**修正**：`onApproval` 在沒有串流時記下核准（`approvalFollowups`，1 小時內有效）；Agent 回到 idle／done 且仍無串流時，`relayApprovalFollowup` 以 hook 的 Stop 訊息（`hookTransport` 為 `auto` 且有該 session 的 Stop 事件，最多等 3 秒）貼回核准所在的 thread，每筆只貼一次。沒有 hook 事件時維持原本只送狀態通知。
 2. `agent is busy (w1:p1)`：`assertAgentAvailable` 在 Agent 狀態為 `working` 或該 terminal 在 `activeStreams` 時拒絕。w1:p1 是正在執行本專案工作的 Claude，回報當下狀態為 working（本輪查核時也是 working，`active-streams.json` 為空），依此判斷是設計上的忙碌拒絕；但**無法排除**記憶體中 `activeStreams` 殘留舊項目（尚無對應證據，Agent 閒置時再試仍 busy 才需調查）。
 驗證（2026-10-28）：lint 通過；新增 1 項測試；完整 `npm test` 280 項、273 通過、6 失敗（ISSUE-035 既有項目）。驗收（2026-10-28）：以 Herdr API 對 Codex w4:p1 直接輸入需核准的指令（無 Discord 串流），Discord 收到核准通知，使用者回覆後 Codex 完成，核准 thread 補貼了最終回覆（`FOLLOWUP-OK`），使用者回報「有補貼了，ok」（未逐項記錄是否只貼一次）。
+
+### ISSUE-045 遠端 hook 事件到了但沒被採用（2026-10-28，已修正、待驗收）
+
+重現：修正 tunnel 後遠端 agy 從 Discord 問「今天東京氣溫」，bridge log 有 `hook Stop session=2d61b30e pane=w2:p1 chars=116`，但同回合的 `capture-diagnostics/…agy-pod_w2_p1.json` 顯示 `agent_session = None`、耗時 44959 ms，表示這回合仍由畫面 parser 收尾，hook 沒被用到——先前「收尾正常」的驗收其實是 parser 的結果，遠端 hook 驗收需重做。
+根因（已確認）：遠端 Herdr 沒有 session 回報（遠端 agy 的 hooks.json 沒有 Herdr 自己的 session hook），`agent_session` 為空；bridge 只用 session id 比對 Stop 事件，所以事件被忽略。另外 log 的 `pane=w2:p1` 沒有 machine 前綴，與 bridge 看到的 `agy-pod:w2:p1` 不同。
+修正：遠端腳本新增 `--machine <id>` 參數，事件的 paneId 帶 `<id>:` 前綴；`HookEventStore.stopForPane` 以 pane ID 保存最近的 Stop；`streamAgent` 與核准後補貼在 **沒有 `agent_session`** 時改用 pane ID 比對（有 session 的仍嚴格比對 session）。遠端 hooks.json 的 command 改為 `/root/.local/bin/herdr-discord-hook.py --machine agy-pod`，腳本已重新上傳。
+驗證（2026-10-28）：lint 通過；新增 1 項 pane 比對測試；完整 `npm test` 281 項、274 通過、6 失敗（ISSUE-035 既有項目）。**未驗證**：修正後遠端 agy 在 Discord 以 hook 收尾（應在 log 看到 `hook Stop … pane=agy-pod:w2:p1`，耗時遠小於 parser 的約 45 秒）。ISSUE-045 遠端 machine 的「已驗收」狀態因此撤回，改為待驗收。
 

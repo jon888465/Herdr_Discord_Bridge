@@ -2323,10 +2323,17 @@ export async function relayApprovalFollowup(
   }
   const session = agent.agent_session as
     { kind?: string; value?: string } | undefined;
-  if (!session?.value || !["id", "path"].includes(session.kind ?? ""))
+  if (
+    session &&
+    (!session.value || !["id", "path"].includes(session.kind ?? ""))
+  )
     return false;
   for (let i = 0; i < attempts; i++) {
-    const message = hookEvents.stopSince(session.value, entry.since)?.message;
+    const message = (
+      session
+        ? hookEvents.stopSince(session.value, entry.since)
+        : hookEvents.stopForPane(agent.pane_id, entry.since)
+    )?.message;
     if (message?.trim()) {
       followups.delete(agent.terminal_id);
       await discord.postApprovalFollowup(entry.approval, message.trim());
@@ -2577,7 +2584,11 @@ export async function streamAgent(
         ? (
             hookEvents.stopSince(hookSession.value, started)?.message ?? ""
           ).trim()
-        : "";
+        : !hookSession
+          ? (
+              hookEvents.stopForPane(current.pane_id, started)?.message ?? ""
+            ).trim()
+          : "";
     const complete =
       transcript?.turn.completed ||
       Boolean(hookFinal) ||
