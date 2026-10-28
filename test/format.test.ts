@@ -52,6 +52,48 @@ test("agent header identifies the Agent, workspace, and pane", () => {
   assert.match(rendered, /Pane: w1:p2/);
 });
 
+test("agent header is one unframed line and shows the machine once for remote agents", () => {
+  const local = agentHeader("codex", "w1", "w1:p2", "backend", "review");
+  assert.equal(local.split("\n").length, 3);
+  assert.doesNotMatch(local, /[┌└│]\s*$|─/);
+  assert.match(local, /🤖 codex · backend │ WK: w1 · review │ Pane: w1:p2/);
+  const remote = agentHeader(
+    "agy",
+    "agy-pod:w2",
+    "agy-pod:w2:p1",
+    "agy",
+    "agy-pod:~",
+  );
+  assert.match(remote, /🤖 agy @agy-pod │ WK: w2 · ~ │ Pane: agy-pod:w2:p1/);
+});
+
+test("agent header (reviewed with agy-pod): clean before comparing, per-field limits, safe separators", () => {
+  // ANSI／換行不會讓同名 kind 被當成不同。
+  assert.match(
+    agentHeader("agy\n", "w1", "w1:p1", "\u001b[1magy", "w1"),
+    /🤖 agy │ WK: w1 │ Pane: w1:p1/,
+  );
+  // 長且含反引號的 workspace 名稱：Pane 仍完整，且不會破壞程式碼區塊。
+  const long = agentHeader(
+    "bot",
+    "m:w1",
+    "m:w1:p1",
+    "",
+    "m:feat-```-long".repeat(25),
+  );
+  assert.match(long, /Pane: m:w1:p1$/m);
+  assert.equal((long.match(/```/g) || []).length, 2);
+  // 名稱含 │ 不混淆欄位；截斷以字元計，不切壞 emoji。
+  assert.match(agentHeader("a│b", "w1", "w1:p1"), /🤖 a\|b │ WK: w1/);
+  const emoji = agentHeader("x", "w1", "w1:p1", "", "😀".repeat(40));
+  assert.doesNotMatch(emoji, /\uFFFD|[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+  // 機器名與 workspace 前綴重複時只顯示一次。
+  assert.match(
+    agentHeader("agy", "dev:w1", "dev:w1:p2", "", "dev:ops:test"),
+    /🤖 agy @dev │ WK: w1 · ops:test │ Pane: dev:w1:p2/,
+  );
+});
+
 test("mention-only commands and prefixed commands share the same parser", () => {
   assert.deepEqual(parseCommandText("agents", "/herdr", true, true), {
     rest: "agents",
