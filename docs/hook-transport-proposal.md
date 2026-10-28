@@ -1,6 +1,6 @@
 # Hook／協定通道提案：TUI 留在 Herdr，bridge 另走結構化事件
 
-更新日期：2026-10-28。狀態：**規劃中，尚未實作**。以下「已查」只代表讀過文件或二進位字串，「已驗證」才表示在本機實測過；本文件目前沒有任何已驗證項目。
+更新日期：2026-10-28。狀態：**規劃中，尚未實作**。以下「已查」只代表讀過文件或二進位字串，「已驗證」才表示在本機實測過。已驗證項目見下方「Claude 實測結果」，其餘皆未驗證。
 
 ## 目標
 
@@ -31,6 +31,17 @@ Herdr 現有 `herdr-agent-state.sh` 只處理 `SessionStart`（回報 session id
 3. `Stop`：以 `last_assistant_message` 當最終回覆並標記完成；bridge 與現有 turn 關聯（prompt／session）後貼 Discord。
 4. 權限：`PermissionRequest` hook 把請求轉給 bridge，在 Discord 顯示並等待使用者選擇，再把決定回給 hook；TUI 端同時是否還顯示提示、使用者在 TUI 先按掉時如何撤銷 Discord 請求，需實測。
 5. 遠端 machine：hook 在遠端執行，需透過既有 SSH 轉發通道回報；首版可只支援本機。
+
+## Claude 實測結果（2026-10-28，本機 macOS，claude 於 Herdr 臨時 pane，以 `--settings` 檔註冊 hook；測試檔已清除）
+
+已驗證：
+1. `Stop` hook 確實觸發。輸入含 `session_id`、`transcript_path`、`prompt_id`、`permission_mode`、`last_assistant_message`（測試回覆 `DONE` 與畫面一致）、`background_tasks`、`session_crons`。
+2. `PermissionRequest` hook 在 `--permission-mode default` 下觸發，輸入含 `tool_name`、`tool_input`（Bash 的 command／description）、`prompt_id`。在 auto mode（本機預設）下不會出現權限提示，也就不會觸發。
+3. hook 等待期間，**TUI 同時顯示權限提示**（使用者可在 TUI 直接決定）。
+4. hook 回傳 `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}` 後，TUI 提示自動消失並執行該工具（檔案已建立）。deny 路徑未測。
+5. 使用者在 TUI 先按 Enter 決定時，工具照常執行；但等待中的 hook 行程**不會被取消**，至少 20 秒後仍存活，直到它自己逾時。bridge 必須自行處理孤兒等待（hook 設合理 timeout、收到 TUI 先決定時放棄並撤銷 Discord 請求）。
+
+未驗證：deny 與 `updatedPermissions`、hook 逾時後 TUI 的行為、`http` 型 hook、bridge 以外程序偽造事件的防護、`Stop` 事件與 bridge 現有 turn 的關聯（可用 `prompt_id`／session）、遠端 machine。Codex／agy／pi 仍完全未測。
 
 ## 待驗證項目（依序）
 

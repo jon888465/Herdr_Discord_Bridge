@@ -1604,4 +1604,6 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 
 約束：**parser 路徑永遠保留為備用**；hook 事件缺失、逾時或 CLI 不支援時退回 parser，不得移除或降級。
 
-未驗證：全部（hook 實際觸發、權限等待行為、Codex／agy／pi 能力、遠端 machine、事件遺失的退回流程）。下一步：先實測 Claude `Stop`，再測 `PermissionRequest`。
+已驗證（2026-10-28，Claude 臨時 pane）：`Stop` 帶 `last_assistant_message`；`PermissionRequest` 可等待外部決定且 TUI 同時顯示提示，回傳 allow 後 TUI 自動執行；TUI 先決定時 hook 行程不會被取消。細節見提案文件。
+
+未驗證：deny、bridge 端接收與關聯、Codex／agy／pi 能力、遠端 machine、事件遺失的退回流程。bridge 程式尚未動。下一步：做 bridge 的 hook 事件入口與 Claude 最小版（`transport: auto`，逾時退回 parser）。
