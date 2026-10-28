@@ -176,3 +176,141 @@ test("PermissionRequest hook waits for a Discord decision, cancel and drop leave
     stop();
   }
 });
+
+test("Codex Stop hook also completes the stream (ISSUE-045)", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const agent = {
+    terminal_id: "term",
+    pane_id: "w2:p2",
+    workspace_id: "w2",
+    tab_id: "w2:t1",
+    agent: "codex",
+    agent_status: "working",
+    agent_session: { kind: "id", value: "sess-codex" },
+  };
+  const sent: string[] = [];
+  const runtime = {
+    config: { streamIntervalMs: 2000, outputLines: 40 },
+    herdr: {
+      listAgentsWithWorkspaceNames: async () => [agent],
+      readAgent: async () => "› question\n• partial",
+    },
+    discord: {
+      editProgress: async () => {},
+      postOutput: async (_m: unknown, text: string) => {
+        sent.push(text);
+      },
+    },
+  } as unknown as Parameters<typeof streamAgent>[2];
+  const task = streamAgent(
+    agent as never,
+    {} as Parameters<typeof streamAgent>[1],
+    runtime,
+    "question",
+    "",
+  );
+  hookEvents.record({
+    event: "Stop",
+    sessionId: "sess-codex",
+    message: "codex hook final",
+  });
+  t.mock.timers.tick(2000);
+  await task;
+  assert.deepEqual(sent, ["codex hook final"]);
+});
+
+test("hookTransport validation, mode lookup and status text (ISSUE-045)", async () => {
+  const {
+    validateHookTransport,
+    hookModeFor,
+    hookStatusText,
+    registeredEvents,
+  } = await import("../src/hook-status.js");
+  assert.deepEqual(validateHookTransport(undefined), {
+    claude: "auto",
+    codex: "auto",
+  });
+  assert.deepEqual(validateHookTransport({ codex: "parser", agy: "auto" }), {
+    claude: "auto",
+    codex: "parser",
+  });
+  assert.throws(() => validateHookTransport({ claude: "hook" }), /auto/);
+  assert.equal(hookModeFor({ claude: "parser" }, "claude"), "parser");
+  assert.equal(hookModeFor({}, "claude"), "auto");
+  assert.equal(hookModeFor(undefined, "codex"), "auto");
+  assert.equal(hookModeFor({ claude: "auto" }, "agy"), "parser");
+
+  const home = mkdtempSync(join(tmpdir(), "hk-home-"));
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  mkdirSync(join(home, ".claude"));
+  writeFileSync(
+    join(home, ".claude", "settings.json"),
+    JSON.stringify({
+      hooks: {
+        Stop: [{ hooks: [{ command: "/x/scripts/herdr-discord-hook" }] }],
+      },
+    }),
+  );
+  assert.deepEqual(registeredEvents(join(home, ".claude", "settings.json")), {
+    Stop: true,
+    PermissionRequest: false,
+  });
+  const text = hookStatusText({ codex: "parser" }, home);
+  assert.match(text, /claude\*\*：模式 `auto`｜Stop ✅｜PermissionRequest ❌/);
+  assert.match(text, /codex\*\*：模式 `parser`｜Stop ❌/);
+});
+
+test("parser mode ignores a Claude Stop hook event (ISSUE-045)", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const agent = {
+    terminal_id: "term",
+    pane_id: "w2:p3",
+    workspace_id: "w2",
+    tab_id: "w2:t1",
+    agent: "claude",
+    agent_status: "working",
+    agent_session: { kind: "id", value: "sess-parser" },
+  };
+  const sent: string[] = [];
+  const runtime = {
+    config: {
+      streamIntervalMs: 2000,
+      outputLines: 40,
+      hookTransport: { claude: "parser", codex: "auto" },
+    },
+    herdr: {
+      listAgentsWithWorkspaceNames: async () => [agent],
+      readAgent: async () => "❯ question\n\n⏺ partial",
+    },
+    discord: {
+      editProgress: async () => {},
+      postOutput: async (_m: unknown, text: string) => {
+        sent.push(text);
+      },
+    },
+  } as unknown as Parameters<typeof streamAgent>[2];
+  const task = streamAgent(
+    agent as never,
+    {} as Parameters<typeof streamAgent>[1],
+    runtime,
+    "question",
+    "",
+  );
+  hookEvents.record({
+    event: "Stop",
+    sessionId: "sess-parser",
+    message: "hook final",
+  });
+  t.mock.timers.tick(2000);
+  t.mock.timers.tick(2000);
+  // 只有一次 tick 後仍未完成：hook 被忽略，沒有立即貼出
+  assert.deepEqual(sent, []);
+  agent.agent_status = "idle";
+  for (let i = 0; i < 40 && sent.length === 0; i++) {
+    t.mock.timers.tick(2000);
+    await Promise.resolve();
+  }
+  await task;
+  assert.ok(sent.length > 0);
+  assert.ok(!(sent as string[]).includes("hook final"));
+});

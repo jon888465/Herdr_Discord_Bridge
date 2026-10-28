@@ -39,6 +39,7 @@ export const SHORT_COMMANDS = new Set([
   "agents",
   "agent",
   "status",
+  "hooks",
   "current",
   "use",
   "ask",

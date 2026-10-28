@@ -1,3 +1,4 @@
+import { hookModeFor, hookStatusText } from "./hook-status.js";
 import {
   hookEvents,
   permissionBroker,
@@ -250,7 +251,7 @@ async function startBridge(
         throw new Error(
           "Use team questions <task-id> and team reply <task-id> <question-id> <answer> for Team Task replies",
         );
-      await deliverApproval(approval, text, herdr, routing);
+      await deliverApproval(approval, text, herdr, routing, config);
     } else {
       throw new Error("you are not authorized to control this agent");
     }
@@ -493,6 +494,12 @@ export async function handleCommand(
       return;
     case "status":
       await status(context, runtime);
+      return;
+    case "hooks":
+      await runtime.discord.reply(
+        context.message,
+        hookStatusText(runtime.config.hookTransport),
+      );
       return;
     case "assign":
       await assignAgent(args, context, runtime);
@@ -2386,7 +2393,7 @@ export async function streamAgent(
     const hookSession = current.agent_session as
       { kind?: string; value?: string } | undefined;
     const hookFinal =
-      (current.agent || "").toLowerCase().includes("claude") &&
+      hookModeFor(runtime.config.hookTransport, current.agent) === "auto" &&
       hookSession?.kind === "id"
         ? (
             hookEvents.stopSince(hookSession.value, started)?.message ?? ""
@@ -2646,6 +2653,7 @@ async function deliverApproval(
   text: string,
   herdr: HerdrClient,
   routing: RoutingStore,
+  config?: { hookTransport?: Partial<Record<string, "auto" | "parser">> },
 ): Promise<void> {
   const agents = await herdr.listAgentsWithWorkspaceNames();
   const current = agents.find(
@@ -2668,7 +2676,10 @@ async function deliverApproval(
   }
   // Claude PermissionRequest hook 正在等決定（ISSUE-045）：allow／deny 直接回給 hook，
   // TUI 提示會自動消失；其他文字照舊打進 TUI，並放棄對 hook 的等待。
-  const decision = permissionDecisionFromText(text);
+  const decision =
+    hookModeFor(config?.hookTransport, current.agent) === "auto"
+      ? permissionDecisionFromText(text)
+      : undefined;
   console.log(
     `approval reply pane=${current.pane_id} text=${JSON.stringify(text.slice(0, 40))} hookPending=${permissionBroker.has(current.pane_id)} decision=${decision ?? "none"}`,
   );
@@ -2738,6 +2749,7 @@ function helpText(prefix: string): string {
     `\`${prefix} current\` — 顯示目前 thread 的 active Agent`,
     `\`${prefix} use <agent>\` — 切換 thread 的 active Agent`,
     `\`${prefix} status\` — 檢查 Herdr socket 與 routing`,
+    `\`${prefix} hooks\` — 查看 Claude／Codex hook 通道是否已註冊與目前模式（hook 優先，缺事件退回 parser）`,
     `\`${prefix} workspaces\` — 列出可用 workspace`,
     `\`${prefix} wk use <workspace>\` — 只切換 route workspace，不會選 Agent`,
     "",
@@ -2789,6 +2801,7 @@ function consoleHelpText(): string {
     "agent detach — 停止 bridge 顯示目前 Agent；不停止 Agent、不取消 routing",
     "current — 顯示目前選取的 Agent、workspace 與 pane",
     "status — 檢查 Herdr socket 與 routing",
+    "hooks — 查看 Claude／Codex hook 通道是否已註冊與目前模式（hook 優先，缺事件退回 parser）",
     "wk — 列出可用 workspace",
     "wk use <workspace> — 選取 workspace；不會建立或移動 Agent",
     "",

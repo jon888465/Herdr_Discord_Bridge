@@ -187,7 +187,12 @@ export async function startHookServer(
         broker.register(event, respond);
         return;
       }
-      if (event) store.record(event);
+      if (event) {
+        store.record(event);
+        console.log(
+          `hook ${event.event} session=${event.sessionId.slice(0, 8)} pane=${event.paneId ?? "?"} chars=${event.message.length}`,
+        );
+      }
       socket.end();
     });
   });

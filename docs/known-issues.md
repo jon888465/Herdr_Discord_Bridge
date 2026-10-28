@@ -1638,3 +1638,30 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 驗證（2026-10-28，使用者在 Discord 實測，bridge w2:p23 的 console log 為證）：(1) colab_llm（`w5:p3`）回覆 `2`：`hookPending=true decision=none`，數字送進 TUI，agent 繼續執行。(2) 本 session（`w1:p1`）回覆 `1` 兩次、`allow`、`deny`、`allow`：`allow` 與 `deny` 皆 `decision=…` 並由 hook 回傳——`allow` 後指令執行，`deny` 後 Claude 收到「Permission denied by hook」且測試檔未被刪除，再次 `allow` 後刪除成功。(3) 使用者確認文字回答後出現 📨 反應。
 
 使用者回報（2026-10-28）：「Approve / continue」按鈕、TUI 先決定後的恢復通知，以及 Claude `Stop` hook 的 Discord 端到端（回覆只貼一次、很快收尾）皆正常（以使用者口頭回報為證，無額外 log 擷取）。未驗證：早先 `3`（switch to auto mode）沒反應的原因，可能是重啟前舊版或當時狀態，無 log 佐證。
+
+### ISSUE-045 Codex 接入（2026-10-28，原始碼完成，待使用者信任 hook 與驗收）
+
+已做：`~/.codex/hooks.json` 加入 `Stop`（10 秒）與 `PermissionRequest`（300 秒）指向 `scripts/herdr-discord-hook`（備份 `hooks.json.bak-hook`）；`streamAgent` 的 hook 收尾條件由 Claude 擴及 Codex（agent_session kind `id`）；`PermissionRequest` 的 broker／Discord 回覆路徑本來就以 pane 為單位，不分 CLI。新增 1 項測試（Codex 的 Stop 使串流直接收尾）；完整 `npm test` 268 項、261 通過，失敗的 6 項為 ISSUE-035 既有項目；lint 通過（2026-10-28）。
+
+**尚未生效的條件**：Codex 要求新 hook 先在 `/hooks` 審查並信任，信任前會被略過。嘗試以 `--dangerously-bypass-hook-trust` 做暫時實測被安全機制拒絕，故沒有繞過、**Codex 的 hook 輸入輸出格式與等待行為未實測**，目前只依官方文件。
+
+未驗證：全部 Codex 實測（Stop 觸發與 `last_assistant_message`、PermissionRequest 等待與 TUI 同時顯示提示、cancel 後回到原核准流程、與現有 Codex transcript 收尾的先後）；Discord 端到端。
+
+### ISSUE-045 通道設定、hooks 指令與說明（2026-10-28，原始碼完成，待驗收）
+
+新增 `hookTransport` 設定（`auto`／`parser`，預設 `auto`）、`hooks` 狀態指令（Discord 與 console）、help 文字與 README（中英）安裝說明及設定範例；`parser` 模式下 `streamAgent` 忽略 Stop 事件、`deliverApproval` 不走 hook 決定。測試（2026-10-28）：新增 2 項（設定驗證／模式查詢／狀態文字、parser 模式忽略 Stop 事件）；完整 `npm test` 270 項、263 通過，失敗的 6 項為 ISSUE-035 既有項目；lint 通過。未驗證：Discord 上實際執行 `hooks` 指令與 help 顯示；`parser` 模式在真實 Claude／Codex 的行為；Codex hook 實測（待使用者在 Codex `/hooks` 信任後驗收）。
+
+### ISSUE-045 Codex 實測結果與撤回 PermissionRequest（2026-10-28）
+
+實測（本機，Codex v0.162.1，暫時 pane 與暫時專案，`-a on-request -s read-only`，hook 已在 `/hooks` 信任）發現兩個問題，故**撤回 Codex 的 `PermissionRequest` hook 註冊**（`~/.codex/hooks.json` 現僅剩 Herdr 的 `SessionStart` 與 `Stop`；備份 `hooks.json.bak-hook`）：
+
+1. **Codex 在 PermissionRequest hook 執行期間不顯示核准提示**，畫面是 `Working … · herdr-discord-hook: relay to Discord bridge`，Herdr 狀態為 `working` 而非 `blocked`。與 Claude 不同（Claude 提示與 hook 同時顯示）。因此不會產生 Discord 的 blocked 核准通知，使用者在 TUI 也無法回答，直到 hook 逾時或結束（我們的指令最長等 290 秒）。結束 hook 後才出現一般核准提示（畫面顯示 `hook exited without a status code`）。
+2. **hook 的環境變數不可信**：hook 行程的 `HERDR_PANE_ID` 是 `w4:p1`（另一個 Codex pane），也沒有繼承測試用的 `HERDR_DISCORD_HOOK_SOCKET`。推測 hook 由共用的 Codex app-server daemon 執行，繼承的是 daemon 啟動時的環境（**未確認**）。因此以 `HERDR_PANE_ID` 對應 pane 對 Codex 不可靠，必須改用 session id 對應。
+
+影響與狀態：Codex 的權限 hook 暫不可用；Codex `Stop` 仍註冊，但**未取得實測證據**（測試中事件未送到測試用 socket，原因同第 2 點；未驗證是否送到正式 bridge）。Claude 不受影響。我曾因測試在 `~/.codex/config.toml` 暫時加入 `/private/tmp/cx2/proj` 的 trusted 專案紀錄，已移除。
+
+下一步（未做）：Codex `Stop` 的 pane 對應改用 session id（`hookEvents` 已以 session id 查詢，應不受影響，待實測確認）；Codex 權限改走 app-server 協定，或在 Codex 提示出現前不阻塞（例如 hook 立即回傳不決定並由 bridge 另行通知）。
+
+後續（2026-10-28）：`hooks` 指令對 Codex 的 `PermissionRequest` 改顯示「未註冊（Codex 不建議開啟）」，若已註冊則警告；README／SPEC 同步改為 Codex 只開 `Stop`；bridge 在收到 hook 事件時於 console 印出 `hook <事件> session=… pane=… chars=…` 供驗收對照（bridge 已重啟為 w2:p26）。完整 `npm test` 270 項、263 通過，失敗的 6 項為 ISSUE-035 既有項目（2026-10-28）。待驗收：Codex `Stop` 實際送達 bridge 並使串流提前收尾。
+
+使用者回報（2026-10-28）：在 Discord 問 Codex agent 後 bridge console 有出現 `hook Stop …` 並正常收尾，Codex `Stop` 視為已驗收（以使用者口頭回報為證）。Codex 權限仍不可用（見上）。

@@ -4,6 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import type { AgentStatus } from "./types.js";
 import { validateMachines, type MachineConfig } from "./machines.js";
+import {
+  DEFAULT_HOOK_TRANSPORT,
+  validateHookTransport,
+  type HookAgent,
+  type HookTransportMode,
+} from "./hook-status.js";
 
 export interface DiscordConfig {
   enabled: boolean;
@@ -22,6 +28,8 @@ export interface Config {
   agentProfiles?: AgentProfile[];
   /** 遠端 Herdr 機器；未列出的 ID 一律是本機。 */
   machines: MachineConfig[];
+  /** 各 CLI 的完成／權限通道：auto＝hook 優先、缺事件退回 parser；parser＝只用畫面 parser。 */
+  hookTransport: Record<HookAgent, HookTransportMode>;
   notifyOn: AgentStatus[];
   pollIntervalMs: number;
   requestTimeoutMs: number;
@@ -39,6 +47,7 @@ export interface Config {
 
 const DEFAULTS: Config = {
   machines: [],
+  hookTransport: { ...DEFAULT_HOOK_TRANSPORT },
   notifyOn: ["blocked"],
   pollIntervalMs: 2000,
   requestTimeoutMs: 5000,
@@ -194,6 +203,7 @@ export function loadConfig(): Config {
     ...source,
     agentProfiles: validateProfiles(source.agentProfiles),
     machines: validateMachines(source.machines),
+    hookTransport: validateHookTransport(source.hookTransport),
     notifyOn: stringArray(source.notifyOn, DEFAULTS.notifyOn),
     pollIntervalMs: positiveInt(
       source.pollIntervalMs,

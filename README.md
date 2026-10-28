@@ -311,7 +311,51 @@ If you talk to an Agent directly in Herdr, it can also ask the bridge to post to
 
 The marker convention is packaged as the [discord-send skill](skills/discord-send/SKILL.md); link it into your agent's skills directory (e.g. `ln -s "$PWD/skills/discord-send" ~/.claude/skills/discord-send`) so every project's agent knows it.
 
-Claude `Stop` hook (optional, ISSUE-045, pending live acceptance): register `scripts/herdr-discord-hook` as a `Stop` command hook in `~/.claude/settings.json` (`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/abs/path/to/scripts/herdr-discord-hook"}]}]}}`). The bridge then finishes a Claude reply as soon as Claude reports it instead of waiting for the screen to settle. Without the hook, or if an event is lost, the screen parser is used exactly as before.
+### Hook channel (Claude, Codex) — ISSUE-045
+
+By default the bridge reads each reply from the terminal screen (the parser). A CLI hook gives it the reply and the permission request directly, which is more reliable. **Hook is preferred; the parser is always kept as the fallback**, so nothing breaks if a hook is missing or an event is lost.
+
+| CLI             | Hooks to enable             | Where                     | Extra step                                                                        |
+| --------------- | --------------------------- | ------------------------- | --------------------------------------------------------------------------------- |
+| Claude          | `Stop`, `PermissionRequest` | `~/.claude/settings.json` | none                                                                              |
+| Codex           | `Stop`, `PermissionRequest` | `~/.codex/hooks.json`     | run `/hooks` inside Codex and trust both entries (until trusted they are skipped) |
+| agy, pi, others | not supported yet           | —                         | parser only                                                                       |
+
+Add both events pointing at the absolute path of `scripts/herdr-discord-hook` (the `Stop` timeout can be short, the `PermissionRequest` timeout should be about 300 seconds):
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/abs/path/scripts/herdr-discord-hook",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/abs/path/scripts/herdr-discord-hook",
+            "timeout": 300
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+- Check the state with `hooks` in Discord (`@bot hooks`) or at the `bridge>` console: it shows the mode and whether each event is registered. Codex trust is not detected; check `/hooks` in Codex.
+- Choose the channel per CLI in the plugin `config.json`: `"hookTransport": { "claude": "auto", "codex": "auto" }`. `auto` (default) = hook first, parser fallback. `parser` = ignore hooks for that CLI. Restart the bridge after changing it.
+- With a hook, reply `allow` / `deny` (or press the approve button) in the approval thread to answer a permission prompt; other text, including option numbers, is typed into the TUI as before. Permission hooks only fire when the CLI actually asks (Claude's auto mode never asks; Codex asks only for commands that need approval).
+- The bridge must be running for the hook to do anything; without it the hook exits silently and the TUI works as usual.
 
 Preferred for Agents: the `herdr-discord-send` command (`scripts/herdr-discord-send`; link it onto PATH, e.g. `ln -s "$PWD/scripts/herdr-discord-send" ~/.local/bin/herdr-discord-send`). `herdr-discord-send "text"`, `--file PATH`, `--stdin`. It talks to the running bridge over a user-only local socket (`~/.config/herdr-discord-bridge/send.sock`), identifies the pane by `HERDR_PANE_ID`, and fails clearly when the pane has no mapped thread. Pending live acceptance (ISSUE-037).
 

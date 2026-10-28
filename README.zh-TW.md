@@ -283,6 +283,52 @@ Agent 可在最終回覆中單獨一行寫 `[[discord-attach: /絕對路徑]]`�
 
 標記約定已包成 [discord-send skill](skills/discord-send/SKILL.md)；請連結到 Agent 的 skills 目錄（如 `ln -s "$PWD/skills/discord-send" ~/.claude/skills/discord-send`），各專案的 Agent 才會知道。
 
+### Hook 通道（Claude、Codex）— ISSUE-045
+
+預設 bridge 從終端畫面解析回覆（parser）。CLI hook 能直接提供回覆內容與權限請求，比較可靠。**hook 優先，parser 永遠保留為備用**，所以 hook 沒裝或事件遺失都不會壞掉。
+
+| CLI           | 要開啟的 hook               | 設定位置                  | 額外步驟                                               |
+| ------------- | --------------------------- | ------------------------- | ------------------------------------------------------ |
+| Claude        | `Stop`、`PermissionRequest` | `~/.claude/settings.json` | 無                                                     |
+| Codex         | `Stop`、`PermissionRequest` | `~/.codex/hooks.json`     | 在 Codex 內輸入 `/hooks`，信任這兩項（信任前會被略過） |
+| agy、pi、其他 | 尚不支援                    | —                         | 只用 parser                                            |
+
+兩個事件都指向 `scripts/herdr-discord-hook` 的絕對路徑（`Stop` 逾時可短，`PermissionRequest` 建議約 300 秒）：
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/絕對路徑/scripts/herdr-discord-hook",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/絕對路徑/scripts/herdr-discord-hook",
+            "timeout": 300
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+- 用 Discord 的 `@bot hooks` 或 `bridge>` console 的 `hooks` 查看目前模式與各事件是否已註冊。Codex 的信任狀態無法偵測，請在 Codex 內用 `/hooks` 確認。
+- 在 plugin `config.json` 依 CLI 選擇通道：`"hookTransport": { "claude": "auto", "codex": "auto" }`。`auto`（預設）＝hook 優先、缺事件退回 parser；`parser`＝該 CLI 忽略 hook。改完需重啟 bridge。
+- 有 hook 時，在核准 thread 回覆 `allow`／`deny`（或按核准按鈕）即可回答權限請求；其他文字（含選項數字）照舊打進 TUI。權限 hook 只有 CLI 真的詢問時才觸發（Claude 的 auto mode 不會詢問；Codex 只在需要核准的指令才詢問）。
+- bridge 必須在執行中 hook 才有作用；沒有 bridge 時 hook 靜默結束，TUI 照常使用。
+
 建議 Agent 使用 `herdr-discord-send` 指令（`scripts/herdr-discord-send`，請連結到 PATH，如 `ln -s "$PWD/scripts/herdr-discord-send" ~/.local/bin/herdr-discord-send`）：`herdr-discord-send "文字"`、`--file 路徑`、`--stdin`。它經由僅限本機使用者的 socket（`~/.config/herdr-discord-bridge/send.sock`）請執行中的 bridge 發送，以 `HERDR_PANE_ID` 識別 pane；pane 沒有對應 thread 時會明確報錯。待實機驗收（ISSUE-037）。
 
 傳入附件：除 PNG/JPEG/WebP 圖片外，其他 Discord 檔案（≤ 10 MiB、每則至多四個）會存到 Agent cwd 並把路徑交給 Agent（ISSUE-039，待實機驗收）。
