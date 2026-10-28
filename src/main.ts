@@ -37,7 +37,12 @@ import {
 } from "./response-stream.js";
 import { AgentPool } from "./agent-pool.js";
 import { runTeamTurn } from "./team-turn.js";
-import { loadConfig, statePath, stateDirectory } from "./config.js";
+import {
+  loadConfig,
+  statePath,
+  stateDirectory,
+  type Config,
+} from "./config.js";
 import { StreamResumeStore } from "./stream-resume.js";
 import {
   claudeTurnComplete,
@@ -126,6 +131,7 @@ async function startBridge(
     config.approvalTimeoutMs,
   );
   const activeStreams = new Set<string>();
+  const approvalFollowups = new Map<string, ApprovalFollowup>();
   const streamResume = new StreamResumeStore(
     join(stateDirectory(), "active-streams.json"),
   );
@@ -259,6 +265,12 @@ async function startBridge(
           "Use team questions <task-id> and team reply <task-id> <question-id> <answer> for Team Task replies",
         );
       await deliverApproval(approval, text, herdr, routing, config);
+      // 沒有串流（例如在終端機發問）時，記下這次核准，回合結束後把最終回覆補貼回來。
+      if (!activeStreams.has(approval.terminalId))
+        approvalFollowups.set(approval.terminalId, {
+          approval,
+          since: Date.now(),
+        });
     } else {
       throw new Error("you are not authorized to control this agent");
     }
@@ -380,6 +392,18 @@ async function startBridge(
   watcher.on("transition", (transition: AgentTransition) => {
     if (!tasks.owns(transition.agent) && !handoffs.blocks(transition.agent))
       void handleTransition(transition, { config, herdr, routing, discord });
+    if (
+      ["idle", "done"].includes(transition.to) &&
+      !activeStreams.has(transition.agent.terminal_id)
+    )
+      void relayApprovalFollowup(
+        transition.agent,
+        approvalFollowups,
+        discord,
+        config,
+      ).catch((error) =>
+        console.error(`Approval follow-up failed: ${safeError(error)}`),
+      );
     if (
       ["idle", "done"].includes(transition.to) &&
       !activeStreams.has(transition.agent.terminal_id)
@@ -2268,6 +2292,49 @@ function agyConversationCreatedAt(id: string): number | undefined {
   } catch {
     return undefined;
   }
+}
+
+export interface ApprovalFollowup {
+  approval: ApprovalRecord;
+  since: number;
+}
+
+/**
+ * 重啟補發或終端機發問的核准，使用者在 Discord 回覆後沒有串流會收最終回覆；
+ * 回合結束時改用 hook 的 Stop 訊息補貼到核准 thread（沒有 hook 事件就不補，狀態通知照舊）。
+ */
+export async function relayApprovalFollowup(
+  agent: AgentRecord,
+  followups: Map<string, ApprovalFollowup>,
+  discord: Pick<DiscordAdapter, "postApprovalFollowup">,
+  config: Pick<Config, "hookTransport">,
+  waitMs = 500,
+  attempts = 6,
+): Promise<boolean> {
+  const entry = followups.get(agent.terminal_id);
+  if (!entry) return false;
+  if (Date.now() - entry.since > 3600000) {
+    followups.delete(agent.terminal_id);
+    return false;
+  }
+  if (hookModeFor(config.hookTransport, agent.agent) !== "auto") {
+    followups.delete(agent.terminal_id);
+    return false;
+  }
+  const session = agent.agent_session as
+    { kind?: string; value?: string } | undefined;
+  if (!session?.value || !["id", "path"].includes(session.kind ?? ""))
+    return false;
+  for (let i = 0; i < attempts; i++) {
+    const message = hookEvents.stopSince(session.value, entry.since)?.message;
+    if (message?.trim()) {
+      followups.delete(agent.terminal_id);
+      await discord.postApprovalFollowup(entry.approval, message.trim());
+      return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
+  return false;
 }
 
 export async function resumeStreams(runtime: Runtime): Promise<void> {

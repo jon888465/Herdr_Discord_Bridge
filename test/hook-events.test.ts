@@ -390,3 +390,46 @@ test("agy Stop: final message comes from the transcript's last tool-free PLANNER
     false,
   );
 });
+
+test("approval follow-up posts the hook Stop message once when no stream exists (ISSUE-042)", async () => {
+  const { relayApprovalFollowup } = await import("../src/main.js");
+  const { hookEvents } = await import("../src/hook-events.js");
+  const posted: string[] = [];
+  const discord = {
+    postApprovalFollowup: async (_a: unknown, text: string) => {
+      posted.push(text);
+    },
+  };
+  const agent = {
+    terminal_id: "t-follow",
+    agent: "codex",
+    agent_session: { kind: "id", value: "sess-follow" },
+  } as never;
+  const followups = new Map([
+    ["t-follow", { approval: { id: "a" } as never, since: Date.now() - 1000 }],
+  ]);
+  const config = {
+    hookTransport: { claude: "auto", codex: "auto", agy: "auto", pi: "auto" },
+  } as never;
+  // 沒有 Stop 事件：不貼、保留記錄。
+  assert.equal(
+    await relayApprovalFollowup(agent, followups, discord, config, 1, 2),
+    false,
+  );
+  assert.equal(followups.size, 1);
+  hookEvents.record({
+    event: "Stop",
+    sessionId: "sess-follow",
+    message: " done! ",
+  });
+  assert.equal(
+    await relayApprovalFollowup(agent, followups, discord, config, 1, 2),
+    true,
+  );
+  assert.deepEqual(posted, ["done!"]);
+  assert.equal(followups.size, 0);
+  assert.equal(
+    await relayApprovalFollowup(agent, followups, discord, config, 1, 2),
+    false,
+  );
+});

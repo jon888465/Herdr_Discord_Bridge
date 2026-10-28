@@ -375,6 +375,28 @@ export class DiscordAdapter {
     }
   }
 
+  /** 對方沒有進行中串流時（例如在終端機發問），把核准後的最終回覆補貼到核准所在的 thread。 */
+  async postApprovalFollowup(
+    approval: ApprovalRecord,
+    text: string,
+  ): Promise<void> {
+    try {
+      const channel = await this.client.channels.fetch(
+        approval.discordThreadId,
+      );
+      if (!(channel instanceof ThreadChannel)) return;
+      const header = agentHeader(
+        approval.agentName,
+        approval.workspaceId,
+        approval.paneId,
+      );
+      for (const chunk of splitDiscordText(`${header}\n${text}`))
+        await channel.send({ content: chunk, allowedMentions: { parse: [] } });
+    } catch {
+      // A deleted or archived Discord thread is safe to ignore.
+    }
+  }
+
   private async handleMessage(message: Message): Promise<void> {
     const channelId = this.parentChannelId(message);
     if (

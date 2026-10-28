@@ -1751,3 +1751,10 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 
 環境：Codex 0.165.0 w4:p1，由使用者在終端機直接輸入（非 Discord）使其停在核准提示；重啟時 `active-streams.json` 為 `[]`，無續傳串流。重啟後 bridge log 出現 `approval reply pane=w4:p1 text="1"`（使用者在 Discord 回覆選項 1，代表補發的核准通知已送達並被路由），隨後 Codex 完成、`hook Stop session=01a1813b pane=w4:p1`，`hook_test_blocked.txt` 已建立。結論：補發 blocked 通知已驗收（以 log 與結果推得；未逐項記錄 Discord 畫面）。
 
+### ISSUE-042 核准後沒有收到 Agent 回覆、Discord 顯示 agent is busy（2026-10-28，已修正第一項、待驗收）
+
+使用者回報（補發 blocked 通知驗收後）：重啟後有收到核准請求，回覆 `1` 後 Codex 執行了，但 Discord 沒收到 Agent 的回覆；之後從 Discord 對 w1:p1 傳訊息顯示 `agent is busy (w1:p1)`。
+1. 沒有回覆：根因已確認——該回合由終端機發問，沒有 Discord 串流（`streamAgent`），bridge 只送狀態通知（`is idle/done`），不會轉發回覆內容；補發的核准通知本身不會建立串流。**修正**：`onApproval` 在沒有串流時記下核准（`approvalFollowups`，1 小時內有效）；Agent 回到 idle／done 且仍無串流時，`relayApprovalFollowup` 以 hook 的 Stop 訊息（`hookTransport` 為 `auto` 且有該 session 的 Stop 事件，最多等 3 秒）貼回核准所在的 thread，每筆只貼一次。沒有 hook 事件時維持原本只送狀態通知。
+2. `agent is busy (w1:p1)`：`assertAgentAvailable` 在 Agent 狀態為 `working` 或該 terminal 在 `activeStreams` 時拒絕。w1:p1 是正在執行本專案工作的 Claude，回報當下狀態為 working（本輪查核時也是 working，`active-streams.json` 為空），依此判斷是設計上的忙碌拒絕；但**無法排除**記憶體中 `activeStreams` 殘留舊項目（尚無對應證據，Agent 閒置時再試仍 busy 才需調查）。
+驗證（2026-10-28）：lint 通過；新增 1 項測試；完整 `npm test` 280 項、273 通過、6 失敗（ISSUE-035 既有項目）。**未驗證**：真實 Discord 端在回覆核准後收到回覆。
+
