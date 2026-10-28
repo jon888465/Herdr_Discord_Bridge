@@ -224,3 +224,41 @@ test("cleanupRemoteAttachments runs a scoped find and validates input", async ()
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("machines hookSocket validation and reverse-tunnel args (ISSUE-045)", async () => {
+  const { hookTunnelArgs } = await import("../src/machines.js");
+  const [m] = validateMachines([
+    {
+      id: "pod",
+      ssh: "pod",
+      socket: "/r/herdr.sock",
+      hookSocket: "/root/.config/hb/hooks.sock",
+    },
+  ]);
+  assert.equal(m.hookSocket, "/root/.config/hb/hooks.sock");
+  assert.equal(
+    validateMachines([{ id: "pod", ssh: "pod", socket: "/r/h.sock" }])[0]
+      .hookSocket,
+    undefined,
+  );
+  for (const bad of [
+    "relative/h.sock",
+    "/a b/h.sock",
+    "/a/../h.sock",
+    "/a'b/h.sock",
+    5,
+  ])
+    assert.throws(() =>
+      validateMachines([
+        { id: "pod", ssh: "pod", socket: "/r/h.sock", hookSocket: bad },
+      ]),
+    );
+  const args = hookTunnelArgs(m, "/local/hooks.sock");
+  assert.deepEqual(args.slice(-3), [
+    "-R",
+    "/root/.config/hb/hooks.sock:/local/hooks.sock",
+    "pod",
+  ]);
+  assert.ok(args.includes("StreamLocalBindUnlink=yes"));
+  assert.ok(args.includes("ExitOnForwardFailure=yes"));
+});

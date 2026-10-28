@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { HerdrClient, HerdrError } from "./herdr.js";
+import { hookSocketPath } from "./hook-events.js";
 
 /** 遠端 Herdr 機器：經 SSH 把遠端 herdr.sock 轉成本機短路徑 socket（ISSUE-041）。 */
 export interface MachineConfig {
@@ -13,6 +14,11 @@ export interface MachineConfig {
   ssh: string;
   /** 遠端 Herdr API socket 的絕對路徑。 */
   socket: string;
+  /**
+   * 選填：遠端 hook socket 的絕對路徑。設定後 bridge 以 `ssh -R` 把它轉回本機 hook socket，
+   * 遠端 Agent 的 Stop hook 才能把事件送回本機（ISSUE-045）。未設定則遠端只用 parser。
+   */
+  hookSocket?: string;
 }
 
 const MACHINE_ID = /^[A-Za-z][A-Za-z0-9_-]{1,31}$/;
@@ -25,7 +31,7 @@ export function validateMachines(value: unknown): MachineConfig[] {
   const machines: MachineConfig[] = [];
   for (const item of value) {
     if (!item || typeof item !== "object") continue;
-    const { id, ssh, socket } = item as Record<string, unknown>;
+    const { id, ssh, socket, hookSocket } = item as Record<string, unknown>;
     if (
       typeof id !== "string" ||
       typeof ssh !== "string" ||
@@ -40,8 +46,23 @@ export function validateMachines(value: unknown): MachineConfig[] {
       throw new Error(`machines[${id}].ssh is not a valid ssh target`);
     if (!socket.startsWith("/") || /[\s:]/.test(socket))
       throw new Error(`machines[${id}].socket must be an absolute path`);
+    if (
+      hookSocket !== undefined &&
+      (typeof hookSocket !== "string" ||
+        !hookSocket.startsWith("/") ||
+        /[\s:'"\\]/.test(hookSocket) ||
+        hookSocket.split("/").includes(".."))
+    )
+      throw new Error(
+        `machines[${id}].hookSocket must be an absolute path without spaces`,
+      );
     seen.add(id);
-    machines.push({ id, ssh, socket });
+    machines.push({
+      id,
+      ssh,
+      socket,
+      ...(typeof hookSocket === "string" ? { hookSocket } : {}),
+    });
   }
   return machines;
 }
@@ -128,6 +149,105 @@ export class MachineTunnel {
       );
       this.timer = setTimeout(() => this.spawnSsh(), this.backoffMs);
       this.backoffMs = Math.min(this.backoffMs * 2, 30000);
+    });
+  }
+}
+
+/** `ssh -R` 參數：把遠端 hook socket 轉回本機 hook socket；舊的遠端 socket 檔會被取代。 */
+export function hookTunnelArgs(
+  machine: MachineConfig,
+  localHookSocket: string,
+): string[] {
+  return [
+    "-N",
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "ExitOnForwardFailure=yes",
+    "-o",
+    "StreamLocalBindUnlink=yes",
+    "-o",
+    "ServerAliveInterval=15",
+    "-o",
+    "ServerAliveCountMax=3",
+    "-R",
+    `${machine.hookSocket}:${localHookSocket}`,
+    machine.ssh,
+  ];
+}
+
+/**
+ * 另開一條 `ssh -R`（不與 -L 共用，轉發失敗不會拖垮遠端控制），讓遠端 hook 把事件送回本機。
+ * 啟動前先在遠端建立 0700 目錄；斷線後以退避重連。
+ */
+export class HookReverseTunnel {
+  private child: ChildProcess | null = null;
+  private stopped = false;
+  private backoffMs = 1000;
+  private timer: NodeJS.Timeout | null = null;
+
+  constructor(
+    readonly machine: MachineConfig,
+    private readonly localHookSocket: string,
+    private readonly log: (message: string) => void = console.error,
+  ) {}
+
+  start(): void {
+    if (!this.machine.hookSocket) return;
+    this.spawnSsh();
+  }
+
+  stop(): void {
+    this.stopped = true;
+    if (this.timer) clearTimeout(this.timer);
+    this.child?.kill("SIGTERM");
+  }
+
+  private spawnSsh(): void {
+    if (this.stopped || !this.machine.hookSocket) return;
+    const startedAt = Date.now();
+    const dir = path.posix.dirname(this.machine.hookSocket);
+    const prepare = spawn(
+      "ssh",
+      [
+        "-o",
+        "BatchMode=yes",
+        this.machine.ssh,
+        `mkdir -p -m 700 ${shellQuote(dir)}`,
+      ],
+      { stdio: "ignore" },
+    );
+    const retry = (reason: string) => {
+      this.child = null;
+      if (this.stopped) return;
+      if (Date.now() - startedAt > 30000) this.backoffMs = 1000;
+      this.log(
+        `machine ${this.machine.id}: hook tunnel ${reason}; retry in ${Math.round(this.backoffMs / 1000)}s`,
+      );
+      this.timer = setTimeout(() => this.spawnSsh(), this.backoffMs);
+      this.backoffMs = Math.min(this.backoffMs * 2, 30000);
+    };
+    this.child = prepare;
+    prepare.once("error", (error) => retry(`mkdir failed: ${error.message}`));
+    prepare.once("exit", (code) => {
+      if (this.stopped) return;
+      if (code !== 0) return retry(`mkdir exited ${code}`);
+      const child = spawn(
+        "ssh",
+        hookTunnelArgs(this.machine, this.localHookSocket),
+        {
+          stdio: ["ignore", "ignore", "pipe"],
+        },
+      );
+      this.child = child;
+      let stderr = "";
+      child.stderr?.on("data", (chunk: Buffer) => {
+        stderr = (stderr + chunk.toString()).slice(-300);
+      });
+      child.once("error", (error) => retry(`ssh failed: ${error.message}`));
+      child.once("exit", (exit) =>
+        retry(`closed (exit ${exit}) ${stderr.trim()}`),
+      );
     });
   }
 }
@@ -254,6 +374,7 @@ type Params = Record<string, unknown>;
 interface Remote {
   config: MachineConfig;
   tunnel: MachineTunnel;
+  hookTunnel?: HookReverseTunnel;
   client: HerdrClient;
   up: boolean;
   cache: Map<string, Record<string, unknown>>;
@@ -280,6 +401,9 @@ export class HerdrHub extends HerdrClient {
       this.remotes.set(config.id, {
         config,
         tunnel,
+        hookTunnel: config.hookSocket
+          ? new HookReverseTunnel(config, hookSocketPath(), log)
+          : undefined,
         client: new HerdrClient(
           tunnel.socketPath,
           Math.min(defaultTimeoutMs, 5000),
@@ -295,11 +419,17 @@ export class HerdrHub extends HerdrClient {
   private log: (message: string) => void;
 
   startTunnels(): void {
-    for (const remote of this.remotes.values()) remote.tunnel.start();
+    for (const remote of this.remotes.values()) {
+      remote.tunnel.start();
+      remote.hookTunnel?.start();
+    }
   }
 
   stopTunnels(): void {
-    for (const remote of this.remotes.values()) remote.tunnel.stop();
+    for (const remote of this.remotes.values()) {
+      remote.tunnel.stop();
+      remote.hookTunnel?.stop();
+    }
   }
 
   /** 把本機檔案上傳到該機器上的目錄；機器不存在時回報錯誤。 */
