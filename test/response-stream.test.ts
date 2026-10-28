@@ -4,6 +4,7 @@ import {
   CodexTurn,
   Settlement,
   rollingPreview,
+  sessionCreatedSince,
 } from "../src/response-stream.js";
 
 const event = (payload: object) =>
@@ -66,4 +67,24 @@ test("preview shows the latest tail instead of the first chunk", () => {
   const text = "old".repeat(1000) + "latest CLI response";
   assert.ok(rollingPreview(text).endsWith("latest CLI response"));
   assert.ok(rollingPreview(text).length <= 1502);
+});
+
+test("sessionCreatedSince accepts a UUIDv7 session created at or after the prompt (ISSUE-047)", () => {
+  const id = "01a180fe-d4a8-7bd1-9701-2155cdc999e6"; // 2026-10-28T05:32:26.664Z
+  const at = Date.parse("2026-10-28T05:32:26.664Z");
+  assert.equal(sessionCreatedSince({ kind: "id", value: id }, at), true);
+  assert.equal(sessionCreatedSince({ kind: "id", value: id }, at - 1000), true);
+  assert.equal(
+    sessionCreatedSince({ kind: "id", value: id }, at + 60000),
+    false,
+  );
+  assert.equal(sessionCreatedSince({ kind: "path", value: id }, at), false);
+  assert.equal(
+    sessionCreatedSince(
+      { kind: "id", value: "43629c7e-0750-42da-bef9-53223d69b93f" },
+      0,
+    ),
+    false,
+  );
+  assert.equal(sessionCreatedSince(null, 0), false);
 });

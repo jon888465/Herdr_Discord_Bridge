@@ -32,6 +32,7 @@ import {
   Settlement,
   rollingPreview,
   sameAgentSession,
+  sessionCreatedSince,
 } from "./response-stream.js";
 import { AgentPool } from "./agent-pool.js";
 import { runTeamTurn } from "./team-turn.js";
@@ -2237,6 +2238,7 @@ export async function streamAgent(
   let lastEdit = started - PROGRESS_UPDATE_MS;
   let collectingSince = 0;
   let identityMissingSince: number | undefined;
+  let trackedSession: unknown = initial.agent_session;
   let idleSince = 0;
   const settlement = new Settlement();
   const edit = async (content: string): Promise<boolean> => {
@@ -2268,11 +2270,10 @@ export async function streamAgent(
       candidate.workspace_id === initial.workspace_id &&
       candidate.agent === initial.agent;
     const sessionMatches =
-      candidate &&
-      sameAgentSession(candidate.agent_session, initial.agent_session);
+      candidate && sameAgentSession(candidate.agent_session, trackedSession);
     const sessionMissing =
       sameLocation &&
-      initial.agent_session != null &&
+      trackedSession != null &&
       (candidate.agent_session == null ||
         !sameAgentSession(candidate.agent_session, candidate.agent_session));
     if (!candidate || sessionMissing) {
@@ -2300,7 +2301,21 @@ export async function streamAgent(
       );
       return;
     }
-    if (!sameLocation || !sessionMatches) {
+    if (
+      sameLocation &&
+      !sessionMatches &&
+      initial.agent === "codex" &&
+      sessionCreatedSince(candidate.agent_session, started)
+    ) {
+      console.log(
+        `Codex session materialized during turn pane=${initial.pane_id}; following new session`,
+      );
+      trackedSession = candidate.agent_session;
+    }
+    if (
+      !sameLocation ||
+      !sameAgentSession(candidate.agent_session, trackedSession)
+    ) {
       const reason = !sameLocation
         ? "pane/terminal/workspace/agent changed"
         : "session changed";

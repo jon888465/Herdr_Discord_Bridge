@@ -186,3 +186,18 @@ export function sameAgentSession(left: unknown, right: unknown): boolean {
     a.value === b.value
   );
 }
+
+/**
+ * Codex materializes a new session at the first prompt of a fresh thread, so
+ * Herdr's `agent_session` can switch id mid-turn (ISSUE-047). A UUIDv7 id
+ * embeds its creation time; a session created at or after the prompt was sent
+ * (small clock tolerance) is the same turn's session, not another conversation.
+ */
+export function sessionCreatedSince(session: unknown, since: number): boolean {
+  const s = session as { kind?: unknown; value?: unknown } | null;
+  if (!s || s.kind !== "id" || typeof s.value !== "string") return false;
+  const m = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-/i.exec(s.value);
+  if (!m) return false;
+  const ms = Number.parseInt(s.value.replace(/-/g, "").slice(0, 12), 16);
+  return Number.isFinite(ms) && ms >= since - 5000;
+}

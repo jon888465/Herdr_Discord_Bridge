@@ -47,6 +47,7 @@
 | ISSUE-041 | bridge 不支援 Herdr 遠端機器（如 agy-pod）的 Agent | 已驗收（文字對話，2026-10-24） | 關閉遠端面板後重問，Discord 收到正確回覆；斷線重連、附件、Team Worker 等未驗收 |
 | ISSUE-042 | 從 Discord 驅動的 Agent 自己重啟 bridge 時，該回合的串流與最終回覆遺失 | 待調查（限制已確認、尚無修正） | 2026-10-24 發生一次；重啟後不會接續進行中的回覆 |
 | ISSUE-043 | 傳入附件沒有保留期限，本機與遠端會一直累積 | 已修正、待驗收 | 已於 2026-10-25 重啟（w2:p1Y，程式尚未 commit）；本機啟動清理已實際刪除過期目錄；遠端刪除未驗證 |
+| ISSUE-047 | Codex 在 Discord 送問後出現「Agent identity changed (session changed); response capture stopped」，擷取在核准通知前中止 | 已修正、待驗收（2026-10-28） | 重新對 Codex 送問，確認不再中止且 allow／deny 可進行；見 ISSUE-047 |
 | ISSUE-046 | Discord 輸入權限選項數字（3）後沒有任何反應，之後按 Approve 才有動作 | 已驗收（2026-10-28，數字／allow／deny／按鈕／📨；原 `3` 沒反應根因未確認） | 2026-10-28 重啟後數字 1／2 回覆成功且有 📨；使用者早先的 `3` 沒反應原因仍未確認 |
 | ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | Claude Stop 與 PermissionRequest 已驗收（2026-10-28，使用者實測）；Codex／agy／pi、transport 設定、遠端 machine 未做 | Claude 已驗收；Codex／agy／pi 未做；見 docs/hook-transport-proposal.md |
 | ISSUE-044 | Claude 回覆在 Discord 被重複貼出多則 | 重新開啟→已修正、待驗收 | 2026-10-28 重現，確認根因為回合尾巴後的「※ recap」行擋住完成判斷；原始碼與單元測試完成，已 commit（ccec39b）並於 2026-10-28 重啟（w2:p10），Discord 未驗收 |
@@ -1675,3 +1676,21 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 原始碼：`HerdrClient.sendKeys`（`pane.send_keys`）、`deliverApproval`（已匯出以便測試）；新增 1 項測試（allow→`y`、deny→`esc`、數字→文字、非 Codex 不轉換）。完整 `npm test` 271 項、264 通過，失敗的 6 項為 ISSUE-035 既有項目，lint 通過（2026-10-28）。
 
 限制與未驗證：快捷鍵是 Codex 目前版本畫面上標示的 `(y)`／`(esc)`，版本改動可能失效；deny 會中斷整個回合；Discord 端（核准通知後回覆 `allow`／`deny`）尚未實測；其他核准類型（檔案變更、MCP 詢問）的快捷鍵未逐一測。
+
+## ISSUE-047：Codex 送問後擷取因 session changed 中止，核准通知與 allow 驗收無法進行
+
+更新日期：2026-10-28　狀態：已修正、待驗收（session 切換的觸發原因仍屬推測；修正已部署，尚未經 Discord 端驗收）
+
+使用者症狀：在 Discord 對 Codex（w4:p1，python_test）送出「建立 hook_test_allow.txt」的 ISSUE-045 驗收提示後，回應卡片只顯示 `Agent identity changed (session changed); response capture stopped.`。Codex 實際停在核准提示（Herdr 狀態 blocked、標題 Action Required），但 Discord 上沒有走到 allow 的流程，因此 Codex 的 allow／deny 驗收尚未進行。
+
+預期行為：有效 prompt 送達後持續等待本次回覆；核准時 Discord 出現核准通知並可回覆 allow／deny。
+
+環境與已知事實：bridge 為 2026-10-28 重啟的 w2:p29，`streamAgent` 於 `src/main.ts` 比較 `initial.agent_session` 與當前值（`sameAgentSession`，kind＋value 完全相同才算同一個）。bridge log 顯示同一個 pane w4:p1 當天的 Codex session id 先後為 `01a18079`、`01a180eb`，驗收時 Herdr 回報 `01a180fe-d4a8-7bd1-9701-2155cdc999e6`，log 出現 `Response capture stopped: session changed (pane=w4:p1)` 兩次。與 ISSUE-008 相同症狀。
+
+已確認：中止是 identity 比較不相等所致（不是 hook 或 y／esc 邏輯）。
+使用者確認（2026-10-28）：送問前沒有 `/new`。
+新證據（2026-10-28，讀 `~/.codex/sessions/2026/10/28/`）：`rollout-…13-32-27-01a180fe-…jsonl` 的建立時間（台北 13:32:27）與 Discord 送問時間（下午 1:32）吻合，session_meta 為 Codex 0.165.0、cwd `python_test`；前一個 session `01a180eb` 建立於 13:11:35。也就是說，Codex 在這個 prompt 到達時才建立新 session（檔案在第一個 prompt 才產生），Herdr 的 `agent_session` 在串流期間由舊 id 換成新 id。
+推測（未驗證）：該 Codex 為重新啟動或新執行緒，session 於第一個 prompt 才實體化，因此 bridge 記下的 `initial.agent_session` 仍是舊值。尚無送問當下 `initial.agent_session` 的紀錄，無法證明舊值就是 `01a180eb`。
+修正：`sessionCreatedSince`（`src/response-stream.ts`）判斷 UUIDv7 session id 是否建立於送問時間（容忍 5 秒）之後；`streamAgent` 對 Codex 在同 pane／terminal／workspace 下遇到這種新 id 時改追蹤新 id（log：`Codex session materialized during turn`），其餘 id 變動仍停止擷取。新增 1 項測試。2026-10-28：lint 通過；完整 `npm test` 272 項、265 通過、6 失敗（ISSUE-035 既有項目）。注意：`CodexTranscript` 仍綁定舊 session 檔，換 session 後完成判斷靠 Stop hook 或畫面 parser。
+下一步：使用者重新送問驗收；另記錄送問當下與換 id 當下的 `agent_session`以確認觸發原因。修正做法是在同一 pane／terminal／cwd 下，若新 session id（UUIDv7 內含毫秒時間）的時間不早於本次送問時間，視為同一回合的 session 實體化而改採新 id，其餘情況仍停止擷取，避免轉發其他對話。
+
