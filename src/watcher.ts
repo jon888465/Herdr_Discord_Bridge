@@ -63,6 +63,16 @@ export class AgentWatcher extends EventEmitter {
               lastAgent,
             } satisfies AgentRemoved);
         }
+      } else {
+        // 重啟時已在 blocked 的 Agent 不會有 working→blocked 轉換；首輪補發一次，
+        // 讓 Discord 能收到核准通知（ISSUE-042）。handleTransition 會先收掉該 terminal 的舊核准。
+        for (const agent of current.values())
+          if (agent.agent_status === "blocked")
+            this.emit("transition", {
+              agent,
+              from: "unknown",
+              to: "blocked",
+            } satisfies AgentTransition);
       }
       this.previous = current;
       this.primed = true;

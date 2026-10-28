@@ -1705,5 +1705,10 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 限制：Stop hook 事件只存在記憶體，重啟期間送出的 Stop 不會補回，這種情況由畫面 parser 判斷完成；進行中的 Codex 逐字稿以 `CodexTranscript.connect` 重新連線；team／console 路徑與強制收尾後的輕量觀察（`rewatchAfterForcedFinish`）不在此範圍。
 驗證（2026-10-28）：lint 通過；新增 2 項 store 測試；完整 `npm test` 274 項、267 通過、6 失敗（ISSUE-035 既有項目）。**未驗證**：真實重啟中的回合是否接續並送出最終回覆。
 
-2026-10-28 13:45 使用者回報：Codex deny 驗收提示送出後卡片停在 `working · 已耗時 1秒`、沒有出現核准選項（Codex w4:p1 實際已 blocked，畫面有 `Yes, proceed (y)`／`No (esc)` 提示）。核對：bridge 行程啟動時間為 13:45:38，與該則送問同一分鐘；舊 bridge 尚無續傳記錄，新 bridge log 沒有 w4:p1 的任何紀錄，`active-streams.json` 只有之後才送出的回合。判斷為該回合串流隨 13:45 的重啟中斷（ISSUE-042 在續傳功能部署前的最後一次發生），**不是** Codex y／esc 或核准路徑的缺陷；此判斷依時間吻合推得，沒有舊 bridge 的 log 可直接證明。另發現限制：重啟時已處於 blocked 的 Agent 不會有 working→blocked 轉換，新 bridge 不會補發核准通知（未修正，需要時另開項目）。Codex allow／deny 的 Discord 端驗收仍未完成。
+2026-10-28 13:45 使用者回報：Codex deny 驗收提示送出後卡片停在 `working · 已耗時 1秒`、沒有出現核准選項（Codex w4:p1 實際已 blocked，畫面有 `Yes, proceed (y)`／`No (esc)` 提示）。核對：bridge 行程啟動時間為 13:45:38，與該則送問同一分鐘；舊 bridge 尚無續傳記錄，新 bridge log 沒有 w4:p1 的任何紀錄，`active-streams.json` 只有之後才送出的回合。判斷為該回合串流隨 13:45 的重啟中斷（ISSUE-042 在續傳功能部署前的最後一次發生），**不是** Codex y／esc 或核准路徑的缺陷；此判斷依時間吻合推得，沒有舊 bridge 的 log 可直接證明。另發現限制：重啟時已處於 blocked 的 Agent 不會有 working→blocked 轉換，新 bridge 不會補發核准通知。Codex allow／deny 的 Discord 端驗收仍未完成。
+
+### ISSUE-042 補發 blocked 通知（2026-10-28，已實作、待驗收）
+
+修正：`AgentWatcher` 首輪輪詢時，對已在 `blocked` 的 Agent 補發一次 `unknown → blocked` 轉換，走原本的 `handleTransition`（先收掉該 terminal 的舊核准，再送新的核准通知；`notifyOn` 未含 blocked 時不送）。限制：重啟前登記的 PermissionRequest hook 連線已斷，hook 行程靜默結束，該提示改由 TUI 流程處理，回覆以文字輸入（Codex 為 y／esc 快捷鍵）；每次重啟都會對仍 blocked 的 Agent 重送一次通知，舊通知的按鈕失效。
+驗證（2026-10-28）：lint 通過；新增 1 項 watcher 測試（首輪補發、第二輪不重發、之後正常轉換）；完整 `npm test` 275 項、268 通過、6 失敗（ISSUE-035 既有項目）。**未驗證**：真實重啟時 Discord 收到補發通知。
 
