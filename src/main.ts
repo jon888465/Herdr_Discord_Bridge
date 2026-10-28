@@ -2648,7 +2648,7 @@ async function handleRemoved(
   }
 }
 
-async function deliverApproval(
+export async function deliverApproval(
   approval: ApprovalRecord,
   text: string,
   herdr: HerdrClient,
@@ -2688,6 +2688,17 @@ async function deliverApproval(
     return;
   }
   permissionBroker.cancel(current.pane_id);
+  // Codex 不能用 PermissionRequest hook（會擋住提示，ISSUE-045），但核准提示有快捷鍵：
+  // y＝核准、esc＝拒絕。allow／deny 文字轉成對應按鍵；其他文字照舊打進 TUI。
+  const codexDecision = permissionDecisionFromText(text);
+  if ((current.agent || "").toLowerCase().includes("codex") && codexDecision) {
+    await herdr.sendKeys(
+      current.pane_id,
+      codexDecision === "allow" ? ["y"] : ["esc"],
+    );
+    routing.deactivateApproval(approval.token);
+    return;
+  }
   await herdr.sendAgent(current.pane_id, text.slice(0, 12000));
   routing.deactivateApproval(approval.token);
 }

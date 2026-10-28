@@ -314,3 +314,47 @@ test("parser mode ignores a Claude Stop hook event (ISSUE-045)", async (t) => {
   assert.ok(sent.length > 0);
   assert.ok(!(sent as string[]).includes("hook final"));
 });
+
+test("Codex approval replies allow/deny become y/esc keys (ISSUE-045)", async () => {
+  const { deliverApproval } = await import("../src/main.js");
+  const agent = {
+    terminal_id: "t1",
+    pane_id: "w4:p1",
+    workspace_id: "w4",
+    agent: "codex",
+    agent_status: "blocked",
+  };
+  const calls: string[] = [];
+  const herdr = {
+    listAgentsWithWorkspaceNames: async () => [agent],
+    sendKeys: async (_t: string, keys: string[]) => {
+      calls.push(`keys:${keys.join("+")}`);
+    },
+    sendAgent: async (_t: string, text: string) => {
+      calls.push(`text:${text}`);
+    },
+  };
+  const routing = { deactivateApproval: () => {} };
+  const approval = {
+    token: "x",
+    terminalId: "t1",
+    paneId: "w4:p1",
+    workspaceId: "w4",
+  };
+  const run = (text: string) =>
+    deliverApproval(
+      approval as never,
+      text,
+      herdr as never,
+      routing as never,
+      {},
+    );
+  await run("allow");
+  await run("deny");
+  await run("2");
+  assert.deepEqual(calls, ["keys:y", "keys:esc", "text:2"]);
+  agent.agent = "agy";
+  calls.length = 0;
+  await run("allow");
+  assert.deepEqual(calls, ["text:allow"]);
+});

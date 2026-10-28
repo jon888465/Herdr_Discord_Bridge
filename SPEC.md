@@ -585,3 +585,4 @@ Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*
 - 驗收要求：實際 Claude 回合在 Discord 只貼一次、無「capture incomplete」，並確認 hook 未安裝時仍走 parser。
 - **通道設定與狀態（2026-10-28）**：`hookTransport: { claude, codex }`，值 `auto`（預設，hook 優先、缺事件退回 parser）或 `parser`（該 CLI 忽略 hook 事件與 hook 權限回覆，`allow`／`deny` 文字改為照舊打進 TUI）；值不合法時 config 載入失敗；其他 CLI 一律 parser。指令 `hooks`（Discord 與 console）回報各 CLI 的模式，以及 `~/.claude/settings.json`、`~/.codex/hooks.json` 是否已註冊 `Stop`／`PermissionRequest` 的 `herdr-discord-hook`；Codex 的信任狀態無法偵測。安裝步驟見 README。
 - **Codex（2026-10-28）**：只註冊 `Stop`（`~/.codex/hooks.json`；需在 Codex `/hooks` 信任後才會執行）。**不註冊 `PermissionRequest`**：實測 Codex 在該 hook 執行期間不顯示核准提示且 Herdr 不標 `blocked`，且 hook 行程的 `HERDR_PANE_ID` 不可信（ISSUE-045）。Codex 的 `Stop` 尚未取得實測證據。
+- **Codex 權限回覆（2026-10-28）**：Codex 的核准提示在 Discord 回覆 `allow`（含按鈕的 `continue`）時送 `y` 鍵、`deny` 時送 `esc` 鍵（`pane.send_keys`）；其他文字照舊打進 TUI。拒絕會中斷該回合。其他 CLI 不轉換。

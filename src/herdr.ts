@@ -285,6 +285,15 @@ export class HerdrClient {
     return agent;
   }
 
+  /** 直接送按鍵（不附 Enter），用於 Codex 核准提示的 y／esc 快捷鍵。 */
+  async sendKeys(target: string, keys: string[]): Promise<void> {
+    await this.request(
+      "pane.send_keys",
+      { pane_id: target, keys },
+      { retries: 0 },
+    );
+  }
+
   async sendInput(target: string, text: string): Promise<void> {
     await this.request("pane.send_input", {
       pane_id: target,

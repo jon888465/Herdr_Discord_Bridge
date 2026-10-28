@@ -1665,3 +1665,13 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 後續（2026-10-28）：`hooks` 指令對 Codex 的 `PermissionRequest` 改顯示「未註冊（Codex 不建議開啟）」，若已註冊則警告；README／SPEC 同步改為 Codex 只開 `Stop`；bridge 在收到 hook 事件時於 console 印出 `hook <事件> session=… pane=… chars=…` 供驗收對照（bridge 已重啟為 w2:p26）。完整 `npm test` 270 項、263 通過，失敗的 6 項為 ISSUE-035 既有項目（2026-10-28）。待驗收：Codex `Stop` 實際送達 bridge 並使串流提前收尾。
 
 使用者回報（2026-10-28）：在 Discord 問 Codex agent 後 bridge console 有出現 `hook Stop …` 並正常收尾，Codex `Stop` 視為已驗收（以使用者口頭回報為證）。Codex 權限仍不可用（見上）。
+
+### ISSUE-045 Codex 權限：allow／deny 轉快捷鍵（2026-10-28，已實作、待 Discord 驗收）
+
+評估：(a) app-server 協定的核准是 server→client 請求（schema 有 `CommandExecutionRequestApprovalParams`、`FileChangeRequestApprovalParams`、`PermissionsRequestApprovalParams`），但要讓 Codex TUI 改連共用 app-server（`codex --remote`），且第二個 client 是否能收到並回應 TUI 那條 thread 的核准請求**未驗證**，改動大；(b) 不阻塞的 hook 對 Codex 無益——parser 路徑本來就能偵測 `blocked`。採用較小的做法：Codex 的核准提示有快捷鍵 `y`（核准）與 `esc`（拒絕），Discord 的 `allow`／`deny`（含核准按鈕的 `continue`）在 Codex 改送這兩個按鍵，其他文字（含數字）照舊打進 TUI。
+
+實測（2026-10-28，本機 Codex v0.162.1，暫時 pane，`-a on-request -s read-only`，經 Herdr API `pane.send_keys`）：`y` 後指令執行（檔案建立、Codex 回報 DONE）；`esc` 後指令未執行，Codex 顯示 `You canceled the request` 並**中斷該回合**（`Conversation interrupted`），即拒絕等同於「No，並告訴 Codex 怎麼做」的 esc。測試 pane 與暫存檔已清除。
+
+原始碼：`HerdrClient.sendKeys`（`pane.send_keys`）、`deliverApproval`（已匯出以便測試）；新增 1 項測試（allow→`y`、deny→`esc`、數字→文字、非 Codex 不轉換）。完整 `npm test` 271 項、264 通過，失敗的 6 項為 ISSUE-035 既有項目，lint 通過（2026-10-28）。
+
+限制與未驗證：快捷鍵是 Codex 目前版本畫面上標示的 `(y)`／`(esc)`，版本改動可能失效；deny 會中斷整個回合；Discord 端（核准通知後回覆 `allow`／`deny`）尚未實測；其他核准類型（檔案變更、MCP 詢問）的快捷鍵未逐一測。
