@@ -1934,3 +1934,13 @@ lint、typecheck、build 通過。`node --test dist/test/hook-events.test.js dis
 ### ISSUE-051 驗收（2026-10-29）
 
 使用者在本機執行 `npm start`，輸出 `node dist/src/index.js` 後為 `Discord is disabled or its bot token is missing in plugin config/env`，不再出現 `MODULE_NOT_FOUND`。入口路徑修正已驗收。程式在 token 檢查處結束，原因為 `npm start` 不經 Herdr plugin 載入設定（正式啟動為 `scripts/run.sh`），不是本 issue 的缺陷；未驗證 `npm start` 完整啟動。已同時更新 `bin`、`start`、`dry-run`，其中 `bin` 與 `dry-run` 未另行執行驗證。
+
+### ISSUE-045 本機 agy Stop hook 安裝（2026-10-29）
+
+查核：本機 `~/.gemini/config/hooks.json` 原先只有 Herdr 的 `PreInvocation`，沒有 `herdr-discord-hook`，agy 走畫面 parser。使用者要求安裝後，於 `hooks.json` 新增群組 `herdr-discord-bridge` → `Stop`（10 秒）指向 `/home/jones/wk/Herdr_Discord_Bridge/scripts/herdr-discord-hook`，保留既有 `herdr` 群組；備份 `~/.gemini/config/hooks.json.bak-hook`。以 `echo '{}'` 餵入該指令確認可執行且 exit 0。
+
+未驗證：agy 是否重載 hooks（可能需重啟 agy session）、agy 實際完成回合時 Stop 事件是否到達 bridge、Discord final 是否完整只送一次。本機 agy 版本未在此輪確認。狀態：已安裝、待驗收；2026-10-28 的 agy 已驗收是另一環境結果，不代表本機。未 commit。
+
+### ISSUE-045 本機 agy Stop hook 驗收（2026-10-29）
+
+使用者回報本機 agy 安裝 `Stop` hook 後的 Discord 測試「ok」（使用者口頭回報，未提供事件紀錄或畫面；未逐項確認 final 是否只送一次、是否重啟過 agy session）。依此將本機 agy hook 由「已安裝、待驗收」改為已驗收；證據等級為使用者實測回報。未 commit。
