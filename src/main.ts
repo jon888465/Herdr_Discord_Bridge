@@ -1990,7 +1990,11 @@ async function dispatchPrompt(
       return;
     }
     const baselineOutput = await runtime.herdr
-      .readAgent(agent.pane_id, "recent_unwrapped", runtime.config.outputLines)
+      .readAgent(
+        agent.pane_id,
+        "recent_unwrapped",
+        Math.max(runtime.config.outputLines, 2000),
+      )
       .catch(() => "");
     const transcript = await CodexTranscript.connect(agent, prompt);
     validatePrompt(prompt);
@@ -2496,6 +2500,19 @@ export async function streamAgent(
     }
     identityMissingSince = undefined;
     const current = candidate;
+    const hookSession = current.agent_session as
+      { kind?: string; value?: string } | undefined;
+    const readHookFinal = () =>
+      hookModeFor(runtime.config.hookTransport, current.agent) === "auto" &&
+      (hookSession?.kind === "id" || hookSession?.kind === "path")
+        ? (
+            hookEvents.stopSince(hookSession.value, started)?.message ?? ""
+          ).trim()
+        : !hookSession
+          ? (
+              hookEvents.stopForPane(current.pane_id, started)?.message ?? ""
+            ).trim()
+          : "";
     let readOk = false;
     let changed = false;
     try {
@@ -2504,42 +2521,53 @@ export async function streamAgent(
       console.error(`Transcript capture failed: ${safeError(error)}`);
     }
     try {
-      let output: string;
-      try {
-        output = await runtime.herdr.readAgent(
-          current.pane_id,
-          "recent_unwrapped",
-          Math.max(runtime.config.outputLines, 2000),
+      if (!readHookFinal() && !transcript?.turn.completed) {
+        // 來源判斷（ISSUE-050）：streamAgent 只服務 Discord 發起的回合，且此處已無 hook／
+        // transcript final，屬備援。工作中只讀可見畫面；idle／done 才允許讀歷史（可能捲動）。
+        const fallbackHistory = !["working", "blocked", "unknown"].includes(
+          String(current.agent_status),
         );
-      } catch (error) {
-        // Alternate-screen history may require idle scrolling. A visible read
-        // observes the current screen without interrupting the working Agent.
-        if (!(error instanceof HerdrError) || error.code !== "agent_not_idle")
-          throw error;
-        output = await runtime.herdr.readAgent(
-          current.pane_id,
-          "visible",
-          runtime.config.outputLines,
+        let output: string;
+        try {
+          output = await runtime.herdr.readAgent(
+            current.pane_id,
+            fallbackHistory ? "recent_unwrapped" : "visible",
+            fallbackHistory
+              ? Math.max(runtime.config.outputLines, 2000)
+              : runtime.config.outputLines,
+          );
+        } catch (error) {
+          if (
+            !fallbackHistory ||
+            !(error instanceof HerdrError) ||
+            error.code !== "agent_not_idle"
+          )
+            throw error;
+          output = await runtime.herdr.readAgent(
+            current.pane_id,
+            "visible",
+            runtime.config.outputLines,
+          );
+        }
+        // 解析結果只含 assistant 訊息；長時間工具執行時它不變，但原始畫面（spinner、
+        // 計時）仍在重繪。兩者都靜止才算穩定，避免 Claude 作業中途被當成最終回覆。
+        const rawChanged =
+          lastRaw !== "" &&
+          stableScreen(current.agent, output) !==
+            stableScreen(current.agent, lastRaw);
+        lastRaw = output;
+        lastReadError = "";
+        const latest = latestAgentResponse(
+          current.agent,
+          prompt,
+          output,
+          baselineOutput,
         );
+        readOk = true;
+        changed = latest !== lastOutput || rawChanged;
+        lastOutput = latest;
+        if (latest.length > longestOutput.length) longestOutput = latest;
       }
-      // 解析結果只含 assistant 訊息；長時間工具執行時它不變，但原始畫面（spinner、
-      // 計時）仍在重繪。兩者都靜止才算穩定，避免 Claude 作業中途被當成最終回覆。
-      const rawChanged =
-        lastRaw !== "" &&
-        stableScreen(current.agent, output) !==
-          stableScreen(current.agent, lastRaw);
-      lastRaw = output;
-      lastReadError = "";
-      const latest = latestAgentResponse(
-        current.agent,
-        prompt,
-        output,
-        baselineOutput,
-      );
-      readOk = true;
-      changed = latest !== lastOutput || rawChanged;
-      lastOutput = latest;
-      if (latest.length > longestOutput.length) longestOutput = latest;
     } catch (error) {
       lastReadError = safeError(error);
       console.error(`Terminal capture failed: ${safeError(error)}`);
@@ -2572,19 +2600,7 @@ export async function streamAgent(
       settled && Date.now() - collectingSince >= 10000 && !claudeStreaming;
     // Claude 的 Stop hook（ISSUE-045）：事件抵達且帶有最終回覆時直接收尾，不等畫面穩定；
     // 沒裝 hook、事件遺失或訊息為空時 hookFinal 為空，完全維持原本的 parser 流程。
-    const hookSession = current.agent_session as
-      { kind?: string; value?: string } | undefined;
-    const hookFinal =
-      hookModeFor(runtime.config.hookTransport, current.agent) === "auto" &&
-      (hookSession?.kind === "id" || hookSession?.kind === "path")
-        ? (
-            hookEvents.stopSince(hookSession.value, started)?.message ?? ""
-          ).trim()
-        : !hookSession
-          ? (
-              hookEvents.stopForPane(current.pane_id, started)?.message ?? ""
-            ).trim()
-          : "";
+    const hookFinal = readHookFinal();
     const complete =
       transcript?.turn.completed ||
       Boolean(hookFinal) ||
@@ -2706,11 +2722,7 @@ async function relayDirectMarkers(
 ): Promise<void> {
   const targets = mappingsForAgent(agent, runtime.routing.allMappings());
   if (!targets.length && !agentOrigin(agent.terminal_id)) return;
-  const screen = await runtime.herdr.readAgent(
-    agent.pane_id,
-    "recent_unwrapped",
-    500,
-  );
+  const screen = await runtime.herdr.readAgent(agent.pane_id, "visible", 500);
   const found = extractDirectMarkers(screen);
   const done = relayedMarkers.get(agent.terminal_id) || new Set<string>();
   relayedMarkers.set(agent.terminal_id, done);

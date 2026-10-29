@@ -313,7 +313,9 @@ The marker convention is packaged as the [discord-send skill](skills/discord-sen
 
 ### Hook channel (Claude, Codex) — ISSUE-045
 
-By default the bridge reads each reply from the terminal screen (the parser). A CLI hook gives it the reply and the permission request directly, which is more reliable. **Hook is preferred; the parser is always kept as the fallback**, so nothing breaks if a hook is missing or an event is lost.
+Single-Agent automatic observation uses visible snapshots, including post-completion marker scanning (ISSUE-050). Off-screen content requires hook/transcript delivery; prefer `herdr-discord-send` for outbound messages and files. Without a final, captured output may be incomplete. Explicit `read` can still request history.
+
+By default the bridge reads each reply from the terminal screen (the parser). A CLI hook gives it the reply and the permission request directly, which is more reliable. **Hook is preferred; the parser is always kept as the fallback**, a missing hook or lost event falls back to screen capture, which may be incomplete when the reply boundary has scrolled away. Install the pi extension on each machine running pi, then run `/reload` in that pi session or restart pi. Restarting only the bridge does not load pi extensions (ISSUE-045/033).
 
 | CLI    | Hooks to enable                                                                                       | Where                                                                                                                                                           | Extra step                                                                                        |
 | ------ | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |

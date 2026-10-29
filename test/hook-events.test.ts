@@ -189,11 +189,15 @@ test("Codex Stop hook also completes the stream (ISSUE-045)", async (t) => {
     agent_session: { kind: "id", value: "sess-codex" },
   };
   const sent: string[] = [];
+  let reads = 0;
   const runtime = {
     config: { streamIntervalMs: 2000, outputLines: 40 },
     herdr: {
       listAgentsWithWorkspaceNames: async () => [agent],
-      readAgent: async () => "› question\n• partial",
+      readAgent: async () => {
+        reads++;
+        return "› question\n• partial";
+      },
     },
     discord: {
       editProgress: async () => {},
@@ -217,6 +221,105 @@ test("Codex Stop hook also completes the stream (ISSUE-045)", async (t) => {
   t.mock.timers.tick(2000);
   await task;
   assert.deepEqual(sent, ["codex hook final"]);
+  assert.equal(reads, 0, "received final must bypass terminal reads");
+});
+
+test("working Codex reads only visible output before Stop arrives (ISSUE-050)", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const agent = {
+    terminal_id: "term",
+    pane_id: "w2:p2",
+    workspace_id: "w2",
+    tab_id: "w2:t1",
+    agent: "codex",
+    agent_status: "working",
+    agent_session: { kind: "id", value: "sess-visible" },
+  };
+  const sent: string[] = [];
+  let reads = 0;
+  const runtime = {
+    config: { streamIntervalMs: 2000, outputLines: 40 },
+    herdr: {
+      listAgentsWithWorkspaceNames: async () => [agent],
+      readAgent: async (_pane: string, source: string) => {
+        reads++;
+        assert.equal(source, "visible");
+        hookEvents.record({
+          event: "Stop",
+          sessionId: "sess-visible",
+          message: "codex hook final",
+        });
+        return "› question\n• partial";
+      },
+    },
+    discord: {
+      editProgress: async () => {},
+      postOutput: async (_m: unknown, text: string) => {
+        sent.push(text);
+      },
+    },
+  } as unknown as Parameters<typeof streamAgent>[2];
+  const task = streamAgent(
+    agent as never,
+    {} as Parameters<typeof streamAgent>[1],
+    runtime,
+    "question",
+    "",
+  );
+  t.mock.timers.tick(2000);
+  await task;
+  assert.deepEqual(sent, ["codex hook final"]);
+  assert.equal(reads, 1);
+});
+
+test("idle Codex fallback may read history when no final exists (ISSUE-050)", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const agent = {
+    terminal_id: "term",
+    pane_id: "w2:p2",
+    workspace_id: "w2",
+    tab_id: "w2:t1",
+    agent: "codex",
+    agent_status: "idle",
+    agent_session: { kind: "id", value: "sess-idle-visible" },
+  };
+  const sent: string[] = [];
+  let reads = 0;
+  const sources: string[] = [];
+  const runtime = {
+    config: { streamIntervalMs: 2000, outputLines: 40 },
+    herdr: {
+      listAgentsWithWorkspaceNames: async () => [agent],
+      readAgent: async (_pane: string, source: string) => {
+        reads++;
+        sources.push(source);
+        hookEvents.record({
+          event: "Stop",
+          sessionId: "sess-idle-visible",
+          message: "codex hook final",
+        });
+        return "› question\n• partial";
+      },
+    },
+    discord: {
+      editProgress: async () => {},
+      postOutput: async (_m: unknown, text: string) => {
+        sent.push(text);
+      },
+    },
+  } as unknown as Parameters<typeof streamAgent>[2];
+  const task = streamAgent(
+    agent as never,
+    {} as Parameters<typeof streamAgent>[1],
+    runtime,
+    "question",
+    "",
+  );
+  t.mock.timers.tick(2000);
+  await task;
+  assert.deepEqual(sent, ["codex hook final"]);
+  assert.equal(reads, 1);
+  assert.deepEqual(sources, ["recent_unwrapped"]);
 });
 
 test("hookTransport validation, mode lookup and status text (ISSUE-045)", async () => {

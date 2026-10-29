@@ -40,7 +40,7 @@
 | ISSUE-031 | CLI 互動選擇經 Discord 回答後 CLI 繼續運作，但 Discord 不再更新 | 已修正、待驗收 | 重啟後以 Codex／Claude 互動選擇重現；根因為診斷檔佐證的推論 |
 
 | ISSUE-032 | CLI 內可點擊的超連結（OSC 8）在 Discord 只剩連結文字，URL 遺失 | 已緩解、待驗收（程式未修） | 以 AGENTS.md 回覆格式規範要求 Agent 輸出完整純文字網址；其他專案需自行加入同樣規範 |
-| ISSUE-033 | 新增 pi agent 終端畫面 parser adapter | 已修正、待驗收 | 原始碼與 fixture 測試完成；尚未用真實 pi pane 經 Discord／Console 驗收，bridge 未重啟 |
+| ISSUE-033 | 新增 pi agent 終端畫面 parser adapter | 重新開啟／待調查 | 2026-10-29 pi 最終回答未擷取，Discord 貼較早進度；本機補裝 hook 見 ISSUE-045，parser 邊界限制未修 |
 | ISSUE-034 | Agent 檔案回送 Discord（discord-attach 標記） | 已驗收（2026-10-20） | 後備片段修正後 Discord 實機收到附件；範圍僅 Claude／文字檔 |
 | ISSUE-035 | coding-workflow 測試在 macOS 有 6 項失敗 | 已驗收（2026-10-29） | 根因：macOS `/var`→`/private/var` realpath 與測試用 `/etc/hostname`；完整測試 0 失敗；見下方 ISSUE-035 |
 | ISSUE-040 | Claude 最終回覆在串流中途被截斷，並混入「Update available!」提示 | 已修正、結案（2026-10-29，未實機驗收） | 使用者決定不另測；僅畫面重放與單元測試；根因為推論；再發生則重開 |
@@ -49,9 +49,10 @@
 | ISSUE-043 | 傳入附件沒有保留期限，本機與遠端會一直累積 | 已驗收（2026-10-29） | 本機實測刪除；遠端以 ssh 檢查取得間接證據（過期目錄已消失、父目錄 mtime 吻合）|
 | ISSUE-048 | Discord 訊息開頭的 Agent 識別框（agent／WK／pane 三行加框線）佔太多空間，且看不出遠端機器 | 已驗收（2026-10-28） | 使用者在 Discord 確認標頭 OK；手機版未單獨驗證；見下方 ISSUE-048 |
 | ISSUE-049 | 對 pi 傳圖片被拒絕「此 Agent 尚未支援本機圖片交付」 | 已修正、待驗收（2026-10-29） | pi 加入圖片白名單；單元測試完成；bridge 尚未重啟；Discord 未驗收；見下方 ISSUE-049 |
+| ISSUE-050 | hook 啟用後 Codex 回應期間 TUI 偶爾滾動 | 重新開啟／待調查 | final 優先、工作中 visible；2026-10-29 使用者已重啟，Gateway 連線成功，實機滾動待驗收 |
 | ISSUE-047 | Codex 在 Discord 送問後出現「Agent identity changed (session changed); response capture stopped」，擷取在核准通知前中止 | 已驗收（2026-10-28，使用者實測 Discord 送問後不再中止、核准流程正常） | 觸發原因（Codex 第一個 prompt 才建新 session）屬推測；見 ISSUE-047 |
 | ISSUE-046 | Discord 輸入權限選項數字（3）後沒有任何反應，之後按 Approve 才有動作 | 已驗收（2026-10-28，數字／allow／deny／按鈕／📨；原 `3` 沒反應根因未確認） | 2026-10-28 重啟後數字 1／2 回覆成功且有 📨；使用者早先的 `3` 沒反應原因仍未確認 |
-| ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | Claude Stop 與 PermissionRequest 已驗收（2026-10-28，使用者實測）；Codex Stop 與 allow／deny（y／esc 快捷鍵）、hookTransport 設定與 hooks 指令已驗收（2026-10-28）；agy Stop、pi 擴充已驗收（2026-10-28）；遠端 machine（agy）已驗收（2026-10-28，修正後重測） | 遠端 Claude／Codex／pi 未涵蓋；見 docs/hook-transport-proposal.md |
+| ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | Claude Stop 與 PermissionRequest 已驗收（2026-10-28，使用者實測）；Codex Stop 與 allow／deny（y／esc 快捷鍵）、hookTransport 設定與 hooks 指令已驗收（2026-10-28）；agy Stop 已驗收（2026-10-28）；pi Linux 缺漏補裝後已驗收（2026-10-29，保留 macOS 驗收歷史）；遠端 machine（agy）已驗收（2026-10-28，修正後重測） | 遠端 Claude／Codex／pi 未涵蓋；見 docs/hook-transport-proposal.md |
 | ISSUE-044 | Claude 回覆在 Discord 被重複貼出多則 | 重新開啟→已修正、待驗收 | 2026-10-28 重現，確認根因為回合尾巴後的「※ recap」行擋住完成判斷；原始碼與單元測試完成，已 commit（ccec39b）並於 2026-10-28 重啟（w2:p10），Discord 未驗收 |
 | ISSUE-039 | Discord 傳入非圖片檔案（如 chat.json）被拒絕 | 已驗收（2026-10-29） | 使用者於 Discord 傳非圖片檔驗收；邊界案例未逐項記錄 |
 | ISSUE-038 | agy 多行 prompt（含附圖）回顯後擷取不到回覆，Discord 只得「capture failure」 | 已修正、結案（2026-10-29，未實機驗收） | 使用者決定不另測；僅畫面重放與單元測試；再發生則重開 |
@@ -1340,7 +1341,7 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 
 ## ISSUE-033：接入 pi agent（終端畫面 parser adapter）
 
-更新日期：2026-10-19。狀態：已修正、待驗收（僅原始碼與自動化檢查）。
+更新日期：2026-10-29。狀態：重新開啟／待調查（最後回覆未擷取，見 ISSUE-045／033 Linux 紀錄；先前實作與測試歷史保留）。
 
 症狀：Herdr 已回報 `agent: "pi"` 與 `agent_session`（kind `path`，指向 `~/.pi/agent/sessions/.../*.jsonl`），但 bridge 無專用 adapter，落入 generic marker adapter，無法辨識 pi 畫面而擷取不到回覆。預期：pi pane 的 Discord／Console 回覆能擷取本次回答。
 
@@ -1736,11 +1737,49 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 修正：`sessionCreatedSince` 新增 `createdAt` 查詢參數；`streamAgent` 對 agy（本機）以對話目錄的 birthtime 判斷是否為送問後建立，是則追蹤新 id，其餘仍停止。遠端 agy 無法查目錄，仍維持停止。
 驗證（2026-10-28）：lint 通過；新增 1 項測試；完整 `npm test` 277 項、270 通過、6 失敗（ISSUE-035 既有項目）。驗收（2026-10-28）：重啟 bridge（a505bfb）後使用者從 Discord 問 agy，回報「ok了」（未逐項記錄 log 與耗時）。
 
-### ISSUE-045 pi 擴充（2026-10-28，已驗收）
+### ISSUE-045 pi 擴充（2026-10-28 歷史驗收；2026-10-29 Linux 缺漏修正後已驗收）
 
 調查（本機 pi 1.3.0，讀內建 docs 與型別）：pi 沒有 hooks.json，而是 TypeScript 擴充（`~/.pi/agent/extensions/`，與 Herdr 的 `herdr-agent-state.ts` 同目錄）。事件有 `agent_start`、`agent_end`（含 messages）、`agent_settled`（含 `aborted`，最終且僅通知）、`tool_call`（可 block）；pi 沒有內建權限提示，權限只存在於使用者自己安裝的擴充，所以 pi 只做完成通知，不做權限。
 實作：`scripts/pi/herdr-discord-bridge.ts`（複製到擴充目錄；`HERDR_ENV=1` 才啟用；`agent_end` 取最後一則 `stopReason=stop` 的 assistant 文字，`agent_settled` 且未中止、TUI、已 idle 時以 session 檔路徑為 sessionId 傳到 hook socket，失敗靜默）；bridge 的 hook 比對由 `kind=id` 擴及 `kind=path`（pi 的 Herdr `agent_session` 是檔案路徑）；`hookTransport.pi`（預設 `auto`）與 `hooks` 指令支援 pi。ISSUE-047 的 session 切換追蹤也擴及 pi：以 session 檔名內的 ISO 時間判斷是否為送問後建立。已複製到 `~/.pi/agent/extensions/herdr-discord-bridge.ts`。
 驗證（2026-10-28）：lint 通過；新增 1 項 session 檔名時間測試並更新 hookTransport 測試；完整 `npm test` 278 項、271 通過、6 失敗（ISSUE-035 既有項目）。驗收（2026-10-28）：重啟 bridge（f12892e 之後）、pi 載入擴充後，使用者從 Discord 問 pi（w4:p4），回報 bridge 有收到 hook 且「ok」（未逐項記錄 log 與耗時，也未另測送問後新 session 的追蹤路徑是否被觸發）。擴充與 Herdr 擴充互不影響屬觀察到無異常，未另行驗證。
+
+### ISSUE-045 Linux Codex／Claude completion 註冊查核（2026-10-29，待調查）
+
+使用者詢問 Codex／Claude 是否也需要安裝 completion hook。本機以 `registeredEvents()` 檢查 `~/.codex/hooks.json` 與 `~/.claude/settings.json`：兩個檔案都存在，但 bridge 的 `Stop`、`PermissionRequest` 皆未註冊；正式 `loadConfig()` 確認兩者模式均為 `auto`。這是設定缺漏的唯讀查核，不是新的 Discord 回覆失敗重現；過去其他環境的驗收不能代表此台 Linux 已部署。
+
+預期／範圍：要透過 hook 取得正式 final，各 CLI 須各自註冊指向本專案 `scripts/herdr-discord-hook` 的 `Stop`；Codex 尚需在 `/hooks` 審查信任，Claude 的 `PermissionRequest` 屬權限整合、不是完成通知的必要條件。未註冊時仍會 fallback，Codex 可另有 native transcript 路徑，因此不表示所有回覆必然失敗。尚未修改兩者設定、未重啟或部署；本輪沒有為此執行模型回合或端到端驗收。下一步：使用者若要求安裝，保留既有 hooks，完成各自的註冊、載入／信任與 Discord 回合驗證。文件 `git diff --check` 通過。
+
+### ISSUE-045 Linux Codex／Claude Stop 安裝（2026-10-29）
+
+狀態：Codex、Claude 已驗收（2026-10-29，本機 Discord 回覆）。Codex 信任已於 2026-10-29 完成（使用者回報並核對信任紀錄）。此紀錄接續上方唯讀查核，保留未安裝時的歷史。
+
+使用者授權「幫我處理」後，已在 `~/.codex/hooks.json` 與 `~/.claude/settings.json` 的 `hooks.Stop` 各追加一筆 command：`/home/jones/wk/Herdr_Discord_Bridge/scripts/herdr-discord-hook`，timeout 10 秒。各檔旁備份為 `hooks.json.bak-bridge-stop-20261029T132121`、`settings.json.bak-bridge-stop-20261029T132121`。合併時以 assertions 核對原有非 hooks 設定、所有其他事件及舊 Stop entries 完整保留；Herdr SessionStart 未變更。沒有安裝 PermissionRequest（本次只處理完成通知）。
+
+環境／啟用狀態：正式設定載入器確認兩者 `hookTransport=auto`；`registeredEvents()` 確認兩者 `Stop=true`、`PermissionRequest=false`。Codex `features.hooks=true`，目前信任紀錄只有舊 SessionStart，未替新 Stop 寫入 trusted_hash、未繞過信任。唯一正在執行的 Codex 是本工作回合，無法在工作中向自身 TUI 注入 `/hooks` 並完成審查；解除方式為本回合完成後由使用者在 Codex 輸入 `/hooks`，確認路徑後信任 Stop。查核時無 Claude live pane，因此沒有可重載的 Claude 程序；下次啟動將讀取設定，實際觸發仍待驗收。未重啟任何 Agent 或 bridge，未變更原始碼或 build，未 commit／push。
+
+驗證（2026-10-29）：以 Python 臨時 Unix socket 分別執行從兩份實際設定擷取的 command（先斷言為專案腳本絕對路徑），輸入合成 Stop payload；兩者均 exit 0、stdout 空白，接收內容與多行 final、sessionId、event 精確一致。此測試沒有經過 CLI hook 信任／載入流程，沒有對 Discord 發訊息，不等同實機成功。`node --test dist/test/hook-events.test.js` 13/13 通過、0 失敗，輸出 `/tmp/bridge-stop-tests-20261029.tap`；`git diff --check` 通過。只有設定與文件更新，未跑完整套件或重建。
+
+補充驗證（2026-10-29）：使用者回報已在 Codex trust hooks；唯讀核對 `~/.codex/config.toml`，新增 `/home/jones/.codex/hooks.json:stop:0:0` 的 `trusted_hash` 存在，`enabled` 未顯式設定。本輪未修改信任紀錄，先前「只有 SessionStart」為安裝當時的歷史。信任步驟已解除，不代表已觀察到真實 Stop 觸發。
+
+驗收（2026-10-29）：Codex 信任後，使用者從本對話詢問「現在台北天氣如何」，收到天氣回覆後確認「看起來ok」。唯讀 `herdr pane read w4:p2P --source recent-unwrapped --lines 35` 查到兩筆 `hook Stop session=01a185b1 pane=w2:p6`（chars=102、139），與目前 Codex session／pane 相符，證明真實 Stop 已抵達 bridge；日誌未帶 prompt id／時間，未逐筆斷言哪筆為天氣回合。Codex 本機短問答列為已驗收，未將此結果擴大到長工具回合、Claude 或 pi。
+
+未驗證／下一步：Claude 啟動後與 pi 各以 Discord 回合核對 final；Codex 長工具回合、重複回貼次數及確切耗時未另行驗證。舊片段不補送，其他電腦設定未處理。文件 `git diff --check` 通過；本輪僅更新驗收紀錄，未重跑程式測試。
+
+### ISSUE-045／033 pi Linux 最後回覆與 Discord 不一致（2026-10-29）
+
+狀態：ISSUE-045 本機擴充部署缺漏修正後已驗收（2026-10-29，見下方最終確認）；ISSUE-033 parser 邊界問題重新開啟／待調查。保留 2026-10-28 另一環境的驗收歷史。
+
+症狀／預期：使用者回報 Discord 顯示 `Final response unavailable; captured CLI excerpt`，內含 diff、`Planning quota cache regression test`、先前計畫與 Working 行；CLI 實際已完成，最終回答以「已修正，並確認讀取到兩張附圖」開頭，列出變更與 79 通過／3 跳過／0 失敗（這是 pi 對另一專案的回報，不是 bridge 本輪測試）。預期 Discord 收到同回合的最終 assistant 文字。
+
+環境／重現證據：Linux pi 1.4.0、pane `w6:p1`、session 路徑 `~/.pi/agent/sessions/--home-jones-wk-pi-acc-switcher--/2026-10-27T09-08-23-704Z_01a17c9e-2e16-7101-9147-10dd024b5ebf.jsonl`；診斷檔 `/home/jones/.local/state/herdr/plugins/herdr-discord-bridge/capture-diagnostics/2026-10-29T03-59-01-926Z-w6_p1.json`：耗時 125148 ms、idle、無 transcript、`extracted_last` 為空、最長片段 917 字元；`raw_screen_tail` 與目前 pane 都包含正確 final。檢查時 bridge 位於 `w4:p2P`，Gateway 已連線。
+
+已確認根因／限制：本機 `~/.pi/agent/extensions/` 只有 Herdr state 擴充，缺少 `herdr-discord-bridge.ts`；正式 `loadConfig()` 確認 `hookTransport.pi=auto`，因此無 completion hook 可用，只走畫面後備。`streamAgent` 未取得 final 時會送先前保存的 `longestOutput`；它可以是較早的工具／進度，並非 CLI 最後回答。真實診斷的尾端畫面已看不到 prompt，且未保存當時 baseline；以空 baseline 重放 `latestAgentResponse('pi', prompt, raw_screen_tail, '')` 結果為空，符合既有 fail-closed 契約，但不能把這次重放當成原 baseline 的完整重現。最後一輪 parser 為何無法從原 baseline 擷取，仍待調查；不放寬回答邊界以猜測 final。
+
+修正／啟用：將 repo 既有 `scripts/pi/herdr-discord-bridge.ts` 複製到本機 `~/.pi/agent/extensions/`（原先不存在，未覆寫 Herdr 擴充）。確認 pi idle 後以 `herdr pane run w6:p1 /reload` 載入；畫面回報 `Reloaded keybindings, extensions, skills, prompts, themes, and context files`，原有對話保留。未修改產品程式、未重新 build、未重啟 pi 或 bridge、未 commit／push。這只處理此台機器，不代表其他電腦已安裝。
+
+驗證（2026-10-29）：臨時腳本 `node /tmp/check-pi-bridge-hook.mjs` 先因已安裝擴充不存在而 assertion 失敗；安裝後通過：以實際安裝檔註冊 `agent_start`／`agent_end`／`agent_settled`，在隔離 Unix socket 斷言 Stop 的 session 路徑及完整 final，排除 thinking 與工具進度。此測試未對 Discord 發送訊息，完成後移除臨時腳本。`node --test dist/test/hook-events.test.js dist/test/cli-adapter.test.js` 40/40 通過、0 失敗；`git diff --check` 通過。本輪僅環境與文件修改，未跑全套或重新 build。
+
+未驗證／下一步：已送出的舊 Discord 片段不會自動更新；reload 不會重發上一回合 Stop。仍需使用者在同一 Discord thread 對 pi 再提問，核對 bridge 收到同 session 的 Stop 且 Discord 與 CLI final 一致，長工具回合亦待驗收。不宣稱已端到端解決，也未自動補送舊回答。parser 在 hook 缺失時仍可能回傳不完整片段；需另以帶原 baseline 的 trace 建立完整重現。
 
 ### ISSUE-045 遠端 machine hook（2026-10-28，已驗收；中途撤回後經修正重新驗收，見下方「遠端 hook 事件到了但沒被採用」）
 
@@ -1796,3 +1835,81 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 修正：新增 `agentSupportsLocalImages`（`src/attachments.ts`），`src/main.ts` 改用它；pi 以**完全相等**比對（不用子字串，避免 copilot 等名稱誤中），其餘維持原子字串比對。範圍：`src/attachments.ts`、`src/main.ts`、`test/attachments.test.ts`、`SPEC.md`。
 
 驗證（2026-10-29）：lint 通過；完整 `npm test` 284 項、283 通過、0 失敗、1 skipped（含新增的白名單測試）。**未驗證**：Discord 對 pi 傳圖端到端；pi 在不支援視覺的模型下的行為；遠端 pi（遠端目前沒有 pi）。下一步：重啟 bridge 後由使用者從 Discord 對 pi 傳圖驗收。
+
+### ISSUE-045 Claude／pi 測試回報與收件查核（2026-10-29）
+
+使用者回報「兩個都試了」（接續 Claude、pi 待驗收說明）。唯讀 `herdr pane read w4:p2P --source recent-unwrapped --lines 30` 查到 `hook Stop session=18258fcd pane=w2:pA chars=294` 與 pi `hook Stop session=/home/jo pane=w6:p1 chars=248`、`chars=138`；證明這些 pane 的真實 Stop 已抵達 bridge。Claude pane 身分尚未在本次查核另取 live metadata，session 日誌僅顯示前綴，未做逐回合 prompt 關聯。
+
+狀態維持已修正、待驗收：使用者尚未明說兩者 Discord 最終回覆是否完整且與 CLI 一致，已詢問確認，不把「試過」直接當成通過。無程式、設定、build、重啟或部署變更；本輪僅紀錄測試回報及收件證據，`git diff --check` 通過，未重跑測試。下一步：收到使用者具體結果後更新各自驗收狀態；若有差異，保留本次收件證據並重新調查。
+
+### ISSUE-045 Claude／pi Linux 最終驗收確認（2026-10-29，已驗收）
+
+使用者在被明確詢問「Claude、pi 在 Discord 的最後回覆，是否都完整且與 CLI 一致？」後回覆「兩個都正常」。結合上方真實 Stop 收件紀錄，本機 Claude Stop 安裝與 pi 擴充補裝／reload 均列為已驗收；前項「結果待確認」狀態已解除，保留為歷史。Codex 前一輪短問答也已驗收。
+
+範圍：這台 Linux、使用者本次實際測試的 Discord 回合。未記錄精確延遲或逐一重複次數；不涵蓋其他電腦、斷線／重啟恢復或所有長工具回合。ISSUE-033 在 hook 缺失時的 parser 邊界與較早片段限制仍待調查，不因 hook 路徑通過而結案。未改程式或設定、未 build／重啟／部署／commit／push；本輪僅更新驗收文件，`git diff --check` 通過，未重跑程式測試。
+
+## ISSUE-050：hook 啟用後 Codex 回應期間 TUI 偶爾滾動
+
+更新日期：2026-10-29。狀態：重新開啟／待調查（2026-10-29 使用者重啟後回報仍滾動）。
+
+症狀：使用者已完成 Codex Stop 信任及 Discord 短問答驗收後，回報「codex cli 回應時就會看到 tui 有時會滾動」。預期 hook 回合能取得 final，且進度觀察不干擾本機閱讀位置。環境為本機 Linux、Codex，未提供確切發生時間或 scroll trace；不能把正常 CLI 新輸出自動跟隨與 bridge 觸發的歷史捲動混為一談。
+
+已確認程式行為：`src/main.ts` 的 `streamAgent` 每輪先呼叫 `agent.read` 的 `recent_unwrapped`、至少 2000 行，遇 `agent_not_idle` 才退回 `visible`；完成這次讀取與 progress 更新後才取 matching Stop。預設 `streamIntervalMs=1200`。即使 hook／Codex transcript 可提供 final，這條歷史讀取路徑仍會執行。原始碼註解明載 alternate-screen history 可能需 idle scrolling；但本輪沒有在使用者畫面重現或取得 Herdr 底層捲動 trace，因此實際滾動根因未確認。hook 最終回覆內容正確與「完全不讀 TUI」為不同驗收範圍；ISSUE-045 final 驗收仍有效。
+
+處理／驗證：本輪僅唯讀核對 `streamAgent`、`HerdrClient.readAgent` 與設定預設值，沒有修改產品程式、設定或 runtime，未 build／重啟／部署／commit／push。文件 `git diff --check` 通過，沒有執行新的程式測試，未宣稱修正視覺滾動。
+
+下一步：以可記錄 read source 及 scroll 狀態的回放建立重現，驗證先檢查 Stop／transcript final、進度只讀 visible、必要時才啟動歷史 fallback 的策略；在保留 hook 遺失備援下驗證不干擾本機畫面。以上策略尚未實作。
+
+### ISSUE-050 串流讀取修正（2026-10-29）
+
+原先回歸命令 `node --test --test-name-pattern 'Codex Stop hook also' dist/test/hook-events.test.js` 失敗（0/1）：Stop 已抵達仍呼叫一次 terminal read，預期為 0。修正 `streamAgent` 先 poll transcript／檢查相符 Stop，再決定是否讀 terminal；未完成時 working／blocked／unknown 改讀 visible，idle／done 保留歷史備援。另加入讀取期間 Stop 抵達的測試，驗證 working 只讀 visible 且同輪送出 hook final。
+
+範圍為串流讀取策略；不改 hook 註冊或信任。實際畫面滾動與該讀取的因果尚未取得 live trace；此修正移除已確認的不必要歷史讀取，不宣稱所有 Herdr 滾動已消失。送問前 baseline、idle fallback 與其他操作仍可能讀歷史。尚未重啟／部署，執行中 bridge 未載入本次程式，需新 Discord 回合實機驗收；未 commit／push。
+
+### ISSUE-050 驗證與使用者重啟（2026-10-29）
+
+原始碼與 build：lint、typecheck、build 通過。`npm test` 完整 285 項，284 通過、1 失敗；失敗為 ISSUE-007 既有重複程序入口測試（`null !== 1`，約 10.9 秒，疑似負載／逾時，根因未重新確認）。單獨重測 `node --test --test-name-pattern 'real entrypoint rejects' dist/test/instance-lock.test.js` 1/1 通過，不能將完整套件改記為全綠；ISSUE-007 保留重新開啟／待調查。`node --test dist/test/hook-events.test.js` 14/14 通過，包括原失敗的 final 跳過 TUI 讀取與 working 僅 visible／讀取途中 Stop 抵達測試。完整紀錄 `/tmp/issue050-tests.tap`、hook 紀錄 `/tmp/issue050-hook.tap`；`git diff --check` 通過。
+
+使用者回報 bridge 已重啟；查核新 pane `w4:p2Q`、PID 48594，2026-10-29 13:52:33 啟動，cwd 為本 checkout；dist/src/main.js 同時段更新且包含 `readHookFinal` 與 visible 策略，pane 顯示 `Discord Gateway connected, Herdr watcher started`。已載入本次 build，取代前述未部署狀態；本輪沒有再次重啟。其他 Console 舊選取 Agent 已退出警告仍在，與 Gateway 連線無關。
+
+驗收待辦：在新 Discord Codex 回合觀察工作中 TUI 是否仍跳動，並核對 final 完整且只送一次；其他 CLI 及 idle／done 歷史備援仍需實機觀察。沒有宣稱完全消除所有滾動。未 commit／push。
+
+### ISSUE-050 重啟後再次滾動（2026-10-29，重新開啟）
+
+使用者在確認新版 bridge 已重啟後回報「剛剛 tui 又滾動了」，第一版未通過實機驗收。保留先前自動測試與部署歷史，不能沿用已修正狀態。查核剩餘自動歷史讀取包括送問前 baseline、idle／done 串流備援、forced-finish rewatch，以及無 active stream 時的 direct marker 掃描。尚無此次實際 read／scroll trace，未確認是哪個路徑觸發；已詢問發生時點。
+
+### ISSUE-050 第二次修正：完成後自動讀取（2026-10-29）
+
+使用者補充發生在「回答完」。除 idle／done 串流仍讀歷史外，`relayDirectMarkers` 在沒有 active stream 的 idle／done transition 會掃描 500 行歷史，屬第一版未涵蓋路徑；另有 baseline 與 rewatch。這是已確認的自動讀取缺口，尚未取得本次滾動對應哪一筆 API 的 trace。
+
+回歸：`node --test --test-name-pattern 'idle Codex reads' dist/test/hook-events.test.js` 修正前 0/1，實際 source 為 recent_unwrapped、預期 visible。第二次修正將 Discord 單 Agent baseline、所有狀態的串流讀取、rewatch、direct marker 掃描改為 visible；已有 final 仍跳過串流讀取。明確 read／handoff 不變。Parser 保留，但只能處理目前可見範圍；畫面外的標記請用 `herdr-discord-send`，無 hook／transcript 的長回答可能不完整，不能為避免滾動猜測隱藏內容。
+
+原始碼已變更，驗證進行中；使用者先前重啟的是第一版，本次尚未重啟部署。狀態仍重新開啟／待調查，保留第一次驗收失敗。
+
+### ISSUE-050 第二次修正驗證結果（2026-10-29）
+
+lint、typecheck、build 通過。`node --test dist/test/hook-events.test.js dist/test/response-delivery.test.js` 29/29 通過（`/tmp/issue050b-targeted.tap`）。`npm test` 286 項、283 通過、3 失敗（`/tmp/issue050b-tests.tap`）：ISSUE-007 duplicate entrypoint 為 `null !== 1`；ISSUE-021 handoff verify/cancel 為 ENOENT；ISSUE-012 changed questions 回合應 completed 卻 blocked。三項單獨以 `node --test --test-name-pattern 'real entrypoint rejects|concurrent handoff verification|changed questions supersede' dist/test/instance-lock.test.js dist/test/session-handoff.test.js dist/test/team-questions.test.js` 重測 3/3 通過（`/tmp/issue050b-retry.tap`）。仍保留完整測試失敗歷史，這三個 issue 維持重新開啟／待調查；疑似併行／負載影響，未證實根因，不修改其驗收標準。
+
+`git diff --check` 通過。第二版原始碼與 build 完成，但尚未重啟部署／實機驗收；ISSUE-050 維持重新開啟，等待第二版 runtime 驗證。未 commit／push。
+
+### ISSUE-050 轉交 Claude（2026-10-29）
+
+使用者要求轉交 Claude；接手目標為同 repo 的 Claude pane `w2:pA`（session `18258fcd-40d4-40fc-b7ee-cfe352c4325f`）。Codex 停止後續實作，保留未提交檔案與第二版 build；請接手者先確認實際 runtime 版本，再調查回答完成後滾動。第二版尚未取得部署與驗收證據，完整測試失敗與重測歷史如上。
+
+### ISSUE-050 Claude 接手審查（2026-10-29）
+
+審查第二版 diff（`src/main.ts`、`test/hook-events.test.ts`）與全部 `readAgent` 呼叫點。`src/main.ts` 的自動路徑（單 Agent baseline、`streamAgent`、`rewatchAfterForcedFinish`、`relayDirectMarkers`）均已改為 `visible`；`recent_unwrapped` 只剩使用者明確觸發的 handoff 摘要（約 1758 行）與 `/read`（約 2109 行）。`team-task-engine.ts`、`console-agent.ts` 讀 `visible`；`team-turn.ts` 讀取來源由團隊回合呼叫端決定，屬使用者發起的團隊流程，不在單 Agent 完成後路徑。未發現其他完成後自動讀歷史的路徑。
+
+範圍與契約評估：合理。hook／transcript／`herdr-discord-send` 為正常交付來源，visible parser 僅為備援；代價是無 hook 且回答超出畫面時備援可能不完整，已於前節載明，不為避免滾動而猜測內容。尚無 live read／scroll trace，無法確認滾動是否來自 `agent.read`；仍可能是 Herdr 自身重繪或 Codex TUI 正常的新輸出跟隨，這兩項未排除。
+
+驗證（2026-10-29 重新 `npm run build` 通過；`node --test dist/test/hook-events.test.js dist/test/response-delivery.test.js` 29/29 通過）。dist 時間（13:59）晚於 src 修改（13:58），build 為最新。此刻未找到執行中的 bridge 程序，不能確認 runtime 載入的版本。本輪未重啟、未 commit／push；ISSUE-050 維持重新開啟，須經使用者授權重啟並在新 Discord 回合觀察完成後是否仍滾動；若仍滾動，下一步為記錄 Herdr `agent.read` 呼叫時間與 TUI 滾動時間對照。
+
+### ISSUE-050 第二版重啟（2026-10-29）
+
+使用者回報已重啟 bridge。核對：Herdr pane `w4:p2R`（label「Discord bridge」）顯示 `Discord Gateway connected, Herdr watcher started`；`dist/src/main.js` 修改時間 14:43:49，晚於第二版 src。沙箱內 `ps` 看不到該程序，無法確認 PID 與啟動時間，因此「已載入第二版」僅有 pane 輸出與 dist 時間的間接證據。實機驗收（新 Discord Codex 回合完成後 TUI 是否滾動、final 完整只送一次）尚未進行，ISSUE-050 維持重新開啟／待調查。未 commit／push。
+
+### ISSUE-050 第三版：依來源決定可否讀歷史（2026-10-29）
+
+依使用者指示：Discord 來源或明確要求送 Discord 的備援情況可以讀歷史（可能捲動），本機直接操作不得干擾。實作：`streamAgent`（僅服務 Discord 發起回合）在已有 hook／transcript final 時完全不讀畫面；無 final 的備援中，working／blocked／unknown 讀 `visible`，idle／done 讀 `recent_unwrapped`（`agent_not_idle` 退回 `visible`）；Discord 單 Agent baseline 與 forced-finish rewatch 恢復讀歷史，維持與串流讀取一致的比對基準。`relayDirectMarkers`（本機回合完成後的掃描，不知道回合是否 Discord 來源）維持只讀 `visible`。Hook 事件不含 prompt 文字，故無法偵測本機回合是否「明確要求送 Discord」，該情況請用 `herdr-discord-send`（本機目前 `which herdr-discord-send` 找不到，標記僅掃可見畫面，畫面外標記可能漏送）。
+
+驗證（2026-10-29）：lint、build 通過；`node --test dist/test/hook-events.test.js dist/test/response-delivery.test.js` 29/29 通過（idle 備援測試改為預期 `recent_unwrapped`，已有 Stop 時 0 次讀取與 working 僅 visible 測試保留）。未跑完整 `npm test`。第三版未重啟，目前執行中為第二版；使用者先前重啟的是第二版。ISSUE-050 維持重新開啟，須重啟後實機驗收：本機回合完成後不滾動、Discord 回合 final 完整。未 commit／push。

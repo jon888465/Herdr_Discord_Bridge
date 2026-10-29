@@ -139,3 +139,23 @@ Live short-answer prompt and shared turn capture were tested; coding reviewer
 and handoff/failover identity gates stay unchanged.
 [ISSUE-026](docs/known-issues.md) records synthetic fixtures, live short-answer capture, and pending
 Discord delivery and deployment; unknown-session restart detection remains limited.
+
+## pi completion deployment
+
+The pi completion extension must be installed on each machine running pi and loaded
+with `/reload` or pi startup; restarting only the bridge does not load it.
+On 2026-10-29 the Linux installation lacked this extension, so Discord received
+an earlier CLI progress excerpt despite a completed final on screen. The extension
+is now installed and reloaded; isolated hook delivery passes, and the user
+confirmed Discord finals match the CLI on 2026-10-29. Local Codex and Claude Stop
+hooks were also registered and accepted in Discord that day (Codex trust confirmed).
+Parser capture without a usable prompt/baseline boundary
+remains limited. See ISSUE-045/033 in [known issues](docs/known-issues.md).
+
+## Non-scrolling single-Agent observation
+
+ISSUE-050 tracks a failed first live acceptance (scrolling after completion).
+Discord single-Agent baseline, streaming, rewatch, and direct-marker observation
+now use visible snapshots only. Hook/transcript finals remain preferred. Off-screen
+parser text and markers may be unavailable; explicit read/handoff remain separate.
+The second fix still requires runtime deployment and live acceptance.
