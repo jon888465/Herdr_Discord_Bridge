@@ -55,7 +55,7 @@
 | ISSUE-039 | Discord 傳入非圖片檔案（如 chat.json）被拒絕 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-038 | agy 多行 prompt（含附圖）回顯後擷取不到回覆，Discord 只得「capture failure」 | 已修正、待驗收 | 原始碼、單元測試與實際畫面重放完成；bridge 尚未重啟，Discord 未驗收 |
 | ISSUE-037 | 使用者直接在 Herdr 要求 Agent 傳給 Discord，bridge 不代送 | 已驗收（2026-10-20，指令版） | 重啟後使用者確認 Discord 收到；範圍見驗收紀錄 |
-| ISSUE-036 | 強制收尾後的 rewatch 在使用者直接於 pane 輸入新內容後仍重複擷取舊 prompt，Discord 被洗版 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟 |
+| ISSUE-036 | 強制收尾後的 rewatch 在使用者直接於 pane 輸入新內容後仍重複擷取舊 prompt，Discord 被洗版 | 已驗收（2026-10-29） | 使用者於 pane 續問，Discord 未再重送；見下方 ISSUE-036 |
 | ISSUE-022 | Phase 4 Quota / Failover Manager | 已修正、待驗收 | 2026-09-21 新增 28 項通過；完整 181/184，ISSUE-007／021 待調查，live 待驗收 |
 
 | ISSUE-023 | Grok 回答框與折行標記無法解析 | 已修正、待驗收 | Grok live turn probe 通過；Discord 交付、長文及 blocked 續答待驗收 |
@@ -1386,7 +1386,7 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 
 ## ISSUE-036：rewatch 對已過時的 prompt 重複擷取並洗版 Discord
 
-更新日期：2026-10-20。狀態：已修正、待驗收（原始碼已改；執行中的 bridge 仍是 2026-10-19 17:16 的舊 build，**未重啟，仍會洗版**）。
+更新日期：2026-10-29。狀態：已驗收（2026-10-29，macOS，2026-10-29 重啟後的 bridge：使用者在 Discord 問完後，直接在 pane 繼續提問，Discord 沒有再重送舊回覆或「再度運作」訊息，符合預期）。
 
 症狀：w5:p1（Claude）的 Discord 持續收到「▶️ Agent 再度運作，繼續擷取回覆…」與回覆內容，畫面一直滾動。預期：Agent 回覆一次後不再重複送。
 
@@ -1398,7 +1398,7 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 
 驗證（2026-10-20）：lint 通過；完整 `npm test` 244 項、237 通過、6 失敗（同 ISSUE-035 的 coding-workflow 既有失敗）；新增單元測試通過。
 
-未驗證／限制：未重啟 bridge 與實機驗收；已送出的訊息無法收回。若使用者在輸入框打字尚未送出，也會被視為「已前進」而停止觀察（可接受的保守行為）。Claude 無 transcript 時 rewatch 的片段跳動根因（為何 `extracted_last` 在片段間變動）未另行修正。
+未驗證／限制：（2026-10-20 的「未重啟」已過期，bridge 已於 2026-10-29 重啟並驗收，驗收只涵蓋一次 pane 續問情境；）已送出的訊息無法收回。若使用者在輸入框打字尚未送出，也會被視為「已前進」而停止觀察（可接受的保守行為）。Claude 無 transcript 時 rewatch 的片段跳動根因（為何 `extracted_last` 在片段間變動）未另行修正。
 
 ## ISSUE-037：直接在 Herdr 要求 Agent 傳訊息／檔案給 Discord 時 bridge 不代送
 
