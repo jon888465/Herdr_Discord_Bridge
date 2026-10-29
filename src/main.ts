@@ -11,6 +11,7 @@ import { PROGRESS_UPDATE_MS, formatElapsed } from "./progress-time.js";
 import {
   ATTACHMENT_RETENTION_MS,
   ATTACHMENT_SUBDIR,
+  agentSupportsLocalImages,
   cleanupOldAttachments,
   prepareAttachments,
   type InboundAttachment,
@@ -1939,12 +1940,7 @@ async function dispatchPrompt(
       const images = prepared.filter((item) => item.kind === "image");
       const files = prepared.filter((item) => item.kind === "file");
       hasImages = images.length > 0;
-      if (
-        hasImages &&
-        !["codex", "claude", "agy", "antigravity"].some((kind) =>
-          agent.agent?.toLowerCase().includes(kind),
-        )
-      )
+      if (hasImages && !agentSupportsLocalImages(agent.agent))
         throw new Error("此 Agent 尚未支援本機圖片交付。");
       if (images.length)
         prompt +=

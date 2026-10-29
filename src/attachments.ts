@@ -286,3 +286,14 @@ export async function cleanupOldAttachments(
   }
   return removed;
 }
+
+/**
+ * 可接收「本機圖片路徑」交付的 Agent（ISSUE-049）。pi 必須完全相等：用子字串會誤中其他名稱。
+ */
+export function agentSupportsLocalImages(kind: string | undefined): boolean {
+  const name = (kind ?? "").toLowerCase();
+  if (name === "pi") return true;
+  return ["codex", "claude", "agy", "antigravity"].some((k) =>
+    name.includes(k),
+  );
+}

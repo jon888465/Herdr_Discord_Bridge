@@ -48,6 +48,7 @@
 | ISSUE-042 | 從 Discord 驅動的 Agent 自己重啟 bridge 時，該回合的串流與最終回覆遺失 | 串流續傳與 blocked 補發通知已驗收（2026-10-28） | 2026-10-24、10-28 各發生一次；已改為重啟後依 active-streams.json 接續 |
 | ISSUE-043 | 傳入附件沒有保留期限，本機與遠端會一直累積 | 已驗收（2026-10-29） | 本機實測刪除；遠端以 ssh 檢查取得間接證據（過期目錄已消失、父目錄 mtime 吻合）|
 | ISSUE-048 | Discord 訊息開頭的 Agent 識別框（agent／WK／pane 三行加框線）佔太多空間，且看不出遠端機器 | 已驗收（2026-10-28） | 使用者在 Discord 確認標頭 OK；手機版未單獨驗證；見下方 ISSUE-048 |
+| ISSUE-049 | 對 pi 傳圖片被拒絕「此 Agent 尚未支援本機圖片交付」 | 已修正、待驗收（2026-10-29） | pi 加入圖片白名單；單元測試完成；bridge 尚未重啟；Discord 未驗收；見下方 ISSUE-049 |
 | ISSUE-047 | Codex 在 Discord 送問後出現「Agent identity changed (session changed); response capture stopped」，擷取在核准通知前中止 | 已驗收（2026-10-28，使用者實測 Discord 送問後不再中止、核准流程正常） | 觸發原因（Codex 第一個 prompt 才建新 session）屬推測；見 ISSUE-047 |
 | ISSUE-046 | Discord 輸入權限選項數字（3）後沒有任何反應，之後按 Approve 才有動作 | 已驗收（2026-10-28，數字／allow／deny／按鈕／📨；原 `3` 沒反應根因未確認） | 2026-10-28 重啟後數字 1／2 回覆成功且有 📨；使用者早先的 `3` 沒反應原因仍未確認 |
 | ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | Claude Stop 與 PermissionRequest 已驗收（2026-10-28，使用者實測）；Codex Stop 與 allow／deny（y／esc 快捷鍵）、hookTransport 設定與 hooks 指令已驗收（2026-10-28）；agy Stop、pi 擴充已驗收（2026-10-28）；遠端 machine（agy）已驗收（2026-10-28，修正後重測） | 遠端 Claude／Codex／pi 未涵蓋；見 docs/hook-transport-proposal.md |
@@ -1782,3 +1783,16 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 協作方式（使用者要求試驗與 agy-pod 協作）：我實作初版，經 Herdr API 把需求、實作與預期輸出送給遠端 agy（agy-pod w2:p1，只做審查、不改檔），約 22 秒回覆。採用：先清理再比較 kind、各欄位限長且以字元截斷、反引號與 `│` 防護、前綴碰撞測試；未採用：移除 `WK:`／`Pane:` 標籤（保持可讀性）、把 Pane 移到最前（維持使用者要求的順序），並指出其 IPv6 疑慮不適用（pane ID 不是網址）。遠端 agy 沒有 repo，沒有改任何檔案；它的測試預期值我逐一核對後才寫入。
 驗證（2026-10-28）：lint 通過；新增／更新 2 項標頭測試（含協作建議的邊界案例）；完整 `npm test` 283 項、276 通過、6 失敗（ISSUE-035 既有項目）。驗收：2026-10-28 使用者在 Discord 確認標頭 OK。**未驗證**：手機版橫向捲動。
 
+## ISSUE-049：對 pi 傳圖片被拒絕
+
+更新日期：2026-10-29。狀態：已修正、待驗收（原始碼與單元測試完成；bridge **尚未重啟**載入此修正；Discord 尚未驗收）。延伸自 ISSUE-039（其圖片白名單限制為當時明列的設計限制，非回歸，故新開此 issue 而不重開 039）。
+
+症狀：使用者在另一台電腦的 Herdr 對 pi agent 附圖提問，bridge 回「❌ 此 Agent 尚未支援本機圖片交付。」（使用者附圖，已以圖片工具讀取）。預期：pi 能收到圖片並回答。
+
+已確認根因：`src/main.ts` 的本機圖片白名單只有 codex／claude／agy／antigravity，pi 不在其中（程式與截圖一致）。
+
+調查（2026-10-29，本機 pi 1.3.0）：`pi --help` 範例含 `pi @prompt.md @image.png`；以 `pi -p --no-session` 請它用 read 工具讀一張本機 PNG，pi 正確描述了圖片內容。bridge 的交付方式（prompt 附本機路徑並要求用工具讀取）對 pi 可行。能否看圖取決於 pi 當下的模型是否支援視覺（此次實測的模型可以）；不支援時 prompt 已要求明說讀不到。
+
+修正：新增 `agentSupportsLocalImages`（`src/attachments.ts`），`src/main.ts` 改用它；pi 以**完全相等**比對（不用子字串，避免 copilot 等名稱誤中），其餘維持原子字串比對。範圍：`src/attachments.ts`、`src/main.ts`、`test/attachments.test.ts`、`SPEC.md`。
+
+驗證（2026-10-29）：lint 通過；完整 `npm test` 284 項、283 通過、0 失敗、1 skipped（含新增的白名單測試）。**未驗證**：Discord 對 pi 傳圖端到端；pi 在不支援視覺的模型下的行為；遠端 pi（遠端目前沒有 pi）。下一步：重啟 bridge 後由使用者從 Discord 對 pi 傳圖驗收。

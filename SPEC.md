@@ -358,7 +358,7 @@ PNG/JPEG/WebP attachment，每個最多 5 MiB；下載來源限 Discord HTTPS CD
 格式與二進位簽章不一致，但在支援格式範圍內（例如宣告 image/png 但實質為 JPEG），
 Bridge 會自動依實際二進位格式正規化副檔名（如儲存為 `.jpg`），避免下游解碼器崩潰；
 若二進位內容非受支援圖片格式，則拒絕並清除暫存。產生的本機路徑位於 target Agent cwd 下的
-`.herdr-discord-bridge/attachments`，並以明確指示要求 Codex/agy 使用 image-viewing tool（Codex／Claude／agy 皆在 allowlist；Claude 以 Read 工具讀取路徑，尚待實機驗收）。
+`.herdr-discord-bridge/attachments`，並以明確指示要求 Codex/agy 使用 image-viewing tool（Codex／Claude／agy 皆在 allowlist；Claude 以 Read 工具讀取路徑，尚待實機驗收；pi 於 2026-10-29 加入 allowlist，以完全相等比對 agent 名稱，ISSUE-049，待實機驗收）。
 非圖片附件（ISSUE-039，2026-10-21）：PNG/JPEG/WebP 以外的 Discord 附件視為一般檔案，至多 10 MiB、同樣限 Discord HTTPS CDN host、禁止 redirect，存成同目錄下 `message-*/<序號>-<清理後檔名>`（去除路徑與特殊字元），prompt 附「使用者附檔」路徑；每則總附件上限仍為四個；純檔案不受 Agent 白名單限制。Bridge 不執行或解析內容。
 這是本機檔案傳遞，不是原生 multimodal input，且要求 Agent 可存取相同 filesystem。
 不支援的 agent/format 與下載失敗會回報。成功檔案會保留（目前尚無自動 retention cleanup）；

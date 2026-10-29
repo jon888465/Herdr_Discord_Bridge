@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { prepareImages, validateImage } from "../src/attachments.js";
+import {
+  agentSupportsLocalImages,
+  prepareImages,
+  validateImage,
+} from "../src/attachments.js";
 const image = {
   url: "https://cdn.discordapp.com/attachments/1/2/image.png",
   size: 8,
@@ -197,4 +201,11 @@ test("cleanupOldAttachments removes only expired message-* directories", async (
     await rm(root, { recursive: true, force: true });
     await rm(outside, { recursive: true, force: true });
   }
+});
+
+test("local image delivery allowlist includes pi by exact name only (ISSUE-049)", () => {
+  for (const kind of ["codex", "claude", "agy", "antigravity", "pi", "PI"])
+    assert.equal(agentSupportsLocalImages(kind), true, kind);
+  for (const kind of ["copilot", "spinner", "gemini", "", undefined])
+    assert.equal(agentSupportsLocalImages(kind), false, String(kind));
 });
