@@ -50,6 +50,7 @@
 | ISSUE-048 | Discord 訊息開頭的 Agent 識別框（agent／WK／pane 三行加框線）佔太多空間，且看不出遠端機器 | 已驗收（2026-10-28） | 使用者在 Discord 確認標頭 OK；手機版未單獨驗證；見下方 ISSUE-048 |
 | ISSUE-049 | 對 pi 傳圖片被拒絕「此 Agent 尚未支援本機圖片交付」 | 已修正、待驗收（2026-10-29） | pi 加入圖片白名單；單元測試完成；bridge 尚未重啟；Discord 未驗收；見下方 ISSUE-049 |
 | ISSUE-050 | hook 啟用後 Codex 回應期間 TUI 偶爾滾動 | 重新開啟／待調查 | final 優先、工作中 visible；2026-10-29 使用者已重啟，Gateway 連線成功，實機滾動待驗收 |
+| ISSUE-051 | `npm start`／`dry-run` 與 bin 指向不存在的 `dist/index.js` | 已修正、待驗收 | 2026-10-29 改為 `dist/src/index.js`；實際啟動待使用者驗收 |
 | ISSUE-047 | Codex 在 Discord 送問後出現「Agent identity changed (session changed); response capture stopped」，擷取在核准通知前中止 | 已驗收（2026-10-28，使用者實測 Discord 送問後不再中止、核准流程正常） | 觸發原因（Codex 第一個 prompt 才建新 session）屬推測；見 ISSUE-047 |
 | ISSUE-046 | Discord 輸入權限選項數字（3）後沒有任何反應，之後按 Approve 才有動作 | 已驗收（2026-10-28，數字／allow／deny／按鈕／📨；原 `3` 沒反應根因未確認） | 2026-10-28 重啟後數字 1／2 回覆成功且有 📨；使用者早先的 `3` 沒反應原因仍未確認 |
 | ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | Claude Stop 與 PermissionRequest 已驗收（2026-10-28，使用者實測）；Codex Stop 與 allow／deny（y／esc 快捷鍵）、hookTransport 設定與 hooks 指令已驗收（2026-10-28）；agy Stop 已驗收（2026-10-28）；pi Linux 缺漏補裝後已驗收（2026-10-29，保留 macOS 驗收歷史）；遠端 machine（agy）已驗收（2026-10-28，修正後重測） | 遠端 Claude／Codex／pi 未涵蓋；見 docs/hook-transport-proposal.md |
@@ -1913,3 +1914,11 @@ lint、typecheck、build 通過。`node --test dist/test/hook-events.test.js dis
 依使用者指示：Discord 來源或明確要求送 Discord 的備援情況可以讀歷史（可能捲動），本機直接操作不得干擾。實作：`streamAgent`（僅服務 Discord 發起回合）在已有 hook／transcript final 時完全不讀畫面；無 final 的備援中，working／blocked／unknown 讀 `visible`，idle／done 讀 `recent_unwrapped`（`agent_not_idle` 退回 `visible`）；Discord 單 Agent baseline 與 forced-finish rewatch 恢復讀歷史，維持與串流讀取一致的比對基準。`relayDirectMarkers`（本機回合完成後的掃描，不知道回合是否 Discord 來源）維持只讀 `visible`。Hook 事件不含 prompt 文字，故無法偵測本機回合是否「明確要求送 Discord」，該情況請用 `herdr-discord-send`（本機目前 `which herdr-discord-send` 找不到，標記僅掃可見畫面，畫面外標記可能漏送）。
 
 驗證（2026-10-29）：lint、build 通過；`node --test dist/test/hook-events.test.js dist/test/response-delivery.test.js` 29/29 通過（idle 備援測試改為預期 `recent_unwrapped`，已有 Stop 時 0 次讀取與 working 僅 visible 測試保留）。未跑完整 `npm test`。第三版未重啟，目前執行中為第二版；使用者先前重啟的是第二版。ISSUE-050 維持重新開啟，須重啟後實機驗收：本機回合完成後不滾動、Discord 回合 final 完整。未 commit／push。
+
+## ISSUE-051：`npm start` 找不到入口
+
+更新日期：2026-10-29。狀態：已修正、待驗收。
+
+症狀：`npm start` 回報 `MODULE_NOT_FOUND`。預期：能啟動 bridge。根因（已確認）：`package.json` 的 `bin`、`start`、`dry-run` 指向 `dist/index.js`，但 build 輸出為 `dist/src/index.js`（`dist/index.js` 不存在）。修正：三處改為 `dist/src/index.js`。
+
+驗證：確認 `package.json` 內容與 `dist/src/index.js` 存在；`npm run dry-run` 啟動後 120 秒內未結束（未確認是否為預期的常駐行為），未視為通過。`npm start` 實際啟動（含 Discord token 載入）尚未驗收，需使用者啟動確認。未 commit／push。
