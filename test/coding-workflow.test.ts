@@ -945,8 +945,11 @@ test("artifact reads stay inside the task directory and reject escapes", () => {
       JSON.stringify({ ok: true }),
     );
     assert.deepEqual(readCodingArtifact(dir, "task-a", "a-ok"), { ok: true });
+    // 目標必須真實存在：/etc/hostname 在 macOS 不存在，會變成 ENOENT 而不是逃逸（ISSUE-035）。
+    const outside = join(dir, "outside.json");
+    writeFileSync(outside, "{}");
     symlinkSync(
-      "/etc/hostname",
+      outside,
       join(dir, "artifacts", "task-a", "a-link.json"),
     );
     assert.throws(

@@ -375,8 +375,10 @@ export function writeCodingArtifact(
     throw new Error("invalid coding artifact identity");
   const root = path.resolve(journalDir, "artifacts", taskId);
   assertArtifactsOutsideWorktree(root, repository);
-  const file = path.resolve(root, `${artifactId}.json`);
-  if (!file.startsWith(fs.realpathSync(root) + path.sep))
+  // 以 realpath 後的根目錄組檔案路徑；macOS 的 /var → /private/var 會讓未解析路徑誤判為逃逸（ISSUE-035）。
+  const rootReal = fs.realpathSync(root);
+  const file = path.resolve(rootReal, `${artifactId}.json`);
+  if (!file.startsWith(rootReal + path.sep))
     throw new Error("artifact path escapes task scope");
   const payload = JSON.stringify(body);
   if (Buffer.byteLength(payload) > MAX_ARTIFACT_BYTES)

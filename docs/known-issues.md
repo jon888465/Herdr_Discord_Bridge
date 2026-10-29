@@ -42,7 +42,7 @@
 | ISSUE-032 | CLI 內可點擊的超連結（OSC 8）在 Discord 只剩連結文字，URL 遺失 | 已緩解、待驗收（程式未修） | 以 AGENTS.md 回覆格式規範要求 Agent 輸出完整純文字網址；其他專案需自行加入同樣規範 |
 | ISSUE-033 | 新增 pi agent 終端畫面 parser adapter | 已修正、待驗收 | 原始碼與 fixture 測試完成；尚未用真實 pi pane 經 Discord／Console 驗收，bridge 未重啟 |
 | ISSUE-034 | Agent 檔案回送 Discord（discord-attach 標記） | 已驗收（2026-10-20） | 後備片段修正後 Discord 實機收到附件；範圍僅 Claude／文字檔 |
-| ISSUE-035 | coding-workflow 測試在 macOS 有 6 項失敗 | 待調查 | 基準亦失敗，根因未確認 |
+| ISSUE-035 | coding-workflow 測試在 macOS 有 6 項失敗 | 已修正、待驗收（2026-10-29） | 根因：macOS `/var`→`/private/var` realpath 與測試用 `/etc/hostname`；完整測試 0 失敗；見下方 ISSUE-035 |
 | ISSUE-040 | Claude 最終回覆在串流中途被截斷，並混入「Update available!」提示 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 已於 2026-10-24 重啟（w2:p1V）；根因為推論；Discord 未驗收 |
 | ISSUE-041 | bridge 不支援 Herdr 遠端機器（如 agy-pod）的 Agent | 已驗收（文字對話，2026-10-24） | 關閉遠端面板後重問，Discord 收到正確回覆；斷線重連、附件、Team Worker 等未驗收 |
 | ISSUE-042 | 從 Discord 驅動的 Agent 自己重啟 bridge 時，該回合的串流與最終回覆遺失 | 串流續傳與 blocked 補發通知已驗收（2026-10-28） | 2026-10-24、10-28 各發生一次；已改為重啟後依 active-streams.json 接續 |
@@ -1377,9 +1377,12 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 
 ## ISSUE-035：coding-workflow 測試在 macOS 有 6 項失敗
 
-更新日期：2026-10-19。狀態：待調查。
+更新日期：2026-10-29。狀態：已修正、待驗收（原始碼與自動化測試完成；執行中的 bridge 尚未重啟載入此修正）。
 
-症狀：`npm test` 在 macOS（Darwin 25.5.0）有 6 項 `test/coding-workflow.test.ts` 失敗（如「artifact reads stay inside the task directory and reject escapes」）。基準（無 ISSUE-034 變更）重現相同失敗。根因未確認（可能與 macOS `/tmp`／`/private` realpath 或 git 環境有關，僅為推測）。下一步：單獨執行並檢視失敗訊息。
+**已確認根因（2026-10-29）：** (1) 正式程式 bug：`writeCodingArtifact`（`src/coding-version.ts`）用未解析的 `path.resolve(root)` 組檔案路徑，卻拿 `realpathSync(root)` 比對；journal 目錄位於 symlink 路徑（macOS 的 `/var`→`/private/var`）時恆判為「artifact path escapes task scope」，導致 implement assignment 失敗，連帶 5 項 coding 測試失敗。(2) 測試問題：「artifact reads…reject escapes」用 `/etc/hostname` 當 symlink 目標，macOS 沒有該檔，變成 ENOENT 而非逃逸。
+修正：寫入改用 realpath 後的根目錄組路徑；測試改指向暫存目錄內真實存在的檔案。驗證（2026-10-29，macOS）：lint 通過；完整 `npm test` 283 項、282 通過、0 失敗、1 skipped。**未驗證**：實際 coding 流程的 Discord／Herdr 端到端；bridge 尚未重啟。
+
+原症狀（2026-10-19）：`npm test` 在 macOS（Darwin 25.5.0）有 6 項 `test/coding-workflow.test.ts` 失敗（如「artifact reads stay inside the task directory and reject escapes」）。基準（無 ISSUE-034 變更）重現相同失敗。根因未確認（可能與 macOS `/tmp`／`/private` realpath 或 git 環境有關，僅為推測）。下一步：單獨執行並檢視失敗訊息。
 
 ## ISSUE-036：rewatch 對已過時的 prompt 重複擷取並洗版 Discord
 
