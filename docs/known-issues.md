@@ -50,7 +50,7 @@
 | ISSUE-048 | Discord 訊息開頭的 Agent 識別框（agent／WK／pane 三行加框線）佔太多空間，且看不出遠端機器 | 已驗收（2026-10-28） | 使用者在 Discord 確認標頭 OK；手機版未單獨驗證；見下方 ISSUE-048 |
 | ISSUE-049 | 對 pi 傳圖片被拒絕「此 Agent 尚未支援本機圖片交付」 | 已修正、待驗收（2026-10-29） | pi 加入圖片白名單；單元測試完成；bridge 尚未重啟；Discord 未驗收；見下方 ISSUE-049 |
 | ISSUE-050 | hook 啟用後 Codex 回應期間 TUI 偶爾滾動 | 重新開啟／待調查 | final 優先、工作中 visible；2026-10-29 使用者已重啟，Gateway 連線成功，實機滾動待驗收 |
-| ISSUE-051 | `npm start`／`dry-run` 與 bin 指向不存在的 `dist/index.js` | 已修正、待驗收 | 2026-10-29 改為 `dist/src/index.js`；實際啟動待使用者驗收 |
+| ISSUE-051 | `npm start`／`dry-run` 與 bin 指向不存在的 `dist/index.js` | 已驗收（入口路徑） | 2026-10-29 使用者跑 `npm start` 不再 MODULE_NOT_FOUND；因缺 token 未完整啟動，屬啟動方式差異 |
 | ISSUE-047 | Codex 在 Discord 送問後出現「Agent identity changed (session changed); response capture stopped」，擷取在核准通知前中止 | 已驗收（2026-10-28，使用者實測 Discord 送問後不再中止、核准流程正常） | 觸發原因（Codex 第一個 prompt 才建新 session）屬推測；見 ISSUE-047 |
 | ISSUE-046 | Discord 輸入權限選項數字（3）後沒有任何反應，之後按 Approve 才有動作 | 已驗收（2026-10-28，數字／allow／deny／按鈕／📨；原 `3` 沒反應根因未確認） | 2026-10-28 重啟後數字 1／2 回覆成功且有 📨；使用者早先的 `3` 沒反應原因仍未確認 |
 | ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | Claude Stop 與 PermissionRequest 已驗收（2026-10-28，使用者實測）；Codex Stop 與 allow／deny（y／esc 快捷鍵）、hookTransport 設定與 hooks 指令已驗收（2026-10-28）；agy Stop 已驗收（2026-10-28）；pi Linux 缺漏補裝後已驗收（2026-10-29，保留 macOS 驗收歷史）；遠端 machine（agy）已驗收（2026-10-28，修正後重測） | 遠端 Claude／Codex／pi 未涵蓋；見 docs/hook-transport-proposal.md |
@@ -1922,3 +1922,15 @@ lint、typecheck、build 通過。`node --test dist/test/hook-events.test.js dis
 症狀：`npm start` 回報 `MODULE_NOT_FOUND`。預期：能啟動 bridge。根因（已確認）：`package.json` 的 `bin`、`start`、`dry-run` 指向 `dist/index.js`，但 build 輸出為 `dist/src/index.js`（`dist/index.js` 不存在）。修正：三處改為 `dist/src/index.js`。
 
 驗證：確認 `package.json` 內容與 `dist/src/index.js` 存在；`npm run dry-run` 啟動後 120 秒內未結束（未確認是否為預期的常駐行為），未視為通過。`npm start` 實際啟動（含 Discord token 載入）尚未驗收，需使用者啟動確認。未 commit／push。
+
+### ISSUE-050 第三版重啟（2026-10-29）
+
+使用者重啟 bridge。核對：Herdr pane `w4:p2T`（label「Discord bridge」），`node dist/src/index.js`，PID 63205，啟動時間 2026-10-29 14:58:18，晚於 `dist/src/main.js` 的最後 build（14:58:17），故執行中為第三版（commit `fa0320e` 的程式）；pane 顯示 `Discord Gateway connected, Herdr watcher started`。使用者實際以 `scripts/run.sh`（Herdr plugin 機制）啟動，未使用 `npm start`，因此 ISSUE-051 尚未被驗證。實機驗收（本機回合完成後不滾動、Discord 回合 final 完整只送一次）尚未進行，ISSUE-050 維持重新開啟，依使用者決定後續觀察。未 commit。
+
+### ISSUE-051 驗收範圍更正（2026-10-29）
+
+先前紀錄曾暗示使用者重啟時已走過修正後的入口，此說法錯誤：使用者以 `scripts/run.sh` 啟動，該腳本走 Herdr plugin，不使用 `npm start`。直接執行 `node dist/src/index.js` 會因缺少 plugin 設定而報 token 遺失，這是啟動方式不同，不是 token 本身遺失。`package.json` 的 `bin`／`start`／`dry-run` 修正仍待驗收，需實際跑 `npm start` 確認；是否仍需要由 `npm start` 啟動由使用者決定。
+
+### ISSUE-051 驗收（2026-10-29）
+
+使用者在本機執行 `npm start`，輸出 `node dist/src/index.js` 後為 `Discord is disabled or its bot token is missing in plugin config/env`，不再出現 `MODULE_NOT_FOUND`。入口路徑修正已驗收。程式在 token 檢查處結束，原因為 `npm start` 不經 Herdr plugin 載入設定（正式啟動為 `scripts/run.sh`），不是本 issue 的缺陷；未驗證 `npm start` 完整啟動。已同時更新 `bin`、`start`、`dry-run`，其中 `bin` 與 `dry-run` 未另行執行驗證。
