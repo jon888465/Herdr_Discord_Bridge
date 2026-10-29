@@ -52,7 +52,7 @@
 | ISSUE-046 | Discord 輸入權限選項數字（3）後沒有任何反應，之後按 Approve 才有動作 | 已驗收（2026-10-28，數字／allow／deny／按鈕／📨；原 `3` 沒反應根因未確認） | 2026-10-28 重啟後數字 1／2 回覆成功且有 📨；使用者早先的 `3` 沒反應原因仍未確認 |
 | ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | Claude Stop 與 PermissionRequest 已驗收（2026-10-28，使用者實測）；Codex Stop 與 allow／deny（y／esc 快捷鍵）、hookTransport 設定與 hooks 指令已驗收（2026-10-28）；agy Stop、pi 擴充已驗收（2026-10-28）；遠端 machine（agy）已驗收（2026-10-28，修正後重測） | 遠端 Claude／Codex／pi 未涵蓋；見 docs/hook-transport-proposal.md |
 | ISSUE-044 | Claude 回覆在 Discord 被重複貼出多則 | 重新開啟→已修正、待驗收 | 2026-10-28 重現，確認根因為回合尾巴後的「※ recap」行擋住完成判斷；原始碼與單元測試完成，已 commit（ccec39b）並於 2026-10-28 重啟（w2:p10），Discord 未驗收 |
-| ISSUE-039 | Discord 傳入非圖片檔案（如 chat.json）被拒絕 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟，Discord 未驗收 |
+| ISSUE-039 | Discord 傳入非圖片檔案（如 chat.json）被拒絕 | 已驗收（2026-10-29） | 使用者於 Discord 傳非圖片檔驗收；邊界案例未逐項記錄 |
 | ISSUE-038 | agy 多行 prompt（含附圖）回顯後擷取不到回覆，Discord 只得「capture failure」 | 已修正、結案（2026-10-29，未實機驗收） | 使用者決定不另測；僅畫面重放與單元測試；再發生則重開 |
 | ISSUE-037 | 使用者直接在 Herdr 要求 Agent 傳給 Discord，bridge 不代送 | 已驗收（2026-10-20，指令版） | 重啟後使用者確認 Discord 收到；範圍見驗收紀錄 |
 | ISSUE-036 | 強制收尾後的 rewatch 在使用者直接於 pane 輸入新內容後仍重複擷取舊 prompt，Discord 被洗版 | 已驗收（2026-10-29） | 使用者於 pane 續問，Discord 未再重送；見下方 ISSUE-036 |
@@ -1488,7 +1488,7 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 
 ## ISSUE-039：Discord 傳入的非圖片檔案被拒絕
 
-更新日期：2026-10-21。狀態：已修正、待驗收（原始碼已改；執行中的 bridge 為舊 build，**未重啟**）。
+更新日期：2026-10-29。狀態：已驗收（使用者於 2026-10-29 回報在 Discord 傳送非圖片檔已驗收；具體檔案類型與邊界案例（僅檔案無文字、超過 10 MiB）未逐項記錄）。
 
 症狀：使用者在 thread「colab-llm」附上 `chat.json`（35.17 KB）提問，bridge 回「❌ Only PNG, JPEG and WebP image attachments are supported」。預期：一般檔案也能交給 Agent 讀取。
 
@@ -1498,7 +1498,7 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 
 驗證（2026-10-21）：lint 通過；完整 `npm test` 252 項、245 通過、6 失敗（ISSUE-035 既有）；新增測試涵蓋檔名清理、路徑逃逸、非 Discord host、超過 10 MiB、宣告為圖片但內容不是圖片仍拒絕。
 
-未驗證／限制：Discord 端到端未驗收；Agent 是否真的讀取檔案取決於其工具；成功檔案不會自動清理（沿用圖片行為，無 retention）；二進位大檔與壓縮檔只存檔、不處理；blocked 等待回答時仍不接受附件。
+未驗證／限制：（Discord 端到端已於 2026-10-29 由使用者驗收，邊界案例未記錄；）Agent 是否真的讀取檔案取決於其工具；成功檔案不會自動清理（沿用圖片行為，無 retention）；二進位大檔與壓縮檔只存檔、不處理；blocked 等待回答時仍不接受附件。
 
 ## ISSUE-040：Claude 最終回覆被截斷並混入更新提示
 
