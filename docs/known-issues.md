@@ -53,7 +53,7 @@
 | ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | Claude Stop 與 PermissionRequest 已驗收（2026-10-28，使用者實測）；Codex Stop 與 allow／deny（y／esc 快捷鍵）、hookTransport 設定與 hooks 指令已驗收（2026-10-28）；agy Stop、pi 擴充已驗收（2026-10-28）；遠端 machine（agy）已驗收（2026-10-28，修正後重測） | 遠端 Claude／Codex／pi 未涵蓋；見 docs/hook-transport-proposal.md |
 | ISSUE-044 | Claude 回覆在 Discord 被重複貼出多則 | 重新開啟→已修正、待驗收 | 2026-10-28 重現，確認根因為回合尾巴後的「※ recap」行擋住完成判斷；原始碼與單元測試完成，已 commit（ccec39b）並於 2026-10-28 重啟（w2:p10），Discord 未驗收 |
 | ISSUE-039 | Discord 傳入非圖片檔案（如 chat.json）被拒絕 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 尚未重啟，Discord 未驗收 |
-| ISSUE-038 | agy 多行 prompt（含附圖）回顯後擷取不到回覆，Discord 只得「capture failure」 | 已修正、待驗收 | 原始碼、單元測試與實際畫面重放完成；bridge 尚未重啟，Discord 未驗收 |
+| ISSUE-038 | agy 多行 prompt（含附圖）回顯後擷取不到回覆，Discord 只得「capture failure」 | 已修正、結案（2026-10-29，未實機驗收） | 使用者決定不另測；僅畫面重放與單元測試；再發生則重開 |
 | ISSUE-037 | 使用者直接在 Herdr 要求 Agent 傳給 Discord，bridge 不代送 | 已驗收（2026-10-20，指令版） | 重啟後使用者確認 Discord 收到；範圍見驗收紀錄 |
 | ISSUE-036 | 強制收尾後的 rewatch 在使用者直接於 pane 輸入新內容後仍重複擷取舊 prompt，Discord 被洗版 | 已驗收（2026-10-29） | 使用者於 pane 續問，Discord 未再重送；見下方 ISSUE-036 |
 | ISSUE-022 | Phase 4 Quota / Failover Manager | 已修正、待驗收 | 2026-09-21 新增 28 項通過；完整 181/184，ISSUE-007／021 待調查，live 待驗收 |
@@ -1472,7 +1472,7 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 
 ## ISSUE-038：agy 多行 prompt 回顯後擷取不到最終回覆
 
-更新日期：2026-10-21。狀態：已修正、待驗收（原始碼已改並以實際畫面重放驗證；執行中的 bridge 仍是舊 build，**未重啟**；已送出的失敗訊息無法補送）。
+更新日期：2026-10-29。狀態：已修正、使用者決定不另行實機驗收而結案（2026-10-29）。**並非已驗收**：只有 2026-10-21 的實際畫面重放與單元測試，沒有在 Discord 以 parser 路徑實測；bridge 已於 2026-10-29 重啟載入此修正。agy 現在有 Stop hook（ISSUE-045），一般情況不走此 parser 路徑，只有 hook 沒到或 `hookTransport.agy` 設為 `parser` 時才會用到。若日後 agy 再出現「capture incomplete」，重新開啟此 issue。已送出的失敗訊息無法補送。
 
 症狀：Discord thread「python test repo」對 w4:p5（agy）發出含附圖的 Webui 修圖需求，25 分 10 秒後回報「finished — capture incomplete」與「Agent ended, but Bridge could not capture its final response」。Agent 實際已完成並在畫面輸出完整總結。預期：Discord 收到最終回覆。
 
