@@ -43,7 +43,7 @@
 | ISSUE-033 | 新增 pi agent 終端畫面 parser adapter | 已修正、待驗收 | 原始碼與 fixture 測試完成；尚未用真實 pi pane 經 Discord／Console 驗收，bridge 未重啟 |
 | ISSUE-034 | Agent 檔案回送 Discord（discord-attach 標記） | 已驗收（2026-10-20） | 後備片段修正後 Discord 實機收到附件；範圍僅 Claude／文字檔 |
 | ISSUE-035 | coding-workflow 測試在 macOS 有 6 項失敗 | 已修正、待驗收（2026-10-29） | 根因：macOS `/var`→`/private/var` realpath 與測試用 `/etc/hostname`；完整測試 0 失敗；見下方 ISSUE-035 |
-| ISSUE-040 | Claude 最終回覆在串流中途被截斷，並混入「Update available!」提示 | 已修正、待驗收 | 原始碼與單元測試完成；bridge 已於 2026-10-24 重啟（w2:p1V）；根因為推論；Discord 未驗收 |
+| ISSUE-040 | Claude 最終回覆在串流中途被截斷，並混入「Update available!」提示 | 已修正、結案（2026-10-29，未實機驗收） | 使用者決定不另測；僅畫面重放與單元測試；根因為推論；再發生則重開 |
 | ISSUE-041 | bridge 不支援 Herdr 遠端機器（如 agy-pod）的 Agent | 已驗收（文字對話，2026-10-24） | 關閉遠端面板後重問，Discord 收到正確回覆；斷線重連、附件、Team Worker 等未驗收 |
 | ISSUE-042 | 從 Discord 驅動的 Agent 自己重啟 bridge 時，該回合的串流與最終回覆遺失 | 串流續傳與 blocked 補發通知已驗收（2026-10-28） | 2026-10-24、10-28 各發生一次；已改為重啟後依 active-streams.json 接續 |
 | ISSUE-043 | 傳入附件沒有保留期限，本機與遠端會一直累積 | 已修正、待驗收 | 已於 2026-10-25 重啟（w2:p1Y，程式尚未 commit）；本機啟動清理已實際刪除過期目錄；遠端刪除未驗證 |
@@ -1502,7 +1502,7 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 
 ## ISSUE-040：Claude 最終回覆被截斷並混入更新提示
 
-更新日期：2026-10-24。狀態：已修正、待驗收（原始碼已改；bridge 已於 2026-10-24 以含此修正的 build 重啟為 w2:p1V；Discord 尚未驗收；已送出的截斷訊息無法補送或編輯）。
+更新日期：2026-10-29。狀態：已修正、使用者決定不另行實機驗收而結案（2026-10-29）。**並非已驗收**：只有 2026-10-24 的真實畫面重放與單元測試，沒有在 Discord 以 parser 路徑實測；bridge 已於 2026-10-29 重啟載入此修正。Claude 現在有 Stop hook（ISSUE-045），一般情況不走此 parser 路徑，只有 hook 沒到或 `hookTransport.claude` 設為 `parser` 時才會用到。若日後 Claude 回覆再被截斷或混入更新提示，重新開啟此 issue。已送出的截斷訊息無法補送或編輯。
 
 症狀：thread「Nas討論」（對應 w3:p1，Claude）收到的最終回覆從句中開始（「因此拒絕金鑰…」）、換行與縮排混亂、結尾停在「2.」，最後一行是「Update available! Run: brew upgrade claude-code」；「2.」的內容與其後段落都沒送到。預期：完整、不含 UI 提示的回覆。
 
