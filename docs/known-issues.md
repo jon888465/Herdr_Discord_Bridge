@@ -52,6 +52,7 @@
 | ISSUE-050 | hook 啟用後 Codex 回應期間 TUI 偶爾滾動 | 重新開啟／待調查 | final 優先、工作中 visible；2026-10-29 使用者已重啟，Gateway 連線成功，實機滾動待驗收 |
 | ISSUE-051 | `npm start`／`dry-run` 與 bin 指向不存在的 `dist/index.js` | 已驗收（入口路徑） | 2026-10-29 使用者跑 `npm start` 不再 MODULE_NOT_FOUND；因缺 token 未完整啟動，屬啟動方式差異 |
 | ISSUE-052 | `main` 沒有 CI 與 branch protection，無法作為自動 merge 閘門 | 修正中 | 2026-10-30 `ci.yml` 已加入工作樹（未 commit／push）；待推送後看 Ubuntu／macOS 實際結果，再設 branch protection |
+| ISSUE-053 | 卡片 `x-` 自訂欄位解析後不保留，序列化後消失 | 已修正、待驗收 | 2026-10-30 使用者決定「禁止」；`parseCard` 已拒絕 `x-` key，自動化測試通過；尚無寫檔層，無 live 驗收項目，待 PR 合併 |
 | ISSUE-047 | Codex 在 Discord 送問後出現「Agent identity changed (session changed); response capture stopped」，擷取在核准通知前中止 | 已驗收（2026-10-28，使用者實測 Discord 送問後不再中止、核准流程正常） | 觸發原因（Codex 第一個 prompt 才建新 session）屬推測；見 ISSUE-047 |
 | ISSUE-046 | Discord 輸入權限選項數字（3）後沒有任何反應，之後按 Approve 才有動作 | 已驗收（2026-10-28，數字／allow／deny／按鈕／📨；原 `3` 沒反應根因未確認） | 2026-10-28 重啟後數字 1／2 回覆成功且有 📨；使用者早先的 `3` 沒反應原因仍未確認 |
 | ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | Claude Stop 與 PermissionRequest 已驗收（2026-10-28，使用者實測）；Codex Stop 與 allow／deny（y／esc 快捷鍵）、hookTransport 設定與 hooks 指令已驗收（2026-10-28）；agy Stop 已驗收（2026-10-28）；pi Linux 缺漏補裝後已驗收（2026-10-29，保留 macOS 驗收歷史）；遠端 machine（agy）已驗收（2026-10-28，修正後重測） | 遠端 Claude／Codex／pi 未涵蓋；見 docs/hook-transport-proposal.md |
@@ -1974,3 +1975,23 @@ ruleset 行為測試（2026-10-30）：由 ADMIN 帳號經 SSH 直接 push 一�
 5. 此 issue 不涵蓋自動 merge 的權限與政策，那屬於卡片規劃。
 
 附註：舊分支的 `docs/ci.md` 曾引用 `ISSUE-021` 追蹤 CI；該編號在 `main` 已用於 Phase 3 Session Handoff Runtime，本 issue 以 ISSUE-052 取代，不沿用舊編號。
+
+## ISSUE-053：卡片 `x-` 自訂欄位解析後不保留
+
+更新日期：2026-10-30。狀態：已修正、待驗收。
+
+症狀：ADR-0001 寫「未知頂層 key 拒絕（可用 `x-` 前綴自訂）」。`parseCard` 接受 `x-` 開頭的 key，但 `Card` 型別沒有欄位可放，解析後直接丟棄；`serializeCard` 因此不會寫回。預期：使用者自訂的 `x-` 欄位在讀寫往返後仍存在，或明確禁止。
+
+重現（2026-10-30，本機 macOS、Node v26.12.0）：對含 `x-note: 自訂` 的合法卡片執行 `parseCard`，回傳的卡片鍵為 `id,type,status,title,version,created,updated,body`，不含 `x-note`；`serializeCard` 輸出不含 `x-note`。
+
+根因（已確認）：`parseFields` 只做「是否允許」檢查，`buildCard` 只挑已知欄位組成 `Card`，沒有保留 `x-` 欄位的結構。
+
+影響範圍：目前沒有檔案讀寫層與呼叫端，尚未造成實際損失。日後 bridge 若改寫卡片（例如寫回 `status`），會悄悄刪掉使用者的 `x-` 欄位。
+
+修正（2026-10-30）：使用者決定選項 (b)「禁止」。`parseCard` 不再允許 `x-` 前綴，與其他未知 key 一樣回傳 `unknown key "x-..."`；ADR-0001 同步修正。未採用 (a)（保留於 `extensions`），因為需要新增型別與序列化規則，而內容本來就能寫在內文。
+
+測試（2026-10-30，本機 macOS、Node v26.12.0，非 CI）：`test/card.test.ts` 的未知 key 測試改為 `owner` 與 `x-note` 都必須被拒絕並回報 `unknown key`（修改前紅燈）；「超過 8 KiB」測試原本用 `x-note` 灌大小，改用合法的 `source` 欄位並檢查錯誤訊息，避免因別的原因碰巧通過。卡片相關測試 119 項通過。全套結果見 PR。
+
+未驗證：沒有 live 驗收項目（函式尚無呼叫端）。CI 結果以 PR 的 check 為準。
+
+文件：[卡片範例與轉換指引](card-examples/README.md)已說明 `x-` 欄位會被拒絕。
