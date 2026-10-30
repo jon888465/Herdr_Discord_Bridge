@@ -53,6 +53,7 @@
 | ISSUE-051 | `npm start`／`dry-run` 與 bin 指向不存在的 `dist/index.js` | 已驗收（入口路徑） | 2026-10-29 使用者跑 `npm start` 不再 MODULE_NOT_FOUND；因缺 token 未完整啟動，屬啟動方式差異 |
 | ISSUE-052 | `main` 沒有 CI 與 branch protection，無法作為自動 merge 閘門 | 修正中 | 2026-10-30 `ci.yml` 已加入工作樹（未 commit／push）；待推送後看 Ubuntu／macOS 實際結果，再設 branch protection |
 | ISSUE-053 | 卡片 `x-` 自訂欄位解析後不保留，序列化後消失 | 已修正、待驗收 | 2026-10-30 使用者決定「禁止」；`parseCard` 已拒絕 `x-` key，自動化測試通過；尚無寫檔層，無 live 驗收項目，待 PR 合併 |
+| ISSUE-054 | 缺少單檔卡片驗證指令，Agent 轉 Mantis 單後無法自我檢查 | 已修正、待驗收 | 2026-10-30 新增 `herdr-card-check`；自動化測試通過；待使用者用真實 Mantis 單請 Agent 轉卡片並以此指令驗收 |
 | ISSUE-047 | Codex 在 Discord 送問後出現「Agent identity changed (session changed); response capture stopped」，擷取在核准通知前中止 | 已驗收（2026-10-28，使用者實測 Discord 送問後不再中止、核准流程正常） | 觸發原因（Codex 第一個 prompt 才建新 session）屬推測；見 ISSUE-047 |
 | ISSUE-046 | Discord 輸入權限選項數字（3）後沒有任何反應，之後按 Approve 才有動作 | 已驗收（2026-10-28，數字／allow／deny／按鈕／📨；原 `3` 沒反應根因未確認） | 2026-10-28 重啟後數字 1／2 回覆成功且有 📨；使用者早先的 `3` 沒反應原因仍未確認 |
 | ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | Claude Stop 與 PermissionRequest 已驗收（2026-10-28，使用者實測）；Codex Stop 與 allow／deny（y／esc 快捷鍵）、hookTransport 設定與 hooks 指令已驗收（2026-10-28）；agy Stop 已驗收（2026-10-28）；pi Linux 缺漏補裝後已驗收（2026-10-29，保留 macOS 驗收歷史）；遠端 machine（agy）已驗收（2026-10-28，修正後重測） | 遠端 Claude／Codex／pi 未涵蓋；見 docs/hook-transport-proposal.md |
@@ -1995,3 +1996,19 @@ ruleset 行為測試（2026-10-30）：由 ADMIN 帳號經 SSH 直接 push 一�
 未驗證：沒有 live 驗收項目（函式尚無呼叫端）。CI 結果以 PR 的 check 為準。
 
 文件：[卡片範例與轉換指引](card-examples/README.md)已說明 `x-` 欄位會被拒絕。
+
+## ISSUE-054：缺少單檔卡片驗證指令
+
+更新日期：2026-10-30。狀態：已修正、待驗收。
+
+症狀：使用者要請 Agent 把 Mantis 單轉成卡片，但沒有任何指令能檢查產出的檔案是否合格，只能靠人看或臨時跑測試。預期：Agent 轉完可自行執行一個指令，得到明確的 OK／FAIL 與原因。
+
+根因（已確認）：只有 `parseCard` 函式，沒有對外的指令入口。
+
+修正：新增 `scripts/herdr-card-check FILE...`（`src/card-check-cli.ts`；核心 `runCardCheck` 為純函式，讀檔由外部注入）。逐檔輸出 `OK`（id、類型、狀態、標題）或 `FAIL`（原因）；結束碼 0 全部合格、1 有不合格或讀不到、2 用法錯誤；超過 256 KiB 不讀取。只檢查格式，不判斷內容。
+
+測試（2026-10-30，本機 macOS、Node v26.12.0，非 CI）：`test/card-check.test.ts` 7 項（純函式）與 `test/card-check-cli.test.ts` 4 項（端到端：實際執行編譯後 CLI 與 bash 包裝檔，涵蓋範例卡、無效檔、目錄、超大檔、無參數），皆先看失敗再實作。手動執行：四張卡 OK；`README.md` 被判不合格（缺 frontmatter，符合預期）；`external: { mantis: 0001234 }`（未加引號）被判 `"external.mantis" must be a string or null`。
+
+未驗證：使用者尚未用真實 Mantis 單實際走完「請 Agent 轉卡片、跑驗證」流程；Agent 是否會確實執行此指令取決於指引遵守度，未驗證。沒有 PATH 連結以外的安裝步驟（`npm run build` 後可用）。
+
+文件：[轉換指引](card-examples/README.md)含用法與限制。

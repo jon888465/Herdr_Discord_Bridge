@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Resolve symlinks so it works when linked into ~/.local/bin.
+src="${BASH_SOURCE[0]}"
+while [[ -L "$src" ]]; do
+  dir="$(cd -P -- "$(dirname -- "$src")" && pwd)"
+  src="$(readlink "$src")"
+  [[ "$src" != /* ]] && src="$dir/$src"
+done
+root="$(cd -P -- "$(dirname -- "$src")/.." && pwd)"
+exec node "$root/dist/src/card-check-cli.js" "$@"

@@ -89,7 +89,7 @@ bridge 寫卡片時：先記讀取時的內容雜湊，寫入前再比對，不�
 - 指令名稱與入口（CLI、Discord）尚未定，實作前於此補充。
 - cards 目錄放專案內還是 bridge 目錄：本文預設專案內並可設定，使用者尚未最終確認。
 - 是否需要 JSON Schema 或編輯器提示檔供外部工具驗證。
-- 是否補單檔驗證指令（例如 `card check <檔>`），讓人與 Agent 能在轉換卡片後立即驗證；目前沒有，見[轉換指引](../card-examples/README.md)。
+- 其餘指令（匯入、匯出、列表）的名稱與入口；單檔驗證已定為 `herdr-card-check`（見實作狀態）。
 - Mantis 欄位對應需用實際 Mantis 表單核對。
 
 ## 實作狀態（2026-10-30）
@@ -98,6 +98,7 @@ bridge 寫卡片時：先記讀取時的內容雜湊，寫入前再比對，不�
   - `parseCard(text, filename?)`（`src/card.ts`），純函式，不讀寫檔案。涵蓋：受限 frontmatter 子集、必填欄位、id 格式與檔名比對、`type`／`status` 列舉、日期、`version`、標題長度、`links`／`external` 結構、frontmatter 8 KiB 與整檔 256 KiB 上限、CRLF 與開頭 BOM 容錯。內部拆為 `readCardDocument`（結構）與 `buildCard`（語意）。
   - `importCard(text, { slug?, today, existingIds })`（`src/card-import.ts`），純函式：狀態一律強制為 `draft`；清空 `external`；已存在的 id 拒絕、不覆蓋；缺 `id` 時由 `type`（REQ／TKT）、`today` 與**呼叫者明確給的 `slug`** 產生，不從標題推導；有 `id` 時忽略 `slug`；回傳 `filename` 與 `notes`（記錄被改動的項目）。沒有呼叫端。
   - `serializeCard(card)`（`src/card-serialize.ts`），純函式：`Card` 轉成 md 文字。鍵順序固定（與輸入物件的屬性順序無關）；字串只在安全時用裸寫，否則加雙引號，規則比本專案解析器更保守（例如開頭的 `#`、`-`、`%`、`@` 也加引號，避免其他 YAML 工具讀錯）；陣列與物件用行內寫法。**寫出前先用 `parseCard` 讀回並比對，內容不同就回傳失敗**（例如標題含換行、`status` 不合法、本文含 CR），確保不會產生讀不回來的檔案。尚未寫入檔案，沒有呼叫端。
+  - `herdr-card-check FILE...`（`scripts/herdr-card-check` → `src/card-check-cli.ts`，核心 `runCardCheck` 在 `src/card-check.ts`）：逐檔以 `parseCard` 檢查，輸出 `OK`／`FAIL`；結束碼 0／1／2；超過 256 KiB 的檔案不讀取。只檢查格式，不判斷內容。待使用者驗收（ISSUE-054）。
 - **測試**：`test/card.test.ts` 57 項（含真實規劃卡必須可解析）、`test/card-import.test.ts` 15 項、`test/card-serialize.test.ts` 36 項（含 `docs/cards` 內每張卡 parse、serialize、parse 往返相等且重複序列化文字不變）。全套 `npm test`（2026-10-30，本機 macOS、Node v26.12.0）394 項：393 通過、0 失敗、1 略過；這不是 CI 結果。開發過程抓到並修正兩個缺陷：`today` 只檢查格式、未檢查日期是否真實存在；`type` 以 `in` 判斷會把 `constructor` 等原型鏈名稱當成有效值（改用 `Object.hasOwn`）。
 - **尚未實作**：Mantis 匯出、bridge 寫檔（雜湊比對、原子寫入、符號連結與路徑跳脫防護）、從檔案系統讀取並提供 `existingIds`、執行中卡被刪的暫停、指令入口。驗收條件中這些項目仍是待做。
 - **決策變更（2026-10-30，ISSUE-053）**：原稿允許 `x-` 前綴自訂欄位，但 `Card` 沒有保留它的位置，讀寫往返會悄悄丟失。改為**禁止**：`parseCard` 對 `x-` 開頭的 key 回傳 `unknown key`。若日後需要擴充欄位，應新增明確欄位或 `extensions` 結構，並補往返測試。

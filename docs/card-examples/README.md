@@ -2,7 +2,7 @@
 
 日期：2026-10-30。規格見 [ADR-0001](../adr/0001-portable-md-cards.md)。
 
-> **狀態：卡片格式的解析、驗證、匯入、序列化已有函式（`src/card*.ts`），但還沒有任何 CLI／Discord 指令，也沒有檔案讀寫層。** 本指引讓你請 Agent 產生合格的卡片檔；產生後的檔案目前只能靠測試或人工檢查，bridge 還不會自動讀取它。
+> **狀態：卡片格式的解析、驗證、匯入、序列化已有函式（`src/card*.ts`），另有單檔驗證指令 `herdr-card-check`（待使用者驗收，ISSUE-054）。還沒有 Discord 指令，也沒有檔案讀寫層，bridge 不會自動讀取卡片。** 本指引讓你請 Agent 產生合格的卡片檔，並用驗證指令自我檢查。
 
 ## 範例
 
@@ -53,6 +53,7 @@
 
 ### 產出後自我檢查
 
+- [ ] **執行 `scripts/herdr-card-check <檔案>`，結果必須是 `OK`**（見下方「驗證指令」）。
 - [ ] 檔名等於 `<id>.md`。
 - [ ] 必填欄位齊全：`id`、`type`、`status`、`title`、`version`、`created`、`updated`。
 - [ ] `status` 是 `draft`；沒有 `ready`、`in_progress`、`done`。
@@ -60,8 +61,27 @@
 - [ ] 推測的內容都標了「需要使用者確認」。
 - [ ] 沒有敏感資訊。
 
+## 驗證指令
+
+```
+scripts/herdr-card-check FILE...
+```
+
+逐一檢查檔案是否合格，輸出每個檔案的 `OK`（附 id、類型、狀態、標題）或 `FAIL`（附原因）。結束碼：`0` 全部合格、`1` 至少一個不合格或讀不到、`2` 用法錯誤。可一次給多個檔案；失敗不會中斷後面的檔案。超過 256 KiB 的檔案不讀取，直接判為不合格。
+
+```
+$ scripts/herdr-card-check docs/card-examples/REQ-*.md docs/card-examples/TKT-*.md
+OK    docs/card-examples/TKT-20261030-example-mantis-bug.md  TKT-20261030-example-mantis-bug ticket draft "範例：…"
+$ scripts/herdr-card-check bad.md
+FAIL  bad.md: "external.mantis" must be a string or null
+```
+
+注意：
+- 要先 `npm run build`（指令執行編譯後的 `dist/`）。可連結到 PATH：`ln -s "$PWD/scripts/herdr-card-check" ~/.local/bin/herdr-card-check`。
+- **不要用 `*.md` 萬用字元**：同目錄的 `README.md` 不是卡片，會被判為不合格。用 `REQ-*.md TKT-*.md`。
+- 它只檢查格式（`parseCard` 的規則），不會判斷內容是否正確、推測是否合理、有沒有敏感資訊；那些仍要人看。
+
 ## 目前的限制
 
-- **沒有驗證指令。** 目前無法對單一檔案執行 `card check`。要驗證可以把檔案放進 `docs/card-examples/`（檔名須符合 `REQ-` 或 `TKT-` 開頭）並執行 `npm test`，但這會讓範例清單測試失敗，只適合臨時檢查。是否補一個驗證指令見 ADR 未決項目。
 - **不支援 `x-` 自訂欄位。** 含 `x-` 開頭 key 的卡片會被 `parseCard` 拒絕（`unknown key`）。需要保留的資訊請寫在內文。見 [ISSUE-053](../known-issues.md)。
 - bridge 還不會讀取或監看卡片目錄；卡片目前是人與 Agent 之間的文件。

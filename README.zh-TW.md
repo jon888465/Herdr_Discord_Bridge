@@ -336,6 +336,8 @@ Agent 可在最終回覆中單獨一行寫 `[[discord-attach: /絕對路徑]]`�
 
 建議 Agent 使用 `herdr-discord-send` 指令（`scripts/herdr-discord-send`，請連結到 PATH，如 `ln -s "$PWD/scripts/herdr-discord-send" ~/.local/bin/herdr-discord-send`）：`herdr-discord-send "文字"`、`--file 路徑`、`--stdin`。它經由僅限本機使用者的 socket（`~/.config/herdr-discord-bridge/send.sock`）請執行中的 bridge 發送，以 `HERDR_PANE_ID` 識別 pane；pane 沒有對應 thread 時會明確報錯。待實機驗收（ISSUE-037）。
 
+卡片檔：`scripts/herdr-card-check 檔案...` 檢查 Markdown 卡片是否符合卡片格式（[ADR-0001](docs/adr/0001-portable-md-cards.md)；範例與 Mantis 轉換指引見 [docs/card-examples](docs/card-examples/README.md)）。每檔輸出 `OK`／`FAIL`；結束碼 0 全部合格、1 有不合格或讀不到、2 用法錯誤。只檢查格式，需先 `npm run build`；bridge 不會讀取卡片。待驗收（ISSUE-054）。
+
 傳入附件：除 PNG/JPEG/WebP 圖片外，其他 Discord 檔案（≤ 10 MiB、每則至多四個）會存到 Agent cwd 並把路徑交給 Agent（ISSUE-039，待實機驗收）。
 
 ### 遠端 machine 的 hook
