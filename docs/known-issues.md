@@ -1950,7 +1950,7 @@ lint、typecheck、build 通過。`node --test dist/test/hook-events.test.js dis
 
 更新日期：2026-10-30。狀態：修正中。
 
-症狀：要讓 Agent 走到自動 merge（規劃中，見卡片 REQ-20261030-card-to-merge，另案提交），`main` 需要可信的自動閘門，但現況沒有。預期：`main` 有每次 PR 都會執行的 CI，並由 branch protection 要求通過。
+症狀：要讓 Agent 走到自動 merge（規劃中，見[卡片](cards/REQ-20261030-card-to-merge.md)），`main` 需要可信的自動閘門，但現況沒有。預期：`main` 有每次 PR 都會執行的 CI，並由 branch protection 要求通過。
 
 查核（2026-10-30，以 `gh` 唯讀查詢）：repo 為公開，帳號權限 ADMIN；`main` 無 branch protection、無 ruleset；`main` 無 `.github/workflows/ci.yml`。CI 僅存在於未合併分支 `followup-team-question-ui-ci`（PR #1，OPEN，base 為舊的 `phase4-quota-failover-manager`，比 `main` 落後 120 個 commit，且混有約 940 行 Team 答覆介面功能與 macOS Bash 修正）。該分支 2026-09-20 的 run 兩個平台通過，但不是 `main` 的結果。
 
@@ -1963,9 +1963,9 @@ lint、typecheck、build 通過。`node --test dist/test/hook-events.test.js dis
 GitHub 驗證（2026-10-30，PR #2 https://github.com/jon888465/Herdr_Discord_Bridge/pull/2 ，run 41019013179）：Ubuntu（Node v22.23.4）286 項全通過；macOS（Node v22.23.3）286 項，285 通過、0 失敗、1 略過；兩者 typecheck、lint 皆通過。這是 PR 分支結果，尚未合併，`main` 尚無 CI run。
 
 未驗證／下一步：
-1. ~~推送後確認 GitHub 上 Ubuntu 與 macOS 實際結果~~ 已於 PR #2 通過；合併後確認 `main` 的 push run。
-2. 設定 branch protection／ruleset，將 CI 設為必要檢查。
-3. 處理 PR #1（關閉或改 base）。
+1. ~~推送後確認 GitHub 上 Ubuntu 與 macOS 實際結果~~ 已於 PR #2 通過；PR #2 於 2026-10-30 合併（`175981c`），`main` push run 41019618373 兩平台通過（Ubuntu 286/286；macOS 285 通過、1 略過、0 失敗）。
+2. ~~設定 branch protection／ruleset，將 CI 設為必要檢查。~~ 使用者於 2026-10-30 建立 ruleset `protect-main`（id 26191256），已用 `gh api` 唯讀核對設定：enforcement `active`，目標為預設分支，bypass 清單為空；規則為禁止刪除、禁止 force push（non_fast_forward）、必須經 PR（核准數 0，其餘審查選項皆未開）、必要檢查 `Full tests (ubuntu-latest, Node 22)` 與 `Full tests (macos-latest, Node 22)`。`strict_required_status_checks_policy` 為 false（不要求分支與 `main` 同步後才可合併）。**僅核對設定，未做行為測試**（未實際嘗試直接 push `main` 或合併紅燈 PR），因此「規則實際擋得住」尚未驗收。
+3. ~~處理 PR #1~~ 2026-10-30 已關閉並留言說明；分支 `followup-team-question-ui-ci` 保留未刪，其中 Team 答覆介面功能未合併，需要時另開 PR 並 rebase。
 4. action 釘住 commit SHA。
 5. 此 issue 不涵蓋自動 merge 的權限與政策，那屬於卡片規劃。
 

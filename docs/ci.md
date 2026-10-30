@@ -2,7 +2,16 @@
 
 更新日期：2026-10-30。Workflow：`.github/workflows/ci.yml`。問題與驗收追蹤：[ISSUE-052](known-issues.md)。
 
-> **狀態：已在 PR #2 分支（`ci/add-workflow`）通過，尚未合併進 `main`，也未對 `main` 執行過。** `main` 的 branch protection 尚未設定，CI 目前不是必要檢查。
+> **狀態：PR #2 已合併進 `main`（2026-10-30，`175981c`），`main` 的 push run 兩個平台皆通過。** 2026-10-30 已建立 ruleset `protect-main`，兩個平台的檢查為 `main` 的必要檢查（設定已核對，行為未測試；細節見 ISSUE-052）。
+
+## `main` 上的結果（2026-10-30，run 41019618373）
+
+| 平台 | Node | 結果 |
+|---|---|---|
+| ubuntu-latest | 22 | 286 項，286 通過、0 失敗、0 略過 |
+| macos-latest | 22 | 286 項，285 通過、0 失敗、1 略過 |
+
+Run：https://github.com/jon888465/Herdr_Discord_Bridge/actions/runs/41019618373 。
 
 ## GitHub 實際結果（2026-10-30，PR #2，run 41019013179）
 
