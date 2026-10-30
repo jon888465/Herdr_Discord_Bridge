@@ -36,7 +36,7 @@ Run：https://github.com/jon888465/Herdr_Discord_Bridge/actions/runs/41019013179
 
 - 取自 PR #1 的 `e7b9118`，只取 workflow 與本文件。PR #1 另含約 940 行 Team 答覆介面功能與 macOS Bash 修正，且比 `main` 落後 120 個 commit，未合併、未重用。
 - `main` 現行的 `scripts/run.sh` 已不使用 macOS 系統 Bash 缺少的功能（以 `grep` 確認原始碼無相關用法）；是否在 macOS runner 全數通過，必須看實際 run，不由本機結果推定。
-- 採用 `actions/checkout@v7`、`actions/setup-node@v7`（以 tag 引用，與 2026-09-20 成功的 run 相同）。作為自動 merge 閘門前，應改為釘住 commit SHA 並啟用 Dependabot 更新，目前未做。
+- Action 釘住 commit SHA（2026-10-30，ISSUE-052）：`actions/checkout` 為 `3d3c42e5aac5ba805825da76410c181273ba90b1`（v7.0.1），`actions/setup-node` 為 `949feb2413d6458794dcd2491c4babbbce0c15c1`（v7.1.0）；SHA 以 `gh api` 解析 `v7` tag 取得，並對照到具體版本標籤。釘住後不會隨 tag 移動而自動更新；尚未啟用 Dependabot，升級需手動。
 
 ## 本機檢查（2026-10-30，macOS，Node v26.12.0，非 CI 環境）
 
@@ -51,4 +51,4 @@ Run：https://github.com/jon888465/Herdr_Discord_Bridge/actions/runs/41019013179
 - 在 GitHub 實際執行並記錄 `main` 的 Ubuntu／macOS 結果。
 - 設定 branch protection 或 ruleset，將本檢查設為必要。
 - 處理 PR #1（關閉或改 base）。
-- 釘住 action SHA。
+- 啟用 Dependabot 更新 action（釘 SHA 後升級靠它提醒）。
