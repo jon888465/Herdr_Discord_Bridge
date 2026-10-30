@@ -1964,9 +1964,11 @@ GitHub 驗證（2026-10-30，PR #2 https://github.com/jon888465/Herdr_Discord_Br
 
 未驗證／下一步：
 1. ~~推送後確認 GitHub 上 Ubuntu 與 macOS 實際結果~~ 已於 PR #2 通過；PR #2 於 2026-10-30 合併（`175981c`），`main` push run 41019618373 兩平台通過（Ubuntu 286/286；macOS 285 通過、1 略過、0 失敗）。
-2. ~~設定 branch protection／ruleset，將 CI 設為必要檢查。~~ 使用者於 2026-10-30 建立 ruleset `protect-main`（id 26191256），已用 `gh api` 唯讀核對設定：enforcement `active`，目標為預設分支，bypass 清單為空；規則為禁止刪除、禁止 force push（non_fast_forward）、必須經 PR（核准數 0，其餘審查選項皆未開）、必要檢查 `Full tests (ubuntu-latest, Node 22)` 與 `Full tests (macos-latest, Node 22)`。`strict_required_status_checks_policy` 為 false（不要求分支與 `main` 同步後才可合併）。**僅核對設定，未做行為測試**（未實際嘗試直接 push `main` 或合併紅燈 PR），因此「規則實際擋得住」尚未驗收。
+2. ~~設定 branch protection／ruleset，將 CI 設為必要檢查。~~ 使用者於 2026-10-30 建立 ruleset `protect-main`（id 26191256），已用 `gh api` 唯讀核對設定：enforcement `active`，目標為預設分支，bypass 清單為空；規則為禁止刪除、禁止 force push（non_fast_forward）、必須經 PR（核准數 0，其餘審查選項皆未開）、必要檢查 `Full tests (ubuntu-latest, Node 22)` 與 `Full tests (macos-latest, Node 22)`。`strict_required_status_checks_policy` 為 false（不要求分支與 `main` 同步後才可合併）。**當時僅核對設定；其後的直接 push 測試見下方（已被拒絕）。** 合併紅燈 PR 的行為仍未測試，因此「規則實際擋得住」只部分驗證。
 3. ~~處理 PR #1~~ 2026-10-30 已關閉並留言說明；分支 `followup-team-question-ui-ci` 保留未刪，其中 Team 答覆介面功能未合併，需要時另開 PR 並 rebase。
-4. action 釘住 commit SHA。
+4. ~~action 釘住 commit SHA~~ 已於分支 `ci/pin-actions` 修改（`actions/checkout` v7.0.1、`actions/setup-node` v7.1.0，細節見 `docs/ci.md`）；待此 PR 的 CI 通過與合併。Dependabot 尚未啟用。
+
+ruleset 行為測試（2026-10-30）：由 ADMIN 帳號經 SSH 直接 push 一個空 commit（`255c726`，parent `1a65de4`）到 `main`，被 GitHub 拒絕（`push declined due to repository rule violations`；`Changes must be made through a pull request`；`2 of 2 required status checks are expected`），`origin/main` 維持 `1a65de4`。證明 bypass 清單為空時規則對管理員也生效。**未測試**：合併 CI 未過的 PR 是否被擋、force push、刪除 `main`（後兩者不實測，以設定核對為準）。
 5. 此 issue 不涵蓋自動 merge 的權限與政策，那屬於卡片規劃。
 
 附註：舊分支的 `docs/ci.md` 曾引用 `ISSUE-021` 追蹤 CI；該編號在 `main` 已用於 Phase 3 Session Handoff Runtime，本 issue 以 ISSUE-052 取代，不沿用舊編號。
