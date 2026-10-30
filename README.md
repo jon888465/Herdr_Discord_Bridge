@@ -363,6 +363,8 @@ Add both events pointing at the absolute path of `scripts/herdr-discord-hook` (t
 
 Preferred for Agents: the `herdr-discord-send` command (`scripts/herdr-discord-send`; link it onto PATH, e.g. `ln -s "$PWD/scripts/herdr-discord-send" ~/.local/bin/herdr-discord-send`). `herdr-discord-send "text"`, `--file PATH`, `--stdin`. It talks to the running bridge over a user-only local socket (`~/.config/herdr-discord-bridge/send.sock`), identifies the pane by `HERDR_PANE_ID`, and fails clearly when the pane has no mapped thread. Pending live acceptance (ISSUE-037).
 
+Card files: `scripts/herdr-card-check FILE...` checks Markdown card files against the card format ([ADR-0001](docs/adr/0001-portable-md-cards.md), examples and Mantis conversion guide in [docs/card-examples](docs/card-examples/README.md)). Prints `OK`/`FAIL` per file; exit 0 all valid, 1 any invalid or unreadable, 2 usage error. Format only; run `npm run build` first. The bridge does not read cards. Pending acceptance (ISSUE-054).
+
 Inbound attachments: besides PNG/JPEG/WebP images, any other Discord file (≤ 10 MiB, up to four per message) is saved under the Agent cwd and its path is given to the Agent (ISSUE-039; pending live acceptance).
 
 ### Hooks on remote machines
