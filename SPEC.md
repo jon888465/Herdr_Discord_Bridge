@@ -339,7 +339,9 @@ npm run build
 authorization/stale mapping、active Agent selection、多 thread Agent mapping、
 legacy state migration、Agent identity header、config path safety，以及用於
 ping/list/read/prompt/wait/cancel 與 bounded retry 的 mock newline-delimited
-Herdr socket。Final diff scan 不得包含真實 credential、token、private local
+Herdr socket。CI（`.github/workflows/ci.yml`，見 [docs/ci.md](docs/ci.md)，ISSUE-052）
+在 Ubuntu 與 macOS 執行 typecheck、lint、test；CI 結果與本機結果分開記錄，不互相
+替代，CI 通過也不等於 Discord／Herdr／CLI 端到端驗收。Final diff scan 不得包含真實 credential、token、private local
 config 或 runtime state。Plugin manifest 必須能被 Herdr link。Commit/push 與
 runtime restart 或 deployment 依使用者授權執行；自動檢查本身不代表已授權發布。
 
