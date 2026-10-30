@@ -85,18 +85,12 @@ test("a duplicate key is rejected", () => {
   assert.match(result.error, /duplicate/);
 });
 
-test("an unknown top-level key is rejected but an x- key is allowed", () => {
-  const unknown = parseCard(
-    withExtra("owner: someone"),
-    "REQ-20261030-example.md",
-  );
-  assert.equal(unknown.ok, false);
-  if (!unknown.ok) assert.match(unknown.error, /"owner"/);
-  const custom = parseCard(
-    withExtra("x-note: 自訂欄位"),
-    "REQ-20261030-example.md",
-  );
-  assert.equal(custom.ok, true);
+test("an unknown top-level key is rejected, including an x- prefixed one", () => {
+  for (const line of ["owner: someone", "x-note: 自訂欄位"]) {
+    const result = parseCard(withExtra(line), "REQ-20261030-example.md");
+    assert.equal(result.ok, false, line);
+    if (!result.ok) assert.match(result.error, /unknown key/, line);
+  }
 });
 
 for (const [name, line] of [
@@ -314,10 +308,12 @@ test("title must be 1 to 120 characters", () => {
 });
 
 test("frontmatter over 8 KiB and files over 256 KiB are rejected", () => {
-  const bigFrontmatter = withExtra(`x-note: "${"a".repeat(8200)}"`);
-  assert.equal(parseCard(bigFrontmatter).ok, false);
-  const bigFile = minimal + "a".repeat(256 * 1024);
-  assert.equal(parseCard(bigFile).ok, false);
+  const bigFrontmatter = parseCard(withExtra(`source: "${"a".repeat(8200)}"`));
+  assert.equal(bigFrontmatter.ok, false);
+  if (!bigFrontmatter.ok) assert.match(bigFrontmatter.error, /8 KiB/);
+  const bigFile = parseCard(minimal + "a".repeat(256 * 1024));
+  assert.equal(bigFile.ok, false);
+  if (!bigFile.ok) assert.match(bigFile.error, /256 KiB/);
 });
 
 test("CRLF line endings and a leading BOM are accepted", () => {

@@ -332,8 +332,7 @@ function parseFields(lines: string[]): Map<string, Value> {
     if (!match) reject(`unsupported frontmatter line: ${line}`);
     const key = match[1];
     if (fields.has(key)) reject(`duplicate key "${key}"`);
-    if (!KNOWN_KEYS.has(key) && !key.startsWith("x-"))
-      reject(`unknown key "${key}"`);
+    if (!KNOWN_KEYS.has(key)) reject(`unknown key "${key}"`);
     const raw = match[2] ?? "";
     if (raw === "") reject(`empty value for "${key}"`);
     fields.set(key, parseValue(raw));
