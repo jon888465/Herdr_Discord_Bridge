@@ -1960,8 +1960,10 @@ lint、typecheck、build 通過。`node --test dist/test/hook-events.test.js dis
 
 驗證（2026-10-30，macOS，Node v26.12.0，本機，非 CI）：`npm ci`、`typecheck`、`lint` 通過；`npm test` 286 項，285 通過、0 失敗、1 略過。
 
+GitHub 驗證（2026-10-30，PR #2 https://github.com/jon888465/Herdr_Discord_Bridge/pull/2 ，run 41019013179）：Ubuntu（Node v22.23.4）286 項全通過；macOS（Node v22.23.3）286 項，285 通過、0 失敗、1 略過；兩者 typecheck、lint 皆通過。這是 PR 分支結果，尚未合併，`main` 尚無 CI run。
+
 未驗證／下一步：
-1. 推送後確認 GitHub 上 Ubuntu 與 macOS 實際結果（Node 22）。
+1. ~~推送後確認 GitHub 上 Ubuntu 與 macOS 實際結果~~ 已於 PR #2 通過；合併後確認 `main` 的 push run。
 2. 設定 branch protection／ruleset，將 CI 設為必要檢查。
 3. 處理 PR #1（關閉或改 base）。
 4. action 釘住 commit SHA。
