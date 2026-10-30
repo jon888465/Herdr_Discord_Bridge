@@ -1,17 +1,13 @@
 ---
 id: REQ-20261030-card-to-merge
 type: requirement
-status: refined          # draft | discussing | refined | recorded | approved | in_progress | done
+status: refined          # draft | discussing | refined | recorded | ready | in_progress | done | cancelled
+title: 卡片驅動：從工作單到 PR／CI／Merge
 version: 1
 created: 2026-10-30
 updated: 2026-10-30
 source: 與使用者的架構討論（含 ChatGPT 分享對話的規格稿，其內容未能自動讀取，由使用者貼上）
-links:
-  related_docs:
-    - docs/coding-workflow-proposal.md
-    - docs/durable-task-engine.md
-    - docs/hook-transport-proposal.md
-  related_issues: [ISSUE-025, ISSUE-041]
+links: { related_docs: [docs/coding-workflow-proposal.md, docs/durable-task-engine.md, docs/hook-transport-proposal.md, docs/adr/0001-portable-md-cards.md], related_issues: [ISSUE-025, ISSUE-041, ISSUE-052] }
 external: { notion: null, github: null, mantis: null }
 ---
 
