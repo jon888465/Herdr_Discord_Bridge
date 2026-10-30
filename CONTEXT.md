@@ -48,6 +48,8 @@
 
 ## Pending feature index
 
+- [卡片驅動 Card-to-Merge](docs/cards/REQ-20261030-card-to-merge.md)：**規劃中，尚未實作。** 以可攜 md 卡片（frontmatter）作為需求來源，依專案政策檔（L0 不 push／L1 開 PR／L2 CI 綠後自動 merge）走 worktree → review → test → PR → CI → merge；暫不做 Tracker Adapter。授權止於 merge，不含部署與驗收。
+
 - [本機 Git Coding Workflow](docs/coding-workflow-proposal.md)：首版已接入 `team ask --coding`。同一 scheduler、單一 writer、不同已知 session review、Lead 只讀結案與版本 gate。Review／verify 期間工作樹改變不會留下有效 pass。Lead 直接實作後回派 review、多 writer／worktree 與 GitHub 未做。Live 驗收見 ISSUE-025。
 
 - [ISSUE-013/014 handoff and Herdr delegation methods](docs/team-orchestration-issues-013-014-handoff.md):
