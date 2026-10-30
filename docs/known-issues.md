@@ -51,6 +51,7 @@
 | ISSUE-049 | 對 pi 傳圖片被拒絕「此 Agent 尚未支援本機圖片交付」 | 已修正、待驗收（2026-10-29） | pi 加入圖片白名單；單元測試完成；bridge 尚未重啟；Discord 未驗收；見下方 ISSUE-049 |
 | ISSUE-050 | hook 啟用後 Codex 回應期間 TUI 偶爾滾動 | 重新開啟／待調查 | final 優先、工作中 visible；2026-10-29 使用者已重啟，Gateway 連線成功，實機滾動待驗收 |
 | ISSUE-051 | `npm start`／`dry-run` 與 bin 指向不存在的 `dist/index.js` | 已驗收（入口路徑） | 2026-10-29 使用者跑 `npm start` 不再 MODULE_NOT_FOUND；因缺 token 未完整啟動，屬啟動方式差異 |
+| ISSUE-052 | `main` 沒有 CI 與 branch protection，無法作為自動 merge 閘門 | 修正中 | 2026-10-30 `ci.yml` 已加入工作樹（未 commit／push）；待推送後看 Ubuntu／macOS 實際結果，再設 branch protection |
 | ISSUE-047 | Codex 在 Discord 送問後出現「Agent identity changed (session changed); response capture stopped」，擷取在核准通知前中止 | 已驗收（2026-10-28，使用者實測 Discord 送問後不再中止、核准流程正常） | 觸發原因（Codex 第一個 prompt 才建新 session）屬推測；見 ISSUE-047 |
 | ISSUE-046 | Discord 輸入權限選項數字（3）後沒有任何反應，之後按 Approve 才有動作 | 已驗收（2026-10-28，數字／allow／deny／按鈕／📨；原 `3` 沒反應根因未確認） | 2026-10-28 重啟後數字 1／2 回覆成功且有 📨；使用者早先的 `3` 沒反應原因仍未確認 |
 | ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | Claude Stop 與 PermissionRequest 已驗收（2026-10-28，使用者實測）；Codex Stop 與 allow／deny（y／esc 快捷鍵）、hookTransport 設定與 hooks 指令已驗收（2026-10-28）；agy Stop 已驗收（2026-10-28）；pi Linux 缺漏補裝後已驗收（2026-10-29，保留 macOS 驗收歷史）；遠端 machine（agy）已驗收（2026-10-28，修正後重測） | 遠端 Claude／Codex／pi 未涵蓋；見 docs/hook-transport-proposal.md |
@@ -1944,3 +1945,26 @@ lint、typecheck、build 通過。`node --test dist/test/hook-events.test.js dis
 ### ISSUE-045 本機 agy Stop hook 驗收（2026-10-29）
 
 使用者回報本機 agy 安裝 `Stop` hook 後的 Discord 測試「ok」（使用者口頭回報，未提供事件紀錄或畫面；未逐項確認 final 是否只送一次、是否重啟過 agy session）。依此將本機 agy hook 由「已安裝、待驗收」改為已驗收；證據等級為使用者實測回報。未 commit。
+
+## ISSUE-052：`main` 沒有 CI 與 branch protection
+
+更新日期：2026-10-30。狀態：修正中。
+
+症狀：要讓 Agent 走到自動 merge（規劃中，見卡片 REQ-20261030-card-to-merge，另案提交），`main` 需要可信的自動閘門，但現況沒有。預期：`main` 有每次 PR 都會執行的 CI，並由 branch protection 要求通過。
+
+查核（2026-10-30，以 `gh` 唯讀查詢）：repo 為公開，帳號權限 ADMIN；`main` 無 branch protection、無 ruleset；`main` 無 `.github/workflows/ci.yml`。CI 僅存在於未合併分支 `followup-team-question-ui-ci`（PR #1，OPEN，base 為舊的 `phase4-quota-failover-manager`，比 `main` 落後 120 個 commit，且混有約 940 行 Team 答覆介面功能與 macOS Bash 修正）。該分支 2026-09-20 的 run 兩個平台通過，但不是 `main` 的結果。
+
+根因（已確認）：CI 與一項功能綁在同一個長期未合併的 PR，從未進入 `main`。另確認該 workflow 的 `paths-ignore: **/*.md` 若設為必要檢查，會使純文件 PR 永遠等待檢查。
+
+修正範圍（工作樹，未 commit／push）：新增 `.github/workflows/ci.yml`（取自 PR #1，移除 `paths-ignore`）、重寫 `docs/ci.md`。不合併 PR #1 的功能與腳本變更。
+
+驗證（2026-10-30，macOS，Node v26.12.0，本機，非 CI）：`npm ci`、`typecheck`、`lint` 通過；`npm test` 286 項，285 通過、0 失敗、1 略過。
+
+未驗證／下一步：
+1. 推送後確認 GitHub 上 Ubuntu 與 macOS 實際結果（Node 22）。
+2. 設定 branch protection／ruleset，將 CI 設為必要檢查。
+3. 處理 PR #1（關閉或改 base）。
+4. action 釘住 commit SHA。
+5. 此 issue 不涵蓋自動 merge 的權限與政策，那屬於卡片規劃。
+
+附註：舊分支的 `docs/ci.md` 曾引用 `ISSUE-021` 追蹤 CI；該編號在 `main` 已用於 Phase 3 Session Handoff Runtime，本 issue 以 ISSUE-052 取代，不沿用舊編號。
