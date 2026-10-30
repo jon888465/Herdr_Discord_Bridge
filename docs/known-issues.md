@@ -1968,6 +1968,8 @@ GitHub 驗證（2026-10-30，PR #2 https://github.com/jon888465/Herdr_Discord_Br
 3. ~~處理 PR #1~~ 2026-10-30 已關閉並留言說明；分支 `followup-team-question-ui-ci` 保留未刪，其中 Team 答覆介面功能未合併，需要時另開 PR 並 rebase。
 4. ~~action 釘住 commit SHA~~ 已於分支 `ci/pin-actions` 修改（`actions/checkout` v7.0.1、`actions/setup-node` v7.1.0，細節見 `docs/ci.md`）；待此 PR 的 CI 通過與合併。Dependabot 尚未啟用。
 
+PR 閘門觀察（2026-10-30）：PR #4、#5 在 CI 執行期間觀察到 `mergeStateStatus` 為 `BLOCKED`，兩個必要檢查通過後變為 `CLEAN`；PR #6 只記錄到通過後的 `CLEAN`，未觀察到執行期間的狀態；PR #2 建立於 ruleset 之前，不適用。`main` 的 push run 在 PR #2、#4、#6 合併後皆通過（#4：run 41023426861，Ubuntu 286/286、macOS 285 通過加 1 略過）。紅燈 PR 是否被擋仍未實測。
+
 ruleset 行為測試（2026-10-30）：由 ADMIN 帳號經 SSH 直接 push 一個空 commit（`255c726`，parent `1a65de4`）到 `main`，被 GitHub 拒絕（`push declined due to repository rule violations`；`Changes must be made through a pull request`；`2 of 2 required status checks are expected`），`origin/main` 維持 `1a65de4`。證明 bypass 清單為空時規則對管理員也生效。**未測試**：合併 CI 未過的 PR 是否被擋、force push、刪除 `main`（後兩者不實測，以設定核對為準）。
 5. 此 issue 不涵蓋自動 merge 的權限與政策，那屬於卡片規劃。
 
