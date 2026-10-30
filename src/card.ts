@@ -71,8 +71,10 @@ const ID_PATTERN = /^(REQ|TKT)-\d{8}-[a-z0-9][a-z0-9-]{1,40}$/;
 const KEY_LINE = /^([A-Za-z][A-Za-z0-9_-]*):(?: +(.*))?$/;
 const INNER_KEY = /^[A-Za-z][A-Za-z0-9_-]*/;
 
-type Scalar = string | number | null;
-type Value = Scalar | Scalar[] | { [key: string]: Scalar | Scalar[] };
+export type Scalar = string | number | null;
+export type CardValue =
+  Scalar | Scalar[] | { [key: string]: Scalar | Scalar[] };
+type Value = CardValue;
 
 class CardError extends Error {}
 
@@ -267,19 +269,21 @@ function buildExternal(value: Value | undefined): CardExternal {
   return external;
 }
 
-function checkDate(key: string, value: string): string {
+export function isCardDate(value: string): boolean {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (match) {
-    const [year, month, day] = [match[1], match[2], match[3]].map(Number);
-    const date = new Date(Date.UTC(year, month - 1, day));
-    if (
-      date.getUTCFullYear() === year &&
-      date.getUTCMonth() === month - 1 &&
-      date.getUTCDate() === day
-    )
-      return value;
-  }
-  return reject(`"${key}" must be a valid YYYY-MM-DD date`);
+  if (!match) return false;
+  const [year, month, day] = [match[1], match[2], match[3]].map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
+}
+
+function checkDate(key: string, value: string): string {
+  if (!isCardDate(value)) reject(`"${key}" must be a valid YYYY-MM-DD date`);
+  return value;
 }
 
 function checkRequired(
@@ -316,7 +320,7 @@ function checkRequired(
   };
 }
 
-function fail(error: string): ParseResult {
+function fail(error: string): { ok: false; error: string } {
   return { ok: false, error };
 }
 
@@ -337,7 +341,16 @@ function parseFields(lines: string[]): Map<string, Value> {
   return fields;
 }
 
-export function parseCard(text: string, filename?: string): ParseResult {
+export interface CardDocument {
+  fields: Map<string, CardValue>;
+  body: string;
+}
+
+export type ReadResult =
+  { ok: true; document: CardDocument } | { ok: false; error: string };
+
+// 只做結構解析（frontmatter 子集、大小限制），不檢查欄位語意。
+export function readCardDocument(text: string): ReadResult {
   if (Buffer.byteLength(text, "utf8") > MAX_FILE_BYTES)
     return fail("card file exceeds 256 KiB");
   const lines = text
@@ -350,15 +363,33 @@ export function parseCard(text: string, filename?: string): ParseResult {
   const frontmatter = lines.slice(1, end);
   if (Buffer.byteLength(frontmatter.join("\n"), "utf8") > MAX_FRONTMATTER_BYTES)
     return fail("frontmatter exceeds 8 KiB");
-
   try {
-    const fields = parseFields(frontmatter);
+    return {
+      ok: true,
+      document: {
+        fields: parseFields(frontmatter),
+        body: lines
+          .slice(end + 1)
+          .join("\n")
+          .replace(/^\n/, ""),
+      },
+    };
+  } catch (error) {
+    if (error instanceof CardError) return fail(error.message);
+    throw error;
+  }
+}
+
+// 驗證欄位語意並組出 Card；filename 有值時必須等於 <id>.md。
+export function buildCard(
+  document: CardDocument,
+  filename?: string,
+): ParseResult {
+  const { fields } = document;
+  try {
     const card: Card = {
       ...checkRequired(fields, filename),
-      body: lines
-        .slice(end + 1)
-        .join("\n")
-        .replace(/^\n/, ""),
+      body: document.body,
     };
     if (fields.has("source"))
       card.source = asString("source", fields.get("source"));
@@ -372,4 +403,10 @@ export function parseCard(text: string, filename?: string): ParseResult {
     if (error instanceof CardError) return fail(error.message);
     throw error;
   }
+}
+
+export function parseCard(text: string, filename?: string): ParseResult {
+  const read = readCardDocument(text);
+  if (!read.ok) return read;
+  return buildCard(read.document, filename);
 }
