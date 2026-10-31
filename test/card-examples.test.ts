@@ -57,3 +57,43 @@ test("the Mantis example keeps the Mantis number in external.mantis", () => {
   assert.equal(result.ok && result.card.type, "ticket");
   assert.equal(result.ok && typeof result.card.external?.mantis, "string");
 });
+
+for (const name of files) {
+  const body = (() => {
+    const result = parseCard(
+      fs.readFileSync(path.join(directory, name), "utf8"),
+      name,
+    );
+    return result.ok ? result.card.body : "";
+  })();
+
+  test(`${name} is a card on its own: no commentary about itself and no link to the guide`, () => {
+    assert.notEqual(body, "");
+    assert.doesNotMatch(body, /^>/m, "blockquote commentary");
+    assert.doesNotMatch(body, /本檔/, "text about the file itself");
+    assert.doesNotMatch(body, /README/, "reference to the guide");
+    assert.doesNotMatch(
+      body,
+      /\]\([^)]*\.md\)/,
+      "relative link to another file",
+    );
+  });
+}
+
+test("the guide still links to every example card", () => {
+  const readme = fs.readFileSync(path.join(directory, "README.md"), "utf8");
+  for (const name of files) {
+    assert.ok(readme.includes(`](${name})`), `README must link to ${name}`);
+  }
+});
+
+test("examples that carry a source mark it as fictional there, not in the body", () => {
+  for (const name of files) {
+    const result = parseCard(
+      fs.readFileSync(path.join(directory, name), "utf8"),
+      name,
+    );
+    if (result.ok && result.card.source !== undefined)
+      assert.match(result.card.source, /虛構/, name);
+  }
+});
