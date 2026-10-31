@@ -12,7 +12,9 @@
 | [REQ-20261030-example-feature.md](REQ-20261030-example-feature.md) | 需求卡範例 |
 | [REQ-20261030-example-minimal.md](REQ-20261030-example-minimal.md) | 只含必填欄位的最小卡，可複製後修改 |
 
-這三個檔案由 `test/card-examples.test.ts` 檢查：必須能被 `parseCard` 讀懂、序列化後再讀回相同、匯入後為 `draft`。格式演進時範例失效，測試會失敗。
+每個範例都**就是一張獨立的卡片**：檔案內只有卡片本身，沒有「本檔是範例」之類的說明段落，也不連結回本檔，可以單獨複製使用。說明都寫在這份 README。範例內容是虛構的，這一點標示在卡片的 `source` 欄位（有 `source` 的範例），不寫在內文。
+
+這三個檔案由 `test/card-examples.test.ts` 檢查：必須能被 `parseCard` 讀懂、序列化後再讀回相同、匯入後為 `draft`；內文不得含說明用的引用區塊、「本檔」字樣、README 參照或指向其他檔案的相對連結；本 README 必須連結到每一張範例。格式演進時範例失效，測試會失敗。
 
 ## 請 Agent 把 Mantis 單轉成卡片
 

@@ -6,14 +6,12 @@ title: 範例：登入逾時後頁面顯示空白（Mantis 0001234）
 version: 1
 created: 2026-10-30
 updated: 2026-10-30
-source: Mantis 0001234（本檔為格式範例，內容虛構）
+source: Mantis 0001234（虛構範例）
 project: example-project
 external: { mantis: "0001234" }
 ---
 
 # 範例：登入逾時後頁面顯示空白（Mantis 0001234）
-
-> 本檔是「Mantis 單轉卡片」的格式範例，內容為虛構。轉換規則見 [README.md](README.md)。
 
 ## Mantis 欄位
 

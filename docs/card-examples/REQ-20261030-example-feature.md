@@ -6,15 +6,13 @@ title: 範例：新增匯出報表功能
 version: 2
 created: 2026-10-28
 updated: 2026-10-30
-source: 與使用者的討論（本檔為格式範例，內容虛構）
+source: 與使用者的討論（虛構範例）
 project: example-project
 links: { related_docs: [docs/example-design.md], related_issues: [ISSUE-001] }
 external: { notion: null, github: null, mantis: null }
 ---
 
 # 範例：新增匯出報表功能
-
-> 本檔是「需求卡」的格式範例，內容為虛構。
 
 ## 背景
 
