@@ -2,7 +2,7 @@
 
 日期：2026-10-30。狀態：**已採納（Accepted，2026-10-30 使用者同意五項決定）**。實作進度見文末「實作狀態」。來源卡片：[REQ-20261030-card-to-merge](../cards/REQ-20261030-card-to-merge.md)。
 
-> 本文定義格式與規則。**目前只有純函式 `parseCard`（`src/card.ts`）、`importCard`（`src/card-import.ts`）與 `serializeCard`（`src/card-serialize.ts`）存在**；Mantis 匯出、寫檔、刪除語意與任何 CLI／Discord 指令都尚未實作，不得在 README／SPEC 寫成可用。
+> 本文定義格式與規則。**目前存在的是：純函式 `parseCard`、`importCard`、`serializeCard`，檔案層 `CardStore`（`src/card-store.ts`），以及指令 `herdr-card-check`。** `CardStore` 目前沒有任何呼叫端，bridge 不讀取也不寫入卡片；Mantis 匯出、bridge 專用的狀態寫入、刪除語意與任何 Discord 指令都尚未實作，不得在 README／SPEC 寫成可用。
 
 ## 背景
 
@@ -99,7 +99,12 @@ bridge 寫卡片時：先記讀取時的內容雜湊，寫入前再比對，不�
   - `importCard(text, { slug?, today, existingIds })`（`src/card-import.ts`），純函式：狀態一律強制為 `draft`；清空 `external`；已存在的 id 拒絕、不覆蓋；缺 `id` 時由 `type`（REQ／TKT）、`today` 與**呼叫者明確給的 `slug`** 產生，不從標題推導；有 `id` 時忽略 `slug`；回傳 `filename` 與 `notes`（記錄被改動的項目）。沒有呼叫端。
   - `serializeCard(card)`（`src/card-serialize.ts`），純函式：`Card` 轉成 md 文字。鍵順序固定（與輸入物件的屬性順序無關）；字串只在安全時用裸寫，否則加雙引號，規則比本專案解析器更保守（例如開頭的 `#`、`-`、`%`、`@` 也加引號，避免其他 YAML 工具讀錯）；陣列與物件用行內寫法。**寫出前先用 `parseCard` 讀回並比對，內容不同就回傳失敗**（例如標題含換行、`status` 不合法、本文含 CR），確保不會產生讀不回來的檔案。尚未寫入檔案，沒有呼叫端。
   - `herdr-card-check FILE...`（`scripts/herdr-card-check` → `src/card-check-cli.ts`，核心 `runCardCheck` 在 `src/card-check.ts`）：逐檔以 `parseCard` 檢查，輸出 `OK`／`FAIL`；結束碼 0／1／2；超過 256 KiB 的檔案不讀取。只檢查格式，不判斷內容。待使用者驗收（ISSUE-054）。
-- **測試**：`test/card.test.ts` 57 項（含真實規劃卡必須可解析）、`test/card-import.test.ts` 15 項、`test/card-serialize.test.ts` 36 項（含 `docs/cards` 內每張卡 parse、serialize、parse 往返相等且重複序列化文字不變）。全套 `npm test`（2026-10-30，本機 macOS、Node v26.12.0）394 項：393 通過、0 失敗、1 略過；這不是 CI 結果。開發過程抓到並修正兩個缺陷：`today` 只檢查格式、未檢查日期是否真實存在；`type` 以 `in` 判斷會把 `constructor` 等原型鏈名稱當成有效值（改用 `Object.hasOwn`）。
-- **尚未實作**：Mantis 匯出、bridge 寫檔（雜湊比對、原子寫入、符號連結與路徑跳脫防護）、從檔案系統讀取並提供 `existingIds`、執行中卡被刪的暫停、指令入口。驗收條件中這些項目仍是待做。
+  - `CardStore(rootDir)`（`src/card-store.ts`，2026-11-01），檔案層，同步 API，**尚無呼叫端**：
+    - 唯讀：`list()`（合格的卡與不合格檔案的錯誤分開回報；非卡片檔名如 `README.md` 忽略）、`existingIds()`（以檔名為準，**壞檔與符號連結仍占用它的 id**）、`read(id)`（回傳卡與整份檔案內容的 SHA-256）。目錄不存在視為空。
+    - 寫入：`create(card)`（先寫暫存檔再 `link` 到正式名稱，遇到任何既有項目含失效的符號連結都失敗，不覆蓋）、`update(id, expectedHash, change)`（雜湊與目前檔案不同回 `conflict` 且不動檔案；`change` 不能改 id；內容無變化不重寫；暫存檔加 `rename`）、`importText(text, { slug?, today })`（`importCard` 後 `create`）。
+    - 安全：id 先驗格式再組路徑（`../`、絕對路徑、`.md` 後綴一律 `invalid`，不碰檔案系統）；只讀一般檔案，符號連結、目錄、超過 256 KiB 的檔案拒絕（`unsafe`／`too_large`），以 `lstat` 加 `O_NOFOLLOW` 開檔並用 `fstat` 複核；暫存檔以 `.` 開頭，不會被 `list()` 當成卡片。錯誤以代碼回報：`not_found`、`invalid`、`unsafe`、`too_large`、`exists`、`conflict`。
+    - **限制**：普通檔案系統無法做到「比對雜湊並取代」的真正原子操作；`update` 在 `rename` 前再比對一次以縮小空窗，但仍假設同一時間只有一個程式寫入（bridge），人手動編輯造成的衝突靠雜湊偵測。程序在寫暫存檔與 `link`／`rename` 之間崩潰可能遺留 `.<id>.md.tmp-*` 暫存檔，目前沒有清理機制。`rootDir` 若是檔案而不是目錄，`list()` 會丟出例外。權限固定 `0644`。
+- **測試**：`test/card.test.ts` 57 項（含真實規劃卡必須可解析）、`test/card-import.test.ts` 15 項、`test/card-serialize.test.ts` 36 項（含 `docs/cards` 內每張卡 parse、serialize、parse 往返相等且重複序列化文字不變）、`test/card-store.test.ts` 24 項（真實暫存目錄與符號連結）。全套 `npm test`（2026-10-30，本機 macOS、Node v26.12.0）445 項：444 通過、0 失敗、1 略過（2026-11-01）；這不是 CI 結果。開發過程抓到並修正兩個缺陷：`today` 只檢查格式、未檢查日期是否真實存在；`type` 以 `in` 判斷會把 `constructor` 等原型鏈名稱當成有效值（改用 `Object.hasOwn`）。
+- **尚未實作**：Mantis 匯出、bridge 專用的狀態寫入（只改 `status`、`updated` 與「執行結果」章節，且只允許 `in_progress`／`done`）、執行中卡被刪的暫停、bridge 或 Discord 的呼叫端與指令入口。驗收條件中這些項目仍是待做。
 - **決策變更（2026-10-30，ISSUE-053）**：原稿允許 `x-` 前綴自訂欄位，但 `Card` 沒有保留它的位置，讀寫往返會悄悄丟失。改為**禁止**：`parseCard` 對 `x-` 開頭的 key 回傳 `unknown key`。若日後需要擴充欄位，應新增明確欄位或 `extensions` 結構，並補往返測試。
 - **實作後與原文的差異**：物件值允許純量陣列（`links` 需要）；`status` 註解中的 `approved` 已不在列舉內，規劃卡已同步修正；規劃卡原缺必填的 `title`，一併補上。

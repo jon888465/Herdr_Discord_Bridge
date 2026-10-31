@@ -8,13 +8,16 @@ export interface ImportOptions {
 
 export type ImportResult =
   | { ok: true; card: Card; filename: string; notes: string[] }
-  | { ok: false; error: string };
+  | { ok: false; error: string; code: "exists" | "invalid" };
 
 const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{1,40}$/;
 const ID_PREFIX: Record<string, string> = { requirement: "REQ", ticket: "TKT" };
 
-function fail(error: string): ImportResult {
-  return { ok: false, error };
+function fail(
+  error: string,
+  code: "exists" | "invalid" = "invalid",
+): ImportResult {
+  return { ok: false, error, code };
 }
 
 function generateId(
@@ -35,7 +38,7 @@ function generateId(
 
 export function importCard(text: string, options: ImportOptions): ImportResult {
   const read = readCardDocument(text);
-  if (!read.ok) return read;
+  if (!read.ok) return fail(read.error);
   const notes: string[] = [];
   if (!read.document.fields.has("id")) {
     const generated = generateId(read.document.fields.get("type"), options);
@@ -44,9 +47,9 @@ export function importCard(text: string, options: ImportOptions): ImportResult {
     notes.push(`id generated: ${generated.id}`);
   }
   const built = buildCard(read.document);
-  if (!built.ok) return built;
+  if (!built.ok) return fail(built.error);
   if (options.existingIds.has(built.card.id))
-    return fail(`card ${built.card.id} already exists`);
+    return fail(`card ${built.card.id} already exists`, "exists");
   const card = { ...built.card };
   if (card.status !== "draft") {
     notes.push(`status ${card.status} -> draft`);

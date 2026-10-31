@@ -67,6 +67,10 @@ const MAX_TITLE_LENGTH = 120;
 
 const ID_PATTERN = /^(REQ|TKT)-\d{8}-[a-z0-9][a-z0-9-]{1,40}$/;
 
+export function isCardId(value: string): boolean {
+  return ID_PATTERN.test(value);
+}
+
 // key: value，key 以字母開頭；縮排、清單項目與 "<<" 合併鍵都不符合。
 const KEY_LINE = /^([A-Za-z][A-Za-z0-9_-]*):(?: +(.*))?$/;
 const INNER_KEY = /^[A-Za-z][A-Za-z0-9_-]*/;
