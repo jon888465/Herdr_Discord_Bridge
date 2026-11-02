@@ -384,3 +384,82 @@ test("a file limit above 1 MiB or not a positive integer is a programming error"
     );
   }
 });
+
+test("projects is an inline array of machine-prefixed names and coexists with the legacy project field", () => {
+  const result = parseCard(
+    withExtra(
+      "project: Legacy",
+      "projects: [local:Herdr_Discord_Bridge, agy-pod:other.repo_1]",
+    ),
+    "REQ-20261030-example.md",
+  );
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.card.project, "Legacy");
+  assert.deepEqual(result.card.projects, [
+    "local:Herdr_Discord_Bridge",
+    "agy-pod:other.repo_1",
+  ]);
+});
+
+test("an empty projects array is allowed", () => {
+  const result = parseCard(
+    withExtra("projects: []"),
+    "REQ-20261030-example.md",
+  );
+  assert.deepEqual(result.ok ? result.card.projects : result.error, []);
+});
+
+for (const [name, line] of [
+  ["a scalar instead of an array", "projects: local:Foo"],
+  ["a non-string element", "projects: [5]"],
+  ["a name without a machine prefix", "projects: [Foo]"],
+  ["a space in the name", 'projects: ["local:bad name"]'],
+  ["a one-letter machine id", "projects: [m:Foo]"],
+  ["a directory part of only dots", "projects: [local:..]"],
+  ["a duplicate name", "projects: [local:Foo, local:Foo]"],
+  [
+    "a directory part over 64 characters",
+    `projects: [local:${"a".repeat(65)}]`,
+  ],
+  [
+    "more than 20 projects",
+    `projects: [${Array.from({ length: 21 }, (_, i) => `local:p${i}`).join(", ")}]`,
+  ],
+] as const) {
+  test(`projects with ${name} is rejected`, () => {
+    const result = parseCard(withExtra(line), "REQ-20261030-example.md");
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.error, /projects/);
+  });
+}
+
+test("exactly 20 projects and a 64-character directory part are accepted", () => {
+  const twenty = Array.from({ length: 20 }, (_, i) => `local:p${i}`);
+  assert.equal(
+    parseCard(
+      withExtra(`projects: [${twenty.join(", ")}]`),
+      "REQ-20261030-example.md",
+    ).ok,
+    true,
+  );
+  assert.equal(
+    parseCard(
+      withExtra(`projects: [local:${"a".repeat(64)}]`),
+      "REQ-20261030-example.md",
+    ).ok,
+    true,
+  );
+});
+
+test("a project name with an empty directory part is rejected by the parser", () => {
+  // 行內陣列裡以冒號結尾的裸字串在解析階段就被拒絕；該層的錯誤訊息不帶欄位名稱。
+  assert.equal(
+    parseCard(withExtra("projects: [local:]"), "REQ-20261030-example.md").ok,
+    false,
+  );
+  assert.equal(
+    parseCard(withExtra('projects: ["local:"]'), "REQ-20261030-example.md").ok,
+    false,
+  );
+});

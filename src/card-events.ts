@@ -9,6 +9,22 @@ import {
   type LogEntry,
 } from "./card-ledger.js";
 import { redactSecrets } from "./redact.js";
+import {
+  absolutePath,
+  AGENT,
+  bad,
+  BRANCH,
+  FieldError,
+  integer,
+  MACHINE,
+  oneOf,
+  SNAKE,
+  TASK_ID,
+  text,
+  sha12,
+  url,
+  type Fields,
+} from "./card-fields.js";
 
 export const OMITTED_TEXT = "內容已省略：疑似含機敏資料";
 /** 自由文字（失敗原因）的上限，字元數。 */
@@ -73,100 +89,6 @@ export type CardEvent = { time: string; eventId: string } & (
 export type BuildResult =
   | { ok: true; entry: LogEntry; omitted: boolean }
   | { ok: false; error: string };
-
-class EventError extends Error {}
-
-type Fields = Record<string, unknown>;
-
-function bad(field: string, expected: string): never {
-  throw new EventError(`invalid ${field} (${expected})`);
-}
-
-function text(
-  fields: Fields,
-  key: string,
-  pattern: RegExp,
-  expected: string,
-): string {
-  const value = fields[key];
-  if (typeof value !== "string" || !pattern.test(value)) bad(key, expected);
-  return value;
-}
-
-function oneOf<T extends string>(
-  fields: Fields,
-  key: string,
-  allowed: readonly T[],
-): T {
-  const value = fields[key];
-  if (
-    typeof value !== "string" ||
-    !(allowed as readonly string[]).includes(value)
-  )
-    bad(key, `one of ${allowed.join(", ")}`);
-  return value as T;
-}
-
-function integer(
-  fields: Fields,
-  key: string,
-  min: number,
-  max: number,
-): number {
-  const value = fields[key];
-  if (
-    typeof value !== "number" ||
-    !Number.isInteger(value) ||
-    value < min ||
-    value > max
-  )
-    bad(key, `integer ${min} to ${max}`);
-  return value;
-}
-
-const CONTROL = /[\u0000-\u001F\u007F]/;
-const MACHINE = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
-const AGENT = /^[A-Za-z0-9._-]{1,40}$/;
-const BRANCH = /^[A-Za-z0-9._/-]{1,80}$/;
-const SHA = /^[0-9a-f]{7,40}$/;
-const TASK_ID = /^[A-Za-z0-9._-]{1,64}$/;
-const SNAKE = /^[a-z][a-z0-9_]{0,31}$/;
-
-function absolutePath(fields: Fields, key: string): string {
-  const value = fields[key];
-  if (
-    typeof value !== "string" ||
-    !value.startsWith("/") ||
-    Array.from(value).length > 120 ||
-    CONTROL.test(value) ||
-    value.includes(" | ")
-  )
-    bad(
-      key,
-      "absolute path, at most 120 characters, no control characters or ' | '",
-    );
-  return value;
-}
-
-/** 網址先驗證格式，再移除帳密與像憑證的查詢參數（決定 11 規則 3）。 */
-function url(fields: Fields, key: string): string {
-  const value = fields[key];
-  if (
-    typeof value !== "string" ||
-    !/^https?:\/\/\S+$/.test(value) ||
-    value.length > 150 ||
-    CONTROL.test(value)
-  )
-    bad(key, "http(s) URL without spaces, at most 150 characters");
-  return redactSecrets(value);
-}
-
-function sha12(fields: Fields, key: string): string {
-  return text(fields, key, SHA, "7 to 40 lowercase hex characters").slice(
-    0,
-    12,
-  );
-}
 
 /** 失敗原因：正規化空白、機敏檢查（在截斷之前）、再截斷。回傳空字串表示沒有原因。 */
 function failureReason(fields: Fields): { text: string; suspicious: boolean } {
@@ -289,7 +211,7 @@ function render(fields: Fields): { text: string; suspicious: boolean } {
         suspicious: false,
       };
     default:
-      throw new EventError(`unknown event "${String(fields.event)}"`);
+      throw new FieldError(`unknown event "${String(fields.event)}"`);
   }
 }
 
@@ -317,7 +239,7 @@ export function buildLogEntry(event: CardEvent): BuildResult {
       return { ok: false, error: `${problem} (limit ${MAX_LOG_TEXT_CHARS})` };
     return { ok: true, entry, omitted };
   } catch (error) {
-    if (error instanceof EventError) return { ok: false, error: error.message };
+    if (error instanceof FieldError) return { ok: false, error: error.message };
     throw error;
   }
 }

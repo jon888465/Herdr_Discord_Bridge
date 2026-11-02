@@ -872,3 +872,142 @@ test("recordEvent rejects an invalid event, an unknown card and a malformed id w
   const traversal = store.recordEvent("../x", startedEvent);
   assert.equal(traversal.ok === false && traversal.code, "invalid");
 });
+
+import type { ProjectInfo } from "../src/card-projects.js";
+
+const fooInfo: ProjectInfo = {
+  machine: "local",
+  repoPath: "/Users/jon/git_wk/Foo",
+  branch: "card/REQ-20261101-created",
+};
+
+test("recordProject writes the section, adds the name to projects and bumps updated", () => {
+  const { root, store } = seededReady();
+  const result = store.recordProject(sample.id, fooInfo, "2026-11-03");
+  assert.equal(result.ok && result.name, "local:Foo");
+  assert.deepEqual(result.ok && result.omitted, []);
+  const read = store.read(sample.id);
+  assert.deepEqual(read.ok && read.card.projects, ["local:Foo"]);
+  assert.equal(read.ok && read.card.updated, "2026-11-03");
+  assert.ok(
+    read.ok &&
+      read.card.body.includes(
+        "## 異動專案\n\n### local:Foo\n\n- 機器：local\n- repo：/Users/jon/git_wk/Foo\n- 分支：card/REQ-20261101-created\n",
+      ),
+  );
+  assert.ok(read.ok && read.card.body.startsWith("# 新建立的卡片\n"));
+  if (process.platform !== "win32")
+    assert.equal(modeOf(path.join(root, `${sample.id}.md`)), 0o600);
+});
+
+test("recordProject is idempotent and does not rewrite the file", () => {
+  const { root, store } = seededReady();
+  const first = store.recordProject(sample.id, fooInfo, "2026-11-03");
+  const file = path.join(root, `${sample.id}.md`);
+  const before = fs.readFileSync(file, "utf8");
+  const again = store.recordProject(sample.id, fooInfo, "2026-11-09");
+  assert.equal(again.ok && first.ok && again.hash === first.hash, true);
+  assert.equal(fs.readFileSync(file, "utf8"), before);
+});
+
+test("a second project and later updates keep both, change only the given fields and never duplicate a name", () => {
+  const { store } = seededReady();
+  store.recordProject(sample.id, fooInfo, "2026-11-03");
+  store.recordProject(
+    sample.id,
+    { machine: "agy-pod", repoPath: "/srv/Bar" },
+    "2026-11-03",
+  );
+  store.recordProject(
+    sample.id,
+    {
+      ...fooInfo,
+      headSha: "abcdef1234567890",
+      prUrl: "https://github.com/o/r/pull/9",
+    },
+    "2026-11-04",
+  );
+  const read = store.read(sample.id);
+  assert.deepEqual(read.ok && read.card.projects, ["local:Foo", "agy-pod:Bar"]);
+  const body = read.ok ? read.card.body : "";
+  assert.equal(body.split("### local:Foo").length, 2);
+  assert.ok(
+    body.includes(
+      "- head：abcdef123456\n- PR：https://github.com/o/r/pull/9\n",
+    ),
+  );
+  assert.ok(
+    body.includes("### agy-pod:Bar\n\n- 機器：agy-pod\n- repo：/srv/Bar\n"),
+  );
+  assert.equal(read.ok && read.card.updated, "2026-11-04");
+});
+
+test("recordProject keeps the legacy project field and the human text", () => {
+  const root = tempRoot();
+  const store = new CardStore(root);
+  store.create({ ...sample, status: "ready", project: "Legacy" });
+  assert.equal(store.recordProject(sample.id, fooInfo, "2026-11-03").ok, true);
+  const read = store.read(sample.id);
+  assert.equal(read.ok && read.card.project, "Legacy");
+  assert.ok(read.ok && read.card.body.startsWith("# 新建立的卡片\n"));
+});
+
+test("recordProject rejects bad input, an unknown card and a malformed id without writing", () => {
+  const { root, store } = seededReady();
+  const file = path.join(root, `${sample.id}.md`);
+  const before = fs.readFileSync(file, "utf8");
+  const badInfo = store.recordProject(
+    sample.id,
+    { ...fooInfo, repoPath: "relative" },
+    "2026-11-03",
+  );
+  assert.equal(badInfo.ok === false && badInfo.code, "invalid");
+  const badDate = store.recordProject(sample.id, fooInfo, "2026-13-45");
+  assert.equal(badDate.ok === false && badDate.code, "invalid");
+  const missing = store.recordProject(
+    "REQ-20261101-missing",
+    fooInfo,
+    "2026-11-03",
+  );
+  assert.equal(missing.ok === false && missing.code, "not_found");
+  const traversal = store.recordProject("../x", fooInfo, "2026-11-03");
+  assert.equal(traversal.ok === false && traversal.code, "invalid");
+  assert.equal(fs.readFileSync(file, "utf8"), before);
+});
+
+test("a suspected secret omits only that field and never reaches the file", () => {
+  const { root, store } = seededReady();
+  const token = ["gh", "p_", "FAKEFAKEFAKE0123456789ABCD"].join("");
+  const result = store.recordProject(
+    sample.id,
+    { ...fooInfo, branch: token },
+    "2026-11-03",
+  );
+  assert.deepEqual(result.ok && result.omitted, ["branch"]);
+  const text = fs.readFileSync(path.join(root, `${sample.id}.md`), "utf8");
+  assert.equal(text.includes(token), false);
+  assert.ok(text.includes("- 分支：（已省略：疑似含機敏資料）\n"));
+});
+
+test("a card cannot hold more than 20 projects and a failed write leaves it untouched", () => {
+  const { root, store } = seededReady();
+  for (let i = 0; i < 20; i++)
+    assert.equal(
+      store.recordProject(
+        sample.id,
+        { machine: "local", repoPath: `/r/p${i}` },
+        "2026-11-03",
+      ).ok,
+      true,
+      `project ${i}`,
+    );
+  const file = path.join(root, `${sample.id}.md`);
+  const before = fs.readFileSync(file, "utf8");
+  const extra = store.recordProject(
+    sample.id,
+    { machine: "local", repoPath: "/r/p20" },
+    "2026-11-03",
+  );
+  assert.equal(extra.ok === false && extra.code, "invalid");
+  assert.equal(fs.readFileSync(file, "utf8"), before);
+});

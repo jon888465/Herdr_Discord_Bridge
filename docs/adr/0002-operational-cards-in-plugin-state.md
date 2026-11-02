@@ -41,6 +41,7 @@ Team 任務的 journal（`src/team-task-store.ts`）已是執行狀態的權威�
 ### 4. 異動專案
 
 - frontmatter 以 `projects: [專案名, ...]`（純量陣列，現有格式即可表達）取代單一的 `project` 欄位，方便搜尋與列表。
+- **專案名稱 = `<機器 id>:<repo 目錄名>`**（使用者 2026-11-02 選擇），本機用 `local:`，例如 `local:Herdr_Discord_Bridge`、`agy-pod:Herdr_Discord_Bridge`。完整 repo 路徑與 remote 網址放在 `## 異動專案`，需要唯一識別時查那裡。
 - 詳細資料由 bridge 追加在內文 `## 異動專案`，每個專案一段：機器、repo 路徑、分支、worktree 路徑、base 與 head commit、PR 連結（完整網址）。
 - 現有 `project` 欄位暫時仍被接受以相容既有範例，之後移除。
 
@@ -132,7 +133,7 @@ issue、README、CHANGELOG 等由 Agent 在該卡片的 worktree 裡依專案自
 ## 未決
 
 1. ~~流程紀錄與 256 KiB 上限~~ 使用者已決定「先提高上限，超過再放旁檔」，見決定 10。輪替後卡片保留最近 5 筆（使用者決定）。數字已確認：匯入 512 KiB、營運卡片硬上限 1 MiB、輪替門檻 768 KiB（2026-11-02）。
-2. `projects` 的專案名稱規則：用 Herdr workspace 對應的 repo 目錄名？同名時如何區分（加機器前綴）？
+2. ~~`projects` 的專案名稱規則~~ 已決定（使用者 2026-11-02 選 `<機器 id>:<repo 目錄名>`），見決定 4 與實作狀態。
 3. journal 事件到紀錄行的對照表，以及事件 id 的產生方式。
 4. ~~機敏內容~~ 已決定（2026-11-02），見決定 11。
 5. ~~`CardStore` 的受限 API 與 0600 權限~~ 已實作（2026-11-02，見實作狀態）。
@@ -166,7 +167,7 @@ issue、README、CHANGELOG 等由 Agent 在該卡片的 worktree 裡依專案自
 - `herdr-card-check` 預設 512 KiB，新增 `--ledger` 旗標改用 1 MiB。
 - 測試（2026-11-02，本機 macOS、Node v26.12.0，非 CI）：全套 459 項，458 通過、0 失敗、1 略過（原 445 項，新增 14 項）。
 - **共用遮蔽模組已實作（2026-11-02，ISSUE-056）：** `src/redact.ts` 的 `redactSecrets` 已整併原本兩份遮蔽邏輯並補上漏掉的樣式，含決定 11 規則 3 的網址清理（移除 `user:pass@` 與像憑證的查詢參數）。`publicText` 與 handoff 摘要已改用它，順序為先遮蔽再截斷。**卡片寫入尚未使用它。**
-- **尚未實作：** 輪替本身（`logs/<id>/` 旁檔、保留最近 5 筆）、輪替門檻 768 KiB 的常數（尚無使用者，等實作輪替時再加入）、`projects` 欄位與 `## 異動專案` 的寫入、匯出排除 bridge 區塊（隨 Mantis／Notion 匯出一起做）、journal 事件到事件模板的對應與事件 id 產生方式、營運卡片目錄的建立與 bridge 呼叫端。
+- **尚未實作：** 輪替本身（`logs/<id>/` 旁檔、保留最近 5 筆）、輪替門檻 768 KiB 的常數（尚無使用者，等實作輪替時再加入）、匯出排除 bridge 區塊（隨 Mantis／Notion 匯出一起做）、journal 事件到事件模板的對應與事件 id 產生方式、營運卡片目錄的建立與 bridge 呼叫端。
 
 ### 受限寫入與權限（2026-11-02）
 
@@ -190,3 +191,12 @@ issue、README、CHANGELOG 等由 Agent 在該卡片的 worktree 裡依專案自
 - **解讀與取捨（Agent 的決定，使用者未明說）：** (1) 整筆省略連 `failed` 的分類碼也一併省略，以符合決定 11 規則 2「整筆說明」；(2) 檢查沿用 `redactSecrets`，它刻意偏向過度遮蔽（例如 `token: x` 這種形式整筆省略）；(3) 網址是「清理後照寫」而不是「省略」，依規則 3。
 - 限制：`redactSecrets` 是黑名單，不保證完整。主要防線是預設只寫結構化事實。
 - 測試（2026-11-02，本機 macOS、Node v26.12.0，非 CI）：全套 537 項，536 通過、0 失敗、1 略過（原 511 項）。
+
+### 異動專案（2026-11-02，C4、C5，尚無呼叫端）
+
+- **`projects` 欄位**（`src/card.ts`）：frontmatter 的行內陣列，每個名稱須符合 `<機器 id>:<目錄名>`——機器 id 為 `local` 或 2 到 32 字的 `machines` 格式，目錄名限 `[A-Za-z0-9._-]` 最多 64 字且不可只由點組成；不可重複，最多 20 個，可為空陣列。舊的 `project` 欄位仍被接受並可並存；序列化順序為 `source`、`project`、`projects`、`links`、`external`。
+- **`projectName(machine, directory)`**（`src/card-projects.ts`）：合法的目錄名原樣使用；含空白、中文、過長或只有點的目錄名會被改寫，並**加上原始名稱的 4 位雜湊**（例如 `My Project` → `My-Project-xxxx`、`專案` → `p-xxxx`），所以 `My Project` 與 `My-Project` 不會撞名。機器 id 不合法回傳 `null`。
+- **`upsertProjectSection(body, info)`**：在內文 `## 異動專案` 更新或新增該專案的 `### <名稱>` 小節，欄位依固定順序：機器、repo、分支、worktree、base、head、PR、remote（commit 取前 12 位）。**與流程紀錄不同，這一塊是「更新」而不是「只追加」**：提供的欄位覆蓋、沒提供的保留；人寫的說明與額外的行保留；內容沒變就不重寫。每個欄位沿用事件的格式驗證（`src/card-fields.ts`，從 `card-events` 抽出共用）。
+- **機敏處理（Agent 的決定，使用者未明說）：** 疑似機敏的欄位**只省略該欄位**，改寫成 `（已省略：疑似含機敏資料）`，不省略整個小節，因為這裡沒有需要保留的「事件」；網址（PR、remote）先移除帳密與像憑證的查詢參數再寫入；專案名稱本身（取自 repo 目錄名）或 repo 路徑疑似機敏時**整個拒絕**，因為名稱沒辦法省略。
+- **`CardStore.recordProject(id, info, today)`**：呼叫 `upsertProjectSection`，同時把專案名稱加進 `projects`（冪等）；沒有變化就不重寫檔案、不推進 `updated`；一張卡超過 20 個專案回 `invalid`；不需要事先持有雜湊，沿用自動重讀重試。
+- 測試（2026-11-02，本機 macOS、Node v26.12.0，非 CI）：全套 569 項，568 通過、0 失敗、1 略過（原 537 項）。
