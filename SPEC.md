@@ -604,7 +604,7 @@ Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*
 
 `src/redact.ts` 的 `redactSecrets` 是 handoff 公開文字（`publicText`）與 handoff 摘要（`src/handoff-summary.ts` 的 `boundedHandoffSummary`）共用的遮蔽邏輯。涵蓋：私鑰區塊（含被截斷的）、`sk-`／`gh*_`／`github_pat_`／Slack／AWS access key、JWT、`Bearer`、名稱含 token／password／secret／api_key 等的 `name=value`，以及網址中的 `user:pass@` 與名稱像憑證的查詢參數。標記為 `[redacted private key]`、`[redacted token]`、`[redacted]`。順序是**先遮蔽再截斷**。這是黑名單式規則，**不保證完整**；它只用在 handoff 文字與摘要，一般回覆轉送到 Discord 的路徑沒有套用。待實際 handoff 驗收。
 
-### 營運卡片指令（階段 2a，待驗收）
+### 營運卡片指令（階段 2a，已驗收 2026-11-02）
 
 `card list [status]`、`card show <id>`、`card import [--slug <名稱>] [<本機路徑>]` 可在 Discord（沿用 `allowedUserIds`）與本機 console 使用；卡片存放於 `<stateDirectory>/cards/`，**不進 git**。見 [ADR-0002](docs/adr/0002-operational-cards-in-plugin-state.md)。
 

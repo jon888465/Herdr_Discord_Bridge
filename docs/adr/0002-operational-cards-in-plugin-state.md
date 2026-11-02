@@ -233,7 +233,7 @@ issue、README、CHANGELOG 等由 Agent 在該卡片的 worktree 裡依專案自
 
 ### 2a 實作狀態
 
-**原始碼已實作，自動化測試通過；bridge 尚未重啟、尚未 live 驗收（ISSUE-057）。**
+**原始碼已實作、自動化測試通過，並已重啟 bridge 完成 console 與 Discord live 驗收（2026-11-02，ISSUE-057）。** 驗收過程發現並修正 `SHORT_COMMANDS` 漏掉 `card`（PR #26）。
 
 - `src/card-directory.ts`：`ensureCardsDirectory`，規則見 Q7；永不修改既有目錄。
 - `src/card-command.ts`：`runCardCommand`。`list` 最多 30 行、標題 50 字、最多列 5 個壞檔；`show` 顯示摘要、人寫內文前 1200 字、最近 5 筆紀錄；`import`：Discord 必須恰好一個 `.md` 附件且宣告大小 1 byte 到 512 KiB（超過不下載），**Discord 端不接受路徑參數**（避免讀取伺服器檔案）；console 接受一個本機 `.md` 路徑（拒絕符號連結、非一般檔案、超過 512 KiB、非 UTF-8）。匯入沿用 `CardStore.importText`：強制 `draft`、清空 `external`、不覆蓋既有 id；沒有 id 的卡片需 `--slug`。所有輸出先過 `redactSecrets`。`card assign` 只回「尚未實作（階段 2b）」。
