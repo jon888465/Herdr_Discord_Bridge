@@ -24,6 +24,10 @@ function setup(overrides: Partial<CardCommandDeps> = {}) {
     readLocalFile: () => {
       throw new Error("readLocalFile was not expected");
     },
+    now: () => "2026-11-02T08:15:00Z",
+    startTask: async () => {
+      throw new Error("startTask was not expected");
+    },
     ...overrides,
   };
   const run = (...args: string[]) => runCardCommand(args, deps);
@@ -171,11 +175,10 @@ test("card show reports an unknown card, a malformed id and a missing id", async
   await assert.rejects(run("show"), /usage/);
 });
 
-test("card with no or an unknown subcommand prints usage, and assign says it is not implemented yet", async () => {
+test("card with no or an unknown subcommand prints usage", async () => {
   const { run } = setup();
   await assert.rejects(run(), /usage/);
   await assert.rejects(run("frobnicate"), /usage/);
-  assert.match(await run("assign", "REQ-20261102-aaa"), /尚未實作/);
 });
 
 import { IMPORT_MAX_FILE_BYTES } from "../src/card.js";
@@ -351,4 +354,161 @@ test("readLocalCardFile reads a regular UTF-8 .md file and refuses symlinks, dir
   fs.writeFileSync(path.join(base, "bin.md"), Buffer.from([0x23, 0xff, 0xfe]));
   assert.throws(() => readLocalCardFile(path.join(base, "bin.md")), /UTF-8/);
   assert.throws(() => readLocalCardFile(path.join(base, "none.md")), /ENOENT/);
+});
+
+const assignable = (id = "REQ-20261102-work", patch: Partial<Card> = {}) =>
+  card(id, {
+    status: "ready",
+    body: "# 做事\n\n## 描述\n把報表匯出成 CSV。\n\n## 驗收條件\n- 可以下載\n",
+    ...patch,
+  });
+
+const started = (taskId = "task-1111-aaaa") => ({
+  taskId,
+  lead: { agent: "codex", machine: "local" },
+});
+
+function assignSetup(overrides: Partial<CardCommandDeps> = {}) {
+  const calls: Array<{ prompt: string; coding: boolean }> = [];
+  const s = setup({
+    startTask: async (prompt, options) => {
+      calls.push({ prompt, coding: options.coding });
+      return started();
+    },
+    ...overrides,
+  });
+  return { ...s, calls };
+}
+
+test("assign hands the card to a Team task, then records the task, the status and two log entries", async () => {
+  const { store, run, calls } = assignSetup();
+  store.create(assignable());
+  const reply = await run("assign", "REQ-20261102-work");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].coding, false);
+  assert.match(calls[0].prompt, /把報表匯出成 CSV。/);
+  assert.match(reply, /已指派 REQ-20261102-work/);
+  assert.match(reply, /task-1111-aaaa/);
+  const read = store.read("REQ-20261102-work");
+  assert.equal(read.ok && read.card.status, "in_progress");
+  assert.deepEqual(read.ok && read.card.tasks, ["task-1111-aaaa"]);
+  const log = store.readLog("REQ-20261102-work");
+  assert.deepEqual(
+    log.ok && log.entries.map((e) => [e.event, e.text, e.eventId]),
+    [
+      ["assigned", "指派給 codex（local）", "task-1111-aaaa-assigned"],
+      ["started", "開始執行 task task-1111-aaaa", "task-1111-aaaa-started"],
+    ],
+  );
+});
+
+test("assign --coding passes the coding flag, and extra arguments are refused", async () => {
+  const { store, run, calls } = assignSetup();
+  store.create(assignable());
+  await assert.rejects(run("assign", "REQ-20261102-work", "--oops"), /usage/);
+  await assert.rejects(run("assign"), /usage/);
+  assert.equal(calls.length, 0);
+  await run("assign", "REQ-20261102-work", "--coding");
+  assert.equal(calls[0].coding, true);
+});
+
+test("only ready cards can be assigned, and a refusal changes nothing", async () => {
+  for (const status of [
+    "draft",
+    "discussing",
+    "refined",
+    "in_progress",
+    "done",
+  ]) {
+    const { store, run, calls, rootDir } = assignSetup();
+    store.create(assignable("REQ-20261102-work", { status }));
+    const file = path.join(rootDir, "REQ-20261102-work.md");
+    const before = fs.readFileSync(file, "utf8");
+    await assert.rejects(
+      run("assign", "REQ-20261102-work"),
+      new RegExp(`${status}.*ready|ready.*${status}`),
+      status,
+    );
+    assert.equal(calls.length, 0, status);
+    assert.equal(fs.readFileSync(file, "utf8"), before, status);
+  }
+});
+
+test("assign refuses an invalid or unknown id and a missing directory without starting anything", async () => {
+  const { run, calls } = assignSetup();
+  await assert.rejects(run("assign", "../x"), /不是合法的卡片 id/);
+  await assert.rejects(run("assign", "REQ-20261102-none"), /找不到卡片/);
+  assert.equal(calls.length, 0);
+});
+
+test("a card without a description is refused before a task starts", async () => {
+  const { store, run, calls } = assignSetup();
+  store.create(assignable("REQ-20261102-work", { body: "# 只有標題\n" }));
+  await assert.rejects(run("assign", "REQ-20261102-work"), /描述/);
+  assert.equal(calls.length, 0);
+  const read = store.read("REQ-20261102-work");
+  assert.equal(read.ok && read.card.status, "ready");
+});
+
+test("when the task cannot start the error reaches the caller and the card stays ready", async () => {
+  const { store, run } = assignSetup({
+    startTask: async () => {
+      throw new Error("select a workspace first");
+    },
+  });
+  store.create(assignable());
+  await assert.rejects(
+    run("assign", "REQ-20261102-work"),
+    /select a workspace/,
+  );
+  const read = store.read("REQ-20261102-work");
+  assert.equal(read.ok && read.card.status, "ready");
+  assert.equal(read.ok && read.card.tasks, undefined);
+});
+
+test("if the card cannot be updated after the task started, the reply warns instead of failing", async () => {
+  const { store, rootDir, run } = assignSetup({
+    startTask: async () => {
+      fs.rmSync(path.join(rootDir, "REQ-20261102-work.md"));
+      return started();
+    },
+  });
+  store.create(assignable());
+  const reply = await run("assign", "REQ-20261102-work");
+  assert.match(reply, /任務已啟動/);
+  assert.match(reply, /卡片更新失敗/);
+  assert.match(reply, /task-1111-aaaa/);
+});
+
+test("two assigns of the same card at once start only one task", async () => {
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let starts = 0;
+  const { store, run } = assignSetup({
+    startTask: async () => {
+      starts++;
+      await gate;
+      return started();
+    },
+  });
+  store.create(assignable());
+  const first = run("assign", "REQ-20261102-work");
+  await assert.rejects(run("assign", "REQ-20261102-work"), /指派中/);
+  release();
+  await first;
+  assert.equal(starts, 1);
+  await assert.rejects(run("assign", "REQ-20261102-work"), /in_progress/);
+});
+
+test("the agent and machine written to the log come from the started task", async () => {
+  const { store, run } = assignSetup({
+    startTask: async () => ({
+      taskId: "task-2222",
+      lead: { agent: "claude", machine: "agy-pod" },
+    }),
+  });
+  store.create(assignable());
+  await run("assign", "REQ-20261102-work");
+  const log = store.readLog("REQ-20261102-work");
+  assert.equal(log.ok && log.entries[0].text, "指派給 claude（agy-pod）");
 });

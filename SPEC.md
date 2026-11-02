@@ -611,5 +611,6 @@ Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*
 - 目錄：第一次寫入（`card import`）時以 0700 建立；已存在但群組或其他人可存取、是符號連結或不是目錄時**拒絕並提示 `chmod 700 <路徑>`**，不自動修改。`list`／`show` 不會建立目錄。
 - `list`：最多 30 行，標題截為 50 字，最多列 5 個不合格檔案。`show`：摘要、人寫內文前 1200 字、最近 5 筆流程紀錄。id 不合法或找不到卡片時明確回報。所有輸出先經 `redactSecrets`。
 - `import`：Discord 必須附上恰好一個 `.md` 檔，宣告大小 1 byte 到 512 KiB，超過不下載；Discord **不接受路徑參數**。console 接受一個本機 `.md` 路徑（拒絕符號連結、非一般檔案、超過 512 KiB、非 UTF-8）。匯入的卡片一律為 `draft`、清空 `external`、不覆蓋既有 id；沒有 id 時需 `--slug`。回覆列出調整項目並提醒人審閱後把 `status` 改成 `ready`。
-- `card assign` 尚未實作（階段 2b）。本階段**不啟動 Agent、不改卡片狀態、不寫流程紀錄**。
+- `list`／`show`／`import`（階段 2a）**不啟動 Agent、不改卡片狀態、不寫流程紀錄**。
+- `card assign <id> [--coding]`（階段 2b 第二步，**已實作、待 live 驗收**，ISSUE-058）：只有 `status: ready` 的卡片可指派；卡片必須有非空的 `## 描述`。Lead 與 Workers 的選擇與 `team ask` 完全相同（目前 thread 所屬 workspace 的 Team、active Agent 當 Lead）。交給 Agent 的 prompt 只含標題、`## 描述`、`## 驗收條件`（每段最多 3000 字，標題 200 字），先過 `redactSecrets` 再截斷，包在 `<<<CARD_DATA …>>>`／`<<<END_CARD_DATA>>>` 分隔內並聲明為資料；卡片內文中的 `CARD_DATA` 字樣會被改寫以免假冒分隔線。這**不能防止** prompt injection，人要在設成 `ready` 前審閱內容。任務啟動後：卡片 `ready → in_progress`、`tasks` 加入 task id、寫入 `assigned`（事件 id `<taskId>-assigned`）與 `started`（`<taskId>-started`）兩筆紀錄；回覆後與 `team ask` 一樣送出 Team Task 回條與結果。同一程序內同一張卡同時兩次指派，第二次被拒絕。任務啟動失敗時卡片維持 `ready`；任務已啟動但卡片更新失敗時回覆警告並要求不要重複指派（不丟錯誤）。**任務完成後卡片不會自動變 `done`**——journal 同步屬第三步，目前仍需人處理。
 - 限制：卡片內容可能來自外部（例如 Mantis），顯示前遮蔽是黑名單式，不保證完整。
