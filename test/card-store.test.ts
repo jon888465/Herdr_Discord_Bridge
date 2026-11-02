@@ -1011,3 +1011,226 @@ test("a card cannot hold more than 20 projects and a failed write leaves it unto
   assert.equal(extra.ok === false && extra.code, "invalid");
   assert.equal(fs.readFileSync(file, "utf8"), before);
 });
+
+import { parseLogLine } from "../src/card-ledger.js";
+
+const stamp = (n: number): string =>
+  new Date(Date.UTC(2026, 10, 2, 8, 0, n)).toISOString().slice(0, 19) + "Z";
+const rotEntry = (n: number): LogEntry => ({
+  time: stamp(n),
+  event: "started",
+  text: `第 ${n} 筆 ${"x".repeat(60)}`,
+  eventId: `e${String(n).padStart(4, "0")}`,
+});
+const rotEntries = (from: number, to: number): LogEntry[] =>
+  Array.from({ length: to - from + 1 }, (_, i) => rotEntry(from + i));
+const ids = (from: number, to: number): string[] =>
+  rotEntries(from, to).map((entry) => entry.eventId);
+const idsOfText = (text: string): string[] =>
+  text
+    .split("\n")
+    .map(parseLogLine)
+    .filter((entry): entry is LogEntry => entry !== null)
+    .map((entry) => entry.eventId);
+
+function smallStore() {
+  const root = tempRoot();
+  const store = new CardStore(root, { maxFileBytes: 4096 });
+  assert.equal(store.create({ ...sample, status: "ready" }).ok, true);
+  const cardFile = path.join(root, `${sample.id}.md`);
+  const sideDir = path.join(root, "logs", sample.id);
+  return { root, store, cardFile, sideDir };
+}
+
+test("rotation keeps the newest 5 entries in the card and moves the rest to logs/<id>/0001.md", () => {
+  const { store, cardFile, sideDir } = smallStore();
+  const result = store.appendLog(sample.id, rotEntries(1, 40));
+  assert.equal(result.ok && result.added, 40);
+
+  const card = fs.readFileSync(cardFile, "utf8");
+  assert.deepEqual(idsOfText(card), ids(36, 40));
+  assert.ok(
+    card.includes(`\n> 較早紀錄已移到 logs/${sample.id}/0001.md（只增不改）\n`),
+  );
+  assert.ok(Buffer.byteLength(card) <= 4096);
+
+  const side = fs.readFileSync(path.join(sideDir, "0001.md"), "utf8");
+  assert.deepEqual(idsOfText(side), ids(1, 35));
+  assert.ok(side.startsWith(`# ${sample.id} 流程紀錄（旁檔 0001）\n\n`));
+  assert.deepEqual(fs.readdirSync(sideDir), ["0001.md"]);
+
+  const read = store.read(sample.id);
+  assert.equal(read.ok && read.card.updated, "2026-11-02");
+});
+
+test("side files and their directory are private and are not mistaken for cards", () => {
+  const { root, store } = smallStore();
+  store.appendLog(sample.id, rotEntries(1, 40));
+  if (process.platform !== "win32") {
+    assert.equal(modeOf(path.join(root, "logs")), 0o700);
+    assert.equal(modeOf(path.join(root, "logs", sample.id)), 0o700);
+    assert.equal(modeOf(path.join(root, "logs", sample.id, "0001.md")), 0o600);
+  }
+  const listed = store.list();
+  assert.deepEqual(listed.errors, []);
+  assert.deepEqual(
+    listed.cards.map((entry) => entry.file),
+    [`${sample.id}.md`],
+  );
+  assert.deepEqual([...store.existingIds()], [sample.id]);
+});
+
+test("readLog returns every entry in order across side files and the card, without duplicates", () => {
+  const { store } = smallStore();
+  store.appendLog(sample.id, rotEntries(1, 40));
+  const log = store.readLog(sample.id);
+  assert.deepEqual(
+    log.ok && log.entries.map((entry) => entry.eventId),
+    ids(1, 40),
+  );
+  assert.deepEqual(log.ok && log.entries[0], rotEntry(1));
+});
+
+test("a second rotation adds 0002, updates the single pointer and keeps every entry", () => {
+  const { store, cardFile, sideDir } = smallStore();
+  store.appendLog(sample.id, rotEntries(1, 40));
+  store.appendLog(sample.id, rotEntries(41, 80));
+  const card = fs.readFileSync(cardFile, "utf8");
+  assert.deepEqual(idsOfText(card), ids(76, 80));
+  assert.equal(card.split("較早紀錄已移到").length, 2);
+  assert.ok(
+    card.includes(
+      `> 較早紀錄已移到 logs/${sample.id}/0001.md 到 0002.md（只增不改）`,
+    ),
+  );
+  assert.deepEqual(fs.readdirSync(sideDir).sort(), ["0001.md", "0002.md"]);
+  const log = store.readLog(sample.id);
+  assert.deepEqual(
+    log.ok && log.entries.map((entry) => entry.eventId),
+    ids(1, 80),
+  );
+});
+
+test("an event that was already rotated out is still recognised, so replaying it adds nothing", () => {
+  const { store, cardFile, sideDir } = smallStore();
+  const first = store.appendLog(sample.id, rotEntries(1, 40));
+  const before = fs.readFileSync(cardFile, "utf8");
+  const replay = store.appendLog(sample.id, [rotEntry(3), rotEntry(35)]);
+  assert.equal(replay.ok && replay.added, 0);
+  assert.equal(replay.ok && first.ok && replay.hash === first.hash, true);
+  assert.equal(fs.readFileSync(cardFile, "utf8"), before);
+  assert.deepEqual(fs.readdirSync(sideDir), ["0001.md"]);
+});
+
+test("a crash between the side file and the card leaves duplicates that are removed on read and reused on retry", () => {
+  const { store, cardFile, sideDir } = smallStore();
+  const cardBefore = fs.readFileSync(cardFile, "utf8");
+  const original = store.update.bind(store);
+  store.update = () => ({
+    ok: false,
+    code: "conflict",
+    error: "simulated crash",
+  });
+  const failed = store.appendLog(sample.id, rotEntries(1, 40));
+  assert.equal(failed.ok === false && failed.code, "conflict");
+  assert.equal(fs.readFileSync(cardFile, "utf8"), cardBefore);
+  assert.deepEqual(fs.readdirSync(sideDir), ["0001.md"]);
+  const midway = store.readLog(sample.id);
+  assert.deepEqual(
+    midway.ok && midway.entries.map((entry) => entry.eventId),
+    ids(1, 35),
+  );
+
+  store.update = original;
+  const retried = store.appendLog(sample.id, rotEntries(1, 40));
+  assert.equal(retried.ok && retried.added, 40);
+  assert.deepEqual(fs.readdirSync(sideDir), ["0001.md"]);
+  assert.deepEqual(idsOfText(fs.readFileSync(cardFile, "utf8")), ids(36, 40));
+  const log = store.readLog(sample.id);
+  assert.deepEqual(
+    log.ok && log.entries.map((entry) => entry.eventId),
+    ids(1, 40),
+  );
+});
+
+test("when the card is too large to hold even the newest entries, the append is refused and nothing is written", () => {
+  const root = tempRoot();
+  const store = new CardStore(root, { maxFileBytes: 4096 });
+  store.create({
+    ...sample,
+    status: "ready",
+    body: "# 人寫的\n" + "字".repeat(1150) + "\n",
+  });
+  const cardFile = path.join(root, `${sample.id}.md`);
+  const before = fs.readFileSync(cardFile, "utf8");
+  const result = store.appendLog(sample.id, rotEntries(1, 10));
+  assert.equal(result.ok === false && result.code, "too_large");
+  assert.equal(fs.readFileSync(cardFile, "utf8"), before);
+  assert.equal(fs.existsSync(path.join(root, "logs")), false);
+});
+
+test("if the side file cannot be written the append is refused and the card is untouched", () => {
+  const { root, store, cardFile } = smallStore();
+  fs.writeFileSync(path.join(root, "logs"), "not a directory\n");
+  const before = fs.readFileSync(cardFile, "utf8");
+  const result = store.appendLog(sample.id, rotEntries(1, 40));
+  assert.equal(result.ok === false && result.code, "io");
+  assert.equal(fs.readFileSync(cardFile, "utf8"), before);
+});
+
+test("a symbolic link where the logs directory should be is refused and nothing is written through it", () => {
+  const { root, store, cardFile } = smallStore();
+  const outside = tempRoot();
+  fs.symlinkSync(outside, path.join(root, "logs"));
+  const before = fs.readFileSync(cardFile, "utf8");
+  const result = store.appendLog(sample.id, rotEntries(1, 40));
+  assert.equal(result.ok === false && result.code, "unsafe");
+  assert.equal(fs.readFileSync(cardFile, "utf8"), before);
+  assert.deepEqual(fs.readdirSync(outside), []);
+});
+
+test("a card without a log has an empty readLog and unknown or malformed ids are reported", () => {
+  const { store } = smallStore();
+  const empty = store.readLog(sample.id);
+  assert.deepEqual(empty.ok && empty.entries, []);
+  const missing = store.readLog("REQ-20261101-missing");
+  assert.equal(missing.ok === false && missing.code, "not_found");
+  const bad = store.readLog("../x");
+  assert.equal(bad.ok === false && bad.code, "invalid");
+});
+
+test("a card that stays below the threshold never creates a logs directory", () => {
+  const root = tempRoot();
+  const store = new CardStore(root);
+  store.create({ ...sample, status: "ready" });
+  store.appendLog(sample.id, rotEntries(1, 20));
+  assert.equal(fs.existsSync(path.join(root, "logs")), false);
+  const log = store.readLog(sample.id);
+  assert.deepEqual(
+    log.ok && log.entries.map((entry) => entry.eventId),
+    ids(1, 20),
+  );
+});
+
+test("a single append is limited to 200 entries so a side file can never outgrow the absolute file limit", () => {
+  const root = tempRoot();
+  const store = new CardStore(root);
+  store.create({ ...sample, status: "ready" });
+  const file = path.join(root, `${sample.id}.md`);
+  const before = fs.readFileSync(file, "utf8");
+  const tooMany = store.appendLog(sample.id, rotEntries(1, 201));
+  assert.equal(tooMany.ok === false && tooMany.code, "invalid");
+  assert.equal(fs.readFileSync(file, "utf8"), before);
+  const exactly = store.appendLog(sample.id, rotEntries(1, 200));
+  assert.equal(exactly.ok && exactly.added, 200);
+});
+
+test("side files are read with the absolute limit, so a rotation near a small store limit stays readable", () => {
+  const { store } = smallStore();
+  store.appendLog(sample.id, rotEntries(1, 40));
+  // 旁檔約 4 KB，已超過這個 store 的 4096 位元組上限；仍必須能讀回並去重。
+  const replay = store.appendLog(sample.id, [rotEntry(1)]);
+  assert.equal(replay.ok && replay.added, 0);
+  const log = store.readLog(sample.id);
+  assert.equal(log.ok && log.entries.length, 40);
+});

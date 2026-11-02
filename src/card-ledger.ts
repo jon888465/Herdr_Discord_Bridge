@@ -65,6 +65,7 @@ function formatLine(entry: LogEntry): string {
 export function appendLogEntries(
   body: string,
   entries: LogEntry[],
+  alsoSeen?: ReadonlySet<string>,
 ): AppendResult {
   for (const [index, entry] of entries.entries()) {
     const problem = validateLogEntry(entry);
@@ -74,7 +75,7 @@ export function appendLogEntries(
   const lines = body.split("\n");
   const heading = lines.findIndex((line) => HEADING_LINE.test(line));
   let end = lines.length;
-  const seen = new Set<string>();
+  const seen = new Set<string>(alsoSeen);
   if (heading >= 0) {
     for (let i = heading + 1; i < lines.length; i++) {
       if (ANY_H2.test(lines[i])) {
@@ -113,4 +114,99 @@ export function appendLogEntries(
   const insertion = lastContent === heading ? ["", ...fresh] : fresh;
   lines.splice(lastContent + 1, 0, ...insertion);
   return { ok: true, added: fresh.length, body: lines.join("\n") };
+}
+
+const ENTRY_LINE =
+  /^- (\S+) \| ([a-z][a-z0-9_]{0,31}) \| (.+) \| ev:([A-Za-z0-9_-]{1,64})\s*$/;
+
+/** 指向旁檔的說明行的開頭；輪替時整行被取代，不會疊加。 */
+export const POINTER_PREFIX = "> 較早紀錄已移到 ";
+
+/** 解析一行流程紀錄；不是格式完整的紀錄行（含人寫的清單項目）回傳 null。 */
+export function parseLogLine(line: string): LogEntry | null {
+  const match = ENTRY_LINE.exec(line);
+  if (!match) return null;
+  const entry: LogEntry = {
+    time: match[1],
+    event: match[2],
+    text: match[3],
+    eventId: match[4],
+  };
+  return validateLogEntry(entry) === null ? entry : null;
+}
+
+/** 指向 `logs/<id>/` 底下旁檔（單一或一段編號範圍）的說明行。 */
+export function logPointerLine(
+  id: string,
+  first: number,
+  last: number,
+): string {
+  const pad = (n: number): string => String(n).padStart(4, "0");
+  const files =
+    first === last
+      ? `logs/${id}/${pad(first)}.md`
+      : `logs/${id}/${pad(first)}.md 到 ${pad(last)}.md`;
+  return `${POINTER_PREFIX}${files}（只增不改）`;
+}
+
+/**
+ * 輪替：把「## 流程紀錄」區塊裡較舊的紀錄行移走，只保留最新的 keep 筆，並在區塊開頭
+ * 放一行指向旁檔的說明（取代舊的說明行）。區塊以外與人寫的行逐字保留。
+ * 沒有可移走的紀錄時回傳 null。
+ */
+export function rotateLog(
+  body: string,
+  keep: number,
+  pointerLine: string,
+): { body: string; moved: string[] } | null {
+  const lines = body.split("\n");
+  const heading = lines.findIndex((line) => HEADING_LINE.test(line));
+  if (heading < 0) return null;
+  let end = lines.length;
+  for (let i = heading + 1; i < lines.length; i++) {
+    if (ANY_H2.test(lines[i])) {
+      end = i;
+      break;
+    }
+  }
+  const entryIndexes: number[] = [];
+  for (let i = heading + 1; i < end; i++) {
+    if (parseLogLine(lines[i]) !== null) entryIndexes.push(i);
+  }
+  if (entryIndexes.length <= keep) return null;
+  const movedIndexes = new Set(
+    entryIndexes.slice(0, entryIndexes.length - keep),
+  );
+  const moved = [...movedIndexes].map((i) => lines[i]);
+
+  const content: string[] = [];
+  for (let i = heading + 1; i < end; i++) {
+    if (movedIndexes.has(i) || lines[i].startsWith(POINTER_PREFIX)) continue;
+    // 移走行或舊說明後可能留下連續空行，合併成一行。
+    if (lines[i].trim() === "" && content.at(-1)?.trim() === "") continue;
+    content.push(lines[i]);
+  }
+  while (content.length && content[0].trim() === "") content.shift();
+  while (content.length && content.at(-1)?.trim() === "") content.pop();
+
+  const rebuilt = [lines[heading], "", pointerLine, "", ...content, ""];
+  return {
+    moved,
+    body: [...lines.slice(0, heading), ...rebuilt, ...lines.slice(end)].join(
+      "\n",
+    ),
+  };
+}
+
+/** 「## 流程紀錄」區塊裡所有格式完整的紀錄，依出現順序。 */
+export function logEntriesOf(body: string): LogEntry[] {
+  const lines = body.split("\n");
+  const heading = lines.findIndex((line) => HEADING_LINE.test(line));
+  if (heading < 0) return [];
+  const entries: LogEntry[] = [];
+  for (let i = heading + 1; i < lines.length && !ANY_H2.test(lines[i]); i++) {
+    const entry = parseLogLine(lines[i]);
+    if (entry) entries.push(entry);
+  }
+  return entries;
 }
