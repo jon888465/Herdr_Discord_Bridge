@@ -87,7 +87,7 @@ external: { notion: null, github: null, mantis: null }
 ## 待確認
 
 - ~~卡片目錄放哪~~ 已決定：plugin 狀態目錄，不進 git（ADR-0002）。
-- 流程紀錄的大小已決定（先提高上限、超過再輪替到旁檔，ADR-0002 決定 10，數字待確認）；機敏內容過濾等見 ADR-0002 未決。
+- 流程紀錄的大小已決定（先提高上限、超過再輪替到旁檔，ADR-0002 決定 10，數字已確認）；機敏內容與單筆長度規則已決定（ADR-0002 決定 11：結構化優先、自由文字遇疑似機敏整筆省略）。
 - CI 檢查是否足以作為 L2 閘門（現為 typecheck、lint、test；對照 SPEC.md 第 8 節驗證與完成定義）。
 - 是否打開 `strict_required_status_checks_policy`（分支需與 `main` 同步才可合併）；自動 merge 前建議開。
 - 以行為測試確認 ruleset 擋得住（直接 push `main`、CI 紅燈 PR）。
