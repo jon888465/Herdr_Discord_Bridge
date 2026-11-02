@@ -527,3 +527,269 @@ test("a store limit above 1 MiB is a programming error", () => {
     RangeError,
   );
 });
+
+const modeOf = (file: string): number => fs.statSync(file).mode & 0o777;
+const posixOnly = { skip: process.platform === "win32" };
+
+test(
+  "card files are written 0600 and a directory the store creates is 0700",
+  posixOnly,
+  () => {
+    const root = path.join(tempRoot(), "nested", "cards");
+    const store = new CardStore(root);
+    const created = store.create(sample);
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    const file = path.join(root, `${sample.id}.md`);
+    assert.equal(modeOf(file), 0o600);
+    assert.equal(modeOf(root), 0o700);
+
+    const updated = store.update(sample.id, created.hash, (current) => ({
+      ...current,
+      status: "ready",
+    }));
+    assert.equal(updated.ok, true);
+    assert.equal(modeOf(file), 0o600);
+
+    const imported = store.importText(foreign, { today: "2026-11-01" });
+    assert.equal(imported.ok, true);
+    assert.equal(modeOf(path.join(root, "REQ-20261101-imported.md")), 0o600);
+  },
+);
+
+test(
+  "update tightens a file that had looser permissions to 0600",
+  posixOnly,
+  () => {
+    const root = tempRoot();
+    const store = new CardStore(root);
+    const created = store.create(sample);
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    const file = path.join(root, `${sample.id}.md`);
+    fs.chmodSync(file, 0o644);
+    assert.equal(modeOf(file), 0o644);
+    const updated = store.update(sample.id, created.hash, (current) => ({
+      ...current,
+      status: "ready",
+    }));
+    assert.equal(updated.ok, true);
+    assert.equal(modeOf(file), 0o600);
+  },
+);
+
+import type { LogEntry } from "../src/card-ledger.js";
+
+const ready: Card = { ...sample, status: "ready" };
+const logA: LogEntry = {
+  time: "2026-11-02T08:15:00Z",
+  event: "started",
+  text: "建立 worktree",
+  eventId: "3f2a9c",
+};
+const logB: LogEntry = {
+  time: "2026-11-03T09:00:00Z",
+  event: "pr_opened",
+  text: "PR 已開",
+  eventId: "a1b2c3",
+};
+
+function seededReady(): { root: string; store: CardStore } {
+  const root = tempRoot();
+  const store = new CardStore(root);
+  assert.equal(store.create(ready).ok, true);
+  return { root, store };
+}
+
+test("setStatus moves ready to in_progress to done and changes only status and updated", () => {
+  const { store } = seededReady();
+  const started = store.setStatus(sample.id, "in_progress", "2026-11-02");
+  assert.equal(started.ok, true);
+  const afterStart = store.read(sample.id);
+  assert.deepEqual(afterStart.ok && afterStart.card, {
+    ...ready,
+    status: "in_progress",
+    updated: "2026-11-02",
+  });
+  const done = store.setStatus(sample.id, "done", "2026-11-03");
+  assert.equal(done.ok, true);
+  const afterDone = store.read(sample.id);
+  assert.deepEqual(afterDone.ok && afterDone.card, {
+    ...ready,
+    status: "done",
+    updated: "2026-11-03",
+  });
+});
+
+test("setStatus is idempotent and never moves updated backwards", () => {
+  const { root, store } = seededReady();
+  const first = store.setStatus(sample.id, "in_progress", "2026-11-05");
+  const file = path.join(root, `${sample.id}.md`);
+  const before = fs.readFileSync(file, "utf8");
+  const again = store.setStatus(sample.id, "in_progress", "2026-11-05");
+  assert.equal(again.ok && first.ok && again.hash === first.hash, true);
+  assert.equal(fs.readFileSync(file, "utf8"), before);
+  const older = store.setStatus(sample.id, "in_progress", "2026-11-01");
+  assert.equal(older.ok, true);
+  const read = store.read(sample.id);
+  assert.equal(read.ok && read.card.updated, "2026-11-05");
+});
+
+test("setStatus only allows the bridge statuses and the ready, in_progress, done order", () => {
+  const { store } = seededReady();
+  for (const status of ["draft", "ready", "cancelled", "refined", "bogus"]) {
+    const result = store.setStatus(sample.id, status, "2026-11-02");
+    assert.equal(result.ok === false && result.code, "invalid", status);
+  }
+  assert.equal(
+    store.setStatus(sample.id, "done", "2026-11-02").ok === false,
+    true,
+    "ready cannot jump to done",
+  );
+  assert.equal(
+    store.setStatus(sample.id, "in_progress", "2026-11-02").ok,
+    true,
+  );
+  assert.equal(store.setStatus(sample.id, "done", "2026-11-02").ok, true);
+  assert.equal(
+    store.setStatus(sample.id, "in_progress", "2026-11-02").ok === false,
+    true,
+    "done cannot go back",
+  );
+
+  const draftRoot = tempRoot();
+  const draftStore = new CardStore(draftRoot);
+  draftStore.create(sample);
+  const fromDraft = draftStore.setStatus(
+    sample.id,
+    "in_progress",
+    "2026-11-02",
+  );
+  assert.equal(fromDraft.ok === false && fromDraft.code, "invalid");
+  const badDate = store.setStatus(sample.id, "done", "2026-13-45");
+  assert.equal(badDate.ok === false && badDate.code, "invalid");
+});
+
+test("setStatus reports not_found and rejects a malformed id", () => {
+  const { store } = seededReady();
+  const missing = store.setStatus("REQ-20261101-missing", "done", "2026-11-02");
+  assert.equal(missing.ok === false && missing.code, "not_found");
+  const bad = store.setStatus("../x", "done", "2026-11-02");
+  assert.equal(bad.ok === false && bad.code, "invalid");
+});
+
+test("appendLog adds entries to the log section and leaves the human text byte for byte", () => {
+  const { root, store } = seededReady();
+  const file = path.join(root, `${sample.id}.md`);
+  const before = fs.readFileSync(file, "utf8");
+  const result = store.appendLog(sample.id, [logA, logB]);
+  assert.equal(result.ok && result.added, 2);
+  const after = fs.readFileSync(file, "utf8");
+  assert.ok(
+    after.includes(
+      "- 2026-11-02T08:15:00Z | started | 建立 worktree | ev:3f2a9c\n",
+    ),
+  );
+  assert.ok(
+    after.includes(
+      "- 2026-11-03T09:00:00Z | pr_opened | PR 已開 | ev:a1b2c3\n",
+    ),
+  );
+  const body = before.slice(before.indexOf("# 新建立的卡片"));
+  assert.ok(
+    after.includes(body.trimEnd()),
+    "the original body is still there, unchanged",
+  );
+  const read = store.read(sample.id);
+  assert.equal(read.ok && read.card.status, "ready");
+  assert.equal(read.ok && read.card.title, ready.title);
+  assert.equal(read.ok && read.card.updated, "2026-11-03");
+  assert.equal(read.ok && read.hash, result.ok && result.hash);
+});
+
+test("appendLog is idempotent by event id and does not rewrite the file", () => {
+  const { root, store } = seededReady();
+  const first = store.appendLog(sample.id, [logA]);
+  const file = path.join(root, `${sample.id}.md`);
+  const before = fs.readFileSync(file, "utf8");
+  const again = store.appendLog(sample.id, [logA]);
+  assert.equal(again.ok && again.added, 0);
+  assert.equal(again.ok && first.ok && again.hash === first.hash, true);
+  assert.equal(fs.readFileSync(file, "utf8"), before);
+});
+
+test("appendLog needs no hash and keeps a human edit made after the card was last read", () => {
+  const { root, store } = seededReady();
+  const file = path.join(root, `${sample.id}.md`);
+  fs.writeFileSync(
+    file,
+    fs.readFileSync(file, "utf8").replace("新建立的卡片", "人剛改過的標題"),
+  );
+  const result = store.appendLog(sample.id, [logA]);
+  assert.equal(result.ok, true);
+  const text = fs.readFileSync(file, "utf8");
+  assert.ok(text.includes("人剛改過的標題"));
+  assert.ok(text.includes("ev:3f2a9c"));
+});
+
+test("appendLog retries a conflict and gives up with conflict after three attempts", () => {
+  const { root, store } = seededReady();
+  const original = store.update.bind(store);
+  let calls = 0;
+  store.update = (id, hash, change) =>
+    calls++ < 1
+      ? { ok: false, code: "conflict", error: "simulated" }
+      : original(id, hash, change);
+  assert.equal(store.appendLog(sample.id, [logA]).ok, true);
+  assert.equal(calls, 2);
+
+  const file = path.join(root, `${sample.id}.md`);
+  const before = fs.readFileSync(file, "utf8");
+  let always = 0;
+  store.update = () => {
+    always++;
+    return { ok: false, code: "conflict", error: "simulated" };
+  };
+  const gaveUp = store.appendLog(sample.id, [logB]);
+  assert.equal(gaveUp.ok === false && gaveUp.code, "conflict");
+  assert.equal(always, 3);
+  assert.equal(fs.readFileSync(file, "utf8"), before);
+});
+
+test("appendLog rejects bad entries, broken cards and unknown ids without writing", () => {
+  const { root, store } = seededReady();
+  const file = path.join(root, `${sample.id}.md`);
+  const before = fs.readFileSync(file, "utf8");
+  const bad = store.appendLog(sample.id, [{ ...logA, text: "a\nb" }]);
+  assert.equal(bad.ok === false && bad.code, "invalid");
+  assert.equal(fs.readFileSync(file, "utf8"), before);
+
+  fs.writeFileSync(
+    path.join(root, "REQ-20261101-broken.md"),
+    "no frontmatter\n",
+  );
+  const broken = store.appendLog("REQ-20261101-broken", [logA]);
+  assert.equal(broken.ok === false && broken.code, "invalid");
+  const missing = store.appendLog("REQ-20261101-missing", [logA]);
+  assert.equal(missing.ok === false && missing.code, "not_found");
+  const traversal = store.appendLog("../x", [logA]);
+  assert.equal(traversal.ok === false && traversal.code, "invalid");
+});
+
+test("known limitation: a bridge write keeps the body and every field value but normalises frontmatter formatting", () => {
+  const { root, store } = seededReady();
+  const file = path.join(root, `${sample.id}.md`);
+  const text = fs.readFileSync(file, "utf8");
+  fs.writeFileSync(
+    file,
+    text.replace("status: ready", "status: ready   # 人加的註解"),
+  );
+  assert.ok(fs.readFileSync(file, "utf8").includes("# 人加的註解"));
+  assert.equal(store.appendLog(sample.id, [logA]).ok, true);
+  const after = fs.readFileSync(file, "utf8");
+  assert.equal(after.includes("# 人加的註解"), false);
+  const read = store.read(sample.id);
+  assert.equal(read.ok && read.card.status, "ready");
+  assert.equal(read.ok && read.card.title, ready.title);
+  assert.ok(read.ok && read.card.body.startsWith("# 新建立的卡片\n"));
+});

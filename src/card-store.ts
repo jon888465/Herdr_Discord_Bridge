@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   formatByteLimit,
+  isCardDate,
   isCardId,
   parseCard,
   resolveMaxFileBytes,
@@ -10,6 +11,7 @@ import {
   type ReadOptions,
 } from "./card.js";
 import { importCard } from "./card-import.js";
+import { appendLogEntries, type LogEntry } from "./card-ledger.js";
 import { serializeCard } from "./card-serialize.js";
 
 const CARD_FILE = /^(REQ|TKT)-.*\.md$/;
@@ -42,6 +44,16 @@ export type CreateResult =
 export type ImportTextResult =
   | { ok: true; file: string; hash: string; card: Card; notes: string[] }
   | StoreFailure;
+
+export type AppendLogResult =
+  { ok: true; card: Card; hash: string; added: number } | StoreFailure;
+
+/** bridge 只能把狀態設成這兩個，且只能依這個順序（ADR-0001 決定 5、ADR-0002 決定 2）。 */
+const BRIDGE_STATUS_FROM: Record<string, readonly string[]> = {
+  in_progress: ["ready", "in_progress"],
+  done: ["in_progress", "done"],
+};
+const MAX_ATTEMPTS = 3;
 
 export type UpdateResult =
   { ok: true; card: Card; hash: string } | StoreFailure;
@@ -165,12 +177,12 @@ export class CardStore {
     if (!serialized.ok) return failure(serialized.code, serialized.error);
     const file = `${card.id}.md`;
     const target = path.join(this.rootDir, file);
-    fs.mkdirSync(this.rootDir, { recursive: true });
+    fs.mkdirSync(this.rootDir, { recursive: true, mode: 0o700 });
     const temp = path.join(
       this.rootDir,
       `.${file}.tmp-${process.pid}-${randomBytes(6).toString("hex")}`,
     );
-    fs.writeFileSync(temp, serialized.text, { flag: "wx", mode: 0o644 });
+    fs.writeFileSync(temp, serialized.text, { flag: "wx", mode: 0o600 });
     try {
       fs.linkSync(temp, target);
     } catch (error) {
@@ -216,7 +228,7 @@ export class CardStore {
       this.rootDir,
       `.${file}.tmp-${process.pid}-${randomBytes(6).toString("hex")}`,
     );
-    fs.writeFileSync(temp, serialized.text, { flag: "wx", mode: 0o644 });
+    fs.writeFileSync(temp, serialized.text, { flag: "wx", mode: 0o600 });
     try {
       const again = readRegularFile(target, this.maxFileBytes);
       if (!again.ok || hashText(again.text) !== expectedHash)
@@ -249,5 +261,66 @@ export class CardStore {
       card: imported.card,
       notes: imported.notes,
     };
+  }
+
+  /**
+   * 重讀目前內容、套用 prepare 的結果，雜湊衝突（人剛好在編輯）就重讀重試，最多 MAX_ATTEMPTS 次。
+   * 呼叫端不需要先持有雜湊；prepare 回傳 StoreFailure 表示拒絕，不寫檔。
+   */
+  private mutate(
+    id: string,
+    prepare: (card: Card) => Card | StoreFailure,
+  ): UpdateResult {
+    let last: UpdateResult = failure("conflict", `card ${id} kept changing`);
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      const current = this.read(id);
+      if (!current.ok) return current;
+      const proposal = prepare(current.card);
+      if ("ok" in proposal) return proposal;
+      last = this.update(id, current.hash, () => proposal);
+      if (last.ok || last.code !== "conflict") return last;
+    }
+    return failure("conflict", `card ${id} kept changing`);
+  }
+
+  /** bridge 專用：只改 status 與 updated；只允許 ready → in_progress → done。 */
+  setStatus(id: string, status: string, today: string): UpdateResult {
+    if (!Object.hasOwn(BRIDGE_STATUS_FROM, status))
+      return failure("invalid", "the bridge may only set in_progress or done");
+    if (!isCardDate(today))
+      return failure("invalid", "today must be a valid YYYY-MM-DD date");
+    return this.mutate(id, (card) => {
+      if (!BRIDGE_STATUS_FROM[status].includes(card.status))
+        return failure(
+          "invalid",
+          `cannot move from ${card.status} to ${status}`,
+        );
+      return {
+        ...card,
+        status,
+        updated: today > card.updated ? today : card.updated,
+      };
+    });
+  }
+
+  /**
+   * bridge 專用：把紀錄追加到內文的「## 流程紀錄」。事件 id 去重（冪等）；
+   * 沒有新紀錄時不重寫檔案；只在有新增時把 updated 推進到最後一筆的日期。
+   */
+  appendLog(id: string, entries: LogEntry[]): AppendLogResult {
+    let added = 0;
+    const result = this.mutate(id, (card) => {
+      const appended = appendLogEntries(card.body, entries);
+      if (!appended.ok) return failure("invalid", appended.error);
+      added = appended.added;
+      if (appended.added === 0) return card;
+      const lastDate = entries[entries.length - 1].time.slice(0, 10);
+      return {
+        ...card,
+        body: appended.body,
+        updated: lastDate > card.updated ? lastDate : card.updated,
+      };
+    });
+    return result.ok ? { ...result, added } : result;
   }
 }
