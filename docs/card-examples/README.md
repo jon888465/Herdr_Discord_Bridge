@@ -33,7 +33,7 @@
 | Additional Information | `## 補充資訊` |
 | 備註（bugnotes） | `## Mantis 備註（摘要）`，只摘要、不貼完整對話 |
 | 狀態、嚴重度、優先順序、重現率、版本、平台、分類 | 內文的 `## Mantis 欄位` 表格 |
-| Project | `project` |
+| Project | `project`（舊欄位，Agent 轉換時用這個）。`projects` 與內文的 `## 異動專案` 由 bridge 寫入，轉換時**不要**自己寫 |
 | 附件 | 在內文列檔名；**不要**把附件內容貼進卡片 |
 
 類型：Mantis 單用 `type: ticket`，id 前綴 `TKT-`；純需求或討論用 `type: requirement`，前綴 `REQ-`。
