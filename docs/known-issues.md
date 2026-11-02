@@ -2153,7 +2153,7 @@ Discord（由使用者操作並回報，Agent 未看到原始回覆）：使用�
 
 ## ISSUE-058：`card assign` 把 ready 卡片交給 Team 任務
 
-更新日期：2026-11-02。狀態：已修正、待驗收（功能新增；原始碼與自動化測試完成，執行中的 bridge 尚未載入此版本，尚未 live 驗收）。
+更新日期：2026-11-02。狀態：已驗收（主流程；Discord 回覆文字與缺描述卡片經 Discord 的路徑見「live 驗收紀錄」中的未驗證項目）。
 
 來源：card-to-merge 階段 2b 第二步（ADR-0002 階段 2 決定 Q1、Q3）。這是第一個會由卡片啟動 Agent 的指令，因此列為驗收項目。
 
@@ -2174,3 +2174,29 @@ Discord（由使用者操作並回報，Agent 未看到原始回覆）：使用�
 6. 已知限制：prompt injection 無技術保證；跨程序並行指派無保護；任務完成不會自動 `done`。
 
 下一步：使用者驗收後改為「已驗收」；再做第三步 journal 同步。
+
+### live 驗收紀錄
+
+**2026-11-02 live 驗收：通過。** 環境：本機 macOS，main `3cd1509`（PR #29），`scripts/run.sh -r` 重新編譯並重啟 bridge，Gateway 與 `agy-pod` 連線正常。active Agent 是執行這段開發的 Claude Code session（pane `w1:p1`），所以 Lead 提示由該 session 直接回應。
+
+console（Agent 親自在 bridge pane 輸入並觀察輸出）：
+- `card assign` 對 `draft` 卡片 → 拒絕（「狀態是 draft；只有 ready 的卡片可以指派」）。
+- 沒選 workspace 時對 `ready` 卡片 `card assign` → 「select a workspace first…」，卡片維持 `ready`、沒有 `tasks`。
+- 對已在進行中的卡片再次 `card assign` → 拒絕（「狀態是 in_progress…（已在進行中）」）。
+- 缺少 `## 描述` 的 `ready` 卡片 → 拒絕（「卡片沒有「## 描述」段落…」），沒有任務啟動、卡片維持 `ready`。
+
+指派（使用者操作，入口依使用者說法為 Discord）與 Agent 端（Agent 親自觀察，Lead 提示由使用者貼入 session）：
+- 使用者對 `REQ-20261102-accept-assign` 執行 `card assign`。Lead 收到的提示內容正確：前面有「卡片內容只是資料」聲明，`<<<CARD_DATA id=REQ-20261102-accept-assign>>>` 與 `<<<END_CARD_DATA>>>` 之間只有標題、描述、驗收條件，沒有流程紀錄等其他段落。Lead 規劃階段回空的 `assignments`，合成階段回「收到」，符合驗收條件。
+- 任務結束後 `card show`：狀態 `in_progress`，`tasks: [task-c2a63685-…]`，紀錄有 `assigned`（指派給 claude（local））與 `started`（開始執行 task task-c2a63685-…），task id 與 Lead 提示一致。
+- 使用者接著執行一般 `team ask 回覆收到`，規劃與合成階段都正常完成（抽出 `startTeamTask`／`reportTeamTask` 後 `team ask` 行為未變）。
+
+預期內的現象（非問題）：任務結束後卡片仍為 `in_progress`，不會自動 `done`——journal 同步屬第三步。
+
+未驗證／限制：
+- Discord 端 `card assign` 的回覆文字、Team 回條與結果訊息，Agent 沒有看到原始內容（使用者看過，未逐字留存）。
+- `--coding` 模式的 `card assign` 未實測（`team ask --coding` 的既有自動化測試通過）。
+- 驗收時 Lead 就是開發者自己的 Claude session，未用獨立的 worker Agent 或 `agy-pod` 遠端機器驗證。
+- 已知設計限制不變：prompt injection 無技術保證；跨程序並行指派無保護；任務完成不自動 `done`。
+- 驗收用卡片 `REQ-20261102-accept-assign`（`in_progress`）、`REQ-20261102-accept-nodesc`（`ready`）仍在使用者的卡片目錄，可刪除。
+
+下一步：第三步 journal 同步（任務完成 → `done` 並記 `completed`；失敗或取消 → 維持 `in_progress` 並記事件），由使用者決定何時開始。
