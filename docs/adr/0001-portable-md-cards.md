@@ -1,6 +1,6 @@
 # ADR-0001：可攜 Markdown 卡片格式
 
-日期：2026-10-30。狀態：**已採納（Accepted，2026-10-30 使用者同意五項決定）**。實作進度見文末「實作狀態」。來源卡片：[REQ-20261030-card-to-merge](../cards/REQ-20261030-card-to-merge.md)。
+日期：2026-10-30。狀態：**已採納（Accepted，2026-10-30 使用者同意五項決定）**。實作進度見文末「實作狀態」。**部分被 [ADR-0002](0002-operational-cards-in-plugin-state.md) 取代（2026-11-02）**：卡片位置與「版本歷史交給 git」（決定 1）、「執行態不進卡片」（決定 2）、`project` 欄位（決定 4）、bridge 寫入範圍（決定 5）；格式、受限 frontmatter、匯入匯出、序列化與驗證指令不變。來源卡片：[REQ-20261030-card-to-merge](../cards/REQ-20261030-card-to-merge.md)。
 
 > 本文定義格式與規則。**目前存在的是：純函式 `parseCard`、`importCard`、`serializeCard`，檔案層 `CardStore`（`src/card-store.ts`），以及指令 `herdr-card-check`。** `CardStore` 目前沒有任何呼叫端，bridge 不讀取也不寫入卡片；Mantis 匯出、bridge 專用的狀態寫入、刪除語意與任何 Discord 指令都尚未實作，不得在 README／SPEC 寫成可用。
 
@@ -10,12 +10,12 @@
 
 ## 決策
 
-### 1. 一張卡 = 一個 `.md` 檔，檔案是需求的真相來源
+### 1. 一張卡 = 一個 `.md` 檔，檔案是需求的真相來源（版本歷史部分已被 ADR-0002 取代）
 
 - 路徑：`<cards 目錄>/<id>.md`，**檔名必須等於 id**。預設 cards 目錄為專案內 `docs/cards/`，可設定；是否納入 git 由使用者以 `.gitignore` 決定。
 - 版本歷史交給 git，不另建版本表。`version` 只在需求語意大改時由人遞增。
 
-### 2. 執行態不進卡片
+### 2. 執行態不進卡片（已被 ADR-0002 取代）
 
 誰在跑、哪台機器、哪個 session、重試次數都留在現有 journal。卡片只放：需求、驗收條件、關聯、結果摘要。
 
