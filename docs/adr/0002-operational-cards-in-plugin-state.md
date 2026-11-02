@@ -255,3 +255,15 @@ issue、README、CHANGELOG 等由 Agent 在該卡片的 worktree 裡依專案自
 **第二步實作摘要（2026-11-02）：** `src/card-handoff.ts` 的 `buildAssignmentPrompt`（標題 200 字、`## 描述`／`## 驗收條件` 各 3000 字、先遮蔽再截斷、分隔線防假冒）；`src/main.ts` 把 `team ask` 的啟動邏輯抽成 `startTeamTask`／`reportTeamTask`，`team ask` 與 `card assign` 共用；`runCardCommand` 的 `assign` 子指令只在 `ready` 時啟動任務，之後才更新卡片（狀態、`tasks`、`assigned`／`started` 紀錄，事件 id `<taskId>-assigned`／`-started`）。決策：先啟動任務再寫卡片——若順序相反，啟動失敗後無法把狀態退回 `ready`（`setStatus` 只能往前）；代價是任務已啟動但卡片更新失敗時只能警告。同程序內以記憶體集合擋同一張卡的並行指派；**跨程序（例如同時從兩個 bridge）沒有保護**。
 
 **第三步實作摘要（2026-11-02）：** `src/card-sync.ts`——`syncCards` 掃描 `in_progress` 且有 `tasks` 的卡片，依 `TaskSource`（由 `taskSourceFrom(TeamTaskStore)` 提供，含「第一次進入終止狀態的 journal sequence」）寫入 `completed`／`failed`／`cancelled`，完成才 `done`；`src/main.ts` 的 `startCardSync` 啟動時與每 60 秒執行一次，關機時停止。決策（Agent 的選擇，使用者未逐項確認）：(1) 輪詢而非訂閱事件——任務結束的路徑很多（取消、重啟核對、失敗），輪詢一個入口就涵蓋，也自然補上 bridge 重啟期間完成的任務，代價是最多約 60 秒延遲；(2) 取消的 `by` 固定為 `user`；(3) 先記事件再改狀態，當機後可補；(4) 多個任務時只有最後一個完成才 `done`；(5) 失敗不通知 Discord（Team 任務本身已回報），只記在卡片與 console。
+
+### 2c 實作狀態（2026-11-02）
+
+**原始碼與自動化測試完成，待 live 驗收（ISSUE-060）。** 對應 Q6：執行中的卡片被刪除 → 停止寫入、通知原 thread 並列出選項，不自動取消、不自動重建。
+
+- `src/card-assignments.ts`：`CardAssignmentStore`（`<stateDirectory>/card-assignments.json`，0600）記錄 task → 卡片 id／類型／指派時間／已通知時間。**為什麼需要這份索引：** 卡片一刪，卡片本身就看不到 task id；Team 任務 journal 又不知道卡片。決策（Agent 的選擇，使用者未逐項確認）：用獨立索引檔，不改 Team 任務 journal 的 schema（風險較大）；索引損毀時不當空的處理，也不讓 bridge 啟動失敗：索引在用到時才開啟，只有用到索引的動作失敗，任務結果同步照常。
+- `src/card-sync.ts`：`syncCards` 回傳 `missing`（進行中的任務、卡片檔確實不存在、未通知過）；`missingCardMessage` 組出通知文字。
+- `src/card-handoff.ts`：`parseAssignmentPrompt` 從當初的 prompt 取回標題／描述／驗收條件。
+- `src/card-command.ts`：`card assign` 成功後記索引（失敗只警告）；新增 `card recreate <id>`。
+- `src/main.ts`：`startCardSync` 在輪詢中通知（送成功才標記已通知，失敗下輪重試）、`card` 指令接線。`src/discord.ts`：`postToOrigin`。
+- 取捨：Discord 通知送不出去（thread 被刪、權限）時只在 console 印一次並每分鐘重試；沒有上限。`card recreate` 只還原交給 Agent 的三個欄位，這是 Q3 內容交接範圍的直接後果。
+- 測試（2026-11-02，本機 macOS、Node v26.12.0，非 CI）：全套 679 項，678 通過、0 失敗、1 略過（原 658 項）。沒有自動化測試涵蓋 `startCardSync` 的通知接線與 `postToOrigin`。

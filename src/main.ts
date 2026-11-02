@@ -21,7 +21,8 @@ import {
 } from "./attachments.js";
 import { agentOrigin, recordAgentOrigin } from "./agent-origin.js";
 import { readLocalCardFile, runCardCommand } from "./card-command.js";
-import { syncCards, taskSourceFrom } from "./card-sync.js";
+import { sharedCardAssignments } from "./card-assignments.js";
+import { missingCardMessage, syncCards, taskSourceFrom } from "./card-sync.js";
 import { basename, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { statSync } from "node:fs";
@@ -428,7 +429,7 @@ async function startBridge(
   );
   watcher.start();
   const stopCleanup = startAttachmentCleanup(herdr);
-  const stopCardSync = startCardSync(tasks);
+  const stopCardSync = startCardSync(tasks, discord);
   const stopHooks = await startHookServer().catch((error) => {
     console.error(`Hook socket unavailable: ${safeError(error)}`);
     return () => undefined;
@@ -593,6 +594,21 @@ export async function handleCommand(
         attachments: [...context.message.attachments.values()],
         download: downloadDiscordText,
         readLocalFile: readLocalCardFile,
+        assignments: lazyCardAssignments(),
+        taskInfo: (taskId) => {
+          try {
+            const task = runtime.tasks?.store.get(taskId);
+            return task
+              ? {
+                  originalPrompt: task.originalPrompt,
+                  lead: ledgerLead(task.lead),
+                  state: task.state,
+                }
+              : undefined;
+          } catch {
+            return undefined;
+          }
+        },
         startTask: async (prompt, options) => {
           started = await startTeamTask(
             prompt,
@@ -1914,20 +1930,80 @@ export async function promptMappedAgent(
 const CARD_SYNC_INTERVAL_MS = 60 * 1000;
 
 /**
+ * 索引檔在「用到的時候」才開啟：檔案損毀時只有用到索引的動作失敗（並說明原因），
+ * 不會讓 bridge 啟動失敗，也不會讓 `card list` 之類不相關的指令壞掉。
+ */
+function lazyCardAssignments() {
+  const open = () =>
+    sharedCardAssignments(join(stateDirectory(), "card-assignments.json"));
+  return {
+    list: () => open().list(),
+    forCard: (cardId: string) => open().forCard(cardId),
+    record: (
+      input: { taskId: string; cardId: string; type: string },
+      at: string,
+    ) => open().record(input, at),
+    markNotified: (taskId: string, at: string) =>
+      open().markNotified(taskId, at),
+  };
+}
+
+/**
  * 定期把已結束的 Team 任務同步回營運卡片（完成 → done；失敗／取消只記事件）。
  * 啟動時先跑一次，之後每分鐘一次；同樣的問題只在內容改變時才印出，避免洗版。
  */
-function startCardSync(tasks: TeamTaskEngine): () => void {
+function startCardSync(
+  tasks: TeamTaskEngine,
+  discord: DiscordAdapter,
+): () => void {
   const rootDir = join(stateDirectory(), "cards");
   const source = taskSourceFrom(tasks.store);
+  const assignments = lazyCardAssignments();
+  const notifying = new Set<string>();
+  const failedNotices = new Set<string>();
+  // 卡片被刪除而任務還在跑：通知原 thread 並列出選項（Q6）。送成功才標記已通知，
+  // 送不出去下一輪再試，同一個任務的失敗只印一次。
+  const notify = (missing: {
+    taskId: string;
+    cardId: string;
+    state: string;
+  }) => {
+    if (notifying.has(missing.taskId)) return;
+    notifying.add(missing.taskId);
+    void (async () => {
+      try {
+        const origin = tasks.store.get(missing.taskId).origin;
+        const text = missingCardMessage(missing);
+        if (!origin || origin.guildId === "local-console")
+          console.log(`Card deleted while its task runs:\n${text}`);
+        else await discord.postToOrigin(origin, text);
+        assignments.markNotified(
+          missing.taskId,
+          new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+        );
+        failedNotices.delete(missing.taskId);
+      } catch (error) {
+        if (!failedNotices.has(missing.taskId)) {
+          failedNotices.add(missing.taskId);
+          console.error(
+            `Card deleted notice failed (${missing.taskId}): ${safeError(error)}`,
+          );
+        }
+      } finally {
+        notifying.delete(missing.taskId);
+      }
+    })();
+  };
   let lastProblems = "";
   const sweep = (): void => {
     try {
       const result = syncCards({
         rootDir,
         tasks: source,
+        assignments,
         now: () => new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
       });
+      for (const missing of result.missing) notify(missing);
       if (result.updated.length)
         console.log(`Card sync updated: ${result.updated.join(", ")}`);
       const problems = result.problems.join("\n");
@@ -3059,7 +3135,7 @@ function helpText(prefix: string): string {
     `\`${prefix} team ask [--coding] <prompt>\` — 建立持久化任務，由 Lead 動態分工；--coding 才啟用本機 Git 驗收`,
     `\`${prefix} team questions <task-id>\` / \`${prefix} team reply <task-id> <question-id> <answer>\` — 指定問題回答`,
     `\`${prefix} team status [task-id]\` / \`${prefix} team cancel <task-id>\` — 查看／取消任務`,
-    `\`${prefix} card list [status]\` / \`${prefix} card show <id>\` — 查看營運卡片；\`card import\`（附上 .md 檔）匯入為 draft；\`card assign <id> [--coding]\` 把 ready 的卡片交給目前 workspace 的 Team（同 \`team ask\`）`,
+    `\`${prefix} card list [status]\` / \`${prefix} card show <id>\` — 查看營運卡片；\`card import\`（附上 .md 檔）匯入為 draft；\`card assign <id> [--coding]\` 把 ready 的卡片交給目前 workspace 的 Team（同 \`team ask\`）；任務還在跑卻刪了卡片時用 \`card recreate <id>\` 重建`,
     `\`${prefix} quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds]\` — 明確額度回報；quota status 查詢`,
     `\`${prefix} failover arm <source> <candidate1,candidate2> <goal>\` → \`failover run <id> confirm-source-stopped\` — 確認停止後自動選擇候選並驗證切換；status/cancel 可查詢／取消`,
     `\`${prefix} handoff checkpoint <source> <goal>\` → \`handoff verify <id> <destination> confirm-source-stopped\` → \`handoff accept <id>\` → \`handoff continue <id>\` — 持久化交接；status/packet/cancel 可查詢／釋放`,
@@ -3117,6 +3193,7 @@ function consoleHelpText(): string {
     "team cancel <task-id> — 停止任務派送並取消仍 active 的工作",
     "card list [status] | card show <id> | card import <本機 .md 路徑> [--slug <名稱>] — 營運卡片（匯入為 draft）",
     "card assign <id> [--coding] — 把 ready 的卡片交給目前 workspace 的 Team（同 team ask）",
+    "card recreate <id> — 卡片被刪除但任務還在跑時，從任務紀錄重建卡片",
     "quota status [pane] / quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds] — 明確額度回報",
     "failover arm <source> <candidate1,candidate2> <goal-and-constraints> — 保存候選優先序與任務",
     "failover status [id] / failover run <id> confirm-source-stopped / failover cancel <id> — 檢視／驗證切換／取消",

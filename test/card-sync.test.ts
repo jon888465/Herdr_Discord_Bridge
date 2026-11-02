@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { LEDGER_MAX_FILE_BYTES, type Card } from "../src/card.js";
 import { CardStore } from "../src/card-store.js";
+import type { CardAssignment } from "../src/card-assignments.js";
 import {
   syncCards,
   taskSourceFrom,
@@ -39,10 +40,11 @@ function setup(tasks: Record<string, FakeTask> = {}) {
       };
     },
   };
-  const run = () =>
+  const run = (assignments: CardAssignment[] = []) =>
     syncCards({
       rootDir,
       tasks: source,
+      assignments: { list: () => assignments },
       now: () => "2026-11-02T09:00:00Z",
     });
   return { rootDir, store, tasks, run };
@@ -232,7 +234,7 @@ test("a broken card file does not stop the others from syncing", () => {
 
 test("a missing or unsafe cards directory is reported without throwing or creating it", () => {
   const { rootDir, run } = setup();
-  assert.deepEqual(run(), { updated: [], problems: [] });
+  assert.deepEqual(run(), { updated: [], problems: [], missing: [] });
   assert.equal(fs.existsSync(rootDir), false);
 
   if (process.platform === "win32") return;
@@ -305,4 +307,130 @@ test("the real journal and the sync work together: a failed task is logged once 
     logOf(store).map((e) => [e[1], e[3]]),
     [["failed", "task-a-2"]],
   );
+});
+
+const assigned = (patch: Partial<CardAssignment> = {}): CardAssignment => ({
+  taskId: "task-a",
+  cardId: ID,
+  type: "requirement",
+  assignedAt: "2026-11-02T08:00:00Z",
+  ...patch,
+});
+
+test("a running task whose card was deleted is reported as missing, and nothing is written", () => {
+  for (const state of [
+    "planning",
+    "running",
+    "blocked",
+    "synthesizing",
+    "cancelling",
+  ]) {
+    const { rootDir, run } = setup({ "task-a": { state } });
+    fs.mkdirSync(rootDir, { mode: 0o700 });
+    const result = run([assigned()]);
+    assert.deepEqual(
+      result.missing,
+      [{ taskId: "task-a", cardId: ID, state }],
+      state,
+    );
+    assert.deepEqual(fs.readdirSync(rootDir), [], state);
+  }
+});
+
+test("a deleted card is not reported when the task is over, unknown, already notified or the card exists", () => {
+  const cases: Array<
+    [string, Record<string, FakeTask>, CardAssignment, boolean]
+  > = [
+    [
+      "completed task",
+      { "task-a": { state: "completed", terminalSequence: 1 } },
+      assigned(),
+      false,
+    ],
+    [
+      "failed task",
+      { "task-a": { state: "failed", terminalSequence: 1 } },
+      assigned(),
+      false,
+    ],
+    [
+      "cancelled task",
+      { "task-a": { state: "cancelled", terminalSequence: 1 } },
+      assigned(),
+      false,
+    ],
+    ["unknown task", {}, assigned(), false],
+    [
+      "already notified",
+      { "task-a": { state: "running" } },
+      assigned({ notifiedAt: "2026-11-02T08:30:00Z" }),
+      false,
+    ],
+    ["card present", { "task-a": { state: "running" } }, assigned(), true],
+  ];
+  for (const [name, tasks, assignment, createCard] of cases) {
+    const { rootDir, store, run } = setup(tasks);
+    fs.mkdirSync(rootDir, { mode: 0o700 });
+    if (createCard) store.create(card(ID));
+    assert.deepEqual(run([assignment]).missing, [], name);
+  }
+});
+
+test("a card file that exists but cannot be read is not treated as deleted", () => {
+  const { rootDir, run } = setup({ "task-a": { state: "running" } });
+  fs.mkdirSync(rootDir, { mode: 0o700 });
+  fs.writeFileSync(path.join(rootDir, `${ID}.md`), "not a card");
+  assert.deepEqual(run([assigned()]).missing, []);
+});
+
+test("without a cards directory every running assignment is missing, and several are listed in order", () => {
+  const { run } = setup({
+    "task-a": { state: "running" },
+    "task-b": { state: "planning" },
+  });
+  const result = run([
+    assigned(),
+    assigned({ taskId: "task-b", cardId: "TKT-20261102-two", type: "ticket" }),
+  ]);
+  assert.deepEqual(
+    result.missing.map((m) => m.taskId),
+    ["task-a", "task-b"],
+  );
+});
+
+import { missingCardMessage } from "../src/card-sync.js";
+
+test("the missing-card message names the card and task, states what the bridge will not do, and lists the three options", () => {
+  const text = missingCardMessage({
+    taskId: "task-a",
+    cardId: ID,
+    state: "running",
+  });
+  assert.match(text, /REQ-20261102-sync/);
+  assert.match(text, /task-a/);
+  assert.match(text, /running/);
+  assert.match(text, /不會自動取消/);
+  assert.match(text, /`card recreate REQ-20261102-sync`/);
+  assert.match(text, /`team cancel task-a`/);
+  assert.match(text, /不處理/);
+});
+
+test("a broken assignment index disables deleted-card detection but not the task result sync", () => {
+  const { rootDir, store } = setup();
+  store.create(card(ID));
+  const result = syncCards({
+    rootDir,
+    tasks: {
+      get: () => ({ state: "completed", terminalSequence: 7, ...finished }),
+    },
+    assignments: {
+      list: () => {
+        throw new Error("card-assignments file is not valid JSON");
+      },
+    },
+    now: () => "2026-11-02T09:00:00Z",
+  });
+  assert.deepEqual(result.updated, [ID]);
+  assert.deepEqual(result.missing, []);
+  assert.match(result.problems.join("\n"), /刪除偵測停用.*not valid JSON/);
 });

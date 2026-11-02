@@ -286,6 +286,23 @@ export class DiscordAdapter {
       });
   }
 
+  /** 把背景通知送到任務當初的來源 thread／channel；送不出去時丟錯誤，由呼叫端決定是否重試。 */
+  async postToOrigin(
+    origin: { channelId: string; threadId?: string },
+    text: string,
+  ): Promise<void> {
+    const channel = await this.client.channels.fetch(
+      origin.threadId || origin.channelId,
+    );
+    if (
+      !channel ||
+      (!(channel instanceof TextChannel) && !(channel instanceof ThreadChannel))
+    )
+      throw new Error("the originating Discord destination is not available");
+    for (const chunk of splitDiscordText(text))
+      await channel.send({ content: chunk, allowedMentions: { parse: [] } });
+  }
+
   async postAgentTransition(
     agent: AgentRecord,
     context: string,

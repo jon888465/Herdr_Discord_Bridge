@@ -5,9 +5,26 @@ import os from "node:os";
 import path from "node:path";
 import { LEDGER_MAX_FILE_BYTES, type Card } from "../src/card.js";
 import { CardStore } from "../src/card-store.js";
+import type { CardAssignment } from "../src/card-assignments.js";
+import { buildAssignmentPrompt } from "../src/card-handoff.js";
 import { runCardCommand, type CardCommandDeps } from "../src/card-command.js";
 
 const cat = (...parts: string[]): string => parts.join("");
+
+function fakeAssignments(initial: CardAssignment[] = []) {
+  const items = [...initial];
+  return {
+    items,
+    record(
+      input: { taskId: string; cardId: string; type: string },
+      at: string,
+    ) {
+      if (items.some((item) => item.taskId === input.taskId)) return;
+      items.push({ ...input, assignedAt: at });
+    },
+    forCard: (cardId: string) => items.filter((item) => item.cardId === cardId),
+  };
+}
 
 function setup(overrides: Partial<CardCommandDeps> = {}) {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "card-command-"));
@@ -25,6 +42,8 @@ function setup(overrides: Partial<CardCommandDeps> = {}) {
       throw new Error("readLocalFile was not expected");
     },
     now: () => "2026-11-02T08:15:00Z",
+    assignments: fakeAssignments(),
+    taskInfo: () => undefined,
     startTask: async () => {
       throw new Error("startTask was not expected");
     },
@@ -511,4 +530,149 @@ test("the agent and machine written to the log come from the started task", asyn
   await run("assign", "REQ-20261102-work");
   const log = store.readLog("REQ-20261102-work");
   assert.equal(log.ok && log.entries[0].text, "指派給 claude（agy-pod）");
+});
+
+test("assign records which card the task came from, and a failure to record only warns", async () => {
+  const assignments = fakeAssignments();
+  const { store, run } = assignSetup({ assignments });
+  store.create(assignable());
+  await run("assign", "REQ-20261102-work");
+  assert.deepEqual(
+    assignments.items.map((a) => [a.taskId, a.cardId, a.type, a.assignedAt]),
+    [
+      [
+        "task-1111-aaaa",
+        "REQ-20261102-work",
+        "requirement",
+        "2026-11-02T08:15:00Z",
+      ],
+    ],
+  );
+
+  const broken = assignSetup({
+    assignments: {
+      ...fakeAssignments(),
+      record: () => {
+        throw new Error("disk full");
+      },
+    },
+  });
+  broken.store.create(assignable());
+  const reply = await broken.run("assign", "REQ-20261102-work");
+  assert.match(reply, /已指派/);
+  assert.match(reply, /disk full/);
+  assert.match(reply, /刪除/);
+});
+
+const recreateId = "REQ-20261102-work";
+function recreateSetup(
+  extra: Partial<CardCommandDeps> = {},
+  taskIds = ["task-old"],
+) {
+  const prompt = buildAssignmentPrompt(
+    assignable(recreateId, { title: "原本的標題" }),
+  );
+  assert.equal(prompt.ok, true);
+  const assignments = fakeAssignments(
+    taskIds.map((taskId, i) => ({
+      taskId,
+      cardId: recreateId,
+      type: "ticket",
+      assignedAt: `2026-11-02T08:0${i}:00Z`,
+    })),
+  );
+  const s = setup({
+    assignments,
+    taskInfo: (taskId) => ({
+      originalPrompt: prompt.ok ? prompt.prompt : "",
+      lead: { agent: "claude", machine: "local" },
+      state: taskId === "task-old" ? "running" : "running",
+    }),
+    ...extra,
+  });
+  return { ...s, assignments };
+}
+
+test("recreate rebuilds a deleted card from the task record as an in-progress card with the task attached", async () => {
+  const { store, run } = recreateSetup();
+  const reply = await run("recreate", recreateId);
+  const read = store.read(recreateId);
+  assert.equal(read.ok && read.card.status, "in_progress");
+  assert.equal(read.ok && read.card.type, "ticket");
+  assert.equal(read.ok && read.card.title, "原本的標題");
+  assert.deepEqual(read.ok && read.card.tasks, ["task-old"]);
+  assert.equal(read.ok && read.card.created, "2026-11-02");
+  assert.ok(read.ok && read.card.body.includes("## 描述\n把報表匯出成 CSV。"));
+  assert.ok(read.ok && read.card.body.includes("## 驗收條件\n- 可以下載"));
+  assert.ok(read.ok && read.card.body.includes("重建"));
+  const log = store.readLog(recreateId);
+  assert.deepEqual(log.ok && log.entries.map((e) => e.eventId), [
+    "task-old-assigned",
+    "task-old-started",
+  ]);
+  assert.match(reply, /已重建 REQ-20261102-work/);
+  assert.match(reply, /無法還原/);
+});
+
+test("recreate attaches every task of the card and rebuilds from the latest one", async () => {
+  const { store, run } = recreateSetup({}, ["task-old", "task-new"]);
+  await run("recreate", recreateId);
+  const read = store.read(recreateId);
+  assert.deepEqual(read.ok && read.card.tasks, ["task-old", "task-new"]);
+  const log = store.readLog(recreateId);
+  assert.deepEqual(log.ok && log.entries.map((e) => e.eventId), [
+    "task-new-assigned",
+    "task-new-started",
+  ]);
+});
+
+test("recreate refuses when the card exists, when nothing is known about it, or when the record is unusable", async () => {
+  const existing = recreateSetup();
+  existing.store.create(assignable(recreateId, { title: "還在的卡片" }));
+  const file = path.join(existing.rootDir, `${recreateId}.md`);
+  const before = fs.readFileSync(file, "utf8");
+  await assert.rejects(existing.run("recreate", recreateId), /已存在/);
+  assert.equal(fs.readFileSync(file, "utf8"), before);
+
+  const unknown = recreateSetup();
+  await assert.rejects(
+    unknown.run("recreate", "REQ-20261102-other"),
+    /沒有.*任務/,
+  );
+
+  const gone = recreateSetup({ taskInfo: () => undefined });
+  await assert.rejects(gone.run("recreate", recreateId), /任務紀錄/);
+  assert.equal(
+    fs.existsSync(path.join(gone.rootDir, `${recreateId}.md`)),
+    false,
+  );
+
+  const garbled = recreateSetup({
+    taskInfo: () => ({
+      originalPrompt: "不是卡片 prompt",
+      lead: { agent: "claude", machine: "local" },
+      state: "running",
+    }),
+  });
+  await assert.rejects(garbled.run("recreate", recreateId), /資料區塊/);
+
+  await assert.rejects(unknown.run("recreate", "../x"), /不是合法的卡片 id/);
+  await assert.rejects(unknown.run("recreate"), /usage/);
+  await assert.rejects(unknown.run("recreate", recreateId, "extra"), /usage/);
+});
+
+test("recreate creates the cards directory when it is gone, and refuses an unsafe one", async () => {
+  const fresh = recreateSetup();
+  assert.equal(fs.existsSync(fresh.rootDir), false);
+  await fresh.run("recreate", recreateId);
+  assert.equal(
+    fs.existsSync(path.join(fresh.rootDir, `${recreateId}.md`)),
+    true,
+  );
+
+  if (process.platform === "win32") return;
+  const unsafe = recreateSetup();
+  fs.mkdirSync(unsafe.rootDir, { mode: 0o700 });
+  fs.chmodSync(unsafe.rootDir, 0o755);
+  await assert.rejects(unsafe.run("recreate", recreateId), /chmod 700/);
 });
