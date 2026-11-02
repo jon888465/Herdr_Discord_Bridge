@@ -61,7 +61,7 @@
 | D3 | 指令入口：建卡、列卡、看卡、指派 | **已決定**（Q1：加進 `handleCommand`，Discord＋console）。`list`／`show`／`import` 2a 已驗收（2026-11-02）；`assign` 屬 2b | ADR-0002 階段 2 決定 |
 | D4 | 卡片 → Team 任務 → journal → 紀錄 的串接；journal 事件到紀錄行的對照表與事件 id 產生方式 | **進行中（階段 2b）**：第一步卡片資料層已實作（`tasks` 欄位、`completed` 事件、`recordTask`）；第二步 `card assign` 啟動已驗收（ISSUE-058，2026-11-02）；第三步 journal 同步已驗收（`src/card-sync.ts`，ISSUE-059，2026-11-02）。事件 id 暫定 `<taskId>-<journal sequence>`，見 ADR-0002 | ADR-0002 未決 3 |
 | D5 | `projects` 的專案名稱規則 | **已決定**（使用者 2026-11-02 選 `<機器 id>:<repo 目錄名>`）並已實作於 C4 | ADR-0002 未決 2 |
-| D6 | 執行中的卡片被刪除時停止寫入並詢問，不默默繼續或取消 | **已實作、待驗收**（階段 2c，ISSUE-060；引擎只有取消沒有暫停，所以是「停止寫入並詢問」） | ADR-0001 決定 7、ADR-0002 決定 7 |
+| D6 | 執行中的卡片被刪除時停止寫入並詢問，不默默繼續或取消 | **已驗收 2026-11-02**（階段 2c，ISSUE-060；引擎只有取消沒有暫停，所以是「停止寫入並詢問」） | ADR-0001 決定 7、ADR-0002 決定 7 |
 | D7 | 卡片內容是不可信輸入：指派時如何交給 Agent，內容當資料而非指令 | 已實作（`src/card-handoff.ts`，Q3；ISSUE-058，已驗收 2026-11-02）。**不能防止 prompt injection** | card-to-merge 風險 |
 | D8 | 回歸測試：既有 `team ask`、Vibe Coding、Discord／CLI 指令行為不變 | 未開始 | card-to-merge 驗收條件 |
 | D9 | 重啟與 live 驗收；SPEC、README 同步 | 2a 的 SPEC、README 已同步；重啟與 live 驗收已完成（2026-11-02，ISSUE-057） | AGENTS.md |
@@ -115,6 +115,7 @@
 | H1 | 遠端 worktree 與清理、殘留偵測（ISSUE-055）；遠端 `herdr --machine … worktree` 實測需使用者同意 | 待決定 |
 | H2 | 自動撿卡（`status: ready`） | 未開始 |
 | H3 | Tracker（Mantis／Notion／Trello）匯入或同步 | 未開始 |
+| H4 | **端到端自動化測試案例**：流程完成後，用 ISSUE-061（較小、較低風險，**先用這個驗證流程本身**）與 ISSUE-055（刪除檢出，風險較高，之後）各跑一次「建單 → 分配 → 開發 → review → test → PR → merge → 結單」。第一次以 L1（人 merge）進行，不直接用 L2。前提與目前缺口見 ISSUE-061、ISSUE-055 的「預定用途」 | 未開始（review、test、PR、merge 自動化尚未實作；建單、分配、結單同步已有） |
 
 ## I. 驗收債（獨立於階段，等使用者）
 

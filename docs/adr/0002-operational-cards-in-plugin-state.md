@@ -258,7 +258,7 @@ issue、README、CHANGELOG 等由 Agent 在該卡片的 worktree 裡依專案自
 
 ### 2c 實作狀態（2026-11-02）
 
-**原始碼與自動化測試完成，待 live 驗收（ISSUE-060）。** 對應 Q6：執行中的卡片被刪除 → 停止寫入、通知原 thread 並列出選項，不自動取消、不自動重建。
+**原始碼與自動化測試完成，live 驗收通過 2026-11-02（ISSUE-060）。** 對應 Q6：執行中的卡片被刪除 → 停止寫入、通知原 thread 並列出選項，不自動取消、不自動重建。
 
 - `src/card-assignments.ts`：`CardAssignmentStore`（`<stateDirectory>/card-assignments.json`，0600）記錄 task → 卡片 id／類型／指派時間／已通知時間。**為什麼需要這份索引：** 卡片一刪，卡片本身就看不到 task id；Team 任務 journal 又不知道卡片。決策（Agent 的選擇，使用者未逐項確認）：用獨立索引檔，不改 Team 任務 journal 的 schema（風險較大）；索引損毀時不當空的處理，也不讓 bridge 啟動失敗：索引在用到時才開啟，只有用到索引的動作失敗，任務結果同步照常。
 - `src/card-sync.ts`：`syncCards` 回傳 `missing`（進行中的任務、卡片檔確實不存在、未通知過）；`missingCardMessage` 組出通知文字。
