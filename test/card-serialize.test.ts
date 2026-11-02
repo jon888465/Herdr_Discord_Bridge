@@ -246,3 +246,37 @@ test("serializeCard refuses output over the ledger limit and rejects an invalid 
     RangeError,
   );
 });
+
+test("projects is written after project and before links, and round trips", () => {
+  const card: Card = {
+    ...minimal,
+    project: "Legacy",
+    projects: ["local:Herdr_Discord_Bridge", "agy-pod:other"],
+    links: { parent: "REQ-20261030-parent" },
+  };
+  const result = serializeCard(card);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const lines = result.text.split("\n---\n")[0].split("\n").slice(8);
+  assert.deepEqual(lines, [
+    "project: Legacy",
+    "projects: [local:Herdr_Discord_Bridge, agy-pod:other]",
+    "links: { parent: REQ-20261030-parent }",
+  ]);
+  const reread = parseCard(result.text, "REQ-20261030-example.md");
+  assert.deepEqual(reread.ok ? reread.card : reread.error, card);
+});
+
+test("an empty projects array round trips and an invalid projects value is refused", () => {
+  const empty = serializeCard({ ...minimal, projects: [] });
+  assert.equal(empty.ok && empty.text.includes("\nprojects: []\n"), true);
+  const reread = empty.ok
+    ? parseCard(empty.text, "REQ-20261030-example.md")
+    : empty;
+  assert.deepEqual(
+    reread.ok && "card" in reread ? reread.card.projects : null,
+    [],
+  );
+  const bad = serializeCard({ ...minimal, projects: ["no prefix"] });
+  assert.equal(bad.ok, false);
+});

@@ -24,6 +24,8 @@ export interface Card {
   updated: string;
   source?: string;
   project?: string;
+  /** `<機器 id>:<repo 目錄名>`，由 bridge 寫入（ADR-0002 決定 4）。 */
+  projects?: string[];
   links?: CardLinks;
   external?: CardExternal;
   body: string;
@@ -46,6 +48,7 @@ const KNOWN_KEYS = new Set<string>([
   ...REQUIRED_KEYS,
   "source",
   "project",
+  "projects",
   "links",
   "external",
 ]);
@@ -259,6 +262,26 @@ function asRecord(
   return value;
 }
 
+/** `<機器 id>:<repo 目錄名>`；機器 id 為 local 或 machines 設定的格式，目錄名不可只由點組成。 */
+export const PROJECT_NAME =
+  /^(?:local|[A-Za-z][A-Za-z0-9_-]{1,31}):(?!\.+$)[A-Za-z0-9._-]{1,64}$/;
+export const MAX_PROJECTS = 20;
+
+function buildProjects(value: Value | undefined): string[] {
+  if (!Array.isArray(value))
+    return reject('"projects" must be an inline array');
+  if (value.length > MAX_PROJECTS)
+    reject(`"projects" has more than ${MAX_PROJECTS} entries`);
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== "string" || !PROJECT_NAME.test(item))
+      reject('"projects" entries must look like <machine>:<directory>');
+    if (seen.has(item)) reject(`"projects" has a duplicate entry ${item}`);
+    seen.add(item);
+  }
+  return value as string[];
+}
+
 function buildLinks(value: Value | undefined): CardLinks {
   const record = asRecord("links", value, [
     "related_docs",
@@ -426,6 +449,8 @@ export function buildCard(
       card.source = asString("source", fields.get("source"));
     if (fields.has("project"))
       card.project = asString("project", fields.get("project"));
+    if (fields.has("projects"))
+      card.projects = buildProjects(fields.get("projects"));
     if (fields.has("links")) card.links = buildLinks(fields.get("links"));
     if (fields.has("external"))
       card.external = buildExternal(fields.get("external"));

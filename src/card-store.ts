@@ -5,6 +5,7 @@ import {
   formatByteLimit,
   isCardDate,
   isCardId,
+  MAX_PROJECTS,
   parseCard,
   resolveMaxFileBytes,
   type Card,
@@ -12,6 +13,7 @@ import {
 } from "./card.js";
 import { importCard } from "./card-import.js";
 import { buildLogEntry, type CardEvent } from "./card-events.js";
+import { upsertProjectSection, type ProjectInfo } from "./card-projects.js";
 import { appendLogEntries, type LogEntry } from "./card-ledger.js";
 import { serializeCard } from "./card-serialize.js";
 
@@ -55,6 +57,16 @@ const BRIDGE_STATUS_FROM: Record<string, readonly string[]> = {
   done: ["in_progress", "done"],
 };
 const MAX_ATTEMPTS = 3;
+
+export type RecordProjectResult =
+  | {
+      ok: true;
+      card: Card;
+      hash: string;
+      name: string;
+      omitted: string[];
+    }
+  | StoreFailure;
 
 export type UpdateResult =
   { ok: true; card: Card; hash: string } | StoreFailure;
@@ -334,5 +346,42 @@ export class CardStore {
     const built = buildLogEntry(event);
     if (!built.ok) return failure("invalid", built.error);
     return this.appendLog(id, [built.entry]);
+  }
+
+  /**
+   * bridge 專用：在內文的「## 異動專案」更新或新增該專案的小節，並把專案名稱
+   * （`<機器 id>:<repo 目錄名>`）加進 frontmatter 的 `projects`（ADR-0002 決定 4）。
+   * 冪等：內容沒有變就不重寫檔案、不推進 updated。一張卡最多 20 個專案。
+   */
+  recordProject(
+    id: string,
+    info: ProjectInfo,
+    today: string,
+  ): RecordProjectResult {
+    if (!isCardDate(today))
+      return failure("invalid", "today must be a valid YYYY-MM-DD date");
+    let name = "";
+    let omitted: string[] = [];
+    const result = this.mutate(id, (card) => {
+      const upserted = upsertProjectSection(card.body, info);
+      if (!upserted.ok) return failure("invalid", upserted.error);
+      name = upserted.name;
+      omitted = upserted.omitted;
+      const projects = card.projects ?? [];
+      const known = projects.includes(upserted.name);
+      if (!upserted.changed && known) return card;
+      if (!known && projects.length >= MAX_PROJECTS)
+        return failure(
+          "invalid",
+          `a card can hold at most ${MAX_PROJECTS} projects`,
+        );
+      return {
+        ...card,
+        body: upserted.body,
+        projects: known ? projects : [...projects, upserted.name],
+        updated: today > card.updated ? today : card.updated,
+      };
+    });
+    return result.ok ? { ...result, name, omitted } : result;
   }
 }
