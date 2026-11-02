@@ -78,7 +78,7 @@ Agent 的推論（使用者未明說）：每個 worktree workspace 是自己的
 4. `--base` 預設用哪個 ref；建立前是否先 `git fetch`。
 5. 清理觸發時機（完成、取消、失敗、逾時）與保留期限；失敗時預設保留以便檢查。
 6. 新 workspace 的 Discord thread 對應：沿用卡片的 thread，還是另開。
-7. 「Agent 最終回報 → 彙整寫入卡片」的資料路徑：現有 hook 與 `herdr-discord-send` 只送 Discord，沒有寫入卡片；需設計（並處理機敏內容，見 ADR-0002 未決 4）。
+7. 「Agent 最終回報 → 彙整寫入卡片」的資料路徑：現有 hook 與 `herdr-discord-send` 只送 Discord，沒有寫入卡片；需設計。依 ADR-0002 決定 11，Agent 的自由文字**不寫進卡片**，卡片只記錄 bridge 產生的結構化事實（PR 網址、SHA、判定結果等）。
 8. 與專案政策檔 L0／L1／L2 的關係：L0（不 push）是否也需要 worktree。
 9. 遠端機器：原生支援 `herdr --machine <名稱> worktree create`，但**尚未實測**，需要使用者同意才能在遠端機器上執行。
 
