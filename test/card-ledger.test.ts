@@ -102,7 +102,7 @@ test("invalid entries are rejected with the field name and nothing is changed", 
     ["text", { text: "a | b" }],
     ["text", { text: "tab\there" }],
     ["text", { text: "" }],
-    ["text", { text: "a".repeat(1001) }],
+    ["text", { text: "a".repeat(301) }],
     ["eventId", { eventId: "" }],
     ["eventId", { eventId: "has space" }],
     ["eventId", { eventId: "a|b" }],
@@ -114,4 +114,13 @@ test("invalid entries are rejected with the field name and nothing is changed", 
     if (!result.ok)
       assert.match(result.error, new RegExp(field), JSON.stringify(patch));
   }
+});
+
+test("the entry text limit is exactly 300 characters, counted as characters not bytes", () => {
+  const atLimit = "字".repeat(300);
+  const ok = appendLogEntries("# T\n", [{ ...e1, text: atLimit }]);
+  assert.equal(ok.ok, true);
+  const over = appendLogEntries("# T\n", [{ ...e1, text: atLimit + "字" }]);
+  assert.equal(over.ok, false);
+  if (!over.ok) assert.match(over.error, /text/);
 });

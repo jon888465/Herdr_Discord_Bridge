@@ -793,3 +793,82 @@ test("known limitation: a bridge write keeps the body and every field value but 
   assert.equal(read.ok && read.card.title, ready.title);
   assert.ok(read.ok && read.card.body.startsWith("# 新建立的卡片\n"));
 });
+
+import { OMITTED_TEXT, type CardEvent } from "../src/card-events.js";
+
+const startedEvent: CardEvent = {
+  time: "2026-11-02T08:15:00Z",
+  eventId: "ev0001",
+  event: "started",
+  taskId: "task-42",
+};
+
+test("recordEvent writes the templated line, is idempotent by event id and bumps updated", () => {
+  const { root, store } = seededReady();
+  const file = path.join(root, `${sample.id}.md`);
+  const first = store.recordEvent(sample.id, startedEvent);
+  assert.equal(first.ok && first.added, 1);
+  const text = fs.readFileSync(file, "utf8");
+  assert.ok(
+    text.includes(
+      "- 2026-11-02T08:15:00Z | started | 開始執行 task task-42 | ev:ev0001\n",
+    ),
+  );
+  const read = store.read(sample.id);
+  assert.equal(read.ok && read.card.updated, "2026-11-02");
+
+  const again = store.recordEvent(sample.id, startedEvent);
+  assert.equal(again.ok && again.added, 0);
+  assert.equal(fs.readFileSync(file, "utf8"), text);
+});
+
+test("recordEvent appends events in order", () => {
+  const { root, store } = seededReady();
+  store.recordEvent(sample.id, startedEvent);
+  store.recordEvent(sample.id, {
+    time: "2026-11-02T09:00:00Z",
+    eventId: "ev0002",
+    event: "blocked",
+    reason: "quota",
+  });
+  const text = fs.readFileSync(path.join(root, `${sample.id}.md`), "utf8");
+  const first = text.indexOf("ev:ev0001");
+  const second = text.indexOf("ev:ev0002");
+  assert.ok(first > 0 && second > first);
+});
+
+test("a suspected secret never reaches the file: the event is kept with the fixed message", () => {
+  const { root, store } = seededReady();
+  const secret = ["gh", "p_", "FAKEFAKEFAKE0123456789ABCD"].join("");
+  const result = store.recordEvent(sample.id, {
+    time: "2026-11-02T08:15:00Z",
+    eventId: "ev0003",
+    event: "failed",
+    code: "push_rejected",
+    reason: `remote said token ${secret}`,
+  });
+  assert.equal(result.ok && result.added, 1);
+  const text = fs.readFileSync(path.join(root, `${sample.id}.md`), "utf8");
+  assert.equal(text.includes(secret), false);
+  assert.ok(
+    text.includes(
+      `- 2026-11-02T08:15:00Z | failed | ${OMITTED_TEXT} | ev:ev0003\n`,
+    ),
+  );
+});
+
+test("recordEvent rejects an invalid event, an unknown card and a malformed id without writing", () => {
+  const { root, store } = seededReady();
+  const file = path.join(root, `${sample.id}.md`);
+  const before = fs.readFileSync(file, "utf8");
+  const invalid = store.recordEvent(sample.id, {
+    ...startedEvent,
+    taskId: "has space",
+  });
+  assert.equal(invalid.ok === false && invalid.code, "invalid");
+  assert.equal(fs.readFileSync(file, "utf8"), before);
+  const missing = store.recordEvent("REQ-20261101-missing", startedEvent);
+  assert.equal(missing.ok === false && missing.code, "not_found");
+  const traversal = store.recordEvent("../x", startedEvent);
+  assert.equal(traversal.ok === false && traversal.code, "invalid");
+});

@@ -11,6 +11,7 @@ import {
   type ReadOptions,
 } from "./card.js";
 import { importCard } from "./card-import.js";
+import { buildLogEntry, type CardEvent } from "./card-events.js";
 import { appendLogEntries, type LogEntry } from "./card-ledger.js";
 import { serializeCard } from "./card-serialize.js";
 
@@ -322,5 +323,16 @@ export class CardStore {
       };
     });
     return result.ok ? { ...result, added } : result;
+  }
+
+  /**
+   * bridge 專用：把有型別的事件以固定模板記入「## 流程紀錄」（ADR-0002 決定 11）。
+   * 欄位不合格回 invalid；疑似機敏時說明改為固定訊息，事件本身仍記錄。
+   * 這是 bridge 應該使用的通道；低階的 appendLog 接受任意已驗證的說明文字，不套用模板與機敏檢查。
+   */
+  recordEvent(id: string, event: CardEvent): AppendLogResult {
+    const built = buildLogEntry(event);
+    if (!built.ok) return failure("invalid", built.error);
+    return this.appendLog(id, [built.entry]);
   }
 }
