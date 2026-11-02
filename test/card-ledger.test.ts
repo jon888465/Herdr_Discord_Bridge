@@ -124,3 +124,87 @@ test("the entry text limit is exactly 300 characters, counted as characters not 
   assert.equal(over.ok, false);
   if (!over.ok) assert.match(over.error, /text/);
 });
+
+import { logPointerLine, parseLogLine, rotateLog } from "../src/card-ledger.js";
+
+const lineOf = (n: number): string =>
+  `- 2026-11-02T08:${String(n).padStart(2, "0")}:00Z | started | 第 ${n} 筆 | ev:e${String(n).padStart(4, "0")}`;
+const entryOf = (n: number): LogEntry => ({
+  time: `2026-11-02T08:${String(n).padStart(2, "0")}:00Z`,
+  event: "started",
+  text: `第 ${n} 筆`,
+  eventId: `e${String(n).padStart(4, "0")}`,
+});
+
+test("parseLogLine reads a well-formed entry line and rejects everything else", () => {
+  assert.deepEqual(parseLogLine(lineOf(7)), entryOf(7));
+  assert.equal(parseLogLine("- 不是紀錄行"), null);
+  assert.equal(parseLogLine("> 較早紀錄已移到 logs/x/0001.md"), null);
+  assert.equal(parseLogLine("人寫的文字 | 含分隔符 | ev:abc"), null);
+  assert.equal(parseLogLine(""), null);
+  assert.equal(
+    parseLogLine("- 2026-13-02T08:15:00Z | started | 壞時間 | ev:e0001"),
+    null,
+  );
+});
+
+test("appendLogEntries also skips event ids it was told have been seen elsewhere", () => {
+  const body = "# T\n\n## 流程紀錄\n\n" + lineOf(1) + "\n";
+  const result = appendLogEntries(
+    body,
+    [entryOf(1), entryOf(2), entryOf(3)],
+    new Set(["e0002"]),
+  );
+  assert.deepEqual(result, {
+    ok: true,
+    added: 1,
+    body: body + lineOf(3) + "\n",
+  });
+});
+
+const pointer = "logs/REQ-20261102-x/0001.md（只增不改）";
+
+test("logPointerLine names one side file or a range of them", () => {
+  assert.equal(
+    logPointerLine("REQ-20261102-x", 1, 1),
+    "> 較早紀錄已移到 logs/REQ-20261102-x/0001.md（只增不改）",
+  );
+  assert.equal(
+    logPointerLine("REQ-20261102-x", 1, 12),
+    "> 較早紀錄已移到 logs/REQ-20261102-x/0001.md 到 0012.md（只增不改）",
+  );
+});
+
+test("rotateLog moves all but the newest entries, leaves a pointer and keeps everything else", () => {
+  const lines = [1, 2, 3, 4, 5, 6, 7].map(lineOf);
+  const body = `# T\n\n## 流程紀錄\n\n${lines.join("\n")}\n\n## 待確認\n- a\n`;
+  const result = rotateLog(body, 5, `> 較早紀錄已移到 ${pointer}`);
+  assert.deepEqual(result, {
+    moved: [lines[0], lines[1]],
+    body: `# T\n\n## 流程紀錄\n\n> 較早紀錄已移到 ${pointer}\n\n${lines.slice(2).join("\n")}\n\n## 待確認\n- a\n`,
+  });
+});
+
+test("rotateLog replaces an earlier pointer instead of stacking another and keeps human lines", () => {
+  const lines = [3, 4, 5, 6, 7, 8].map(lineOf);
+  const body = `# T\n\n## 流程紀錄\n\n> 較早紀錄已移到 舊的指標\n\n人寫的說明\n\n${lines.join("\n")}\n`;
+  const result = rotateLog(body, 5, "> 較早紀錄已移到 新的指標");
+  assert.deepEqual(result, {
+    moved: [lines[0]],
+    body: `# T\n\n## 流程紀錄\n\n> 較早紀錄已移到 新的指標\n\n人寫的說明\n\n${lines.slice(1).join("\n")}\n`,
+  });
+});
+
+test("rotateLog does nothing when there is nothing older than the newest entries to move", () => {
+  const body = `# T\n\n## 流程紀錄\n\n${[1, 2, 3, 4, 5].map(lineOf).join("\n")}\n`;
+  assert.equal(rotateLog(body, 5, "> 較早紀錄已移到 x"), null);
+  assert.equal(rotateLog("# T\n沒有紀錄區塊\n", 5, "> 較早紀錄已移到 x"), null);
+});
+
+test("rotateLog treats only well-formed entry lines as entries", () => {
+  const entries = [1, 2, 3, 4, 5, 6].map(lineOf);
+  const body = `# T\n\n## 流程紀錄\n\n- 人寫的清單項目\n${entries.join("\n")}\n`;
+  const result = rotateLog(body, 5, "> 較早紀錄已移到 p");
+  assert.deepEqual(result?.moved, [entries[0]]);
+  assert.ok(result?.body.includes("- 人寫的清單項目\n"));
+});
