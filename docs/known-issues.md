@@ -2200,3 +2200,25 @@ console（Agent 親自在 bridge pane 輸入並觀察輸出）：
 - 驗收用卡片 `REQ-20261102-accept-assign`（`in_progress`）、`REQ-20261102-accept-nodesc`（`ready`）仍在使用者的卡片目錄，可刪除。
 
 下一步：第三步 journal 同步（任務完成 → `done` 並記 `completed`；失敗或取消 → 維持 `in_progress` 並記事件），由使用者決定何時開始。
+
+## ISSUE-059：Team 任務結束後卡片狀態同步（journal 同步）
+
+更新日期：2026-11-02。狀態：已修正、待驗收（功能新增；原始碼與自動化測試完成，執行中的 bridge 尚未載入此版本，尚未 live 驗收）。
+
+來源：card-to-merge 階段 2b 第三步（ADR-0002 階段 2 決定 Q4）。ISSUE-058 驗收時已看到缺口：任務結束後卡片仍停在 `in_progress`。
+
+使用者可見行為：bridge 啟動時與每 60 秒，依 Team 任務結果更新由 `card assign` 指派的卡片：完成 → `done` 並記 `completed`；失敗／取消 → 維持 `in_progress`，只記 `failed`／`cancelled`。見 SPEC「營運卡片指令」的任務結果同步。
+
+預期行為：重複同步不重複記錄；多個任務時只有最後一個完成才 `done`；人已改動狀態的卡片不碰；任務進行中不動卡片；機敏的失敗原因整筆省略；bridge 重啟後補同步重啟期間完成的任務。
+
+根因／修正範圍：不適用（新功能）。新增 `src/card-sync.ts`（`syncCards`、`taskSourceFrom`）與 `src/main.ts` 的 `startCardSync`。
+
+測試（2026-11-02，本機 macOS、Node v26.12.0，非 CI）：新增 `test/card-sync.test.ts`（12 項，含以真實 `TeamTaskStore` 驗證 journal sequence 與端到端）；全套 658 項，657 通過、0 失敗、1 略過（原 646 項）；`lint` 通過。變異測試：移除「只有最後一個任務完成才 done」的條件會讓對應測試失敗。**沒有**對 `startCardSync` 的計時器與 `main.ts` 接線做自動化測試。
+
+未驗證（待使用者，需先 merge 並用 `scripts/run.sh -r` 重啟 bridge）：
+1. 重啟後約 1 分鐘內，ISSUE-058 驗收留下的卡片 `REQ-20261102-accept-assign`（任務早已完成、卡片仍 `in_progress`）應被補同步：`card show` 看到狀態 `done`、紀錄多一筆 `completed`；bridge console 出現 `Card sync updated: …`。
+2. 再指派一張新卡（例如描述只要求回覆「收到」），任務結束後約 1 分鐘內變 `done`。
+3. 失敗／取消路徑：指派一張卡後用 `team cancel <task-id>` 取消，確認卡片維持 `in_progress` 並多一筆 `cancelled`。
+4. 已知限制：輪詢造成最多約 60 秒延遲；`cancelled` 的 `by` 固定為 `user`；失敗不通知 Discord；卡片被刪除時的處理（2c）未做。
+
+下一步：使用者驗收後改為「已驗收」；再進入 2c（執行中的卡片被刪除）。

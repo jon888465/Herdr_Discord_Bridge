@@ -21,6 +21,7 @@ import {
 } from "./attachments.js";
 import { agentOrigin, recordAgentOrigin } from "./agent-origin.js";
 import { readLocalCardFile, runCardCommand } from "./card-command.js";
+import { syncCards, taskSourceFrom } from "./card-sync.js";
 import { basename, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { statSync } from "node:fs";
@@ -427,6 +428,7 @@ async function startBridge(
   );
   watcher.start();
   const stopCleanup = startAttachmentCleanup(herdr);
+  const stopCardSync = startCardSync(tasks);
   const stopHooks = await startHookServer().catch((error) => {
     console.error(`Hook socket unavailable: ${safeError(error)}`);
     return () => undefined;
@@ -439,6 +441,7 @@ async function startBridge(
   });
   installShutdown(() => {
     stopCleanup();
+    stopCardSync();
     herdr.stopTunnels();
     stopSend();
     stopHooks();
@@ -1908,6 +1911,39 @@ export async function promptMappedAgent(
 }
 
 /** 啟動時與每 6 小時，清理各 Agent cwd 底下超過 3 天的附件目錄（本機與遠端，ISSUE-043）。 */
+const CARD_SYNC_INTERVAL_MS = 60 * 1000;
+
+/**
+ * 定期把已結束的 Team 任務同步回營運卡片（完成 → done；失敗／取消只記事件）。
+ * 啟動時先跑一次，之後每分鐘一次；同樣的問題只在內容改變時才印出，避免洗版。
+ */
+function startCardSync(tasks: TeamTaskEngine): () => void {
+  const rootDir = join(stateDirectory(), "cards");
+  const source = taskSourceFrom(tasks.store);
+  let lastProblems = "";
+  const sweep = (): void => {
+    try {
+      const result = syncCards({
+        rootDir,
+        tasks: source,
+        now: () => new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+      });
+      if (result.updated.length)
+        console.log(`Card sync updated: ${result.updated.join(", ")}`);
+      const problems = result.problems.join("\n");
+      if (problems !== lastProblems && problems)
+        console.error(`Card sync problems:\n${problems}`);
+      lastProblems = problems;
+    } catch (error) {
+      console.error(`Card sync failed: ${safeError(error)}`);
+    }
+  };
+  sweep();
+  const timer = setInterval(sweep, CARD_SYNC_INTERVAL_MS);
+  timer.unref();
+  return () => clearInterval(timer);
+}
+
 function startAttachmentCleanup(herdr: HerdrClient): () => void {
   const sweep = async () => {
     let agents: AgentRecord[];
