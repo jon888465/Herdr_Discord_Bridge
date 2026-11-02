@@ -216,3 +216,33 @@ test("every card in docs/cards survives parse, serialize and parse again", () =>
     assert.equal(again.ok && again.text === written.text, true, name);
   }
 });
+
+import { IMPORT_MAX_FILE_BYTES, LEDGER_MAX_FILE_BYTES } from "../src/card.js";
+
+test("serializeCard checks its read-back against the limit it is given", () => {
+  const big: Card = {
+    ...minimal,
+    body: "a".repeat(IMPORT_MAX_FILE_BYTES) + "\n",
+  };
+  const byDefault = serializeCard(big);
+  assert.equal(byDefault.ok, false);
+  if (!byDefault.ok) assert.match(byDefault.error, /512 KiB/);
+  const ledger = serializeCard(big, { maxFileBytes: LEDGER_MAX_FILE_BYTES });
+  assert.equal(ledger.ok, true);
+  if (!ledger.ok) return;
+  const reread = parseCard(ledger.text, "REQ-20261030-example.md", {
+    maxFileBytes: LEDGER_MAX_FILE_BYTES,
+  });
+  assert.deepEqual(reread.ok ? reread.card : reread.error, big);
+});
+
+test("serializeCard refuses output over the ledger limit and rejects an invalid limit", () => {
+  const huge: Card = { ...minimal, body: "a".repeat(LEDGER_MAX_FILE_BYTES) };
+  const refused = serializeCard(huge, { maxFileBytes: LEDGER_MAX_FILE_BYTES });
+  assert.equal(refused.ok, false);
+  if (!refused.ok) assert.match(refused.error, /1 MiB/);
+  assert.throws(
+    () => serializeCard(minimal, { maxFileBytes: LEDGER_MAX_FILE_BYTES + 1 }),
+    RangeError,
+  );
+});

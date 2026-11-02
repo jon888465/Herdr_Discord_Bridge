@@ -26,7 +26,7 @@
 - 以 `---` 開始與結束；每行 `key: value`；`#` 後為行內註解。
 - 值只允許：字串（無引號或雙引號）、整數、日期 `YYYY-MM-DD`、`null`、行內陣列 `[a, b]`、行內物件 `{ k: v, k2: v2 }`（物件的值只能是純量或純量陣列）。
 - 禁止：多行值、錨點／別名、tag、合併鍵、物件內再放物件或陣列內再放陣列、重複 key、未知頂層 key（**包含 `x-` 前綴**；不提供自訂欄位，需要保留的資訊寫在內文）。
-- frontmatter 上限 8 KiB，整檔上限 256 KiB（與現有 artifact 讀取上限一致）。
+- frontmatter 上限 8 KiB，整檔上限 256 KiB（與現有 artifact 讀取上限一致）。（2026-11-02 起匯入／預設上限為 512 KiB，營運卡片為 1 MiB，見 ADR-0002 決定 10）
 
 替代方案：引入 `yaml` 套件。優點是完整相容；缺點是多一個依賴與較大的攻擊面，且卡片用不到 YAML 的進階功能。若日後需要巢狀結構再重議。
 
@@ -95,14 +95,14 @@ bridge 寫卡片時：先記讀取時的內容雜湊，寫入前再比對，不�
 ## 實作狀態（2026-10-30）
 
 - **已實作**：
-  - `parseCard(text, filename?)`（`src/card.ts`），純函式，不讀寫檔案。涵蓋：受限 frontmatter 子集、必填欄位、id 格式與檔名比對、`type`／`status` 列舉、日期、`version`、標題長度、`links`／`external` 結構、frontmatter 8 KiB 與整檔 256 KiB 上限、CRLF 與開頭 BOM 容錯。內部拆為 `readCardDocument`（結構）與 `buildCard`（語意）。
+  - `parseCard(text, filename?)`（`src/card.ts`），純函式，不讀寫檔案。涵蓋：受限 frontmatter 子集、必填欄位、id 格式與檔名比對、`type`／`status` 列舉、日期、`version`、標題長度、`links`／`external` 結構、frontmatter 8 KiB 與整檔上限（2026-11-02 起預設 512 KiB，可依用途帶入，最大 1 MiB，見 ADR-0002）、CRLF 與開頭 BOM 容錯。內部拆為 `readCardDocument`（結構）與 `buildCard`（語意）。
   - `importCard(text, { slug?, today, existingIds })`（`src/card-import.ts`），純函式：狀態一律強制為 `draft`；清空 `external`；已存在的 id 拒絕、不覆蓋；缺 `id` 時由 `type`（REQ／TKT）、`today` 與**呼叫者明確給的 `slug`** 產生，不從標題推導；有 `id` 時忽略 `slug`；回傳 `filename` 與 `notes`（記錄被改動的項目）。沒有呼叫端。
   - `serializeCard(card)`（`src/card-serialize.ts`），純函式：`Card` 轉成 md 文字。鍵順序固定（與輸入物件的屬性順序無關）；字串只在安全時用裸寫，否則加雙引號，規則比本專案解析器更保守（例如開頭的 `#`、`-`、`%`、`@` 也加引號，避免其他 YAML 工具讀錯）；陣列與物件用行內寫法。**寫出前先用 `parseCard` 讀回並比對，內容不同就回傳失敗**（例如標題含換行、`status` 不合法、本文含 CR），確保不會產生讀不回來的檔案。尚未寫入檔案，沒有呼叫端。
-  - `herdr-card-check FILE...`（`scripts/herdr-card-check` → `src/card-check-cli.ts`，核心 `runCardCheck` 在 `src/card-check.ts`）：逐檔以 `parseCard` 檢查，輸出 `OK`／`FAIL`；結束碼 0／1／2；超過 256 KiB 的檔案不讀取。只檢查格式，不判斷內容。待使用者驗收（ISSUE-054）。
+  - `herdr-card-check FILE...`（`scripts/herdr-card-check` → `src/card-check-cli.ts`，核心 `runCardCheck` 在 `src/card-check.ts`）：逐檔以 `parseCard` 檢查，輸出 `OK`／`FAIL`；結束碼 0／1／2；超過整檔上限（預設 512 KiB，`--ledger` 為 1 MiB）的檔案不讀取。只檢查格式，不判斷內容。待使用者驗收（ISSUE-054）。
   - `CardStore(rootDir)`（`src/card-store.ts`，2026-11-01），檔案層，同步 API，**尚無呼叫端**：
     - 唯讀：`list()`（合格的卡與不合格檔案的錯誤分開回報；非卡片檔名如 `README.md` 忽略）、`existingIds()`（以檔名為準，**壞檔與符號連結仍占用它的 id**）、`read(id)`（回傳卡與整份檔案內容的 SHA-256）。目錄不存在視為空。
     - 寫入：`create(card)`（先寫暫存檔再 `link` 到正式名稱，遇到任何既有項目含失效的符號連結都失敗，不覆蓋）、`update(id, expectedHash, change)`（雜湊與目前檔案不同回 `conflict` 且不動檔案；`change` 不能改 id；內容無變化不重寫；暫存檔加 `rename`）、`importText(text, { slug?, today })`（`importCard` 後 `create`）。
-    - 安全：id 先驗格式再組路徑（`../`、絕對路徑、`.md` 後綴一律 `invalid`，不碰檔案系統）；只讀一般檔案，符號連結、目錄、超過 256 KiB 的檔案拒絕（`unsafe`／`too_large`），以 `lstat` 加 `O_NOFOLLOW` 開檔並用 `fstat` 複核；暫存檔以 `.` 開頭，不會被 `list()` 當成卡片。錯誤以代碼回報：`not_found`、`invalid`、`unsafe`、`too_large`、`exists`、`conflict`。
+    - 安全：id 先驗格式再組路徑（`../`、絕對路徑、`.md` 後綴一律 `invalid`，不碰檔案系統）；只讀一般檔案，符號連結、目錄、超過整檔上限（當時 256 KiB，現為 512 KiB）的檔案拒絕（`unsafe`／`too_large`），以 `lstat` 加 `O_NOFOLLOW` 開檔並用 `fstat` 複核；暫存檔以 `.` 開頭，不會被 `list()` 當成卡片。錯誤以代碼回報：`not_found`、`invalid`、`unsafe`、`too_large`、`exists`、`conflict`。
     - **限制**：普通檔案系統無法做到「比對雜湊並取代」的真正原子操作；`update` 在 `rename` 前再比對一次以縮小空窗，但仍假設同一時間只有一個程式寫入（bridge），人手動編輯造成的衝突靠雜湊偵測。程序在寫暫存檔與 `link`／`rename` 之間崩潰可能遺留 `.<id>.md.tmp-*` 暫存檔，目前沒有清理機制。`rootDir` 若是檔案而不是目錄，`list()` 會丟出例外。權限固定 `0644`。
 - **測試**：`test/card.test.ts` 57 項（含真實規劃卡必須可解析）、`test/card-import.test.ts` 15 項、`test/card-serialize.test.ts` 36 項（含 `docs/cards` 內每張卡 parse、serialize、parse 往返相等且重複序列化文字不變）、`test/card-store.test.ts` 24 項（真實暫存目錄與符號連結）。全套 `npm test`（2026-10-30，本機 macOS、Node v26.12.0）445 項：444 通過、0 失敗、1 略過（2026-11-01）；這不是 CI 結果。開發過程抓到並修正兩個缺陷：`today` 只檢查格式、未檢查日期是否真實存在；`type` 以 `in` 判斷會把 `constructor` 等原型鏈名稱當成有效值（改用 `Object.hasOwn`）。
 - **尚未實作**：Mantis 匯出、bridge 專用的狀態寫入（只改 `status`、`updated` 與「執行結果」章節，且只允許 `in_progress`／`done`）、執行中卡被刪的暫停、bridge 或 Discord 的呼叫端與指令入口。驗收條件中這些項目仍是待做。

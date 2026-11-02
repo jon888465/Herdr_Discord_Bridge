@@ -598,4 +598,4 @@ Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*
 
 ## 卡片驗證指令（2026-10-30，ISSUE-054）
 
-`scripts/herdr-card-check FILE...`（需先 `npm run build`）逐檔檢查 Markdown 卡片是否符合 [ADR-0001](docs/adr/0001-portable-md-cards.md) 的格式（`parseCard` 規則：受限 frontmatter 子集、必填欄位、id 與檔名、`type`／`status` 列舉、日期、`version`、標題長度、`links`／`external` 結構、8 KiB frontmatter 與 256 KiB 整檔上限）。每檔輸出 `OK`（stdout）或 `FAIL`（stderr，附原因）；任何檔案不合格或讀不到則結束碼 1，用法錯誤 2，全部合格 0；失敗不中斷後續檔案；超過 256 KiB 的檔案不讀取。只檢查格式，不判斷內容正確性或敏感資訊。bridge 不讀取卡片，也沒有 Discord 指令。待使用者驗收。
+`scripts/herdr-card-check [--ledger] FILE...`（需先 `npm run build`）逐檔檢查 Markdown 卡片是否符合 [ADR-0001](docs/adr/0001-portable-md-cards.md) 的格式（`parseCard` 規則：受限 frontmatter 子集、必填欄位、id 與檔名、`type`／`status` 列舉、日期、`version`、標題長度、`links`／`external` 結構、8 KiB frontmatter，以及整檔上限：預設 512 KiB，加 `--ledger` 為 1 MiB）。每檔輸出 `OK`（stdout）或 `FAIL`（stderr，附原因）；任何檔案不合格或讀不到則結束碼 1，用法錯誤 2，全部合格 0；失敗不中斷後續檔案；超過所選上限的檔案不讀取。只檢查格式，不判斷內容正確性或敏感資訊。bridge 不讀取卡片，也沒有 Discord 指令。待使用者驗收。

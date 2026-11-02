@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 import { readFileSync, statSync } from "node:fs";
+import { formatByteLimit } from "./card.js";
 import { runCardCheck } from "./card-check.js";
 
-const MAX_BYTES = 256 * 1024;
-
-// 先看大小再讀，避免把超大檔案整個讀進記憶體；上限與卡片格式一致。
-function readCardFile(path: string): string {
+// 先看大小再讀，避免把超大檔案整個讀進記憶體；上限由 runCardCheck 依模式傳入。
+function readCardFile(path: string, maxBytes: number): string {
   const size = statSync(path).size;
-  if (size > MAX_BYTES) throw new Error(`file exceeds 256 KiB (${size} bytes)`);
+  if (size > maxBytes)
+    throw new Error(
+      `file exceeds ${formatByteLimit(maxBytes)} (${size} bytes)`,
+    );
   return readFileSync(path, "utf8");
 }
 

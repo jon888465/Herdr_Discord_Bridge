@@ -1,12 +1,18 @@
 import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { isCardId, parseCard, type Card } from "./card.js";
+import {
+  formatByteLimit,
+  isCardId,
+  parseCard,
+  resolveMaxFileBytes,
+  type Card,
+  type ReadOptions,
+} from "./card.js";
 import { importCard } from "./card-import.js";
 import { serializeCard } from "./card-serialize.js";
 
 const CARD_FILE = /^(REQ|TKT)-.*\.md$/;
-const MAX_FILE_BYTES = 256 * 1024;
 
 export type StoreErrorCode =
   "not_found" | "invalid" | "unsafe" | "too_large" | "exists" | "conflict";
@@ -52,7 +58,7 @@ function failure(code: StoreErrorCode, error: string): StoreFailure {
 
 // 只讀一般檔案：符號連結、目錄與超大檔案都拒絕。lstat 之後再以 O_NOFOLLOW
 // 開檔並用 fstat 複核，避免檢查與讀取之間被換成符號連結。
-function readRegularFile(file: string): FileRead {
+function readRegularFile(file: string, maxBytes: number): FileRead {
   let stat: fs.Stats;
   try {
     stat = fs.lstatSync(file);
@@ -64,8 +70,8 @@ function readRegularFile(file: string): FileRead {
   if (stat.isSymbolicLink())
     return failure("unsafe", "symbolic link is not allowed");
   if (!stat.isFile()) return failure("unsafe", "not a regular file");
-  if (stat.size > MAX_FILE_BYTES)
-    return failure("too_large", "file exceeds 256 KiB");
+  if (stat.size > maxBytes)
+    return failure("too_large", `file exceeds ${formatByteLimit(maxBytes)}`);
   let fd: number;
   try {
     fd = fs.openSync(
@@ -80,8 +86,8 @@ function readRegularFile(file: string): FileRead {
   try {
     const opened = fs.fstatSync(fd);
     if (!opened.isFile()) return failure("unsafe", "not a regular file");
-    if (opened.size > MAX_FILE_BYTES)
-      return failure("too_large", "file exceeds 256 KiB");
+    if (opened.size > maxBytes)
+      return failure("too_large", `file exceeds ${formatByteLimit(maxBytes)}`);
     return { ok: true, text: fs.readFileSync(fd, "utf8") };
   } finally {
     fs.closeSync(fd);
@@ -89,7 +95,17 @@ function readRegularFile(file: string): FileRead {
 }
 
 export class CardStore {
-  constructor(private readonly rootDir: string) {}
+  private readonly options: ReadOptions;
+  private readonly maxFileBytes: number;
+
+  /** options.maxFileBytes 是這個 store 讀寫的整檔上限（預設匯入上限，最大 1 MiB）。 */
+  constructor(
+    private readonly rootDir: string,
+    options?: ReadOptions,
+  ) {
+    this.maxFileBytes = resolveMaxFileBytes(options);
+    this.options = { maxFileBytes: this.maxFileBytes };
+  }
 
   private cardFileNames(): string[] {
     let names: string[];
@@ -106,12 +122,15 @@ export class CardStore {
     const cards: StoredCard[] = [];
     const errors: { file: string; error: string }[] = [];
     for (const file of this.cardFileNames()) {
-      const read = readRegularFile(path.join(this.rootDir, file));
+      const read = readRegularFile(
+        path.join(this.rootDir, file),
+        this.maxFileBytes,
+      );
       if (!read.ok) {
         errors.push({ file, error: read.error });
         continue;
       }
-      const parsed = parseCard(read.text, file);
+      const parsed = parseCard(read.text, file, this.options);
       if (parsed.ok)
         cards.push({ file, card: parsed.card, hash: hashText(read.text) });
       else errors.push({ file, error: parsed.error });
@@ -126,12 +145,15 @@ export class CardStore {
 
   read(id: string): ReadResult {
     if (!isCardId(id)) return failure("invalid", `"${id}" is not a card id`);
-    const read = readRegularFile(path.join(this.rootDir, `${id}.md`));
+    const read = readRegularFile(
+      path.join(this.rootDir, `${id}.md`),
+      this.maxFileBytes,
+    );
     if (!read.ok)
       return read.code === "not_found"
         ? failure("not_found", `card ${id} not found`)
         : read;
-    const parsed = parseCard(read.text, `${id}.md`);
+    const parsed = parseCard(read.text, `${id}.md`, this.options);
     if (!parsed.ok) return failure("invalid", parsed.error);
     return { ok: true, card: parsed.card, hash: hashText(read.text) };
   }
@@ -139,8 +161,8 @@ export class CardStore {
   // 先寫暫存檔再 link 到正式名稱：link 遇到任何既有項目（含失效的符號連結）都會失敗，
   // 因此不會覆蓋；寫入中途失敗也不會留下半截的正式檔。
   create(card: Card): CreateResult {
-    const serialized = serializeCard(card);
-    if (!serialized.ok) return failure("invalid", serialized.error);
+    const serialized = serializeCard(card, this.options);
+    if (!serialized.ok) return failure(serialized.code, serialized.error);
     const file = `${card.id}.md`;
     const target = path.join(this.rootDir, file);
     fs.mkdirSync(this.rootDir, { recursive: true });
@@ -172,21 +194,21 @@ export class CardStore {
     if (!isCardId(id)) return failure("invalid", `"${id}" is not a card id`);
     const file = `${id}.md`;
     const target = path.join(this.rootDir, file);
-    const current = readRegularFile(target);
+    const current = readRegularFile(target, this.maxFileBytes);
     if (!current.ok)
       return current.code === "not_found"
         ? failure("not_found", `card ${id} not found`)
         : current;
     if (hashText(current.text) !== expectedHash)
       return failure("conflict", `card ${id} changed since it was read`);
-    const parsed = parseCard(current.text, file);
+    const parsed = parseCard(current.text, file, this.options);
     if (!parsed.ok) return failure("invalid", parsed.error);
 
     const next = change(structuredClone(parsed.card));
     if (next.id !== id)
       return failure("invalid", "a card id cannot be changed");
-    const serialized = serializeCard(next);
-    if (!serialized.ok) return failure("invalid", serialized.error);
+    const serialized = serializeCard(next, this.options);
+    if (!serialized.ok) return failure(serialized.code, serialized.error);
     if (serialized.text === current.text)
       return { ok: true, card: next, hash: expectedHash };
 
@@ -196,7 +218,7 @@ export class CardStore {
     );
     fs.writeFileSync(temp, serialized.text, { flag: "wx", mode: 0o644 });
     try {
-      const again = readRegularFile(target);
+      const again = readRegularFile(target, this.maxFileBytes);
       if (!again.ok || hashText(again.text) !== expectedHash)
         return failure("conflict", `card ${id} changed since it was read`);
       fs.renameSync(temp, target);
