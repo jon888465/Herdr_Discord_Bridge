@@ -16,8 +16,8 @@ export type AppendResult =
 
 export const LOG_HEADING = "## 流程紀錄";
 
-/** 暫定的單筆說明長度上限。正式的長度與機敏內容規則在 ADR-0002 未決 4、8。 */
-export const MAX_LOG_TEXT_CHARS = 1000;
+/** 單筆說明長度上限（字元數，ADR-0002 決定 11）：結構化事件的整段說明最多 300 字。 */
+export const MAX_LOG_TEXT_CHARS = 300;
 
 const HEADING_LINE = /^## 流程紀錄[ \t]*$/;
 const ANY_H2 = /^## /;
@@ -35,7 +35,7 @@ function validTime(value: string): boolean {
   );
 }
 
-function validateEntry(entry: LogEntry): string | null {
+export function validateLogEntry(entry: LogEntry): string | null {
   if (typeof entry.time !== "string" || !validTime(entry.time))
     return "invalid time (expected YYYY-MM-DDTHH:MM:SSZ)";
   if (typeof entry.event !== "string" || !EVENT.test(entry.event))
@@ -67,7 +67,7 @@ export function appendLogEntries(
   entries: LogEntry[],
 ): AppendResult {
   for (const [index, entry] of entries.entries()) {
-    const problem = validateEntry(entry);
+    const problem = validateLogEntry(entry);
     if (problem) return { ok: false, error: `entry ${index}: ${problem}` };
   }
 
