@@ -70,10 +70,10 @@ external: { notion: null, github: null, mantis: null }
 
 ## 建議切片順序
 
-1. 卡片 schema 與匯出入。
+1. 卡片 schema 與匯出入：schema、解析、匯入、序列化、驗證指令與範例已完成；Mantis 匯出受阻（需要實際表單）。
 2. worktree 隔離：方向已定（Herdr 原生 worktree workspace，一卡一個；見 REQ-20261101-worktree-isolation），尚待實作。
 3. 專案政策檔，先做 L0／L1。
-4. ~~CI 進 `main` 並建立 ruleset~~ 已完成（2026-10-30，ISSUE-052）；剩 CODEOWNERS、釘 SHA、bot 身分與行為測試。
+4. ~~CI 進 `main` 並建立 ruleset~~ 已完成（2026-10-30，ISSUE-052；action 已釘 SHA）；剩 CODEOWNERS、bot 身分、紅燈 PR 實測、`strict` 檢查與 Dependabot。
 5. L2 自動 merge，先拿 herdr bridge 自己試。
 6. 之後再評估：自動撿卡、Tracker 匯入、遠端 worktree。
 
@@ -94,4 +94,6 @@ external: { notion: null, github: null, mantis: null }
 - **公開 repo：** issue 與 PR 內容任何人都能寫，視為不可信輸入；fork PR 的 workflow 權限也要檢查。
 - CODEOWNERS 保護政策檔、`.github/`、AGENTS.md，並要求 Code Owner 審查；需要第二個身分才有意義（作者不能批准自己的 PR）。
 - Agent 專用的 bot 帳號或 GitHub App，以及第二個權限較大的 token（見討論紀錄的權限清單）。
-- action 釘 commit SHA 並啟用 Dependabot。
+- ~~action 釘 commit SHA~~ 已完成（PR #4）；Dependabot 尚未啟用。
+
+逐項進度與依賴見 [Card-to-Merge 追蹤清單](../card-to-merge-tracker.md)，那是剩餘工作的唯一權威來源。
