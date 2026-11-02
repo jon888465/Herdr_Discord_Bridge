@@ -103,3 +103,18 @@ test("console shares a selected thread bidirectionally and retains selection aft
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("card is a recognised command in the console and in the Discord short form", async () => {
+  assert.deepEqual(parseConsoleCommand("card list ready", "/herdr"), {
+    command: "card",
+    args: ["list", "ready"],
+  });
+  assert.deepEqual(
+    parseConsoleCommand("/herdr card show REQ-20261102-a", "/herdr"),
+    { command: "card", args: ["show", "REQ-20261102-a"] },
+  );
+  const { parseCommandText } = await import("../src/discord.js");
+  assert.deepEqual(parseCommandText("card import", "/herdr", true, true), {
+    rest: "card import",
+  });
+});

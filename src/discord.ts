@@ -54,6 +54,7 @@ export const SHORT_COMMANDS = new Set([
   "quota",
   "failover",
   "team",
+  "card",
 ]);
 
 export interface CommandContext {

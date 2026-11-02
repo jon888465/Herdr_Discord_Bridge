@@ -2102,7 +2102,7 @@ Agent 提議的清理順序（**使用者尚未決定**）：(1) 結果已寫進
 
 ## ISSUE-057：營運卡片指令（`card list/show/import`）
 
-更新日期：2026-11-02。狀態：已修正、待驗收（功能新增；原始碼與自動化測試完成，bridge 尚未重啟，尚未 live 驗收）。
+更新日期：2026-11-02。狀態：重新開啟後已再修正、待驗收（第一次 live 驗收失敗，見下方「live 驗收紀錄」；修正版尚未合併、bridge 尚未用修正版重啟）。
 
 來源：card-to-merge 階段 2a（ADR-0002 階段 2 決定 Q1–Q7）。不是 bug，而是第一個讓 bridge 讀寫營運卡片的入口，因此列為驗收項目。
 
@@ -2124,3 +2124,13 @@ Agent 提議的清理順序（**使用者尚未決定**）：(1) 結果已寫進
 7. Windows 未測（權限檢查在 Windows 略過）。
 
 下一步：使用者重啟並驗收後改為「已驗收」；再進入 2b。
+
+### live 驗收紀錄
+
+**2026-11-02 第一次 live 驗收：失敗（PR #25 版本）。** 環境：本機 macOS，`scripts/run.sh -r` 編譯並重啟 bridge（main `7f06ea2`），Gateway 與 `agy-pod` 連線正常。在 bridge console 輸入 `card list`、`card import <路徑>`、`card show …`、`card assign x`、`card bogus`，**全部**回 `no live Agent target; specify an Agent name/pane id or set one with /herdr use`，沒有進入 `card` 指令。
+
+根因（已確認）：`src/discord.ts` 的 `SHORT_COMMANDS` 沒有 `card`。console 的 `parseConsoleCommand` 與 Discord 的簡寫（`@bot card …`）都以這份清單判斷「是不是指令」，不在清單內就當成要轉給 Agent 的 prompt。自動化測試漏掉的原因：整合測試直接呼叫 `handleCommand("card", …)`，繞過了指令解析。影響：console 當時沒有 live Agent 所以只是報錯、沒有東西被送出；若有選取 Agent，`card import /path` 會被當成 prompt 送給該 Agent。
+
+修正（2026-11-02，worktree `card-short-command`）：`SHORT_COMMANDS` 加入 `card`；`test/console.test.ts` 新增解析測試（console 與 Discord 簡寫），修正前紅、修正後綠。
+
+修正版驗證狀態：全套測試見 PR；**merge 並重新編譯重啟後，需重做上述 7 項 live 驗收**，之前的失敗不算通過。
