@@ -1,8 +1,15 @@
 import { isDeepStrictEqual } from "node:util";
-import { parseCard, type Card } from "./card.js";
+import {
+  formatByteLimit,
+  parseCard,
+  resolveMaxFileBytes,
+  type Card,
+  type ReadOptions,
+} from "./card.js";
 
 export type SerializeResult =
-  { ok: true; text: string } | { ok: false; error: string };
+  | { ok: true; text: string }
+  | { ok: false; error: string; code: "invalid" | "too_large" };
 
 // 裸字串只在確定不會被讀成別的東西時使用；其餘一律加雙引號。
 // 規則比本專案的解析器更保守，讓其他 YAML 工具也不會讀錯（例如開頭的 #）。
@@ -54,7 +61,10 @@ function formatExternal(external: NonNullable<Card["external"]>): string {
   return formatObject(entries);
 }
 
-export function serializeCard(card: Card): SerializeResult {
+export function serializeCard(
+  card: Card,
+  options?: ReadOptions,
+): SerializeResult {
   const lines = [
     `id: ${formatString(card.id)}`,
     `type: ${formatString(card.type)}`,
@@ -72,13 +82,26 @@ export function serializeCard(card: Card): SerializeResult {
   if (card.external !== undefined)
     lines.push(`external: ${formatExternal(card.external)}`);
   const text = `---\n${lines.join("\n")}\n---\n\n${card.body}`;
+  // 超過上限單獨回報，呼叫端才能與「內容不合格」分開處理。
+  const maxFileBytes = resolveMaxFileBytes(options);
+  if (Buffer.byteLength(text, "utf8") > maxFileBytes)
+    return {
+      ok: false,
+      code: "too_large",
+      error: `not serializable: card file exceeds ${formatByteLimit(maxFileBytes)}`,
+    };
   // 寫出去的內容必須能被讀回成同一張卡；否則拒絕，避免產生讀不回來的檔案。
-  const reread = parseCard(text, `${card.id}.md`);
+  const reread = parseCard(text, `${card.id}.md`, options);
   if (!reread.ok)
-    return { ok: false, error: `not serializable: ${reread.error}` };
+    return {
+      ok: false,
+      code: "invalid",
+      error: `not serializable: ${reread.error}`,
+    };
   if (!isDeepStrictEqual(reread.card, card))
     return {
       ok: false,
+      code: "invalid",
       error: "not serializable: content changes when read back",
     };
   return { ok: true, text };

@@ -61,7 +61,31 @@ const CARD_STATUSES: readonly string[] = [
   "done",
   "cancelled",
 ];
-const MAX_FILE_BYTES = 256 * 1024;
+/** 匯入來源不可信，也是預設值。 */
+export const IMPORT_MAX_FILE_BYTES = 512 * 1024;
+/** bridge 自己管理的營運卡片（ADR-0002 決定 10）；也是任何呼叫端能放寬到的絕對上限。 */
+export const LEDGER_MAX_FILE_BYTES = 1024 * 1024;
+
+export interface ReadOptions {
+  /** 整檔位元組上限；預設 IMPORT_MAX_FILE_BYTES，最大 LEDGER_MAX_FILE_BYTES。 */
+  maxFileBytes?: number;
+}
+
+export function formatByteLimit(bytes: number): string {
+  return bytes % (1024 * 1024) === 0
+    ? `${bytes / (1024 * 1024)} MiB`
+    : `${bytes / 1024} KiB`;
+}
+
+// 上限放寬是呼叫端的程式決定，不是資料：不合法的值是程式錯誤，不能悄悄關掉保護。
+export function resolveMaxFileBytes(options?: ReadOptions): number {
+  const value = options?.maxFileBytes ?? IMPORT_MAX_FILE_BYTES;
+  if (!Number.isInteger(value) || value < 1 || value > LEDGER_MAX_FILE_BYTES)
+    throw new RangeError(
+      `maxFileBytes must be an integer between 1 and ${LEDGER_MAX_FILE_BYTES}`,
+    );
+  return value;
+}
 const MAX_FRONTMATTER_BYTES = 8 * 1024;
 const MAX_TITLE_LENGTH = 120;
 
@@ -353,9 +377,13 @@ export type ReadResult =
   { ok: true; document: CardDocument } | { ok: false; error: string };
 
 // 只做結構解析（frontmatter 子集、大小限制），不檢查欄位語意。
-export function readCardDocument(text: string): ReadResult {
-  if (Buffer.byteLength(text, "utf8") > MAX_FILE_BYTES)
-    return fail("card file exceeds 256 KiB");
+export function readCardDocument(
+  text: string,
+  options?: ReadOptions,
+): ReadResult {
+  const maxFileBytes = resolveMaxFileBytes(options);
+  if (Buffer.byteLength(text, "utf8") > maxFileBytes)
+    return fail(`card file exceeds ${formatByteLimit(maxFileBytes)}`);
   const lines = text
     .replace(/^\uFEFF/, "")
     .replace(/\r\n/g, "\n")
@@ -408,8 +436,12 @@ export function buildCard(
   }
 }
 
-export function parseCard(text: string, filename?: string): ParseResult {
-  const read = readCardDocument(text);
+export function parseCard(
+  text: string,
+  filename?: string,
+  options?: ReadOptions,
+): ParseResult {
+  const read = readCardDocument(text, options);
   if (!read.ok) return read;
   return buildCard(read.document, filename);
 }

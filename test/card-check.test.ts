@@ -89,3 +89,28 @@ test("an unknown option is a usage error, not treated as a file", () => {
   assert.equal(result.code, 2);
   assert.match(result.stderr, /--frobnicate/);
 });
+
+test("the default limit is the import limit and --ledger raises it to 1 MiB", () => {
+  const big = valid + "a".repeat(600 * 1024);
+  const requested: number[] = [];
+  const read = (_path: string, maxBytes: number): string => {
+    requested.push(maxBytes);
+    return big;
+  };
+  const standard = runCardCheck(["REQ-20261030-example.md"], read);
+  assert.equal(standard.code, 1);
+  assert.match(standard.stderr, /512 KiB/);
+  const ledger = runCardCheck(["--ledger", "REQ-20261030-example.md"], read);
+  assert.equal(ledger.code, 0, ledger.stderr);
+  assert.deepEqual(requested, [512 * 1024, 1024 * 1024]);
+});
+
+test("--ledger may appear after the files and is mentioned in the usage text", () => {
+  const big = valid + "a".repeat(600 * 1024);
+  const result = runCardCheck(
+    ["REQ-20261030-example.md", "--ledger"],
+    () => big,
+  );
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(runCardCheck(["--help"], () => "").stdout, /--ledger/);
+});

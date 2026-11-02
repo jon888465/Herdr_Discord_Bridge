@@ -307,13 +307,13 @@ test("title must be 1 to 120 characters", () => {
   assert.equal(parseCard(withField("title", '""')).ok, false);
 });
 
-test("frontmatter over 8 KiB and files over 256 KiB are rejected", () => {
+test("frontmatter over 8 KiB and files over the import limit are rejected", () => {
   const bigFrontmatter = parseCard(withExtra(`source: "${"a".repeat(8200)}"`));
   assert.equal(bigFrontmatter.ok, false);
   if (!bigFrontmatter.ok) assert.match(bigFrontmatter.error, /8 KiB/);
-  const bigFile = parseCard(minimal + "a".repeat(256 * 1024));
+  const bigFile = parseCard(minimal + "a".repeat(IMPORT_MAX_FILE_BYTES));
   assert.equal(bigFile.ok, false);
-  if (!bigFile.ok) assert.match(bigFile.error, /256 KiB/);
+  if (!bigFile.ok) assert.match(bigFile.error, /512 KiB/);
 });
 
 test("CRLF line endings and a leading BOM are accepted", () => {
@@ -327,4 +327,60 @@ test("the repository planning card parses under the strict subset", () => {
   const file = path.resolve("docs/cards/REQ-20261030-card-to-merge.md");
   const result = parseCard(fs.readFileSync(file, "utf8"), file);
   assert.deepEqual(result.ok ? null : result.error, null);
+});
+
+import { IMPORT_MAX_FILE_BYTES, LEDGER_MAX_FILE_BYTES } from "../src/card.js";
+
+test("the size limits are 512 KiB for imports and 1 MiB for ledger cards", () => {
+  assert.equal(IMPORT_MAX_FILE_BYTES, 512 * 1024);
+  assert.equal(LEDGER_MAX_FILE_BYTES, 1024 * 1024);
+});
+
+test("a larger file limit can be passed per use, and the default stays at the import limit", () => {
+  const big = minimal + "a".repeat(IMPORT_MAX_FILE_BYTES);
+  const byDefault = parseCard(big);
+  assert.equal(byDefault.ok, false);
+  if (!byDefault.ok) assert.match(byDefault.error, /512 KiB/);
+  const ledger = parseCard(big, undefined, {
+    maxFileBytes: LEDGER_MAX_FILE_BYTES,
+  });
+  assert.equal(ledger.ok, true);
+});
+
+test("the limit in use is enforced exactly and named in the error", () => {
+  const room = LEDGER_MAX_FILE_BYTES - Buffer.byteLength(minimal, "utf8");
+  const exact = minimal + "a".repeat(room);
+  const over = exact + "a";
+  const options = { maxFileBytes: LEDGER_MAX_FILE_BYTES };
+  assert.equal(parseCard(exact, undefined, options).ok, true);
+  const rejected = parseCard(over, undefined, options);
+  assert.equal(rejected.ok, false);
+  if (!rejected.ok) assert.match(rejected.error, /1 MiB/);
+});
+
+test("raising the file limit does not raise the 8 KiB frontmatter limit", () => {
+  const result = parseCard(
+    withExtra(`source: "${"a".repeat(8200)}"`),
+    undefined,
+    { maxFileBytes: LEDGER_MAX_FILE_BYTES },
+  );
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.error, /8 KiB/);
+});
+
+test("a file limit above 1 MiB or not a positive integer is a programming error", () => {
+  for (const maxFileBytes of [
+    Infinity,
+    NaN,
+    0,
+    -1,
+    1.5,
+    LEDGER_MAX_FILE_BYTES + 1,
+  ]) {
+    assert.throws(
+      () => parseCard(minimal, undefined, { maxFileBytes }),
+      RangeError,
+      String(maxFileBytes),
+    );
+  }
 });

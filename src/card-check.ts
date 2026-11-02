@@ -1,8 +1,14 @@
-import { parseCard } from "./card.js";
+import {
+  IMPORT_MAX_FILE_BYTES,
+  LEDGER_MAX_FILE_BYTES,
+  parseCard,
+} from "./card.js";
 
-export const USAGE = `Usage: herdr-card-check FILE...
+export const USAGE = `Usage: herdr-card-check [--ledger] FILE...
 Checks that each Markdown card file is valid under the card format
 (docs/adr/0001-portable-md-cards.md). Prints OK or FAIL per file.
+Files larger than 512 KiB are refused; --ledger raises the limit to 1 MiB
+for operational (ledger) cards (docs/adr/0002-operational-cards-in-plugin-state.md).
 Exit status: 0 all valid, 1 at least one invalid or unreadable, 2 usage error.`;
 
 export interface CheckOutput {
@@ -17,24 +23,29 @@ function lines(entries: string[]): string {
 
 export function runCardCheck(
   args: string[],
-  readFile: (path: string) => string,
+  readFile: (path: string, maxBytes: number) => string,
 ): CheckOutput {
   if (args.includes("--help") || args.includes("-h"))
     return { code: 0, stdout: USAGE + "\n", stderr: "" };
-  const unknown = args.find((arg) => arg.startsWith("-"));
+  const ledger = args.includes("--ledger");
+  const files = args.filter((arg) => arg !== "--ledger");
+  const maxFileBytes = ledger ? LEDGER_MAX_FILE_BYTES : IMPORT_MAX_FILE_BYTES;
+  const unknown = files.find((arg) => arg.startsWith("-"));
   if (unknown !== undefined)
     return {
       code: 2,
       stdout: "",
       stderr: `Unknown option: ${unknown}\n${USAGE}\n`,
     };
-  if (args.length === 0) return { code: 2, stdout: "", stderr: USAGE + "\n" };
+  if (files.length === 0) return { code: 2, stdout: "", stderr: USAGE + "\n" };
 
   const ok: string[] = [];
   const failed: string[] = [];
-  for (const file of args) {
+  for (const file of files) {
     try {
-      const result = parseCard(readFile(file), file);
+      const result = parseCard(readFile(file, maxFileBytes), file, {
+        maxFileBytes,
+      });
       if (result.ok) {
         const { id, type, status, title } = result.card;
         ok.push(`OK    ${file}  ${id} ${type} ${status} "${title}"`);

@@ -192,21 +192,21 @@ test("a dangling symbolic link and a directory named like a card are refused", (
   }
 });
 
-test("a file over 256 KiB is refused without being parsed", () => {
+test("a file over the import limit is refused without being parsed", () => {
   const root = tempRoot();
   fs.writeFileSync(
     path.join(root, "REQ-20261101-huge.md"),
-    card("REQ-20261101-huge") + "a".repeat(300 * 1024),
+    card("REQ-20261101-huge") + "a".repeat(IMPORT_MAX_FILE_BYTES),
   );
   const store = new CardStore(root);
-  assert.match(store.list().errors[0].error, /256 KiB/);
+  assert.match(store.list().errors[0].error, /512 KiB/);
   const read = store.read("REQ-20261101-huge");
   assert.equal(read.ok, false);
   if (!read.ok) assert.equal(read.code, "too_large");
 });
 
 import { serializeCard } from "../src/card-serialize.js";
-import type { Card } from "../src/card.js";
+import { IMPORT_MAX_FILE_BYTES, type Card } from "../src/card.js";
 
 const sample: Card = {
   id: "REQ-20261101-created",
@@ -458,4 +458,72 @@ test("importText rejects invalid text and writes nothing", () => {
   assert.equal(result.ok, false);
   if (!result.ok) assert.equal(result.code, "invalid");
   assert.deepEqual(fs.readdirSync(root), []);
+});
+
+import { LEDGER_MAX_FILE_BYTES } from "../src/card.js";
+
+const bigBody = (bytes: number): Card => ({
+  ...sample,
+  body: "a".repeat(bytes) + "\n",
+});
+
+test("a ledger store reads cards that the default store refuses", () => {
+  const root = tempRoot();
+  const ledger = new CardStore(root, { maxFileBytes: LEDGER_MAX_FILE_BYTES });
+  const created = ledger.create(bigBody(700 * 1024));
+  assert.equal(created.ok, true);
+  assert.equal(ledger.read(sample.id).ok, true);
+  assert.equal(ledger.list().cards.length, 1);
+
+  const standard = new CardStore(root);
+  const refused = standard.read(sample.id);
+  assert.equal(refused.ok === false && refused.code, "too_large");
+  assert.match(standard.list().errors[0].error, /512 KiB/);
+});
+
+test("a store refuses to create or grow a card past its own limit and leaves files untouched", () => {
+  const root = tempRoot();
+  const standard = new CardStore(root);
+  const tooBig = standard.create(bigBody(IMPORT_MAX_FILE_BYTES));
+  assert.equal(tooBig.ok === false && tooBig.code, "too_large");
+  assert.deepEqual(fs.readdirSync(root), []);
+
+  const ledger = new CardStore(root, { maxFileBytes: LEDGER_MAX_FILE_BYTES });
+  const created = ledger.create(bigBody(900 * 1024));
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+  const file = path.join(root, `${sample.id}.md`);
+  const before = fs.readFileSync(file, "utf8");
+  const grown = ledger.update(sample.id, created.hash, (current) => ({
+    ...current,
+    body: current.body + "b".repeat(200 * 1024),
+  }));
+  assert.equal(grown.ok === false && grown.code, "too_large");
+  assert.equal(fs.readFileSync(file, "utf8"), before);
+  assert.deepEqual(fs.readdirSync(root), [`${sample.id}.md`]);
+});
+
+test("importText keeps the import limit even when the store limit is higher", () => {
+  const root = tempRoot();
+  const ledger = new CardStore(root, { maxFileBytes: LEDGER_MAX_FILE_BYTES });
+  const result = ledger.importText(
+    foreign + "a".repeat(IMPORT_MAX_FILE_BYTES),
+    {
+      today: "2026-11-01",
+    },
+  );
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.code, "invalid");
+    assert.match(result.error, /512 KiB/);
+  }
+  assert.deepEqual(fs.readdirSync(root), []);
+});
+
+test("a store limit above 1 MiB is a programming error", () => {
+  assert.throws(
+    () =>
+      new CardStore(tempRoot(), { maxFileBytes: LEDGER_MAX_FILE_BYTES + 1 }),
+    RangeError,
+  );
 });
