@@ -4,6 +4,8 @@
 
 > **狀態：卡片格式的解析、驗證、匯入、序列化已有函式（`src/card*.ts`），另有單檔驗證指令 `herdr-card-check`（待使用者驗收，ISSUE-054）。還沒有 Discord 指令，也沒有檔案讀寫層，bridge 不會自動讀取卡片。** 本指引讓你請 Agent 產生合格的卡片檔，並用驗證指令自我檢查。
 
+> 本目錄與 `docs/cards/` 只放範例與設計文件。實際營運用的卡片位置見 [ADR-0002](../adr/0002-operational-cards-in-plugin-state.md)（plugin 狀態目錄，不進 git）；該機制尚未實作。
+
 ## 範例
 
 | 檔案 | 用途 |

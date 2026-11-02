@@ -3,9 +3,9 @@ id: REQ-20261030-card-to-merge
 type: requirement
 status: refined          # draft | discussing | refined | recorded | ready | in_progress | done | cancelled
 title: 卡片驅動：從工作單到 PR／CI／Merge
-version: 1
+version: 2
 created: 2026-10-30
-updated: 2026-10-30
+updated: 2026-11-02
 source: 與使用者的架構討論（含 ChatGPT 分享對話的規格稿，其內容未能自動讀取，由使用者貼上）
 links: { related_docs: [docs/coding-workflow-proposal.md, docs/durable-task-engine.md, docs/hook-transport-proposal.md, docs/adr/0001-portable-md-cards.md], related_issues: [ISSUE-025, ISSUE-041, ISSUE-052] }
 external: { notion: null, github: null, mantis: null }
@@ -26,8 +26,8 @@ external: { notion: null, github: null, mantis: null }
 
 ## 已決定
 
-1. **卡片 = 一個 md 檔（frontmatter + 內文），檔案為需求的真相來源，不使用 DB。** 版本歷史交給 git。
-2. **執行態不寫進卡片。** 誰在跑、跑到哪、哪台機器留在現有 journal；卡片只放需求、驗收條件、關聯與結果摘要。
+1. **卡片 = 一個 md 檔（frontmatter + 內文），不使用 DB。營運卡片放 plugin 狀態目錄 `<stateDirectory>/cards/`，不進 git**（[ADR-0002](../adr/0002-operational-cards-in-plugin-state.md)，取代 ADR-0001 的「版本歷史交給 git」）。`docs/cards/` 與 `docs/card-examples/` 只放範例與設計文件。
+2. **卡片是流程帳本**：記錄從開單到結束的進度、結果與異動專案（`projects`、`## 異動專案`、`## 流程紀錄`）。執行狀態的權威來源仍是 Team 任務 journal，卡片紀錄由事件衍生且可重複寫入不重複（ADR-0002，取代 ADR-0001 的「執行態不進卡片」）。
 3. **卡片可隨手刪除。** 已完成的卡被刪不影響系統；**執行中的卡被刪 → 暫停並詢問使用者**，不默默繼續也不默默取消。
 4. **先不做任何 Tracker Adapter。** Mantis 流程為：Agent 整理成可貼上的 md，使用者自行建單。Notion／Trello 之後只做匯出入，不做雙向同步。
 5. **自動化程度為「每個專案各自的政策」**，政策檔放在各專案 repo 內並進版控（預定 `.herdr/policy.yml`）：
@@ -36,7 +36,7 @@ external: { notion: null, github: null, mantis: null }
    - L2：review 通過、測試通過、CI 綠後自動 merge。
 6. **herdr bridge 本身目標為 L2（全自動到 merge）。** 授權止於 merge；**不含部署、重啟與 live 驗收**（見 AGENTS.md，merge 不等於「已驗收」）。
 7. **認領第一版為人工指派**（使用者在 CLI／Discord 指定一張卡）。自動撿 `status: ready` 的卡留待後續。
-8. 每張卡預設使用獨立 git worktree；不同卡不共用可寫工作樹。
+8. **卡片開始開發時才建立 worktree**（討論、記錄、轉換、Vibe Coding 不建立），使用 Herdr 原生 `herdr worktree`，一卡一個 worktree workspace，bridge 彙整結果寫卡片；專案自己的 issue、README、CHANGELOG 由 Agent 在 worktree 裡修改、隨 PR 進專案（[REQ-20261101-worktree-isolation](REQ-20261101-worktree-isolation.md)）。
 
 ## 現況（2026-10-30 檢查）
 
@@ -71,7 +71,7 @@ external: { notion: null, github: null, mantis: null }
 ## 建議切片順序
 
 1. 卡片 schema 與匯出入。
-2. worktree 隔離（coding workflow 已列為未做）。
+2. worktree 隔離：方向已定（Herdr 原生 worktree workspace，一卡一個；見 REQ-20261101-worktree-isolation），尚待實作。
 3. 專案政策檔，先做 L0／L1。
 4. ~~CI 進 `main` 並建立 ruleset~~ 已完成（2026-10-30，ISSUE-052）；剩 CODEOWNERS、釘 SHA、bot 身分與行為測試。
 5. L2 自動 merge，先拿 herdr bridge 自己試。
@@ -86,7 +86,8 @@ external: { notion: null, github: null, mantis: null }
 
 ## 待確認
 
-- 卡片目錄放各專案 repo 內（與政策檔同處），還是 bridge 自己的目錄；是否以 `.gitignore` 排除以維持「可隨手砍」。
+- ~~卡片目錄放哪~~ 已決定：plugin 狀態目錄，不進 git（ADR-0002）。
+- 流程紀錄的大小已決定（先提高上限、超過再輪替到旁檔，ADR-0002 決定 10，數字待確認）；機敏內容過濾等見 ADR-0002 未決。
 - CI 檢查是否足以作為 L2 閘門（現為 typecheck、lint、test；對照 SPEC.md 第 8 節驗證與完成定義）。
 - 是否打開 `strict_required_status_checks_policy`（分支需與 `main` 同步才可合併）；自動 merge 前建議開。
 - 以行為測試確認 ruleset 擋得住（直接 push `main`、CI 紅燈 PR）。
