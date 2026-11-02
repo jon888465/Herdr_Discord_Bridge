@@ -80,6 +80,7 @@ export function serializeCard(
     lines.push(`project: ${formatString(card.project)}`);
   if (card.projects !== undefined)
     lines.push(`projects: ${formatArray(card.projects)}`);
+  if (card.tasks !== undefined) lines.push(`tasks: ${formatArray(card.tasks)}`);
   if (card.links !== undefined) lines.push(`links: ${formatLinks(card.links)}`);
   if (card.external !== undefined)
     lines.push(`external: ${formatExternal(card.external)}`);

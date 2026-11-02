@@ -26,6 +26,8 @@ export interface Card {
   project?: string;
   /** `<機器 id>:<repo 目錄名>`，由 bridge 寫入（ADR-0002 決定 4）。 */
   projects?: string[];
+  /** 由 bridge 寫入：這張卡曾經交給哪些 Team 任務（ADR-0002 階段 2 決定 Q5）。 */
+  tasks?: string[];
   links?: CardLinks;
   external?: CardExternal;
   body: string;
@@ -49,6 +51,7 @@ const KNOWN_KEYS = new Set<string>([
   "source",
   "project",
   "projects",
+  "tasks",
   "links",
   "external",
 ]);
@@ -267,6 +270,23 @@ export const PROJECT_NAME =
   /^(?:local|[A-Za-z][A-Za-z0-9_-]{1,31}):(?!\.+$)[A-Za-z0-9._-]{1,64}$/;
 export const MAX_PROJECTS = 20;
 
+export const MAX_TASKS = 50;
+const TASK_ENTRY = /^[A-Za-z0-9._-]{1,64}$/;
+
+function buildTasks(value: Value | undefined): string[] {
+  if (!Array.isArray(value)) return reject('"tasks" must be an inline array');
+  if (value.length > MAX_TASKS)
+    reject(`"tasks" has more than ${MAX_TASKS} entries`);
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== "string" || !TASK_ENTRY.test(item))
+      reject('"tasks" entries must be task ids (letters, digits, . _ -)');
+    if (seen.has(item)) reject(`"tasks" has a duplicate entry ${item}`);
+    seen.add(item);
+  }
+  return value as string[];
+}
+
 function buildProjects(value: Value | undefined): string[] {
   if (!Array.isArray(value))
     return reject('"projects" must be an inline array');
@@ -451,6 +471,7 @@ export function buildCard(
       card.project = asString("project", fields.get("project"));
     if (fields.has("projects"))
       card.projects = buildProjects(fields.get("projects"));
+    if (fields.has("tasks")) card.tasks = buildTasks(fields.get("tasks"));
     if (fields.has("links")) card.links = buildLinks(fields.get("links"));
     if (fields.has("external"))
       card.external = buildExternal(fields.get("external"));
