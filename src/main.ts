@@ -1,4 +1,5 @@
 import { hookModeFor, hookStatusText } from "./hook-status.js";
+import { boundedHandoffSummary } from "./handoff-summary.js";
 import {
   hookEvents,
   permissionBroker,
@@ -60,7 +61,6 @@ import {
   agentHeader,
   codeBlock,
   splitDiscordText,
-  stripAnsi,
   statusEmoji,
 } from "./format.js";
 import { HerdrClient, HerdrError } from "./herdr.js";
@@ -2070,32 +2070,6 @@ function validatePrompt(prompt: string): void {
     throw new Error(
       "prompt is empty, contains an invalid character, or is too long",
     );
-}
-
-function boundedHandoffSummary(output: string, maxChars: number): string {
-  const clean = stripAnsi(output).trim();
-  if (!clean) return "";
-  const lines = clean.split(/\r?\n/).filter((line) => line.trim());
-  let summary = lines.join("\n");
-  if (summary.length > maxChars) {
-    const omission = "… [older handoff output omitted] …\n";
-    summary =
-      maxChars <= omission.length
-        ? summary.slice(-maxChars)
-        : `${omission}${summary.slice(-(maxChars - omission.length))}`;
-  }
-  return redactHandoffSecrets(summary);
-}
-
-function redactHandoffSecrets(value: string): string {
-  return value
-    .replace(
-      /\b(sk-[A-Za-z0-9_-]{10,}|gh[pousr]_[A-Za-z0-9_]{10,})\b/g,
-      "[redacted-token]",
-    )
-    .replace(/\b(xox[baprs]-[A-Za-z0-9-]{10,})\b/g, "[redacted-token]")
-    .replace(/(authorization\s*:\s*bearer\s+)[^\s]+/gi, "$1[redacted]")
-    .replace(/((?:token|password|secret)\s*[=:]\s*)[^\s]+/gi, "$1[redacted]");
 }
 
 async function readAgent(

@@ -165,7 +165,8 @@ issue、README、CHANGELOG 等由 Agent 在該卡片的 worktree 裡依專案自
 - `CardStore(rootDir, options?)`：`list`、`read`、`create`、`update` 都使用該 store 的上限；超過回 `too_large`，`update` 失敗時檔案不動。**`importText` 永遠使用匯入上限**，不因 store 放寬而放寬。
 - `herdr-card-check` 預設 512 KiB，新增 `--ledger` 旗標改用 1 MiB。
 - 測試（2026-11-02，本機 macOS、Node v26.12.0，非 CI）：全套 459 項，458 通過、0 失敗、1 略過（原 445 項，新增 14 項）。
-- **尚未實作：** 輪替本身（`logs/<id>/` 旁檔、保留最近 5 筆）、輪替門檻 768 KiB 的常數（尚無使用者，等實作輪替時再加入）、`projects` 欄位與 `## 異動專案` 的寫入、機敏內容過濾與單筆紀錄長度的正式規則、營運卡片目錄的建立與 bridge 呼叫端。
+- **共用遮蔽模組已實作（2026-11-02，ISSUE-056）：** `src/redact.ts` 的 `redactSecrets` 已整併原本兩份遮蔽邏輯並補上漏掉的樣式，含決定 11 規則 3 的網址清理（移除 `user:pass@` 與像憑證的查詢參數）。`publicText` 與 handoff 摘要已改用它，順序為先遮蔽再截斷。**卡片寫入尚未使用它。**
+- **尚未實作：** 輪替本身（`logs/<id>/` 旁檔、保留最近 5 筆）、輪替門檻 768 KiB 的常數（尚無使用者，等實作輪替時再加入）、`projects` 欄位與 `## 異動專案` 的寫入、決定 11 的卡片端規則（結構化事件模板、短自由文字遇疑似機敏整筆省略、單筆 300／200 字、匯出排除 bridge 區塊）、營運卡片目錄的建立與 bridge 呼叫端。
 
 ### 受限寫入與權限（2026-11-02）
 
