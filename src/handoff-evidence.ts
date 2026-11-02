@@ -5,6 +5,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
 import { stripAnsi } from "./format.js";
+import { redactSecrets } from "./redact.js";
 import type { AgentRecord } from "./types.js";
 
 const exec = promisify(execFile);
@@ -115,17 +116,7 @@ export function agentCwd(agent: AgentRecord): string {
   return cwd;
 }
 export function publicText(value: string, limit = 32000): string {
-  const clean = stripAnsi(value)
-    .replace(
-      /-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g,
-      "[redacted private key]",
-    )
-    .replace(
-      /\b(?:sk-[A-Za-z0-9_-]{10,}|gh[pousr]_[A-Za-z0-9_]{10,}|xox[baprs]-[A-Za-z0-9-]{10,})\b/g,
-      "[redacted token]",
-    )
-    .replace(/(authorization\s*:\s*bearer\s+)[^\s]+/gi, "$1[redacted]")
-    .replace(/((?:token|password|secret)\s*[=:]\s*)[^\s]+/gi, "$1[redacted]");
+  const clean = redactSecrets(stripAnsi(value));
   if (clean.length <= limit) return clean;
   const beginning = Math.floor(limit / 4);
   return (
