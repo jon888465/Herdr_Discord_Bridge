@@ -463,3 +463,35 @@ test("a project name with an empty directory part is rejected by the parser", ()
     false,
   );
 });
+
+test("tasks is an inline array of task ids written by the bridge", () => {
+  const result = parseCard(
+    withExtra("tasks: [task-0a1b2c3d-1111, task-9f8e7d6c-2222]"),
+    "REQ-20261030-example.md",
+  );
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.deepEqual(result.card.tasks, [
+    "task-0a1b2c3d-1111",
+    "task-9f8e7d6c-2222",
+  ]);
+  const empty = parseCard(withExtra("tasks: []"), "REQ-20261030-example.md");
+  assert.deepEqual(empty.ok ? empty.card.tasks : empty.error, []);
+});
+
+for (const [name, line] of [
+  ["a scalar instead of an array", "tasks: task-1"],
+  ["a non-string element", "tasks: [5]"],
+  ["a space in an id", 'tasks: ["task 1"]'],
+  ["an id over 64 characters", `tasks: [${"t".repeat(65)}]`],
+  ["a duplicate id", "tasks: [task-1, task-1]"],
+  [
+    "more than 50 ids",
+    `tasks: [${Array.from({ length: 51 }, (_, i) => `task-${i}`).join(", ")}]`,
+  ],
+] as const) {
+  test(`tasks with ${name} is rejected`, () => {
+    const result = parseCard(withExtra(line), "REQ-20261030-example.md");
+    assert.equal(result.ok, false);
+  });
+}

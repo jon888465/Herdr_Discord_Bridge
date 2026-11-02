@@ -280,3 +280,23 @@ test("an empty projects array round trips and an invalid projects value is refus
   const bad = serializeCard({ ...minimal, projects: ["no prefix"] });
   assert.equal(bad.ok, false);
 });
+
+test("tasks is written after projects and before links, and round trips", () => {
+  const card: Card = {
+    ...minimal,
+    projects: ["local:Herdr_Discord_Bridge"],
+    tasks: ["task-0a1b2c3d-1111", "task-9f8e7d6c-2222"],
+    links: { parent: "REQ-20261030-parent" },
+  };
+  const result = serializeCard(card);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const lines = result.text.split("\n---\n")[0].split("\n").slice(8);
+  assert.deepEqual(lines, [
+    "projects: [local:Herdr_Discord_Bridge]",
+    "tasks: [task-0a1b2c3d-1111, task-9f8e7d6c-2222]",
+    "links: { parent: REQ-20261030-parent }",
+  ]);
+  const reread = parseCard(result.text, "REQ-20261030-example.md");
+  assert.deepEqual(reread.ok ? reread.card : reread.error, card);
+});

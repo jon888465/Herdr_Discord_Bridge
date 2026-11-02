@@ -59,6 +59,7 @@ export type CardEvent = { time: string; eventId: string } & (
       baseSha: string;
     }
   | { event: "started"; taskId: string }
+  | { event: "completed"; taskId: string }
   | {
       event: "review_verdict";
       role: string;
@@ -130,6 +131,11 @@ function render(fields: Fields): { text: string; suspicious: boolean } {
     case "started":
       return {
         text: `開始執行 task ${text(fields, "taskId", TASK_ID, "letters, digits, . _ -")}`,
+        suspicious: false,
+      };
+    case "completed":
+      return {
+        text: `task ${text(fields, "taskId", TASK_ID, "letters, digits, . _ -")} 完成`,
         suspicious: false,
       };
     case "review_verdict": {

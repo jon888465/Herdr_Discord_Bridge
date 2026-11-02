@@ -7,6 +7,7 @@ import {
   isCardId,
   LEDGER_MAX_FILE_BYTES,
   MAX_PROJECTS,
+  MAX_TASKS,
   parseCard,
   resolveMaxFileBytes,
   type Card,
@@ -347,6 +348,28 @@ export class CardStore {
       return {
         ...card,
         status,
+        updated: today > card.updated ? today : card.updated,
+      };
+    });
+  }
+
+  /**
+   * bridge 專用：把 Team 任務 id 記進 frontmatter 的 `tasks`（ADR-0002 階段 2 決定 Q5）。
+   * 冪等：已經在清單內就不重寫檔案；順序保留；一張卡最多 50 個。
+   */
+  recordTask(id: string, taskId: string, today: string): UpdateResult {
+    if (!isCardDate(today))
+      return failure("invalid", "today must be a valid YYYY-MM-DD date");
+    if (!/^[A-Za-z0-9._-]{1,64}$/.test(taskId))
+      return failure("invalid", "taskId must be letters, digits, . _ -");
+    return this.mutate(id, (card) => {
+      const tasks = card.tasks ?? [];
+      if (tasks.includes(taskId)) return card;
+      if (tasks.length >= MAX_TASKS)
+        return failure("invalid", `a card can hold at most ${MAX_TASKS} tasks`);
+      return {
+        ...card,
+        tasks: [...tasks, taskId],
         updated: today > card.updated ? today : card.updated,
       };
     });

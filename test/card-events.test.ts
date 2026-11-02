@@ -340,3 +340,11 @@ test("a failure reason is normalised, bounded to 200 characters and checked befo
     true,
   );
 });
+
+test("completed names the finished task and validates the task id", () => {
+  const ok = buildLogEntry({ ...base, event: "completed", taskId: "task-42" });
+  assert.equal(ok.ok && ok.entry.text, "task task-42 完成");
+  assert.equal(ok.ok && ok.entry.event, "completed");
+  reject({ ...base, event: "completed", taskId: "a b" }, /taskId/, "taskId");
+  reject({ ...base, event: "completed" }, /taskId/, "missing taskId");
+});

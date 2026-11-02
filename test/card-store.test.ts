@@ -1234,3 +1234,52 @@ test("side files are read with the absolute limit, so a rotation near a small st
   const log = store.readLog(sample.id);
   assert.equal(log.ok && log.entries.length, 40);
 });
+
+test("recordTask adds the task id to tasks, bumps updated and keeps the body", () => {
+  const { root, store } = seededReady();
+  const result = store.recordTask(ready.id, "task-aaa-1", "2026-11-03");
+  assert.equal(result.ok, true);
+  const read = store.read(ready.id);
+  assert.deepEqual(read.ok && read.card.tasks, ["task-aaa-1"]);
+  assert.equal(read.ok && read.card.updated, "2026-11-03");
+  assert.equal(read.ok && read.card.body, ready.body);
+  if (process.platform !== "win32")
+    assert.equal(modeOf(path.join(root, `${ready.id}.md`)), 0o600);
+});
+
+test("recordTask is idempotent, keeps order, and refuses a bad id, a bad date or an unknown card", () => {
+  const { root, store } = seededReady();
+  store.recordTask(ready.id, "task-aaa-1", "2026-11-03");
+  store.recordTask(ready.id, "task-bbb-2", "2026-11-03");
+  const file = path.join(root, `${ready.id}.md`);
+  const before = fs.readFileSync(file, "utf8");
+  const again = store.recordTask(ready.id, "task-aaa-1", "2026-11-09");
+  assert.equal(again.ok, true);
+  assert.equal(fs.readFileSync(file, "utf8"), before);
+  const read = store.read(ready.id);
+  assert.deepEqual(read.ok && read.card.tasks, ["task-aaa-1", "task-bbb-2"]);
+
+  assert.equal(store.recordTask(ready.id, "bad id", "2026-11-03").ok, false);
+  assert.equal(store.recordTask(ready.id, "task-ccc", "yesterday").ok, false);
+  const missing = store.recordTask(
+    "REQ-20261101-nothing",
+    "task-x",
+    "2026-11-03",
+  );
+  assert.equal(!missing.ok && missing.code, "not_found");
+  assert.equal(fs.readFileSync(file, "utf8"), before);
+});
+
+test("recordTask stops at 50 tasks without touching the file", () => {
+  const { root, store } = seededReady();
+  for (let i = 0; i < 50; i++)
+    assert.equal(
+      store.recordTask(ready.id, `task-${i}`, "2026-11-03").ok,
+      true,
+    );
+  const file = path.join(root, `${ready.id}.md`);
+  const before = fs.readFileSync(file, "utf8");
+  const over = store.recordTask(ready.id, "task-50", "2026-11-03");
+  assert.equal(!over.ok && over.code, "invalid");
+  assert.equal(fs.readFileSync(file, "utf8"), before);
+});
