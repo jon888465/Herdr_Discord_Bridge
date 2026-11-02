@@ -297,3 +297,26 @@ export function agentSupportsLocalImages(kind: string | undefined): boolean {
     name.includes(k),
   );
 }
+
+/**
+ * 下載 Discord 附件並當成 UTF-8 文字讀取（例如要匯入的卡片 md 檔）。
+ * 重用既有的網址驗證（只允許 Discord CDN 的 HTTPS、無帳密、無埠）與下載上限；
+ * 宣告的大小先檢查，下載中再檢查實際大小，內容必須是合法的 UTF-8。
+ */
+export async function downloadDiscordText(
+  item: { url: string; size: number },
+  limit: number,
+  request: typeof fetch = fetch,
+): Promise<string> {
+  assertDiscordUrl(item.url);
+  if (!Number.isFinite(item.size) || item.size <= 0 || item.size > limit)
+    throw new Error(
+      `The attachment must be non-empty and at most ${Math.floor(limit / 1024)} KiB`,
+    );
+  const bytes = await download(item.url, limit, request);
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new Error("The attachment is not valid UTF-8 text");
+  }
+}

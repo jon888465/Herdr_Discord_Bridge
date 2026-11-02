@@ -2099,3 +2099,28 @@ Agent 提議的清理順序（**使用者尚未決定**）：(1) 結果已寫進
 未驗證：實際 session handoff（Discord／Herdr）的端到端；遮蔽是黑名單式，**不保證完整**，新的憑證格式出現就可能漏掉。`redactSecrets` 只用在 handoff 的公開文字與摘要，**一般 Agent 回覆轉送到 Discord 的路徑沒有套用**（本 issue 未改變這一點）；營運卡片尚未使用它（ADR-0002 決定 11，尚未實作）。
 
 下一步：待使用者在實際 handoff 驗收；營運卡片寫入時套用 ADR-0002 決定 11（結構化事件優先、短自由文字遇疑似機敏整筆省略）。
+
+## ISSUE-057：營運卡片指令（`card list/show/import`）
+
+更新日期：2026-11-02。狀態：已修正、待驗收（功能新增；原始碼與自動化測試完成，bridge 尚未重啟，尚未 live 驗收）。
+
+來源：card-to-merge 階段 2a（ADR-0002 階段 2 決定 Q1–Q7）。不是 bug，而是第一個讓 bridge 讀寫營運卡片的入口，因此列為驗收項目。
+
+使用者可見行為：Discord（`allowedUserIds`）與 console 新增 `card list [status]`、`card show <id>`、`card import`。`card assign` 只回「尚未實作」。不啟動 Agent、不改卡片狀態、不寫流程紀錄。
+
+預期行為：見 SPEC「營運卡片指令」。重點：Discord 不能指定伺服器路徑；匯入一律 `draft`、清空 `external`、不覆蓋；既存目錄他人可讀時拒絕並提示 `chmod 700`；輸出先遮蔽機敏內容。
+
+根因／修正範圍：不適用（新功能）。新增 `src/card-directory.ts`、`src/card-command.ts`、`downloadDiscordText`（`src/attachments.ts`）、`src/main.ts` 的 `case "card"` 與 help。
+
+測試（2026-11-02，本機 macOS、Node v26.12.0，非 CI）：`npm run typecheck`、`npm run lint` 通過；新增 `test/card-directory.test.ts`（5）、`test/card-command.test.ts`（18）、`test/card-command-main.test.ts`（2，經 `handleCommand`）、`test/attachments.test.ts`（+4）；全套 618 項，617 通過、0 失敗、1 略過（原 589 項）。目錄權限檢查做過變異測試（移除檢查會讓測試失敗）。
+
+未驗證（待使用者）：
+1. 重啟 bridge 後，在 Discord 實際執行 `card list`（空目錄）。
+2. 附上一個真實 `.md`（例如 Mantis 轉出的卡片）執行 `card import`，確認回覆、檔案權限 0600／目錄 0700。
+3. `card show <id>`，確認內容與遮蔽。
+4. 把檔案改成 `status: ready` 後 `card list ready`。
+5. 把 `cards/` 權限改成 755，確認被拒絕並提示 `chmod 700`（再改回）。
+6. 在 Discord 嘗試 `card import /etc/hosts.md`，確認被拒絕。
+7. Windows 未測（權限檢查在 Windows 略過）。
+
+下一步：使用者重啟並驗收後改為「已驗收」；再進入 2b。

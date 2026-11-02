@@ -209,3 +209,83 @@ test("local image delivery allowlist includes pi by exact name only (ISSUE-049)"
   for (const kind of ["copilot", "spinner", "gemini", "", undefined])
     assert.equal(agentSupportsLocalImages(kind), false, String(kind));
 });
+
+import { downloadDiscordText } from "../src/attachments.js";
+
+const discordUrl = "https://cdn.discordapp.com/attachments/1/2/card.md";
+
+function fakeFetch(body: Uint8Array | string) {
+  const calls: Array<{ url: string; redirect?: string }> = [];
+  const request = (async (url: string, init?: RequestInit) => {
+    calls.push({ url, redirect: init?.redirect });
+    return new Response(new Blob([body as BlobPart]));
+  }) as unknown as typeof fetch;
+  return { request, calls };
+}
+
+test("downloadDiscordText returns the UTF-8 text of a Discord attachment and refuses redirects", async () => {
+  const { request, calls } = fakeFetch("# 卡片\n內容\n");
+  const text = await downloadDiscordText(
+    { url: discordUrl, size: 20 },
+    1024,
+    request,
+  );
+  assert.equal(text, "# 卡片\n內容\n");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].redirect, "error");
+});
+
+test("downloadDiscordText rejects non-Discord and non-HTTPS URLs without making a request", async () => {
+  for (const url of [
+    "https://example.invalid/card.md",
+    "http://cdn.discordapp.com/attachments/1/2/card.md",
+    "https://user:pw@cdn.discordapp.com/attachments/1/2/card.md",
+    "https://cdn.discordapp.com:8443/attachments/1/2/card.md",
+    "file:///etc/passwd",
+  ]) {
+    const { request, calls } = fakeFetch("x");
+    await assert.rejects(
+      downloadDiscordText({ url, size: 1 }, 1024, request),
+      /Discord|Invalid URL/,
+      url,
+    );
+    assert.equal(calls.length, 0, url);
+  }
+});
+
+test("downloadDiscordText checks the declared size before downloading and the real size while downloading", async () => {
+  const declaredTooBig = fakeFetch("x");
+  await assert.rejects(
+    downloadDiscordText(
+      { url: discordUrl, size: 2048 },
+      1024,
+      declaredTooBig.request,
+    ),
+    /at most/,
+  );
+  assert.equal(declaredTooBig.calls.length, 0);
+
+  for (const size of [0, -1, Number.NaN]) {
+    const { request, calls } = fakeFetch("x");
+    await assert.rejects(
+      downloadDiscordText({ url: discordUrl, size }, 1024, request),
+      /at most/,
+      String(size),
+    );
+    assert.equal(calls.length, 0);
+  }
+
+  const lying = fakeFetch("a".repeat(2000));
+  await assert.rejects(
+    downloadDiscordText({ url: discordUrl, size: 10 }, 1024, lying.request),
+    /exceeds/,
+  );
+});
+
+test("downloadDiscordText rejects content that is not valid UTF-8 text", async () => {
+  const { request } = fakeFetch(new Uint8Array([0x23, 0x20, 0xff, 0xfe, 0x0a]));
+  await assert.rejects(
+    downloadDiscordText({ url: discordUrl, size: 5 }, 1024, request),
+    /UTF-8/,
+  );
+});
