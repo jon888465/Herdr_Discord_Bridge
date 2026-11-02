@@ -1,6 +1,6 @@
-// `card` 指令（ADR-0002 階段 2a）：list、show、import。Discord 與本機 console 共用
+// `card` 指令（ADR-0002 階段 2）：list、show、import、assign。Discord 與本機 console 共用
 // handleCommand 的同一個入口；授權沿用既有的 allowedUserIds（在 handleCommand 之前已檢查）。
-// 這一階段的指令不會啟動任何 Agent。
+// 只有 assign 會啟動 Team 任務，且只接受 ready 的卡片。
 
 import fs from "node:fs";
 import {
@@ -9,6 +9,7 @@ import {
   LEDGER_MAX_FILE_BYTES,
   isCardId,
 } from "./card.js";
+import { buildAssignmentPrompt } from "./card-handoff.js";
 import { ensureCardsDirectory } from "./card-directory.js";
 import { CardStore } from "./card-store.js";
 import { redactSecrets } from "./redact.js";
@@ -26,10 +27,17 @@ export interface CardCommandDeps {
   ) => Promise<string>;
   /** 只有 console 會用：讀本機檔案文字（Discord 使用者不能指定伺服器上的路徑）。 */
   readLocalFile: (path: string) => string;
+  /** 事件時間，`YYYY-MM-DDTHH:MM:SSZ`（UTC）。 */
+  now: () => string;
+  /** 以卡片產生的 prompt 啟動 Team 任務；失敗要丟出錯誤（此時卡片不會被改動）。 */
+  startTask: (
+    prompt: string,
+    options: { coding: boolean },
+  ) => Promise<{ taskId: string; lead: { agent: string; machine: string } }>;
 }
 
 const USAGE =
-  "usage: card list [status] | card show <id> | card import [--slug <名稱>] [<本機路徑，僅 console>]（Discord 請附上 .md 檔） | card assign <id>（尚未實作）";
+  "usage: card list [status] | card show <id> | card import [--slug <名稱>] [<本機路徑，僅 console>]（Discord 請附上 .md 檔） | card assign <id> [--coding]";
 const MAX_LIST_LINES = 30;
 const MAX_LIST_ERRORS = 5;
 const TITLE_CHARS = 50;
@@ -151,6 +159,80 @@ export function readLocalCardFile(file: string): string {
   }
 }
 
+// 同一個程序內正在指派的卡片：startTask 之後、卡片狀態更新之前有 await，
+// 沒有這個保護時同時兩次 assign 都會看到 ready 而各啟動一個任務。
+const assigning = new Set<string>();
+
+async function assignCard(
+  args: string[],
+  deps: CardCommandDeps,
+): Promise<string> {
+  const coding = args.includes("--coding");
+  const rest = args.filter((arg) => arg !== "--coding");
+  if (rest.length !== 1 || rest[0].startsWith("--"))
+    throw new Error("usage: card assign <id> [--coding]");
+  const id = rest[0];
+  if (!isCardId(id)) throw new Error(`${id} 不是合法的卡片 id`);
+  if (assigning.has(id)) throw new Error(`卡片 ${id} 正在指派中`);
+  assigning.add(id);
+  try {
+    const store = openDirectory(deps);
+    const read = store?.read(id);
+    if (!store || !read || (!read.ok && read.code === "not_found"))
+      throw new Error(`找不到卡片 ${id}`);
+    if (!read.ok) throw new Error(read.error);
+    const { card } = read;
+    if (card.status !== "ready")
+      throw new Error(
+        `卡片 ${id} 的狀態是 ${card.status}；只有 ready 的卡片可以指派${card.status === "in_progress" ? "（已在進行中）" : ""}`,
+      );
+    const built = buildAssignmentPrompt(card);
+    if (!built.ok) throw new Error(built.error);
+
+    const task = await deps.startTask(built.prompt, { coding });
+
+    // 任務已經啟動：之後的卡片更新失敗只警告，不丟錯誤，否則使用者會以為沒指派而重複指派。
+    const today = deps.now().slice(0, 10);
+    const warnings: string[] = [];
+    const note = (what: string, error: string): void => {
+      warnings.push(`${what}：${error}`);
+    };
+    const status = store.setStatus(id, "in_progress", today);
+    if (!status.ok) note("狀態", status.error);
+    const recorded = store.recordTask(id, task.taskId, today);
+    if (!recorded.ok) note("tasks", recorded.error);
+    const events = [
+      {
+        event: "assigned" as const,
+        machine: task.lead.machine,
+        agent: task.lead.agent,
+        eventId: `${task.taskId}-assigned`,
+      },
+      {
+        event: "started" as const,
+        taskId: task.taskId,
+        eventId: `${task.taskId}-started`,
+      },
+    ];
+    for (const event of events) {
+      const result = store.recordEvent(id, { ...event, time: deps.now() });
+      if (!result.ok) note(`紀錄 ${event.event}`, result.error);
+    }
+
+    const lines = [
+      `已指派 ${id} 給 ${task.lead.agent}（${task.lead.machine}），task ${task.taskId}${coding ? "（--coding）" : ""}`,
+    ];
+    if (warnings.length)
+      lines.push(
+        `⚠️ 任務已啟動，但卡片更新失敗：${warnings.join("；")}。請不要重複指派；用 \`team status ${task.taskId}\` 查看任務。`,
+      );
+    else lines.push("卡片已設為 in_progress。");
+    return lines.join("\n");
+  } finally {
+    assigning.delete(id);
+  }
+}
+
 async function importCardText(
   args: string[],
   deps: CardCommandDeps,
@@ -224,8 +306,7 @@ export async function runCardCommand(
       text = await importCardText(rest, deps);
       break;
     case "assign":
-      text =
-        "`card assign` 尚未實作（階段 2b）。目前卡片只能列出、查看與匯入。";
+      text = await assignCard(rest, deps);
       break;
     default:
       throw new Error(USAGE);

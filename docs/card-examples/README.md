@@ -88,4 +88,4 @@ FAIL  bad.md: "external.mantis" must be a string or null
 ## 目前的限制
 
 - **不支援 `x-` 自訂欄位。** 含 `x-` 開頭 key 的卡片會被 `parseCard` 拒絕（`unknown key`）。需要保留的資訊請寫在內文。見 [ISSUE-053](../known-issues.md)。
-- bridge 還不會讀取或監看卡片目錄；卡片目前是人與 Agent 之間的文件。
+- bridge 只會在你下 `card` 指令時讀寫卡片目錄，不會監看它。`card assign` 只把標題、`## 描述`、`## 驗收條件` 交給 Agent，所以 Mantis 單轉成卡片時，重現步驟等必要資訊請寫進 `## 描述`。

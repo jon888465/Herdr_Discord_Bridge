@@ -76,7 +76,7 @@ import {
   QuotaFailoverStore,
   type QuotaState,
 } from "./quota-failover.js";
-import { TeamTaskStore } from "./team-task-store.js";
+import { TeamTaskStore, type DurableTeamTask } from "./team-task-store.js";
 import {
   AgentWatcher,
   type AgentRemoved,
@@ -580,19 +580,34 @@ export async function handleCommand(
     case "team":
       await teamCommand(args, context, runtime);
       return;
-    case "card":
-      await runtime.discord.reply(
-        context.message,
-        await runCardCommand(args, {
-          rootDir: join(stateDirectory(), "cards"),
-          today: () => new Date().toISOString().slice(0, 10),
-          source: context.source === "console" ? "console" : "discord",
-          attachments: [...context.message.attachments.values()],
-          download: downloadDiscordText,
-          readLocalFile: readLocalCardFile,
-        }),
-      );
+    case "card": {
+      let started: Awaited<ReturnType<typeof startTeamTask>> | undefined;
+      const text = await runCardCommand(args, {
+        rootDir: join(stateDirectory(), "cards"),
+        today: () => new Date().toISOString().slice(0, 10),
+        now: () => new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+        source: context.source === "console" ? "console" : "discord",
+        attachments: [...context.message.attachments.values()],
+        download: downloadDiscordText,
+        readLocalFile: readLocalCardFile,
+        startTask: async (prompt, options) => {
+          started = await startTeamTask(
+            prompt,
+            options.coding,
+            context,
+            runtime,
+          );
+          return {
+            taskId: started.taskId,
+            lead: ledgerLead(started.lead),
+          };
+        },
+      });
+      await runtime.discord.reply(context.message, text);
+      // 與 team ask 相同：先回條，任務結束時再送結果。卡片的 done／失敗同步屬於 2b 第三步。
+      if (started) await reportTeamTask(started, context, runtime);
       return;
+    }
     default:
       if (context.routing.guildId === "local-console") {
         await askAgent([command, ...args], context, runtime);
@@ -1371,14 +1386,22 @@ async function teamRemove(
   );
 }
 
-async function teamAsk(
-  args: string[],
+/**
+ * 解析 Lead 與 Workers、登記並啟動一個持久化的 Team 任務（`team ask` 與 `card assign` 共用）。
+ * 任務一經登記就會執行；回傳的 `running` 在任務結束時 resolve。
+ */
+async function startTeamTask(
+  prompt: string,
+  coding: boolean,
   context: CommandContext,
   runtime: Runtime,
-): Promise<void> {
+): Promise<{
+  taskId: string;
+  lead: AgentRecord;
+  workers: AgentRecord[];
+  running: Promise<DurableTeamTask>;
+}> {
   const workspaceId = await teamWorkspaceId(context, runtime);
-  const coding = args[0] === "--coding";
-  const prompt = (coding ? args.slice(1) : args).join(" ").trim();
   if (coding && !prompt) throw new Error("usage: team ask --coding <prompt>");
   validatePrompt(prompt);
   const targets = runtime.routing.workspaceTargets(workspaceId);
@@ -1462,6 +1485,29 @@ async function teamAsk(
   );
   // Register/persist before the receipt. A delivery failure must not orphan execution.
   void running.catch((error) => console.error(safeError(error)));
+  return { taskId, lead, workers, running };
+}
+
+async function teamAsk(
+  args: string[],
+  context: CommandContext,
+  runtime: Runtime,
+): Promise<void> {
+  const coding = args[0] === "--coding";
+  const prompt = (coding ? args.slice(1) : args).join(" ").trim();
+  await reportTeamTask(
+    await startTeamTask(prompt, coding, context, runtime),
+    context,
+    runtime,
+  );
+}
+
+/** 送出「已接受」回條、等任務結束、再送出結果。 */
+async function reportTeamTask(
+  { taskId, lead, workers, running }: Awaited<ReturnType<typeof startTeamTask>>,
+  context: CommandContext,
+  runtime: Runtime,
+): Promise<void> {
   await runtime.discord.reply(
     context.message,
     `${agentHeaderFor(lead)}\n🧭 **Team Task accepted** · \`${taskId}\`\nLead: **${agentLabel(lead)}**\nWorkers: ${workers.map(agentLabel).join(", ")}`,
@@ -1471,6 +1517,18 @@ async function teamAsk(
     context.message,
     `${agentHeaderFor(lead)}\n**Team Task ${result.state}** · \`${taskId}\`\n\n${result.synthesis || result.detail || "(no synthesis)"}`,
   );
+}
+
+/** 卡片流程紀錄只接受簡單的 Agent 名稱與機器 id；不符合的值換成安全的預設。 */
+function ledgerLead(agent: AgentRecord): { agent: string; machine: string } {
+  const name = String(agent.agent ?? "agent")
+    .replace(/[^A-Za-z0-9._-]/g, "-")
+    .slice(0, 40);
+  const machine = typeof agent.machine === "string" ? agent.machine : "local";
+  return {
+    agent: name || "agent",
+    machine: /^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(machine) ? machine : "local",
+  };
 }
 
 async function reportOrchestrationEvent(
@@ -2965,7 +3023,7 @@ function helpText(prefix: string): string {
     `\`${prefix} team ask [--coding] <prompt>\` — 建立持久化任務，由 Lead 動態分工；--coding 才啟用本機 Git 驗收`,
     `\`${prefix} team questions <task-id>\` / \`${prefix} team reply <task-id> <question-id> <answer>\` — 指定問題回答`,
     `\`${prefix} team status [task-id]\` / \`${prefix} team cancel <task-id>\` — 查看／取消任務`,
-    `\`${prefix} card list [status]\` / \`${prefix} card show <id>\` — 查看營運卡片；\`card import\`（附上 .md 檔）匯入為 draft。目前不會啟動 Agent`,
+    `\`${prefix} card list [status]\` / \`${prefix} card show <id>\` — 查看營運卡片；\`card import\`（附上 .md 檔）匯入為 draft；\`card assign <id> [--coding]\` 把 ready 的卡片交給目前 workspace 的 Team（同 \`team ask\`）`,
     `\`${prefix} quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds]\` — 明確額度回報；quota status 查詢`,
     `\`${prefix} failover arm <source> <candidate1,candidate2> <goal>\` → \`failover run <id> confirm-source-stopped\` — 確認停止後自動選擇候選並驗證切換；status/cancel 可查詢／取消`,
     `\`${prefix} handoff checkpoint <source> <goal>\` → \`handoff verify <id> <destination> confirm-source-stopped\` → \`handoff accept <id>\` → \`handoff continue <id>\` — 持久化交接；status/packet/cancel 可查詢／釋放`,
@@ -3021,7 +3079,8 @@ function consoleHelpText(): string {
     "team questions <task-id> — 列出多 Agent 問題與狀態",
     "team reply <task-id> <question-id> <answer> — 回答指定問題",
     "team cancel <task-id> — 停止任務派送並取消仍 active 的工作",
-    "card list [status] | card show <id> | card import <本機 .md 路徑> [--slug <名稱>] — 營運卡片（匯入為 draft，不啟動 Agent）",
+    "card list [status] | card show <id> | card import <本機 .md 路徑> [--slug <名稱>] — 營運卡片（匯入為 draft）",
+    "card assign <id> [--coding] — 把 ready 的卡片交給目前 workspace 的 Team（同 team ask）",
     "quota status [pane] / quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds] — 明確額度回報",
     "failover arm <source> <candidate1,candidate2> <goal-and-constraints> — 保存候選優先序與任務",
     "failover status [id] / failover run <id> confirm-source-stopped / failover cancel <id> — 檢視／驗證切換／取消",

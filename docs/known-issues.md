@@ -2150,3 +2150,27 @@ Discord（由使用者操作並回報，Agent 未看到原始回覆）：使用�
 未驗證／已知限制：Windows 未測（權限檢查在 Windows 略過）；Discord 端 `card import` 的逐步回覆文字依使用者回報，未逐字留存；驗收用卡片 `REQ-20261102-accept-2a`、`REQ-20261102-accept-test` 仍留在使用者的卡片目錄，可刪除。
 
 下一步：階段 2b（`card assign`、journal 同步、`completed` 事件模板、`tasks` 欄位、內容交接），由使用者決定何時開始。
+
+## ISSUE-058：`card assign` 把 ready 卡片交給 Team 任務
+
+更新日期：2026-11-02。狀態：已修正、待驗收（功能新增；原始碼與自動化測試完成，執行中的 bridge 尚未載入此版本，尚未 live 驗收）。
+
+來源：card-to-merge 階段 2b 第二步（ADR-0002 階段 2 決定 Q1、Q3）。這是第一個會由卡片啟動 Agent 的指令，因此列為驗收項目。
+
+使用者可見行為：`card assign <id> [--coding]`（Discord `@bot card assign …` 與 console）。見 SPEC「營運卡片指令」。`team ask` 的啟動邏輯被抽成共用函式，`team ask` 行為應與之前完全相同。
+
+預期行為：只有 `ready` 且有 `## 描述` 的卡片可指派；Agent 只收到標題／描述／驗收條件（遮蔽、截斷、分隔）；成功後卡片 `in_progress`、記下 `tasks` 與 `assigned`／`started` 紀錄；回條與結果和 `team ask` 一樣；任務完成後卡片**不會**自動 `done`（第三步）。
+
+根因／修正範圍：不適用（新功能）。新增 `src/card-handoff.ts`；`src/card-command.ts` 的 `assign`；`src/main.ts` 抽出 `startTeamTask`／`reportTeamTask` 並接線。
+
+測試（2026-11-02，本機 macOS、Node v26.12.0，非 CI）：新增 `test/card-handoff.test.ts`（6）與 `test/card-command.test.ts` 的 assign 測試（9，含並行指派保護，已做變異測試：移除保護會讓測試卡住失敗）；全套 646 項，645 通過、0 失敗、1 略過（原 631 項）；`lint` 通過。**沒有**經由 `handleCommand` 的 `card assign` 自動化整合測試（需要完整 Team runtime）；`team ask` 的既有測試（含 `--coding`）全數通過，作為抽出共用函式的回歸依據。
+
+未驗證（待使用者，需先 merge 並用 `scripts/run.sh -r` 重啟 bridge）：
+1. 在已 `wk use` 並選好 active Agent 的 thread，匯入一張卡、改成 `ready`，`@bot card assign <id>`：確認回覆、Team 回條、Agent 實際收到的 prompt（含分隔線與資料聲明）。
+2. 任務結束後 `card show <id>`：狀態 `in_progress`、`tasks` 有 task id、紀錄有 `assigned`／`started`。
+3. 對 `draft` 卡片與缺少 `## 描述` 的卡片 `card assign`：確認被拒絕、沒有任務啟動。
+4. 沒有選 workspace／Agent 時 `card assign`：確認錯誤訊息且卡片仍是 `ready`。
+5. 一般 `team ask`（含 `--coding`）仍正常，確認抽出共用函式沒有改變行為。
+6. 已知限制：prompt injection 無技術保證；跨程序並行指派無保護；任務完成不會自動 `done`。
+
+下一步：使用者驗收後改為「已驗收」；再做第三步 journal 同步。
