@@ -117,3 +117,49 @@ test("section headings are matched exactly and sections end at the next level-2 
   assert.match(prompt, /第一段\n### 子標題\n第二段/);
   assert.equal(prompt.includes("不該出現"), false);
 });
+
+import { parseAssignmentPrompt } from "../src/card-handoff.js";
+
+test("parseAssignmentPrompt recovers the title, description and acceptance criteria from a built prompt", () => {
+  const original = card(full);
+  const parsed = parseAssignmentPrompt(promptOf(original), original.id);
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(parsed.title, "加入匯出功能");
+  assert.equal(parsed.description, "讓使用者把報表匯出成 CSV。");
+  assert.equal(parsed.acceptance, "- 按下匯出會下載 CSV\n- 空報表也能匯出");
+});
+
+test("a prompt built without acceptance criteria parses with no acceptance", () => {
+  const original = card("# t\n\n## 描述\n做事。\n");
+  const parsed = parseAssignmentPrompt(promptOf(original), original.id);
+  assert.equal(parsed.ok && parsed.acceptance, undefined);
+  assert.equal(parsed.ok && parsed.description, "做事。");
+});
+
+test("a long title keeps only its first line and the truncation marker stays in long sections", () => {
+  const original = card(`# t\n\n## 描述\n${"字".repeat(4000)}\n`, {
+    title: "長".repeat(300),
+  });
+  const parsed = parseAssignmentPrompt(promptOf(original), original.id);
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(Array.from(parsed.title).length, 200);
+  assert.equal(parsed.title.includes("\n"), false);
+  assert.match(parsed.description, /…（已截斷）$/);
+});
+
+test("parseAssignmentPrompt refuses a different card id, a missing fence and garbage", () => {
+  const prompt = promptOf(card(full));
+  const id = "REQ-20261102-example";
+  assert.equal(parseAssignmentPrompt(prompt, "REQ-20261102-other").ok, false);
+  assert.equal(parseAssignmentPrompt("hello", id).ok, false);
+  assert.equal(
+    parseAssignmentPrompt(prompt.replace("<<<END_CARD_DATA>>>", ""), id).ok,
+    false,
+  );
+  assert.equal(
+    parseAssignmentPrompt(prompt.replace("[描述]", ""), id).ok,
+    false,
+  );
+});

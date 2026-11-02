@@ -5,11 +5,16 @@
 import fs from "node:fs";
 import {
   CARD_STATUSES,
+  type CardType,
   IMPORT_MAX_FILE_BYTES,
   LEDGER_MAX_FILE_BYTES,
   isCardId,
 } from "./card.js";
-import { buildAssignmentPrompt } from "./card-handoff.js";
+import type { CardAssignment } from "./card-assignments.js";
+import {
+  buildAssignmentPrompt,
+  parseAssignmentPrompt,
+} from "./card-handoff.js";
 import { ensureCardsDirectory } from "./card-directory.js";
 import { CardStore } from "./card-store.js";
 import { redactSecrets } from "./redact.js";
@@ -34,10 +39,26 @@ export interface CardCommandDeps {
     prompt: string,
     options: { coding: boolean },
   ) => Promise<{ taskId: string; lead: { agent: string; machine: string } }>;
+  /** 哪個任務由哪張卡指派的索引；卡片被刪除後靠它辨認進行中的任務（階段 2c）。 */
+  assignments: {
+    record(
+      input: { taskId: string; cardId: string; type: string },
+      at: string,
+    ): void;
+    forCard(cardId: string): CardAssignment[];
+  };
+  /** 查任務 journal：當初的 prompt、Lead 與目前狀態；找不到回傳 undefined。 */
+  taskInfo: (taskId: string) =>
+    | {
+        originalPrompt: string;
+        lead: { agent: string; machine: string };
+        state: string;
+      }
+    | undefined;
 }
 
 const USAGE =
-  "usage: card list [status] | card show <id> | card import [--slug <名稱>] [<本機路徑，僅 console>]（Discord 請附上 .md 檔） | card assign <id> [--coding]";
+  "usage: card list [status] | card show <id> | card import [--slug <名稱>] [<本機路徑，僅 console>]（Discord 請附上 .md 檔） | card assign <id> [--coding] | card recreate <id>（從任務紀錄重建被刪除的卡片）";
 const MAX_LIST_LINES = 30;
 const MAX_LIST_ERRORS = 5;
 const TITLE_CHARS = 50;
@@ -190,6 +211,7 @@ async function assignCard(
     if (!built.ok) throw new Error(built.error);
 
     const task = await deps.startTask(built.prompt, { coding });
+    const assignedAt = deps.now();
 
     // 任務已經啟動：之後的卡片更新失敗只警告，不丟錯誤，否則使用者會以為沒指派而重複指派。
     const today = deps.now().slice(0, 10);
@@ -197,6 +219,17 @@ async function assignCard(
     const note = (what: string, error: string): void => {
       warnings.push(`${what}：${error}`);
     };
+    try {
+      deps.assignments.record(
+        { taskId: task.taskId, cardId: id, type: card.type },
+        assignedAt,
+      );
+    } catch (error) {
+      note(
+        "刪除偵測",
+        `${error instanceof Error ? error.message : "unknown error"}（卡片若被刪除，bridge 不會主動通知）`,
+      );
+    }
     const status = store.setStatus(id, "in_progress", today);
     if (!status.ok) note("狀態", status.error);
     const recorded = store.recordTask(id, task.taskId, today);
@@ -231,6 +264,79 @@ async function assignCard(
   } finally {
     assigning.delete(id);
   }
+}
+
+/** 卡片被刪除、任務還在跑時，由人決定要重建（ADR-0002 階段 2c，Q6）。 */
+function recreateCard(args: string[], deps: CardCommandDeps): string {
+  if (args.length !== 1) throw new Error("usage: card recreate <id>");
+  const id = args[0];
+  if (!isCardId(id)) throw new Error(`${id} 不是合法的卡片 id`);
+  const known = deps.assignments.forCard(id);
+  if (known.length === 0)
+    throw new Error(`沒有找到由卡片 ${id} 指派過的任務，無法重建`);
+  const latest = known[known.length - 1];
+  const info = deps.taskInfo(latest.taskId);
+  if (!info) throw new Error(`任務紀錄已不存在（${latest.taskId}），無法重建`);
+  const parsed = parseAssignmentPrompt(info.originalPrompt, id);
+  if (!parsed.ok) throw new Error(parsed.error);
+
+  const check = ensureCardsDirectory(deps.rootDir, { create: true });
+  if (!check.ok) throw new Error(check.error);
+  const store = new CardStore(deps.rootDir, {
+    maxFileBytes: LEDGER_MAX_FILE_BYTES,
+  });
+  const today = deps.now().slice(0, 10);
+  const body = [
+    `# ${parsed.title}`,
+    "",
+    "> 這張卡片是 bridge 從任務紀錄重建的（原卡片已被刪除）。只還原了當初交給 Agent 的標題、描述與驗收條件；背景、風險等其他段落無法還原。",
+    "",
+    "## 描述",
+    parsed.description,
+    ...(parsed.acceptance ? ["", "## 驗收條件", parsed.acceptance] : []),
+    "",
+  ].join("\n");
+  const created = store.create({
+    id,
+    type: latest.type as CardType,
+    status: "in_progress",
+    title: parsed.title,
+    version: 1,
+    created: today,
+    updated: today,
+    tasks: known.map((entry) => entry.taskId),
+    body,
+  });
+  if (!created.ok) {
+    if (created.code === "exists")
+      throw new Error(`卡片 ${id} 已存在，不需要重建`);
+    throw new Error(`重建失敗：${created.error}`);
+  }
+
+  const warnings: string[] = [];
+  const events = [
+    {
+      event: "assigned" as const,
+      machine: info.lead.machine,
+      agent: info.lead.agent,
+      eventId: `${latest.taskId}-assigned`,
+    },
+    {
+      event: "started" as const,
+      taskId: latest.taskId,
+      eventId: `${latest.taskId}-started`,
+    },
+  ];
+  for (const event of events) {
+    const logged = store.recordEvent(id, { ...event, time: latest.assignedAt });
+    if (!logged.ok) warnings.push(`紀錄 ${event.event}：${logged.error}`);
+  }
+  const lines = [
+    `已重建 ${id}（in_progress），任務 ${latest.taskId} 目前是 ${info.state}。內容是當初交給 Agent 的標題、描述與驗收條件（已遮蔽機敏內容，可能被截斷），其他段落無法還原。`,
+    "任務結束後 bridge 會照常把結果同步回這張卡。",
+  ];
+  if (warnings.length) lines.push(`⚠️ ${warnings.join("；")}`);
+  return lines.join("\n");
 }
 
 async function importCardText(
@@ -301,6 +407,9 @@ export async function runCardCommand(
       break;
     case "show":
       text = showCard(rest, deps);
+      break;
+    case "recreate":
+      text = recreateCard(rest, deps);
       break;
     case "import":
       text = await importCardText(rest, deps);

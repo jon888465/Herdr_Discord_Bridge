@@ -65,3 +65,51 @@ export function buildAssignmentPrompt(card: Card): AssignmentPrompt {
   ].join("\n");
   return { ok: true, prompt };
 }
+
+export type ParsedAssignment =
+  | { ok: true; title: string; description: string; acceptance?: string }
+  | { ok: false; error: string };
+
+/**
+ * 從當初交給 Agent 的 prompt 取回標題、描述、驗收條件（`card recreate` 用）。
+ * 這是盡力還原：內容已經過遮蔽與截斷，其他段落（背景、風險等）無法還原。
+ */
+export function parseAssignmentPrompt(
+  prompt: string,
+  cardId: string,
+): ParsedAssignment {
+  const open = `<<<${FENCE_WORD} id=${cardId}>>>\n`;
+  const close = `\n<<<END_${FENCE_WORD}>>>`;
+  const start = prompt.indexOf(open);
+  const end = start < 0 ? -1 : prompt.indexOf(close, start + open.length);
+  if (start < 0 || end < 0)
+    return { ok: false, error: `任務紀錄裡沒有卡片 ${cardId} 的資料區塊` };
+  const block = prompt.slice(start + open.length, end);
+  const headline = "標題：";
+  const descriptionMark = "\n\n[描述]\n";
+  const acceptanceMark = "\n\n[驗收條件]\n";
+  if (!block.startsWith(headline))
+    return { ok: false, error: "任務紀錄裡的卡片資料沒有標題" };
+  const descriptionAt = block.indexOf(descriptionMark);
+  const acceptanceAt =
+    descriptionAt < 0 ? -1 : block.indexOf(acceptanceMark, descriptionAt);
+  if (descriptionAt < 0 || acceptanceAt < 0)
+    return { ok: false, error: "任務紀錄裡的卡片資料格式不符，無法還原" };
+  // 標題被截斷時，截斷標記接在標題後面的新行；只取第一行。
+  const title = block
+    .slice(headline.length, descriptionAt)
+    .split("\n")[0]
+    .trim();
+  const description = block
+    .slice(descriptionAt + descriptionMark.length, acceptanceAt)
+    .trim();
+  const acceptance = block.slice(acceptanceAt + acceptanceMark.length).trim();
+  if (!title || !description)
+    return { ok: false, error: "任務紀錄裡的卡片資料缺少標題或描述" };
+  return {
+    ok: true,
+    title,
+    description,
+    ...(acceptance && acceptance !== NO_ACCEPTANCE ? { acceptance } : {}),
+  };
+}

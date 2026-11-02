@@ -2240,3 +2240,27 @@ console（Agent 親自在 bridge pane 輸入並觀察輸出）：
 - 驗收用卡片（`accept-2a`、`accept-test`、`accept-assign`、`accept-nodesc`、`sync-ok`、`sync-cancel`）仍在使用者的卡片目錄，可刪除。
 
 下一步：階段 2c（執行中的卡片被刪除時停止寫入並詢問，Q6），由使用者決定何時開始。
+
+## ISSUE-060：執行中的卡片被刪除（停止寫入並詢問）
+
+更新日期：2026-11-02。狀態：已修正、待驗收（功能新增；原始碼與自動化測試完成，執行中的 bridge 尚未載入此版本，尚未 live 驗收）。
+
+來源：card-to-merge 階段 2c（ADR-0002 階段 2 決定 Q6、ADR-0001 決定 7）。
+
+使用者可見行為：`card assign` 出去的任務還在進行中時，如果卡片檔被刪除，bridge 會在約 1 分鐘內於任務的來源 thread（或 bridge console）送出通知，列出 `card recreate <id>`、`team cancel <task-id>`、不處理三個選項。新增 `card recreate <id>`。
+
+預期行為：不自動取消任務、不自動重建卡片；只通知一次（送成功才標記）；任務已結束、卡片只是壞掉讀不了、卡片還在時都不通知；`card recreate` 只還原標題／描述／驗收條件，其他段落無法還原。見 SPEC「卡片被刪除而任務還在跑」。
+
+根因／修正範圍：不適用（新功能）。新增 `src/card-assignments.ts`；`src/card-sync.ts`（`missing`、`missingCardMessage`）；`src/card-handoff.ts`（`parseAssignmentPrompt`）；`src/card-command.ts`（記索引、`recreate`）；`src/main.ts`、`src/discord.ts`（通知與接線）。
+
+測試（2026-11-02，本機 macOS、Node v26.12.0，非 CI）：新增 `test/card-assignments.test.ts`（6）、`test/card-sync.test.ts` 的 missing、訊息與索引損毀測試（6）、`test/card-handoff.test.ts` 的解析測試（4）、`test/card-command.test.ts` 的記索引與 recreate 測試（5）；全套 679 項，678 通過、0 失敗、1 略過（原 658 項）；`lint` 通過。變異測試：把「卡片檔確實不存在」的判斷改成一律成立，會讓「讀不了的卡片不算被刪除」測試失敗。**沒有**自動化測試涵蓋 `startCardSync` 的通知接線、`postToOrigin` 與計時器。
+
+未驗證（待使用者，需先 merge 並用 `scripts/run.sh -r` 重啟 bridge）：
+1. 在 Discord thread 指派一張描述要求「先 `sleep 90` 再回覆」的卡片（讓任務跑久一點），任務進行中刪掉卡片檔：約 1 分鐘內該 thread 收到通知，內容含卡片 id、task id、狀態與三個選項。
+2. 再等 1–2 分鐘：不應重複通知。
+3. `card recreate <id>`：卡片回來，狀態 `in_progress`，`tasks` 含該 task，內文有「重建」說明與描述／驗收條件；任務結束後約 1 分鐘內變 `done`。
+4. 另一次：刪卡後改用 `team cancel <task-id>`，確認不會有卡片被建立。
+5. 從 console 指派的任務刪卡：通知印在 bridge console。
+6. 已知限制：只還原三個欄位；Discord 通知失敗會每分鐘重試且沒有上限；索引檔損毀需人工處理（損毀時只停用刪除偵測並在 console 報告，任務結果同步不受影響）；輪詢最多延遲約 60 秒。
+
+下一步：使用者驗收後改為「已驗收」。2c 之後是 worktree 隔離與政策檔（追蹤清單 E 以後）。
