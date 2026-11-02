@@ -1,23 +1,30 @@
 ---
 id: REQ-20261101-worktree-isolation
 type: requirement
-status: draft
+status: refined
 title: 為每張卡建立獨立的 git worktree 隔離
-version: 1
+version: 2
 created: 2026-11-01
 updated: 2026-11-02
-source: 使用者要求建立 worktree 隔離的需求卡（2026-11-01），內容由 Agent 依現況查核後整理，尚未與使用者討論細節
+source: 使用者要求建立需求卡（2026-11-01）；方向與範圍於 2026-11-02 與使用者討論後定案，驗收條件仍多為 Agent 推測
 project: Herdr_Discord_Bridge
-links: { parent: REQ-20261030-card-to-merge, related_docs: [docs/coding-workflow-proposal.md, docs/durable-task-engine.md, docs/adr/0001-portable-md-cards.md], related_issues: [ISSUE-025, ISSUE-041] }
+links: { parent: REQ-20261030-card-to-merge, related_docs: [docs/adr/0002-operational-cards-in-plugin-state.md, docs/coding-workflow-proposal.md, docs/durable-task-engine.md, docs/adr/0001-portable-md-cards.md], related_issues: [ISSUE-025, ISSUE-041] }
 ---
 
 # 為每張卡建立獨立的 git worktree 隔離
 
 ## 描述
 
-使用者要求為「worktree 隔離」建立需求卡。這是 [REQ-20261030-card-to-merge](REQ-20261030-card-to-merge.md) 切片順序中的第 2 項：指派一張卡後，在獨立的 git worktree 與分支上開發，不動使用者正在使用的工作樹，也不與其他卡互相覆蓋。
+為「開始開發」的卡片建立獨立的 git worktree，讓 Agent 在隔離的目錄與分支上工作，不動使用者正在使用的工作樹，也不與其他卡互相覆蓋。這是 [REQ-20261030-card-to-merge](REQ-20261030-card-to-merge.md) 切片順序中的第 2 項。
 
-使用者尚未說明細節；下方「驗收條件」與「待確認」都是 Agent 的整理，**不是使用者已確認的需求**。
+## 已決定（使用者，2026-11-02）
+
+1. **只在卡片開始開發時才建立 worktree。** 討論需求、記錄卡片、把 Mantis 單轉成卡片、直接 Vibe Coding 都不需要，照舊在原本的目錄做。
+2. **用 Herdr 原生的 `herdr worktree` 建立**：一張卡一個 worktree workspace，Agent 在該 workspace 的 pane 工作，pane 的 cwd 就是 worktree 路徑。
+3. **結果由 bridge 彙整寫進卡片**（流程紀錄與異動專案，見 [ADR-0002](../adr/0002-operational-cards-in-plugin-state.md)）。專案自己的 issue、README、CHANGELOG 等由 Agent 在 worktree 裡修改、隨 PR 進專案，bridge 不代寫。
+4. 營運卡片放 plugin 狀態目錄、不進 git（ADR-0002）。
+
+Agent 的推論（使用者未明說）：每個 worktree workspace 是自己的 Team，符合 `CONTEXT.md`「不同 workspace 的 Agent 是不同 Team」的不變式，所以不需要讓 Worker 加入原 workspace 的 Team。
 
 ## 現況（2026-11-01 檢查）
 
@@ -31,15 +38,23 @@ links: { parent: REQ-20261030-card-to-merge, related_docs: [docs/coding-workflow
 
 ## 驗收條件
 
-以下全部由 Agent 推測，**需要使用者確認**：
+使用者已確認的方向（見「已決定」）：
 
-- [ ] 指派一張卡後，bridge 在獨立的 git worktree 與專屬分支上工作；使用者原本的工作樹（含未提交修改）完全不被改動。
-- [ ] 兩張卡同時進行時，各自的工作樹互不影響，沒有共用的可寫路徑。
-- [ ] Worker 與 Lead 能在指定的 worktree 路徑啟動，而不是只能用 Lead 的 `cwd`。
+- [ ] 卡片開始開發時才建立 worktree；討論、記錄、轉換、Vibe Coding 不建立。
+- [ ] 使用 Herdr 原生 `herdr worktree` 建立，一卡一個 worktree workspace。
+
+以下由 Agent 推測，**需要使用者確認**：
+
+- [ ] 使用者原本的工作樹（含未提交修改）完全不被改動；兩張卡同時進行時互不影響。
+- [ ] Agent 在新 workspace 的 root pane 工作（已實測 root pane 的 cwd 等於 worktree 路徑）。
 - [ ] 現有 `team ask --coding` 的版本指紋、單一 writer、不同 session review、artifact 在樹外的規則，在 worktree 內仍成立。
-- [ ] 任務完成、取消或失敗後，worktree 依規則清理：**有未提交修改或未推送 commit 時絕不強制刪除**，改為保留並通知。
+- [ ] 清理時**永不使用 `herdr worktree remove --force`**；工作樹有未提交修改時保留並通知。
+- [ ] 清理 worktree 不自動刪分支（Herdr 本來就不刪）；分支何時刪另行決定。
+- [ ] 新 workspace 的 `allowedWorkspaceIds` 處理有明確規則：只自動納入 bridge 自己建立的 workspace，不放行其他。
+- [ ] Agent 的最終回報被彙整寫入卡片的 `## 流程紀錄` 與 `## 異動專案`。
+- [ ] 啟動時檢查 Herdr 最低版本，不足就拒絕使用此功能。
 - [ ] 現有不使用 worktree 的流程（一般 `team ask`、直接與 Agent 對話）行為完全不變。
-- [ ] 以真實 git repository 與暫存 worktree 的自動化測試涵蓋：建立、重複建立、基準分支不存在、路徑已存在、清理時有未提交修改。
+- [ ] 以真實 git repository 與暫存 worktree 的自動化測試涵蓋：建立、重複建立、基準不存在、路徑已存在、清理時有未提交修改。
 
 ## 非目標
 
@@ -52,19 +67,20 @@ links: { parent: REQ-20261030-card-to-merge, related_docs: [docs/coding-workflow
 
 - 刪除 worktree 是不可逆動作；清理邏輯寫錯會丟失使用者或 Agent 的未提交工作。
 - `--trust-repository` 若代表「信任並執行 repo 內定義的設定或指令」，用在不可信 repo 會有安全風險（語意未驗證）。
-- 若 bridge 自行呼叫 `git worktree`，可能與 Herdr 內建的 worktree workspace 狀態不一致，或在 Herdr UI 看不到。
+- 原生 `create` 會順便開一個「來源 repo」的 workspace（每個 repo 一次），需決定誰負責關閉。
 - 目前 Worker 的啟動、指紋與 artifact 路徑都隱含「同一棵樹」，改動範圍可能比預期大。
 
 ## 待確認
 
-1. **用 Herdr 原生 `herdr worktree`，還是 bridge 自己呼叫 `git worktree`？** 2026-11-02 已驗證原生指令的行為（見下），安全面比預期好（髒檢出拒絕移除、不刪分支）；但原生 `create` 會**開新的 workspace**，與 bridge「一個 Team 只屬於一個 workspace」的不變式衝突（見下方「設計衝突」）。仍待使用者與 Agent 一起決定。
-2. worktree 放哪裡（專案旁、`~/.herdr/...`、或由 Herdr 預設）；分支命名（例如以卡片 id 為基礎的 `card/<id>`）。
-3. worktree 的生命週期綁「一張卡」還是「一次 Team Task」。
-4. 基準（`--base`）預設用哪個 ref；建立前是否先 `git fetch`。
-5. Lead 自己是否也進 worktree，還是只有 Worker 進。
-6. 清理觸發時機（完成、取消、失敗、逾時）與保留期限；失敗時預設保留以便檢查。
-7. ~~`--trust-repository` 與 `--force` 的實際語意~~ 已查明（見下）。待決定：bridge 是否一律不使用 `--force`（Agent 建議一律不用）。
+1. ~~用原生指令還是自行呼叫 git~~ 使用者已決定用原生（見「已決定」）。
+2. bridge 要呼叫的是 Herdr 的 **socket API**（遠端經 ssh 轉發的 socket），不是 CLI；對應 `worktree.create` 等方法的名稱與參數尚未查（`herdr api` 子指令可查詢 socket API 的中繼資料）。
+3. 路徑與分支命名：預設路徑 `~/.herdr/worktrees/<repo>/<分支 slug>`；含 `/` 的分支名（例如 `card/<id>`）的 slug 規則未實測，可用 `--path` 自訂。
+4. `--base` 預設用哪個 ref；建立前是否先 `git fetch`。
+5. 清理觸發時機（完成、取消、失敗、逾時）與保留期限；失敗時預設保留以便檢查。
+6. 新 workspace 的 Discord thread 對應：沿用卡片的 thread，還是另開。
+7. 「Agent 最終回報 → 彙整寫入卡片」的資料路徑：現有 hook 與 `herdr-discord-send` 只送 Discord，沒有寫入卡片；需設計（並處理機敏內容，見 ADR-0002 未決 4）。
 8. 與專案政策檔 L0／L1／L2 的關係：L0（不 push）是否也需要 worktree。
+9. 遠端機器：原生支援 `herdr --machine <名稱> worktree create`，但**尚未實測**，需要使用者同意才能在遠端機器上執行。
 
 ## Herdr worktree 驗證結果（2026-11-02）
 
@@ -90,7 +106,7 @@ links: { parent: REQ-20261030-card-to-merge, related_docs: [docs/coding-workflow
 
 - **安全面可接受：** 髒檢出預設拒絕移除，且 `remove` 從不刪分支。只要 bridge **永不使用 `--force`**，就不會因清理而丟失未提交工作。
 - **但「分支累積」是新問題：** 移除 worktree 後分支永遠留著，沒有任何清理或未合併提示；需要另行決定何時刪分支（刪分支是不可逆動作）。
-- **設計衝突（待決定）：** 原生 `create` 會開**新的 workspace**。`CONTEXT.md` 的不變式：「Team 屬於且只屬於一個 Herdr workspace；成員必須在 Team 的 workspace；不同 workspace 的 Agent 是不同 Team」。若 Worker 在 worktree 的 workspace 啟動，它就不是該 Team 的成員；`allowedWorkspaceIds` 白名單也不認得新 workspace 的 id。解法方向（未決）：(a) 把一張卡視為一個獨立 Team／workspace；(b) bridge 自行呼叫 `git worktree`，仍用 `pane.split` 並指定 `cwd` 為 worktree 路徑，維持單一 workspace；(c) 放寬不變式。
+- **設計衝突（已解決，2026-11-02）：** 原生 `create` 會開新 workspace，原本擔心與「Team 只屬於一個 workspace」及 `allowedWorkspaceIds` 衝突。使用者決定一卡一個 worktree workspace、bridge 只彙整結果，該 workspace 是自己的 Team，因此不違反不變式；`allowedWorkspaceIds` 的處理規則仍待定（見待確認與驗收條件）。
 - **版本相依：** 實測只在 0.9.1；文件為 v0.9.5。若採用原生指令，需決定最低版本並在啟動時檢查。
 
 ### 未實測

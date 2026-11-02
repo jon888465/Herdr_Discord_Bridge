@@ -48,6 +48,7 @@
 
 ## Pending feature index
 
+- [ADR-0002 營運卡片放 plugin 狀態目錄並記錄流程](docs/adr/0002-operational-cards-in-plugin-state.md)：**已採納（決策），尚未實作。** 營運卡片是 bridge 的流程帳本，放 `<stateDirectory>/cards/`、不進 git；記錄進度、結果與異動專案；部分取代 ADR-0001。`docs/cards/` 與 `docs/card-examples/` 只放範例與設計文件。
 - [ADR-0001 可攜 Markdown 卡片格式](docs/adr/0001-portable-md-cards.md)：**已採納；純函式 `parseCard`、`importCard`、`serializeCard` 與檔案層 `CardStore`（`src/card*.ts`）已實作，但 `CardStore` 尚無呼叫端，bridge 不讀寫卡片；Mantis 匯出／bridge 狀態寫入／Discord 指令尚未實作。** 一卡一檔、受限 frontmatter 子集（不引入 YAML 套件）、匯入強制 `draft`、執行態不進卡片、Mantis 匯出（不呼叫 API）。
 - [卡片範例與 Mantis 轉換指引](docs/card-examples/README.md)：三張範例卡（需求、Mantis 單、最小卡）與請 Agent 轉換的規則；範例由測試檢查。另有單檔驗證指令 `scripts/herdr-card-check`（待驗收，ISSUE-054）；bridge 尚不讀取卡片。
 - [卡片驅動 Card-to-Merge](docs/cards/REQ-20261030-card-to-merge.md)：**規劃中，尚未實作。** 以可攜 md 卡片（frontmatter）作為需求來源，依專案政策檔（L0 不 push／L1 開 PR／L2 CI 綠後自動 merge）走 worktree → review → test → PR → CI → merge；暫不做 Tracker Adapter。授權止於 merge，不含部署與驗收。
