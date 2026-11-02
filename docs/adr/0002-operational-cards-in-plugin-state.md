@@ -247,7 +247,7 @@ issue、README、CHANGELOG 等由 Agent 在該卡片的 worktree 裡依專案自
 階段 2b 拆成三步，每步都先寫測試，並由使用者確認後才進下一步：
 
 1. **卡片資料層（已實作，無 live 行為變更）：** `tasks` frontmatter 欄位（內嵌陣列，最多 50 個、不可重複、id 為英數與 `. _ -` 最多 64 字，由 bridge 寫入）；`completed` 事件模板（`task <id> 完成`）；`CardStore.recordTask(id, taskId, today)`（冪等、保留順序、不合法 id 或日期、卡片不存在、超過上限皆拒絕且不動檔案）。測試（2026-11-02，本機 macOS、Node v26.12.0，非 CI）：全套 631 項，630 通過、0 失敗、1 略過（原 618 項）。
-2. **`card assign <id> [--coding]` 啟動（原始碼與自動化測試完成，待 live 驗收，ISSUE-058）：** 把 `team ask` 的啟動邏輯抽成共用函式（先補回歸測試確認 `team ask` 不變）；Lead 與 Workers 的選擇與 `team ask` 完全相同（目前 thread 所屬 workspace 的 Team、active Agent 當 Lead，使用者 2026-11-02 同意）；只有 `ready` 的卡可指派；內容依 Q3 當資料交給 Agent；成功後記入 `tasks`、`ready → in_progress`、寫 `assigned`／`started` 紀錄。
+2. **`card assign <id> [--coding]` 啟動（已實作並 live 驗收通過 2026-11-02，ISSUE-058）：** 把 `team ask` 的啟動邏輯抽成共用函式（先補回歸測試確認 `team ask` 不變）；Lead 與 Workers 的選擇與 `team ask` 完全相同（目前 thread 所屬 workspace 的 Team、active Agent 當 Lead，使用者 2026-11-02 同意）；只有 `ready` 的卡可指派；內容依 Q3 當資料交給 Agent；成功後記入 `tasks`、`ready → in_progress`、寫 `assigned`／`started` 紀錄。
 3. **journal 同步（未實作）：** 任務完成 → `done` 並記 `completed`；失敗或取消 → 維持 `in_progress` 並記事件（Q4）。bridge 重啟後補同步；事件 id 暫定 `<taskId>-<journal sequence>`，重複同步不會重複寫入。
 
 第 2、3 步會改變 live 行為，各需要使用者重啟 bridge 並 live 驗收（將另開 issue）。

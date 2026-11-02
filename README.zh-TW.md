@@ -338,7 +338,7 @@ Agent 可在最終回覆中單獨一行寫 `[[discord-attach: /絕對路徑]]`�
 
 卡片檔：`scripts/herdr-card-check [--ledger] 檔案...` 檢查 Markdown 卡片是否符合卡片格式（[ADR-0001](docs/adr/0001-portable-md-cards.md)；範例與 Mantis 轉換指引見 [docs/card-examples](docs/card-examples/README.md)）。每檔輸出 `OK`／`FAIL`；結束碼 0 全部合格、1 有不合格或讀不到、2 用法錯誤。超過 512 KiB 的檔案會被拒絕（營運卡片加 `--ledger` 可放寬到 1 MiB）。只檢查格式，需先 `npm run build`；待驗收（ISSUE-054）。
 
-營運卡片（階段 2a，已驗收，ISSUE-057）：Discord 與 console 可用 `card list [status]`、`card show <id>`、`card import`（Discord 附上一個 `.md` 檔；console 給本機路徑，可加 `--slug <名稱>`）。卡片存放在 `<狀態目錄>/cards/`（不進 git），目錄以 0700 建立；既有目錄若他人可讀會被拒絕並提示 `chmod 700`。匯入的卡片一律是 `draft`，要自己編輯檔案改成 `status: ready`。`card assign <id> [--coding]`（階段 2b 第二步，待 live 驗收，ISSUE-058）會把 `ready` 的卡片（需要有非空的 `## 描述` 段落）交給目前 workspace 的 Team，行為同 `team ask`；Agent 只會收到標題、描述、驗收條件，且已加分隔並遮蔽機敏內容。卡片會變成 `in_progress` 並記下 task id，目前不會自動變成 `done`。
+營運卡片（階段 2a，已驗收，ISSUE-057）：Discord 與 console 可用 `card list [status]`、`card show <id>`、`card import`（Discord 附上一個 `.md` 檔；console 給本機路徑，可加 `--slug <名稱>`）。卡片存放在 `<狀態目錄>/cards/`（不進 git），目錄以 0700 建立；既有目錄若他人可讀會被拒絕並提示 `chmod 700`。匯入的卡片一律是 `draft`，要自己編輯檔案改成 `status: ready`。`card assign <id> [--coding]`（階段 2b 第二步，已驗收，ISSUE-058）會把 `ready` 的卡片（需要有非空的 `## 描述` 段落）交給目前 workspace 的 Team，行為同 `team ask`；Agent 只會收到標題、描述、驗收條件，且已加分隔並遮蔽機敏內容。卡片會變成 `in_progress` 並記下 task id，目前不會自動變成 `done`。
 
 傳入附件：除 PNG/JPEG/WebP 圖片外，其他 Discord 檔案（≤ 10 MiB、每則至多四個）會存到 Agent cwd 並把路徑交給 Agent（ISSUE-039，待實機驗收）。
 
