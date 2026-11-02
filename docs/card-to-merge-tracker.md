@@ -56,15 +56,15 @@
 
 | ID | 項目 | 狀態 | 來源 |
 |---|---|---|---|
-| D1 | 營運卡片目錄 `<stateDirectory>/cards/` 的建立與權限檢查 | **2a 已實作、待驗收**（ISSUE-057；第一次寫入時建 0700，既存且他人可存取則拒絕並提示 chmod，不是「啟動時」檢查） | ADR-0002 未決 6 |
-| D2 | 卡片索引、搜尋與列表（依 `projects`、`status`） | 部分：`card list [status]` 已實作（2a、待驗收）；依 `projects` 搜尋未做 | ADR-0002 未決 7 |
-| D3 | 指令入口：建卡、列卡、看卡、指派 | **已決定**（Q1：加進 `handleCommand`，Discord＋console）。`list`／`show`／`import` 2a 已實作待驗收；`assign` 屬 2b | ADR-0002 階段 2 決定 |
+| D1 | 營運卡片目錄 `<stateDirectory>/cards/` 的建立與權限檢查 | **2a 已驗收 2026-11-02**（ISSUE-057；第一次寫入時建 0700，既存且他人可存取則拒絕並提示 chmod，不是「啟動時」檢查） | ADR-0002 未決 6 |
+| D2 | 卡片索引、搜尋與列表（依 `projects`、`status`） | 部分：`card list [status]` 已實作並驗收（2a，2026-11-02）；依 `projects` 搜尋未做 | ADR-0002 未決 7 |
+| D3 | 指令入口：建卡、列卡、看卡、指派 | **已決定**（Q1：加進 `handleCommand`，Discord＋console）。`list`／`show`／`import` 2a 已驗收（2026-11-02）；`assign` 屬 2b | ADR-0002 階段 2 決定 |
 | D4 | 卡片 → Team 任務 → journal → 紀錄 的串接；journal 事件到紀錄行的對照表與事件 id 產生方式 | 未開始（**沒有設計文件**） | ADR-0002 未決 3 |
 | D5 | `projects` 的專案名稱規則 | **已決定**（使用者 2026-11-02 選 `<機器 id>:<repo 目錄名>`）並已實作於 C4 | ADR-0002 未決 2 |
 | D6 | 執行中的卡片被刪除時暫停並詢問，不默默繼續或取消 | 未開始（**沒有設計**） | ADR-0001 決定 7、ADR-0002 決定 7 |
 | D7 | 卡片內容是不可信輸入：指派時如何交給 Agent，內容當資料而非指令 | 未開始（**沒有設計**） | card-to-merge 風險 |
 | D8 | 回歸測試：既有 `team ask`、Vibe Coding、Discord／CLI 指令行為不變 | 未開始 | card-to-merge 驗收條件 |
-| D9 | 重啟與 live 驗收；SPEC、README 同步 | 2a 的 SPEC、README 已同步；**重啟與 live 驗收未做**（ISSUE-057） | AGENTS.md |
+| D9 | 重啟與 live 驗收；SPEC、README 同步 | 2a 的 SPEC、README 已同步；重啟與 live 驗收已完成（2026-11-02，ISSUE-057） | AGENTS.md |
 
 ## E. worktree 隔離（階段 3，先本機）
 

@@ -2102,7 +2102,7 @@ Agent 提議的清理順序（**使用者尚未決定**）：(1) 結果已寫進
 
 ## ISSUE-057：營運卡片指令（`card list/show/import`）
 
-更新日期：2026-11-02。狀態：重新開啟後已再修正、待驗收（第一次 live 驗收失敗，見下方「live 驗收紀錄」；修正版尚未合併、bridge 尚未用修正版重啟）。
+更新日期：2026-11-02。狀態：已驗收（第一次 live 驗收失敗後重新開啟並修正；修正版 PR #26 合併後重啟，console 與 Discord 皆通過，見下方「live 驗收紀錄」）。
 
 來源：card-to-merge 階段 2a（ADR-0002 階段 2 決定 Q1–Q7）。不是 bug，而是第一個讓 bridge 讀寫營運卡片的入口，因此列為驗收項目。
 
@@ -2114,7 +2114,7 @@ Agent 提議的清理順序（**使用者尚未決定**）：(1) 結果已寫進
 
 測試（2026-11-02，本機 macOS、Node v26.12.0，非 CI）：`npm run typecheck`、`npm run lint` 通過；新增 `test/card-directory.test.ts`（5）、`test/card-command.test.ts`（18）、`test/card-command-main.test.ts`（2，經 `handleCommand`）、`test/attachments.test.ts`（+4）；全套 618 項，617 通過、0 失敗、1 略過（原 589 項）。目錄權限檢查做過變異測試（移除檢查會讓測試失敗）。
 
-未驗證（待使用者）：
+（以下為首次撰寫時的驗收清單，已於 2026-11-02 全部完成，結果見「live 驗收紀錄」。）
 1. 重啟 bridge 後，在 Discord 實際執行 `card list`（空目錄）。
 2. 附上一個真實 `.md`（例如 Mantis 轉出的卡片）執行 `card import`，確認回覆、檔案權限 0600／目錄 0700。
 3. `card show <id>`，確認內容與遮蔽。
@@ -2134,3 +2134,19 @@ Agent 提議的清理順序（**使用者尚未決定**）：(1) 結果已寫進
 修正（2026-11-02，worktree `card-short-command`）：`SHORT_COMMANDS` 加入 `card`；`test/console.test.ts` 新增解析測試（console 與 Discord 簡寫），修正前紅、修正後綠。
 
 修正版驗證狀態：全套測試見 PR；**merge 並重新編譯重啟後，需重做上述 7 項 live 驗收**，之前的失敗不算通過。
+
+**2026-11-02 第二次 live 驗收：通過（PR #26 版本）。** 環境：本機 macOS，main `460b4b1`，`scripts/run.sh -r` 重新編譯並重啟 bridge，Gateway 與 `agy-pod` 連線正常。
+
+console（由 Agent 在 bridge pane 輸入，親自觀察輸出）：
+- `card list`（空目錄）→「目前沒有卡片」，未建立目錄。
+- `card import <本機 .md>` → 已匯入（draft），註明「status ready -> draft」；卡片目錄權限 700、卡片檔 600（`stat` 實測）。
+- `card list ready`（此時卡片為 draft）→「沒有狀態為 ready 的卡片」；`card show <id>` → 摘要、內文、「尚無紀錄」。
+- `card import /etc/hosts` → 拒絕（路徑必須是 .md）；重複匯入 → 「卡片已存在，不會覆蓋」。
+- `card assign x` →「尚未實作（階段 2b）」；`card bogus` → 用法說明。
+- 目錄改為 755 後 `card list` → 拒絕並提示 `chmod 700 <路徑>`，目錄未被修改；已改回 700。
+
+Discord（由使用者操作並回報，Agent 未看到原始回覆）：使用者回報 `@bot card list`、附 `.md` 的 `card import`、重複匯入、`card import /etc/hosts.md`、把卡片改為 `ready` 後的 `card list ready`皆符合預期，`card show REQ-20261102-accept-test` 成功。Agent 另從卡片目錄確認 `REQ-20261102-accept-test.md` 存在、權限 600。使用者第一次輸入 `card show` 時用錯 id（`accept-2b`，實際匯入的是 `accept-test`），回報「找不到卡片」是正確行為，不是 bug。
+
+未驗證／已知限制：Windows 未測（權限檢查在 Windows 略過）；Discord 端 `card import` 的逐步回覆文字依使用者回報，未逐字留存；驗收用卡片 `REQ-20261102-accept-2a`、`REQ-20261102-accept-test` 仍留在使用者的卡片目錄，可刪除。
+
+下一步：階段 2b（`card assign`、journal 同步、`completed` 事件模板、`tasks` 欄位、內容交接），由使用者決定何時開始。
