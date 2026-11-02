@@ -2243,7 +2243,7 @@ console（Agent 親自在 bridge pane 輸入並觀察輸出）：
 
 ## ISSUE-060：執行中的卡片被刪除（停止寫入並詢問）
 
-更新日期：2026-11-02。狀態：已修正、待驗收（功能新增；原始碼與自動化測試完成，執行中的 bridge 尚未載入此版本，尚未 live 驗收）。
+更新日期：2026-11-02。狀態：已驗收（偵測、通知一次與通知原文、`card recreate`、重建後照常同步、刪卡後 `team cancel` 皆有證據，見下方「live 驗收紀錄」；補測時發現的 `team cancel` 延遲另列 ISSUE-061）。
 
 來源：card-to-merge 階段 2c（ADR-0002 階段 2 決定 Q6、ADR-0001 決定 7）。
 
@@ -2264,3 +2264,72 @@ console（Agent 親自在 bridge pane 輸入並觀察輸出）：
 6. 已知限制：只還原三個欄位；Discord 通知失敗會每分鐘重試且沒有上限；索引檔損毀需人工處理（損毀時只停用刪除偵測並在 console 報告，任務結果同步不受影響）；輪詢最多延遲約 60 秒。
 
 下一步：使用者驗收後改為「已驗收」。2c 之後是 worktree 隔離與政策檔（追蹤清單 E 以後）。
+
+### live 驗收紀錄
+
+**2026-11-02 live 驗收：通過（含 `team cancel` 補測）。** 環境：本機 macOS，main `73117e4`（PR #33），`scripts/run.sh -r` 重新編譯並重啟 bridge。操作（`card assign`、刪卡片檔、`card recreate`、`team cancel`）由使用者在 Discord／終端機執行並回報「都測試好了」，**使用者沒有貼回覆原文**；以下是 Agent 事後從 bridge 狀態檔與卡片檔取得的證據。
+
+A. 刪卡 → 通知 → `card recreate`（`REQ-20261102-del-recreate`，task `task-55beb52e-…`）：
+- 索引 `card-assignments.json` 有該任務，`assignedAt` 08:59:48Z、`notifiedAt` 09:00:16Z——刪卡後約 28 秒內 bridge 判定「卡片被刪除」並完成通知（送成功才會寫 `notifiedAt`）。
+- 卡片現在存在，`status: done`，`tasks: [task-55beb52e-…]`，內文開頭有「這張卡片是 bridge 從任務紀錄重建的」說明，描述與驗收條件已還原；流程紀錄有 `assigned`、`started`（事件 id 與原本相同）以及任務結束後的 `completed`（09:02:03Z）——重建後同步照常運作。
+- bridge console 有 `Card sync updated: REQ-20261102-del-recreate`。
+
+B. 刪卡後不重建（`REQ-20261102-del-cancel`，task `task-db53a441-…`；第一次測試）：
+- 索引 `assignedAt` 09:03:25Z、`notifiedAt` 09:04:16Z（約 51 秒），已通知一次。
+- 卡片目錄裡**沒有**這張卡——bridge 沒有自行重建。
+- 但任務 journal 最終狀態是 `completed`（不是 `cancelled`），所以第一次測試**沒有證明**「刪卡後 `team cancel`」——見下方補測。
+
+B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2`，描述要求先 `sleep 150`，task `task-3be4f271-…`）。使用者在 Discord 指派、刪除卡片檔、收到通知後輸入 `team cancel`，並貼上截圖（Agent 已讀取該圖）：
+- 通知原文（截圖，5:13 PM）：「⚠️ 卡片 REQ-20261102-del-cancel2 已被刪除，但它指派的 Team 任務 task-3be4f271-… 還在進行中（synthesizing）。bridge 不會再寫入這張卡片，也不會自動取消任務或自動重建卡片。請選擇：」，列出 `card recreate REQ-20261102-del-cancel2`、`team cancel task-3be4f271-…`、「不處理」三個選項。內容與 SPEC 規定一致。
+- 索引 `assignedAt` 09:12:30Z、`notifiedAt` 09:13:16Z（約 46 秒內通知）。
+- 任務 journal：`cancel_requested`（09:13:22Z）→ `cancel_turn_settled`（09:15:12Z）→ `task_cancelled`，最終狀態 `cancelled`。
+- cards 目錄**沒有** `REQ-20261102-del-cancel2.md`：取消後 bridge 沒有重建卡片，也沒有為已取消的任務寫任何東西。
+- 使用者指出「`team cancel` 會被 block 到 120 秒後」：`cancel_requested` 到 `cancel_turn_settled` 隔了約 110 秒，與任務的 `sleep` 時間相符。這是既有 Team 任務取消行為，不是 2c 造成；見 ISSUE-061。
+
+未驗證：
+- 「不重複通知」只有間接證據（`notifiedAt` 只會寫一次），沒有逐分鐘觀察。
+- 反向檢查 C（對已存在的卡片 `card recreate` 應被拒絕）沒有證據，只有自動化測試。
+- 從本機 console 指派的任務刪卡（通知印在 console）沒有測。
+- 已知限制不變：只還原標題／描述／驗收條件；Discord 通知失敗每分鐘重試且沒有上限；索引檔損毀需人工處理；輪詢最多延遲約 60 秒；升級前指派的任務不在索引內，刪卡不會被偵測。
+- 驗收用卡片（`del-recreate`、`sync-ok`、`sync-cancel` 及先前的 `accept-*`）仍在使用者的卡片目錄，可刪除。
+
+下一步：2c 之後是 worktree 隔離與政策檔（追蹤清單 E 以後）。
+
+## ISSUE-061：`team cancel` 要等到 Agent 目前的長時間指令結束才會生效
+
+更新日期：2026-11-02。狀態：待調查（既有行為，2c 補測時由使用者發現；根因尚未確認，未修正）。
+
+使用者可見症狀：任務的 Lead 正在執行長時間的 shell 指令（驗收用的 `sleep 150`）時輸入 `team cancel <task-id>`，取消看起來被擋住，要等指令跑完才完成。使用者原話：「team cancel 會被 block 等到 120 秒後」。
+
+預期行為：`team cancel` 盡快中止進行中的工作（至少讓使用者知道取消的進度，而不是無回應）。
+
+重現方式／環境（2026-11-02，本機 macOS，main `73117e4`）：用 `card assign` 指派一張描述為「先在 shell 執行 sleep 150，之後只回覆『完成』」的卡片（task `task-3be4f271-…`，Lead 是 Claude Code，Team 沒有 Worker），任務進入 `synthesizing` 後輸入 `team cancel`。任務 journal：`cancel_requested` 09:13:22Z，`cancel_turn_settled` 09:15:12Z（約 110 秒後），最終 `cancelled`。
+
+已確認：取消最終有生效（最終狀態 `cancelled`），延遲約等於 `sleep` 的剩餘時間。**未確認根因**：可能是取消只送出 Ctrl-C 且要等 Lead 回到可接收輸入（Claude Code 在執行 shell 指令時 Ctrl-C 的行為）、也可能是引擎等待「確認停止」才進入 `cancelled`（SPEC：取消只使用既有 Ctrl-C，確認停止後才 `cancelled`；不確定時保留 `cancelling`）。尚未調查，也不確定這是預期設計還是缺陷。
+
+修正範圍：無（未修正）。與 ISSUE-060 無關：卡片同步與刪除偵測在取消期間照常運作。
+
+未驗證：Lead 不是長時間指令而是一般回覆中取消的延遲；其他 CLI（codex 等）的行為；取消期間使用者是否有看到進度訊息。
+
+下一步：調查 Ctrl-C 在 Claude Code 執行 shell 指令時的實際效果，以及引擎在 `cancelling` 狀態對使用者的回報；決定是縮短等待、補進度訊息，或只在文件註明限制。
+
+預定用途（使用者，2026-11-02）：本 issue **保留起來，等「建單 → 分配任務 → 處理 → review → test → PR → merge → 結單」的自動化流程完成後，拿來當端到端的自動化測試案例**，實際跑一次整條流程。這是未來的計畫，目前不能自動跑。與 ISSUE-055 的用途並列（見追蹤清單 H4）：本 issue 範圍較小、風險較低，建議**先用它驗證流程本身**，再用 ISSUE-055（刪除檢出，風險較高）。
+
+目前各階段的具備情況（2026-11-02，Agent 整理）：
+
+| 階段 | 現況 |
+|---|---|
+| 建單 | 已有：把本 issue 寫成卡片後用 `card import` 匯入（要有 `## 描述` 與 `## 驗收條件`）。**尚未做：** 卡片需先轉成有明確驗收條件的內容（見下） |
+| 分配任務 | 已有：`card assign`（已驗收，ISSUE-058）。Lead／Workers 目前沿用 `team ask` 的選擇方式 |
+| 處理（開發） | 部分：Team 任務可執行，但還沒有 worktree 隔離（追蹤清單 E）；`--coding` 模式有本機 Git 驗收 |
+| review、test | 未做：多 Agent review 與測試的自動化流程尚未實作 |
+| PR、merge | 未做：政策檔與 PR 自動化（追蹤清單 F、G）尚未實作 |
+| 結單 | 部分：任務完成會把卡片同步為 `done`（ISSUE-059，已驗收）；結單時回寫 issue／文件、關閉 PR 等尚未做 |
+
+作為測試案例前的前提（尚未滿足）：
+1. 本 issue 的根因未確認，第一步其實是**診斷**（Ctrl-C 對 Claude Code 執行中 shell 指令的實際效果、引擎在 `cancelling` 的等待與回報）。要轉成「描述＋可驗收條件」的卡片時，驗收條件需由使用者決定：例如「取消後 N 秒內進入 `cancelled`」或「取消期間有進度訊息」或「只在文件註明限制」。Agent 不能在缺少決定時自行定義。
+2. 上表中「review、test、PR、merge」的自動化尚未存在，要等追蹤清單 E–G 完成。
+3. 第一次試跑以 L1（開 PR、由人 merge）進行，不直接用 L2 自動 merge。
+4. 驗收用的長時間任務（`sleep 150` 的卡片）可重用為「重現步驟」：它在 ISSUE-060 補測中已實際重現本問題（task `task-3be4f271-…`），可寫成自動化測試的 fixture。
+
+相關：ISSUE-055（另一個預定的端到端測試案例）、ISSUE-058／059／060、追蹤清單 H4。
