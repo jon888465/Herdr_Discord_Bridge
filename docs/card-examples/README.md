@@ -71,7 +71,7 @@
 scripts/herdr-card-check FILE...
 ```
 
-逐一檢查檔案是否合格，輸出每個檔案的 `OK`（附 id、類型、狀態、標題）或 `FAIL`（附原因）。結束碼：`0` 全部合格、`1` 至少一個不合格或讀不到、`2` 用法錯誤。可一次給多個檔案；失敗不會中斷後面的檔案。超過 256 KiB 的檔案不讀取，直接判為不合格。
+逐一檢查檔案是否合格，輸出每個檔案的 `OK`（附 id、類型、狀態、標題）或 `FAIL`（附原因）。結束碼：`0` 全部合格、`1` 至少一個不合格或讀不到、`2` 用法錯誤。可一次給多個檔案；失敗不會中斷後面的檔案。超過 512 KiB 的檔案不讀取，直接判為不合格；檢查營運卡片（上限 1 MiB）時加 `--ledger`：`scripts/herdr-card-check --ledger FILE...`。
 
 ```
 $ scripts/herdr-card-check docs/card-examples/REQ-*.md docs/card-examples/TKT-*.md
