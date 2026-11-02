@@ -2203,7 +2203,7 @@ console（Agent 親自在 bridge pane 輸入並觀察輸出）：
 
 ## ISSUE-059：Team 任務結束後卡片狀態同步（journal 同步）
 
-更新日期：2026-11-02。狀態：已修正、待驗收（功能新增；原始碼與自動化測試完成，執行中的 bridge 尚未載入此版本，尚未 live 驗收）。
+更新日期：2026-11-02。狀態：已驗收（補同步、完成、取消、一般 `team ask` 回歸皆通過，見下方「live 驗收紀錄」）。
 
 來源：card-to-merge 階段 2b 第三步（ADR-0002 階段 2 決定 Q4）。ISSUE-058 驗收時已看到缺口：任務結束後卡片仍停在 `in_progress`。
 
@@ -2222,3 +2222,21 @@ console（Agent 親自在 bridge pane 輸入並觀察輸出）：
 4. 已知限制：輪詢造成最多約 60 秒延遲；`cancelled` 的 `by` 固定為 `user`；失敗不通知 Discord；卡片被刪除時的處理（2c）未做。
 
 下一步：使用者驗收後改為「已驗收」；再進入 2c（執行中的卡片被刪除）。
+
+### live 驗收紀錄
+
+**2026-11-02 live 驗收：通過。** 環境：本機 macOS，main `2cb48a0`（PR #31），`scripts/run.sh -r` 重新編譯並重啟 bridge。以下 console 結果由 Agent 在 bridge pane 輸入並觀察；Discord 操作由使用者執行。
+
+1. **補同步**：重啟後 console 立即印出 `Card sync updated: REQ-20261102-accept-assign`。該卡（ISSUE-058 驗收留下、任務早已完成）由 `in_progress` 變 `done`，多一筆 `completed`，時間為任務的 `finishedAt`（`08:03:56Z`）而非同步當下；再等 65 秒紀錄沒有重複。
+2. **完成 → `done`**：使用者對 `REQ-20261102-sync-ok` 執行 `card assign`，任務結束後 `card show` 為 `done`，紀錄 `assigned`、`started`、`completed`（`08:25:20Z`），console 印出 `Card sync updated: REQ-20261102-sync-ok`。
+3. **取消 → 維持 `in_progress`**：使用者對 `REQ-20261102-sync-cancel`（描述要求先 `sleep 90`）執行 `card assign` 後取消任務。`card show` 仍為 `in_progress`，紀錄多一筆 `cancelled`「已取消（user）」（`08:28:38Z`），`tasks` 保留 task id，console 印出 `Card sync updated: REQ-20261102-sync-cancel`。
+4. **一般 `team ask` 回歸**：使用者在 Discord 執行 `team ask 回覆收到`，回覆 `Team Task completed`（task `task-9ed421e5-…`，結果「收到」，使用者貼上原文）。卡片目錄沒有任何檔案含該 task id，console 沒有為它印出 `Card sync updated`。
+
+未驗證／限制：
+- 除第 4 項外，Discord 端回覆文字 Agent 沒看到原文。
+- 驗收時 Lead 是開發者自己的 Claude session（第 3、4 項的 Lead 在另一個 workspace `w3`），沒有用獨立 worker Agent 或 `agy-pod` 遠端機器驗證。
+- `cancelled` 的 `by` 固定為 `user`；輪詢造成最多約 60 秒延遲；失敗（`failed`）路徑只有自動化測試，沒有 live 驗證。
+- `main.ts` 計時器接線無自動化測試，僅由本次 live 驗收涵蓋。
+- 驗收用卡片（`accept-2a`、`accept-test`、`accept-assign`、`accept-nodesc`、`sync-ok`、`sync-cancel`）仍在使用者的卡片目錄，可刪除。
+
+下一步：階段 2c（執行中的卡片被刪除時停止寫入並詢問，Q6），由使用者決定何時開始。
