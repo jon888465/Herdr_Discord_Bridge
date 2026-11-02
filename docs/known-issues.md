@@ -55,6 +55,7 @@
 | ISSUE-053 | 卡片 `x-` 自訂欄位解析後不保留，序列化後消失 | 已修正、待驗收 | 2026-10-30 使用者決定「禁止」；`parseCard` 已拒絕 `x-` key，自動化測試通過；尚無寫檔層，無 live 驗收項目，待 PR 合併 |
 | ISSUE-054 | 缺少單檔卡片驗證指令，Agent 轉 Mantis 單後無法自我檢查 | 已修正、待驗收 | 2026-10-30 新增 `herdr-card-check`；自動化測試通過；待使用者用真實 Mantis 單請 Agent 轉卡片並以此指令驗收 |
 | ISSUE-055 | 遠端長期存在的 pod 上，開發完成後的 worktree／workspace／分支清理尚未設計 | 待調查（先紀錄，未來處理） | 2026-11-02 使用者要求先紀錄；功能尚未實作，無實際殘留；原則與 3 個問題待使用者決定 |
+| ISSUE-056 | 機敏內容遮蔽漏掉多種憑證樣式；兩份遮蔽邏輯重複且不一致；handoff 摘要先截斷再遮蔽 | 已修正、待驗收 | 2026-11-02 已整併為 `src/redact.ts`，自動化測試通過；待實際 session handoff 驗收 |
 | ISSUE-047 | Codex 在 Discord 送問後出現「Agent identity changed (session changed); response capture stopped」，擷取在核准通知前中止 | 已驗收（2026-10-28，使用者實測 Discord 送問後不再中止、核准流程正常） | 觸發原因（Codex 第一個 prompt 才建新 session）屬推測；見 ISSUE-047 |
 | ISSUE-046 | Discord 輸入權限選項數字（3）後沒有任何反應，之後按 Approve 才有動作 | 已驗收（2026-10-28，數字／allow／deny／按鈕／📨；原 `3` 沒反應根因未確認） | 2026-10-28 重啟後數字 1／2 回覆成功且有 📨；使用者早先的 `3` 沒反應原因仍未確認 |
 | ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | Claude Stop 與 PermissionRequest 已驗收（2026-10-28，使用者實測）；Codex Stop 與 allow／deny（y／esc 快捷鍵）、hookTransport 設定與 hooks 指令已驗收（2026-10-28）；agy Stop 已驗收（2026-10-28）；pi Linux 缺漏補裝後已驗收（2026-10-29，保留 macOS 驗收歷史）；遠端 machine（agy）已驗收（2026-10-28，修正後重測） | 遠端 Claude／Codex／pi 未涵蓋；見 docs/hook-transport-proposal.md |
@@ -2065,3 +2066,34 @@ Agent 提議的清理順序（**使用者尚未決定**）：(1) 結果已寫進
 4. 本 issue 的內容是**刪除檢出**的邏輯，風險高於一般變更。Agent 建議第一次端到端試跑以 L1（開 PR、由人 merge）進行，不要直接用 L2 自動 merge；也建議先用較小、較低風險的 issue 驗證流程本身。
 
 相關：REQ-20261101-worktree-isolation、ADR-0002（`docs/adr/0002-operational-cards-in-plugin-state.md`，見 PR #15）決定 10 與未決、ISSUE-041（遠端 Herdr 機器）、ISSUE-043（遠端附件保留期限，已有「定期用 ssh 清理」的先例）。
+
+## ISSUE-056：機敏內容遮蔽漏掉多種憑證樣式，且 handoff 摘要先截斷再遮蔽
+
+更新日期：2026-11-02。狀態：已修正、待驗收。
+
+來源：2026-11-02 為 ADR-0002 決定 11 查核現有遮蔽邏輯時發現，不是使用者回報的問題。
+
+症狀（查核結果）：bridge 有兩份重複且不一致的遮蔽邏輯，`src/handoff-evidence.ts` 的 `publicText` 與 `src/main.ts` 的 `redactHandoffSecrets`。以 15 個明顯假造的機敏樣本實測，**只遮蔽 7 個、漏掉 8 個**：`github_pat_…`（細粒度 token）、AWS access key、JWT、單獨的 `Bearer …`、`API_KEY=`、`secret_key:`、含帳密的網址、資料庫連線字串。針對遮蔽規則本身沒有專門測試。
+
+預期行為：已知的憑證樣式在 handoff 文字與摘要中被遮蔽；遮蔽邏輯只有一份；一般文字（commit SHA、不含帳密的網址、一般句子）不被誤改。
+
+重現（2026-11-02，本機 macOS、Node v26.12.0）：
+1. 以舊 `publicText` 規則對測試用樣本表逐項比對：16 項中漏掉 8 項（細粒度 GitHub token、AWS access key、JWT、單獨 Bearer、`API_KEY=`、`secret_key:`、含帳密網址、連線字串）。
+2. 以舊 `boundedHandoffSummary`（先截斷再遮蔽）處理「前面 40 行填充文字加一段私鑰區塊加一行結尾」、上限 100 字：輸出含有 `BODYLINETWO`、`BODYLINETHREE` 與 `-----END PRIVATE KEY-----`，**私鑰內容漏出**。上限 70 字時只剩 `REE` 這類碎片，所以漏出與否取決於截斷點。
+
+根因（已確認）：
+1. 規則只列了少數前綴與少數名稱關鍵字（`token|password|secret`），沒有涵蓋其他常見樣式。
+2. 兩份邏輯是複製後各自演化：`redactHandoffSecrets` 沒有私鑰區塊規則，標記文字也不同（`[redacted-token]` 對 `[redacted token]`）。
+3. `boundedHandoffSummary` 先截斷再遮蔽；截斷點落在金鑰中間時，`BEGIN` 行被切掉，規則就比對不到剩下的內容。
+
+修正範圍：
+- 新增 `src/redact.ts` 的 `redactSecrets`，涵蓋：私鑰區塊（含被截斷、沒有 END 行的）、`sk-`／`ghp_`等／`github_pat_`／Slack／AWS access key、JWT、`Authorization: Bearer`、單獨的 `Bearer`、`name=value`／`name: value`／`"name": "value"`（名稱含 token、password、passwd、secret、api_key、access_key、private_key）、網址中的 `user:pass@` 與名稱像憑證的查詢參數。沒有密碼的 `ssh://git@host`、`git@host:path`、一般網址、commit SHA、`Bearer of bad news` 這類句子不被改動。
+- `publicText` 改為委派給 `redactSecrets`。
+- `boundedHandoffSummary` 從 `main.ts` 抽到 `src/handoff-summary.ts`，順序改為先遮蔽、再去空行、再截斷。
+- 行為差異：handoff 摘要的標記文字由 `[redacted-token]` 改為 `[redacted token]`；handoff 摘要現在也會遮蔽私鑰區塊與上述新樣式。沒有測試依賴舊標記文字。
+
+測試（2026-11-02，本機 macOS、Node v26.12.0，非 CI）：新增 `test/redact.test.ts`（27 項：16 類機敏樣本、被截斷的私鑰、網址查詢參數、8 項不得誤改的正常文字、冪等）與 `test/handoff-redaction.test.ts`（5 項，含「截斷會切到私鑰中間」）。全套 511 項，510 通過、0 失敗、1 略過（原 479 項）。以舊規則跑新的樣本表確認它能抓出 8 項漏洞，以舊的先截斷流程重現漏出後，才把測試的上限調到能區分新舊。
+
+未驗證：實際 session handoff（Discord／Herdr）的端到端；遮蔽是黑名單式，**不保證完整**，新的憑證格式出現就可能漏掉。`redactSecrets` 只用在 handoff 的公開文字與摘要，**一般 Agent 回覆轉送到 Discord 的路徑沒有套用**（本 issue 未改變這一點）；營運卡片尚未使用它（ADR-0002 決定 11，尚未實作）。
+
+下一步：待使用者在實際 handoff 驗收；營運卡片寫入時套用 ADR-0002 決定 11（結構化事件優先、短自由文字遇疑似機敏整筆省略）。
