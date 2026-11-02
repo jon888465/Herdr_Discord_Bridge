@@ -54,6 +54,7 @@
 | ISSUE-052 | `main` 沒有 CI 與 branch protection，無法作為自動 merge 閘門 | 修正中 | 2026-10-30 `ci.yml` 已加入工作樹（未 commit／push）；待推送後看 Ubuntu／macOS 實際結果，再設 branch protection |
 | ISSUE-053 | 卡片 `x-` 自訂欄位解析後不保留，序列化後消失 | 已修正、待驗收 | 2026-10-30 使用者決定「禁止」；`parseCard` 已拒絕 `x-` key，自動化測試通過；尚無寫檔層，無 live 驗收項目，待 PR 合併 |
 | ISSUE-054 | 缺少單檔卡片驗證指令，Agent 轉 Mantis 單後無法自我檢查 | 已修正、待驗收 | 2026-10-30 新增 `herdr-card-check`；自動化測試通過；待使用者用真實 Mantis 單請 Agent 轉卡片並以此指令驗收 |
+| ISSUE-055 | 遠端長期存在的 pod 上，開發完成後的 worktree／workspace／分支清理尚未設計 | 待調查（先紀錄，未來處理） | 2026-11-02 使用者要求先紀錄；功能尚未實作，無實際殘留；原則與 3 個問題待使用者決定 |
 | ISSUE-047 | Codex 在 Discord 送問後出現「Agent identity changed (session changed); response capture stopped」，擷取在核准通知前中止 | 已驗收（2026-10-28，使用者實測 Discord 送問後不再中止、核准流程正常） | 觸發原因（Codex 第一個 prompt 才建新 session）屬推測；見 ISSUE-047 |
 | ISSUE-046 | Discord 輸入權限選項數字（3）後沒有任何反應，之後按 Approve 才有動作 | 已驗收（2026-10-28，數字／allow／deny／按鈕／📨；原 `3` 沒反應根因未確認） | 2026-10-28 重啟後數字 1／2 回覆成功且有 📨；使用者早先的 `3` 沒反應原因仍未確認 |
 | ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | Claude Stop 與 PermissionRequest 已驗收（2026-10-28，使用者實測）；Codex Stop 與 allow／deny（y／esc 快捷鍵）、hookTransport 設定與 hooks 指令已驗收（2026-10-28）；agy Stop 已驗收（2026-10-28）；pi Linux 缺漏補裝後已驗收（2026-10-29，保留 macOS 驗收歷史）；遠端 machine（agy）已驗收（2026-10-28，修正後重測） | 遠端 Claude／Codex／pi 未涵蓋；見 docs/hook-transport-proposal.md |
@@ -2012,3 +2013,53 @@ ruleset 行為測試（2026-10-30）：由 ADMIN 帳號經 SSH 直接 push 一�
 未驗證：使用者尚未用真實 Mantis 單實際走完「請 Agent 轉卡片、跑驗證」流程；Agent 是否會確實執行此指令取決於指引遵守度，未驗證。沒有 PATH 連結以外的安裝步驟（`npm run build` 後可用）。
 
 文件：[轉換指引](card-examples/README.md)含用法與限制。
+
+## ISSUE-055：遠端長期存在的 pod 上，worktree 的清理與殘留尚未設計
+
+更新日期：2026-11-02。狀態：待調查（先紀錄，未來處理）。**這是設計缺口與風險，不是已發生的缺陷**：bridge 目前完全沒有 worktree 建立或清理的程式，所以現在不會產生任何殘留。
+
+使用者可見症狀（預期會發生，功能實作後）：卡片分配到遠端機器開發或 review，任務結束後，該機器上的 worktree 目錄、worktree workspace、分支與依賴（例如各自的 `node_modules`）若沒有被移除，會在長期存在的機器上持續累積。使用者提問（2026-11-02）：完成或 review 後，遠端機器的 workspace 會在關閉前被移除嗎？目前遠端機器就是 pod，不是每個任務新開 pod。
+
+預期行為：任務結束後依明確規則清理；清理不使用 `--force`；有未提交修改時保留並通知；pod 連不上或清理失敗時可延後重試，且不使任務失敗或無法結束。
+
+重現方式／環境：無法重現（未實作）。依據是 2026-11-02 在本機 Herdr 0.9.1、拋棄式 git repo 上的實測，以及官方文件 v0.9.5：
+- `herdr workspace close` 只關閉 Herdr 狀態，不刪除目錄。
+- `herdr worktree remove` 刪除 worktree 目錄並關閉該 worktree 的 workspace，**不刪分支**；工作樹有未提交修改（含未追蹤檔）時拒絕（`dirty_worktree_requires_force`）；`--force` 會永久丟失未提交修改。
+- `create` 會順便開「來源 repo」的 workspace，`remove` 不會關它。
+- 任務結束、卡片標為完成時，Herdr 與 bridge 都不會自動清理。
+- **遠端 `herdr --machine <名稱> worktree ...` 尚未實測**（需使用者同意才能在遠端機器執行）。
+
+已確認根因：不適用。缺口來自尚未設計與實作；未確認任何程式缺陷。
+
+預期的風險（Agent 依實測與程式閱讀整理，尚未在遠端驗證）：
+1. 清理時 pod 連不上（tunnel 斷線或 pod 暫時不可用）；應延後重試，不能判定任務失敗。
+2. bridge 在清理前當機；重啟後需能找出孤兒 worktree，這要求 worktree 路徑或標籤帶卡片 id 以便對照 journal 與卡片。
+3. 有未提交修改的 worktree 因「永不使用 `--force`」而永遠保留，需通知使用者並在卡片標示「清理待處理」。
+4. 分支只會累積（Herdr 不刪分支）；每個 worktree 各自安裝依賴會占用 pod 磁碟。
+5. 移除前必須先關閉該 workspace 內仍在執行的 Agent 與 pane。
+6. 專案政策為 L0（不 push）時，分支只存在於該 pod；pod 若被重建，未推送的分支會消失。`remove` 不刪分支只代表 pod 還在時安全。
+
+Agent 提議的清理順序（**使用者尚未決定**）：(1) 結果已寫進卡片；(2) 工作已保全（已推送，或已通知「只存在於 pod」）；(3) 關閉該 workspace 的 Agent 與 pane；(4) `worktree remove`，永不 `--force`；(5) 成功則卡片記「已清理」，失敗或連不上則記「清理待處理」並重試。關鍵是清理不阻擋任務完成。
+
+待使用者決定：
+1. 是否同意「清理不阻擋完成、失敗可重試、髒的保留並通知」的原則。
+2. L0（不 push）的遠端任務，清理前是否一定要先推送，還是只通知。
+3. 是否需要定期掃描並提醒殘留的 worktree，還是先只在任務結束時清理一次。
+
+修正範圍：無，尚未開始。
+
+測試：無。尚未有可測試的程式。
+
+未驗證：遠端 `herdr --machine ... worktree` 的實際行為；pod 上依賴占用的磁碟量；清理與 tunnel 重連、bridge 重啟的互動；孤兒 worktree 的偵測。
+
+下一步：待使用者決定上述三題後，把結論寫進 [REQ-20261101-worktree-isolation](cards/REQ-20261101-worktree-isolation.md) 的待確認第 5 項；實作 worktree 時一併設計清理、重試與孤兒偵測，並以真實 git repository 的自動化測試涵蓋；遠端行為需另行取得使用者同意後才實測。
+
+預定用途（使用者，2026-11-02）：等「開單 → 開發 → 結束 → merge」的自動化流程完成後，**用本 issue 作為端到端測試案例**，實際跑一次整條流程。這是未來的計畫，目前沒有任何自動化可用。
+
+作為測試案例前，Agent 整理的前提（尚未滿足）：
+1. 上方「待使用者決定」三題已有結論，且轉成有明確驗收條件的卡片；目前這是設計缺口，Agent 無法在缺少決定時自行開發。
+2. worktree 的建立已實作；清理依賴建立，不能先做。
+3. 若要涵蓋遠端 pod 的行為，需另行取得使用者同意在遠端機器實測。
+4. 本 issue 的內容是**刪除檢出**的邏輯，風險高於一般變更。Agent 建議第一次端到端試跑以 L1（開 PR、由人 merge）進行，不要直接用 L2 自動 merge；也建議先用較小、較低風險的 issue 驗證流程本身。
+
+相關：REQ-20261101-worktree-isolation、ADR-0002（`docs/adr/0002-operational-cards-in-plugin-state.md`，見 PR #15）決定 10 與未決、ISSUE-041（遠端 Herdr 機器）、ISSUE-043（遠端附件保留期限，已有「定期用 ssh 清理」的先例）。
