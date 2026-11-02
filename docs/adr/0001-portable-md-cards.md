@@ -2,7 +2,7 @@
 
 日期：2026-10-30。狀態：**已採納（Accepted，2026-10-30 使用者同意五項決定）**。實作進度見文末「實作狀態」。**部分被 [ADR-0002](0002-operational-cards-in-plugin-state.md) 取代（2026-11-02）**：卡片位置與「版本歷史交給 git」（決定 1）、「執行態不進卡片」（決定 2）、`project` 欄位（決定 4）、bridge 寫入範圍（決定 5）；格式、受限 frontmatter、匯入匯出、序列化與驗證指令不變。來源卡片：[REQ-20261030-card-to-merge](../cards/REQ-20261030-card-to-merge.md)。
 
-> 本文定義格式與規則。**目前存在的是：純函式 `parseCard`、`importCard`、`serializeCard`，檔案層 `CardStore`（`src/card-store.ts`），以及指令 `herdr-card-check`。** `CardStore` 目前沒有任何呼叫端，bridge 不讀取也不寫入卡片；Mantis 匯出、bridge 專用的狀態寫入、刪除語意與任何 Discord 指令都尚未實作，不得在 README／SPEC 寫成可用。
+> 本文定義格式與規則。**目前存在的是：純函式 `parseCard`、`importCard`、`serializeCard`，檔案層 `CardStore`（`src/card-store.ts`），以及指令 `herdr-card-check`。** `CardStore` 目前沒有任何呼叫端，bridge 不讀取也不寫入卡片；Mantis 匯出、執行中卡被刪的暫停與任何 Discord 指令都尚未實作，不得在 README／SPEC 寫成可用。bridge 專用的受限寫入（`setStatus`／`appendLog`）已於 2026-11-02 實作，見 ADR-0002，同樣沒有呼叫端。
 
 ## 背景
 
@@ -87,7 +87,7 @@ bridge 寫卡片時：先記讀取時的內容雜湊，寫入前再比對，不�
 ## 未決
 
 - 指令名稱與入口（CLI、Discord）尚未定，實作前於此補充。
-- cards 目錄放專案內還是 bridge 目錄：本文預設專案內並可設定，使用者尚未最終確認。
+- ~~cards 目錄放專案內還是 bridge 目錄~~ 已由 [ADR-0002](0002-operational-cards-in-plugin-state.md) 決定：營運卡片放 plugin 狀態目錄、不進 git；`docs/cards/` 只放範例與設計文件。
 - 是否需要 JSON Schema 或編輯器提示檔供外部工具驗證。
 - 其餘指令（匯入、匯出、列表）的名稱與入口；單檔驗證已定為 `herdr-card-check`（見實作狀態）。
 - Mantis 欄位對應需用實際 Mantis 表單核對。
@@ -105,6 +105,6 @@ bridge 寫卡片時：先記讀取時的內容雜湊，寫入前再比對，不�
     - 安全：id 先驗格式再組路徑（`../`、絕對路徑、`.md` 後綴一律 `invalid`，不碰檔案系統）；只讀一般檔案，符號連結、目錄、超過整檔上限（當時 256 KiB，現為 512 KiB）的檔案拒絕（`unsafe`／`too_large`），以 `lstat` 加 `O_NOFOLLOW` 開檔並用 `fstat` 複核；暫存檔以 `.` 開頭，不會被 `list()` 當成卡片。錯誤以代碼回報：`not_found`、`invalid`、`unsafe`、`too_large`、`exists`、`conflict`。
     - **限制**：普通檔案系統無法做到「比對雜湊並取代」的真正原子操作；`update` 在 `rename` 前再比對一次以縮小空窗，但仍假設同一時間只有一個程式寫入（bridge），人手動編輯造成的衝突靠雜湊偵測。程序在寫暫存檔與 `link`／`rename` 之間崩潰可能遺留 `.<id>.md.tmp-*` 暫存檔，目前沒有清理機制。`rootDir` 若是檔案而不是目錄，`list()` 會丟出例外。權限原為固定 `0644`；**2026-11-02 起改為 0600（目錄 0700），見 ADR-0002**。
 - **測試**：`test/card.test.ts` 57 項（含真實規劃卡必須可解析）、`test/card-import.test.ts` 15 項、`test/card-serialize.test.ts` 36 項（含 `docs/cards` 內每張卡 parse、serialize、parse 往返相等且重複序列化文字不變）、`test/card-store.test.ts` 24 項（真實暫存目錄與符號連結）。全套 `npm test`（2026-10-30，本機 macOS、Node v26.12.0）445 項：444 通過、0 失敗、1 略過（2026-11-01）；這不是 CI 結果。開發過程抓到並修正兩個缺陷：`today` 只檢查格式、未檢查日期是否真實存在；`type` 以 `in` 判斷會把 `constructor` 等原型鏈名稱當成有效值（改用 `Object.hasOwn`）。
-- **尚未實作**：Mantis 匯出、bridge 專用的狀態寫入（只改 `status`、`updated` 與「執行結果」章節，且只允許 `in_progress`／`done`）、執行中卡被刪的暫停、bridge 或 Discord 的呼叫端與指令入口。驗收條件中這些項目仍是待做。
+- **尚未實作**：Mantis 匯出、執行中卡被刪的暫停、bridge 或 Discord 的呼叫端與指令入口。驗收條件中這些項目仍是待做。（原列在此的「bridge 專用的狀態寫入」已於 2026-11-02 實作，見 ADR-0002 實作狀態。）逐項追蹤見[追蹤清單](../card-to-merge-tracker.md)。
 - **決策變更（2026-10-30，ISSUE-053）**：原稿允許 `x-` 前綴自訂欄位，但 `Card` 沒有保留它的位置，讀寫往返會悄悄丟失。改為**禁止**：`parseCard` 對 `x-` 開頭的 key 回傳 `unknown key`。若日後需要擴充欄位，應新增明確欄位或 `extensions` 結構，並補往返測試。
 - **實作後與原文的差異**：物件值允許純量陣列（`links` 需要）；`status` 註解中的 `approved` 已不在列舉內，規劃卡已同步修正；規劃卡原缺必填的 `title`，一併補上。

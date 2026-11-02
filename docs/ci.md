@@ -46,9 +46,12 @@ Run：https://github.com/jon888465/Herdr_Discord_Bridge/actions/runs/41019013179
 
 2026-09-20 PR #1 分支上 run `35509147934`：Ubuntu 206/206、macOS 205 通過加 1 略過。該結果屬舊程式，不能當成目前 `main` 的結果。
 
-## 尚未完成
+## 尚未完成（2026-11-02 盤點）
 
-- 在 GitHub 實際執行並記錄 `main` 的 Ubuntu／macOS 結果。
-- 設定 branch protection 或 ruleset，將本檢查設為必要。
-- 處理 PR #1（關閉或改 base）。
+已完成並移除：在 GitHub 實際執行並記錄 `main` 的結果（見上方）、設定 ruleset 並將兩個平台設為必要檢查、處理 PR #1（已關閉）、action 釘 SHA。
+
+仍待處理（逐項追蹤見 [Card-to-Merge 追蹤清單](card-to-merge-tracker.md) 的 G 節）：
 - 啟用 Dependabot 更新 action（釘 SHA 後升級靠它提醒）。
+- 紅燈 PR 被擋的實測；直接 push `main` 被拒已於 2026-10-30 實測。
+- 打開 `strict_required_status_checks_policy`（分支需與 `main` 同步才可合併）。
+- CODEOWNERS 與 Agent 專用身分（L2 自動 merge 的前置）。

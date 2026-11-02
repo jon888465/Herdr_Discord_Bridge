@@ -1,6 +1,6 @@
 # Known Issues
 
-維護規則見 [AGENTS.md](../AGENTS.md)。最後整理：2026-10-05。
+維護規則見 [AGENTS.md](../AGENTS.md)。最後整理：2026-11-02（ISSUE-052 到 056 的索引列與 Card-to-Merge 追蹤清單；更早的條目未重新整理）。
 
 | ID        | 問題                                                                            | 狀態             | 下一步                                                                                                                                    |
 | --------- | ------------------------------------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
@@ -51,8 +51,8 @@
 | ISSUE-049 | 對 pi 傳圖片被拒絕「此 Agent 尚未支援本機圖片交付」 | 已修正、待驗收（2026-10-29） | pi 加入圖片白名單；單元測試完成；bridge 尚未重啟；Discord 未驗收；見下方 ISSUE-049 |
 | ISSUE-050 | hook 啟用後 Codex 回應期間 TUI 偶爾滾動 | 重新開啟／待調查 | final 優先、工作中 visible；2026-10-29 使用者已重啟，Gateway 連線成功，實機滾動待驗收 |
 | ISSUE-051 | `npm start`／`dry-run` 與 bin 指向不存在的 `dist/index.js` | 已驗收（入口路徑） | 2026-10-29 使用者跑 `npm start` 不再 MODULE_NOT_FOUND；因缺 token 未完整啟動，屬啟動方式差異 |
-| ISSUE-052 | `main` 沒有 CI 與 branch protection，無法作為自動 merge 閘門 | 修正中 | 2026-10-30 `ci.yml` 已加入工作樹（未 commit／push）；待推送後看 Ubuntu／macOS 實際結果，再設 branch protection |
-| ISSUE-053 | 卡片 `x-` 自訂欄位解析後不保留，序列化後消失 | 已修正、待驗收 | 2026-10-30 使用者決定「禁止」；`parseCard` 已拒絕 `x-` key，自動化測試通過；尚無寫檔層，無 live 驗收項目，待 PR 合併 |
+| ISSUE-052 | `main` 沒有 CI 與 branch protection，無法作為自動 merge 閘門 | 修正中 | CI（Ubuntu／macOS）與 ruleset `protect-main` 已在 `main`，直接 push 被拒已實測（2026-10-30）；剩紅燈 PR 被擋實測、Dependabot；`strict` 檢查、CODEOWNERS 與 bot 身分屬 L2 前置，見 [追蹤清單](card-to-merge-tracker.md) |
+| ISSUE-053 | 卡片 `x-` 自訂欄位解析後不保留，序列化後消失 | 已修正、待驗收 | 2026-10-30 使用者決定「禁止」；`parseCard` 已拒絕 `x-` key，已合併（PR #9）；無 live 驗收項目，等使用者決定是否標已驗收 |
 | ISSUE-054 | 缺少單檔卡片驗證指令，Agent 轉 Mantis 單後無法自我檢查 | 已修正、待驗收 | 2026-10-30 新增 `herdr-card-check`；自動化測試通過；待使用者用真實 Mantis 單請 Agent 轉卡片並以此指令驗收 |
 | ISSUE-055 | 遠端長期存在的 pod 上，開發完成後的 worktree／workspace／分支清理尚未設計 | 待調查（先紀錄，未來處理） | 2026-11-02 使用者要求先紀錄；功能尚未實作，無實際殘留；原則與 3 個問題待使用者決定 |
 | ISSUE-056 | 機敏內容遮蔽漏掉多種憑證樣式；兩份遮蔽邏輯重複且不一致；handoff 摘要先截斷再遮蔽 | 已修正、待驗收 | 2026-11-02 已整併為 `src/redact.ts`，自動化測試通過；待實際 session handoff 驗收 |
@@ -1960,7 +1960,7 @@ lint、typecheck、build 通過。`node --test dist/test/hook-events.test.js dis
 
 根因（已確認）：CI 與一項功能綁在同一個長期未合併的 PR，從未進入 `main`。另確認該 workflow 的 `paths-ignore: **/*.md` 若設為必要檢查，會使純文件 PR 永遠等待檢查。
 
-修正範圍（工作樹，未 commit／push）：新增 `.github/workflows/ci.yml`（取自 PR #1，移除 `paths-ignore`）、重寫 `docs/ci.md`。不合併 PR #1 的功能與腳本變更。
+修正範圍（原寫「工作樹，未 commit／push」，已於 PR #2 合併，`175981c`）：新增 `.github/workflows/ci.yml`（取自 PR #1，移除 `paths-ignore`）、重寫 `docs/ci.md`。不合併 PR #1 的功能與腳本變更。
 
 驗證（2026-10-30，macOS，Node v26.12.0，本機，非 CI）：`npm ci`、`typecheck`、`lint` 通過；`npm test` 286 項，285 通過、0 失敗、1 略過。
 
@@ -1970,12 +1970,14 @@ GitHub 驗證（2026-10-30，PR #2 https://github.com/jon888465/Herdr_Discord_Br
 1. ~~推送後確認 GitHub 上 Ubuntu 與 macOS 實際結果~~ 已於 PR #2 通過；PR #2 於 2026-10-30 合併（`175981c`），`main` push run 41019618373 兩平台通過（Ubuntu 286/286；macOS 285 通過、1 略過、0 失敗）。
 2. ~~設定 branch protection／ruleset，將 CI 設為必要檢查。~~ 使用者於 2026-10-30 建立 ruleset `protect-main`（id 26191256），已用 `gh api` 唯讀核對設定：enforcement `active`，目標為預設分支，bypass 清單為空；規則為禁止刪除、禁止 force push（non_fast_forward）、必須經 PR（核准數 0，其餘審查選項皆未開）、必要檢查 `Full tests (ubuntu-latest, Node 22)` 與 `Full tests (macos-latest, Node 22)`。`strict_required_status_checks_policy` 為 false（不要求分支與 `main` 同步後才可合併）。**當時僅核對設定；其後的直接 push 測試見下方（已被拒絕）。** 合併紅燈 PR 的行為仍未測試，因此「規則實際擋得住」只部分驗證。
 3. ~~處理 PR #1~~ 2026-10-30 已關閉並留言說明；分支 `followup-team-question-ui-ci` 保留未刪，其中 Team 答覆介面功能未合併，需要時另開 PR 並 rebase。
-4. ~~action 釘住 commit SHA~~ 已於分支 `ci/pin-actions` 修改（`actions/checkout` v7.0.1、`actions/setup-node` v7.1.0，細節見 `docs/ci.md`）；待此 PR 的 CI 通過與合併。Dependabot 尚未啟用。
+4. ~~action 釘住 commit SHA~~ 已於分支 `ci/pin-actions` 修改（`actions/checkout` v7.0.1、`actions/setup-node` v7.1.0，細節見 `docs/ci.md`）；已於 PR #4 合併（2026-10-30，`cf7f734`），`main` push run 41023426861 兩平台通過（Ubuntu 286/286；macOS 285 通過、1 略過、0 失敗）。Dependabot 尚未啟用。
 
 PR 閘門觀察（2026-10-30）：PR #4、#5 在 CI 執行期間觀察到 `mergeStateStatus` 為 `BLOCKED`，兩個必要檢查通過後變為 `CLEAN`；PR #6 只記錄到通過後的 `CLEAN`，未觀察到執行期間的狀態；PR #2 建立於 ruleset 之前，不適用。`main` 的 push run 在 PR #2、#4、#6 合併後皆通過（#4：run 41023426861，Ubuntu 286/286、macOS 285 通過加 1 略過）。紅燈 PR 是否被擋仍未實測。
 
 ruleset 行為測試（2026-10-30）：由 ADMIN 帳號經 SSH 直接 push 一個空 commit（`255c726`，parent `1a65de4`）到 `main`，被 GitHub 拒絕（`push declined due to repository rule violations`；`Changes must be made through a pull request`；`2 of 2 required status checks are expected`），`origin/main` 維持 `1a65de4`。證明 bypass 清單為空時規則對管理員也生效。**未測試**：合併 CI 未過的 PR 是否被擋、force push、刪除 `main`（後兩者不實測，以設定核對為準）。
 5. 此 issue 不涵蓋自動 merge 的權限與政策，那屬於卡片規劃。
+
+剩餘（2026-11-02 盤點）：紅燈 PR 被擋的實測（直接 push 被拒已測）、Dependabot、`strict_required_status_checks_policy`；CODEOWNERS 與 bot 身分是 L2 自動 merge 的前置。逐項追蹤見 [Card-to-Merge 追蹤清單](card-to-merge-tracker.md) 的 G 節。
 
 附註：舊分支的 `docs/ci.md` 曾引用 `ISSUE-021` 追蹤 CI；該編號在 `main` 已用於 Phase 3 Session Handoff Runtime，本 issue 以 ISSUE-052 取代，不沿用舊編號。
 
