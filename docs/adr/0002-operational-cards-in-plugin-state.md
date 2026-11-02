@@ -139,8 +139,8 @@ issue、README、CHANGELOG 等由 Agent 在該卡片的 worktree 裡依專案自
 3. journal 事件到紀錄行的對照表，以及事件 id 的產生方式。
 4. ~~機敏內容~~ 已決定（2026-11-02），見決定 11。
 5. ~~`CardStore` 的受限 API 與 0600 權限~~ 已實作（2026-11-02，見實作狀態）。
-6. 啟動時建立與檢查狀態目錄權限；狀態目錄被其他使用者可讀時的處理。
-7. 卡片的索引、搜尋與列表（例如依 `projects` 或 `status`）。
+6. ~~啟動時建立與檢查狀態目錄權限~~ 已決定並實作（2026-11-02，階段 2a）：第一次寫入時以 0700 建立；已存在但群組或其他人可存取則拒絕並提示 `chmod 700 <路徑>`，不自動修改，見階段 2 決定 Q7。
+7. 卡片的索引、搜尋與列表：階段 2a 先做 `card list [status]`（依狀態篩選）；依 `projects` 搜尋尚未做。
 8. ~~單筆流程紀錄的長度上限與截斷規則~~ 已決定（2026-11-02），見決定 11。
 
 ## 與 ADR-0001 的關係
@@ -214,3 +214,30 @@ issue、README、CHANGELOG 等由 Agent 在該卡片的 worktree 裡依專案自
 - **真實尺寸驗證（2026-11-02，一次性腳本，非自動化測試）：** 用營運設定（1 MiB 上限）、每筆 300 字、每批 200 筆連續追加 8000 筆。第一次輪替發生在累積 2400 筆時，卡片由 767,948 位元組降到 1,970；卡片最大 769,782，最大旁檔 837,654（小於 1 MiB）；產生 3 個旁檔；`readLog` 讀回 8000 筆且全部唯一。
 - 測試（2026-11-02，本機 macOS、Node v26.12.0，非 CI）：全套 589 項，588 通過、0 失敗、1 略過（原 569 項）。自動化測試用 4096 位元組的小 store（門檻 3072）涵蓋保留 5 筆、二次輪替、輪替後重送舊事件仍冪等、崩潰兩步之間、無法輪替、旁檔寫入失敗、符號連結的 `logs`、批次上限。
 - **限制：** 單次追加最多 200 筆；旁檔最多 9999 個；輪替後的重送冪等需要讀旁檔，旁檔很多時追加會變慢（只在卡片有指向旁檔的說明時發生）；旁檔目前沒有清理機制。
+
+## 階段 2 決定與 2a 實作狀態（2026-11-02）
+
+### 階段 2 決定（使用者 2026-11-02：「Q1 到 Q7 照建議」）
+
+| # | 決定 |
+|---|---|
+| Q1 | `card …` 加進 `handleCommand` 的同一個 switch，Discord 與 console 都可用；授權沿用既有 `allowedUserIds`。首批子指令：`card list [status]`、`card show <id>`、`card import`（附 .md）、`card assign <id> [--coding]`。 |
+| Q2 | 人用編輯檔案把卡片設成 `ready`，不做 `card ready` 指令。 |
+| Q3 | 交給 Agent 的卡片內容視為資料：加分隔、只取有限段落（標題／描述／驗收）、有長度上限、先 `redactSecrets`、只有 `ready` 的卡可指派。**沒有技術上能防 prompt injection 的保證。** |
+| Q4 | Team 任務完成 → 卡片 `done`；失敗或取消 → 維持 `in_progress`、記錄事件，由人決定。 |
+| Q5 | 卡片 frontmatter 新增由 bridge 寫入的 `tasks: [task-…]`。 |
+| Q6 | 任務執行中卡片被刪：bridge 停止寫入卡片、在原 thread 通知並列出選項（`card recreate`／`team cancel`／忽略）；不自動取消、不自動重建。引擎只有取消、沒有暫停，所以原先的「暫停並詢問」改為「停止寫入並詢問」。 |
+| Q7 | 卡片目錄第一次寫入時以 0700 建立；已存在且群組或其他人可存取則拒絕並提示 `chmod 700 <路徑>`，不自動修改。 |
+
+階段拆分：**2a**（目錄檢查、`card list/show/import`，不啟動 Agent）→ **2b**（`card assign`、journal 同步、`completed` 事件模板、`tasks` 欄位、內容交接）→ **2c**（卡片被刪除的處理）。每個子階段都需要使用者重啟 bridge 並 live 驗收。
+
+### 2a 實作狀態
+
+**原始碼已實作，自動化測試通過；bridge 尚未重啟、尚未 live 驗收（ISSUE-057）。**
+
+- `src/card-directory.ts`：`ensureCardsDirectory`，規則見 Q7；永不修改既有目錄。
+- `src/card-command.ts`：`runCardCommand`。`list` 最多 30 行、標題 50 字、最多列 5 個壞檔；`show` 顯示摘要、人寫內文前 1200 字、最近 5 筆紀錄；`import`：Discord 必須恰好一個 `.md` 附件且宣告大小 1 byte 到 512 KiB（超過不下載），**Discord 端不接受路徑參數**（避免讀取伺服器檔案）；console 接受一個本機 `.md` 路徑（拒絕符號連結、非一般檔案、超過 512 KiB、非 UTF-8）。匯入沿用 `CardStore.importText`：強制 `draft`、清空 `external`、不覆蓋既有 id；沒有 id 的卡片需 `--slug`。所有輸出先過 `redactSecrets`。`card assign` 只回「尚未實作（階段 2b）」。
+- `src/attachments.ts`：`downloadDiscordText`，只允許 Discord 附件網址，先檢查宣告大小、下載中再檢查實際大小、嚴格 UTF-8。
+- `src/main.ts`：`case "card"`，卡片目錄 `<stateDirectory>/cards`；`help` 與 console help 已加說明。
+- 範圍外：不啟動 Agent、不改卡片狀態、不寫流程紀錄。
+- 測試（2026-11-02，本機 macOS、Node v26.12.0，非 CI）：全套 618 項，617 通過、0 失敗、1 略過（原 589 項）。

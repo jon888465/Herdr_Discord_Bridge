@@ -54,7 +54,7 @@ const KNOWN_KEYS = new Set<string>([
 ]);
 
 const CARD_TYPES: readonly string[] = ["requirement", "ticket"];
-const CARD_STATUSES: readonly string[] = [
+export const CARD_STATUSES: readonly string[] = [
   "draft",
   "discussing",
   "refined",

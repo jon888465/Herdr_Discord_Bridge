@@ -598,8 +598,18 @@ Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*
 
 ## 卡片驗證指令（2026-10-30，ISSUE-054）
 
-`scripts/herdr-card-check [--ledger] FILE...`（需先 `npm run build`）逐檔檢查 Markdown 卡片是否符合 [ADR-0001](docs/adr/0001-portable-md-cards.md) 的格式（`parseCard` 規則：受限 frontmatter 子集、必填欄位、id 與檔名、`type`／`status` 列舉、日期、`version`、標題長度、`links`／`external` 結構、8 KiB frontmatter，以及整檔上限：預設 512 KiB，加 `--ledger` 為 1 MiB）。每檔輸出 `OK`（stdout）或 `FAIL`（stderr，附原因）；任何檔案不合格或讀不到則結束碼 1，用法錯誤 2，全部合格 0；失敗不中斷後續檔案；超過所選上限的檔案不讀取。只檢查格式，不判斷內容正確性或敏感資訊。bridge 不讀取卡片，也沒有 Discord 指令。待使用者驗收。
+`scripts/herdr-card-check [--ledger] FILE...`（需先 `npm run build`）逐檔檢查 Markdown 卡片是否符合 [ADR-0001](docs/adr/0001-portable-md-cards.md) 的格式（`parseCard` 規則：受限 frontmatter 子集、必填欄位、id 與檔名、`type`／`status` 列舉、日期、`version`、標題長度、`links`／`external` 結構、8 KiB frontmatter，以及整檔上限：預設 512 KiB，加 `--ledger` 為 1 MiB）。每檔輸出 `OK`（stdout）或 `FAIL`（stderr，附原因）；任何檔案不合格或讀不到則結束碼 1，用法錯誤 2，全部合格 0；失敗不中斷後續檔案；超過所選上限的檔案不讀取。只檢查格式，不判斷內容正確性或敏感資訊。待使用者驗收。bridge 端的 `card` 指令見下一段。
 
 ## 機敏內容遮蔽（2026-11-02，ISSUE-056）
 
 `src/redact.ts` 的 `redactSecrets` 是 handoff 公開文字（`publicText`）與 handoff 摘要（`src/handoff-summary.ts` 的 `boundedHandoffSummary`）共用的遮蔽邏輯。涵蓋：私鑰區塊（含被截斷的）、`sk-`／`gh*_`／`github_pat_`／Slack／AWS access key、JWT、`Bearer`、名稱含 token／password／secret／api_key 等的 `name=value`，以及網址中的 `user:pass@` 與名稱像憑證的查詢參數。標記為 `[redacted private key]`、`[redacted token]`、`[redacted]`。順序是**先遮蔽再截斷**。這是黑名單式規則，**不保證完整**；它只用在 handoff 文字與摘要，一般回覆轉送到 Discord 的路徑沒有套用。待實際 handoff 驗收。
+
+### 營運卡片指令（階段 2a，待驗收）
+
+`card list [status]`、`card show <id>`、`card import [--slug <名稱>] [<本機路徑>]` 可在 Discord（沿用 `allowedUserIds`）與本機 console 使用；卡片存放於 `<stateDirectory>/cards/`，**不進 git**。見 [ADR-0002](docs/adr/0002-operational-cards-in-plugin-state.md)。
+
+- 目錄：第一次寫入（`card import`）時以 0700 建立；已存在但群組或其他人可存取、是符號連結或不是目錄時**拒絕並提示 `chmod 700 <路徑>`**，不自動修改。`list`／`show` 不會建立目錄。
+- `list`：最多 30 行，標題截為 50 字，最多列 5 個不合格檔案。`show`：摘要、人寫內文前 1200 字、最近 5 筆流程紀錄。id 不合法或找不到卡片時明確回報。所有輸出先經 `redactSecrets`。
+- `import`：Discord 必須附上恰好一個 `.md` 檔，宣告大小 1 byte 到 512 KiB，超過不下載；Discord **不接受路徑參數**。console 接受一個本機 `.md` 路徑（拒絕符號連結、非一般檔案、超過 512 KiB、非 UTF-8）。匯入的卡片一律為 `draft`、清空 `external`、不覆蓋既有 id；沒有 id 時需 `--slug`。回覆列出調整項目並提醒人審閱後把 `status` 改成 `ready`。
+- `card assign` 尚未實作（階段 2b）。本階段**不啟動 Agent、不改卡片狀態、不寫流程紀錄**。
+- 限制：卡片內容可能來自外部（例如 Mantis），顯示前遮蔽是黑名單式，不保證完整。

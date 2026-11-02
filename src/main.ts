@@ -14,11 +14,13 @@ import {
   ATTACHMENT_SUBDIR,
   agentSupportsLocalImages,
   cleanupOldAttachments,
+  downloadDiscordText,
   prepareAttachments,
   type InboundAttachment,
   type PreparedAttachment,
 } from "./attachments.js";
 import { agentOrigin, recordAgentOrigin } from "./agent-origin.js";
+import { readLocalCardFile, runCardCommand } from "./card-command.js";
 import { basename, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { statSync } from "node:fs";
@@ -577,6 +579,19 @@ export async function handleCommand(
       return;
     case "team":
       await teamCommand(args, context, runtime);
+      return;
+    case "card":
+      await runtime.discord.reply(
+        context.message,
+        await runCardCommand(args, {
+          rootDir: join(stateDirectory(), "cards"),
+          today: () => new Date().toISOString().slice(0, 10),
+          source: context.source === "console" ? "console" : "discord",
+          attachments: [...context.message.attachments.values()],
+          download: downloadDiscordText,
+          readLocalFile: readLocalCardFile,
+        }),
+      );
       return;
     default:
       if (context.routing.guildId === "local-console") {
@@ -2950,6 +2965,7 @@ function helpText(prefix: string): string {
     `\`${prefix} team ask [--coding] <prompt>\` — 建立持久化任務，由 Lead 動態分工；--coding 才啟用本機 Git 驗收`,
     `\`${prefix} team questions <task-id>\` / \`${prefix} team reply <task-id> <question-id> <answer>\` — 指定問題回答`,
     `\`${prefix} team status [task-id]\` / \`${prefix} team cancel <task-id>\` — 查看／取消任務`,
+    `\`${prefix} card list [status]\` / \`${prefix} card show <id>\` — 查看營運卡片；\`card import\`（附上 .md 檔）匯入為 draft。目前不會啟動 Agent`,
     `\`${prefix} quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds]\` — 明確額度回報；quota status 查詢`,
     `\`${prefix} failover arm <source> <candidate1,candidate2> <goal>\` → \`failover run <id> confirm-source-stopped\` — 確認停止後自動選擇候選並驗證切換；status/cancel 可查詢／取消`,
     `\`${prefix} handoff checkpoint <source> <goal>\` → \`handoff verify <id> <destination> confirm-source-stopped\` → \`handoff accept <id>\` → \`handoff continue <id>\` — 持久化交接；status/packet/cancel 可查詢／釋放`,
@@ -3005,6 +3021,7 @@ function consoleHelpText(): string {
     "team questions <task-id> — 列出多 Agent 問題與狀態",
     "team reply <task-id> <question-id> <answer> — 回答指定問題",
     "team cancel <task-id> — 停止任務派送並取消仍 active 的工作",
+    "card list [status] | card show <id> | card import <本機 .md 路徑> [--slug <名稱>] — 營運卡片（匯入為 draft，不啟動 Agent）",
     "quota status [pane] / quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds] — 明確額度回報",
     "failover arm <source> <candidate1,candidate2> <goal-and-constraints> — 保存候選優先序與任務",
     "failover status [id] / failover run <id> confirm-source-stopped / failover cancel <id> — 檢視／驗證切換／取消",
