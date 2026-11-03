@@ -98,3 +98,15 @@ external: { notion: null, github: null, mantis: null }
 - ~~action 釘 commit SHA~~ 已完成（PR #4）；Dependabot 尚未啟用。
 
 逐項進度與依賴見 [Card-to-Merge 追蹤清單](../card-to-merge-tracker.md)，那是剩餘工作的唯一權威來源。
+
+## F2 決定：GitHub 身分（2026-11-03）
+
+使用者決定（先記錄，進 F3 前再做，**目前沒有任何程式**）：
+
+- **L1 第一版先用現有的 `gh`／ssh 登入**（本機 `jon888465`：`gh` 為 fine-grained token、git 走 ssh）。不新增 bot 帳號或 GitHub App。
+- **代價（已知）：** 所有 PR 都會顯示是 `jon888465` 開的；CODEOWNERS 無法要求「獨立審查」（作者與審查者是同一人）；Agent 若能在同一環境執行 `gh`／`git`，就能用同一份憑證（目前已是如此）。因為第一版只做 L1（你自己 merge），這個代價可以接受。
+- **L2 之前必須改成獨立身分（追蹤清單 G2：bot 帳號或 GitHub App）**，並搭配 G1（CODEOWNERS）、G3（strict status checks）。
+- **bridge 只做這些 GitHub 動作（L1）：** push `card/<卡片 id>` 分支、開 PR、讀 CI 狀態。**不做**：push `main`（ruleset `protect-main` 也會擋）、merge、改設定、改 workflow。
+- **最小權限（fine-grained token，單一 repo）：** Contents 讀寫（push 分支）、Pull requests 讀寫（開 PR）、Metadata 讀取；讀 CI 結果需要 Commit statuses／Checks 讀取。**不要給**：Administration、Workflows、Secrets、Actions 寫入。（ssh push 用的是帳號的 ssh key，權限比 token 寬，這是用現有登入的另一項代價。）
+- **PR 內容（已決定）：** 標題用卡片標題，內文只放卡片 id 與 bridge 產生的結構化事實，不貼描述與驗收條件。
+- **受專案政策限制：** 只有政策等級為 L1 以上的專案才允許 push 與開 PR（F1 已提供查詢；強制屬 F3）。
