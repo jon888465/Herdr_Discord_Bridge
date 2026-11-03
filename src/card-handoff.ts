@@ -15,7 +15,7 @@ export type AssignmentPrompt =
   { ok: true; prompt: string } | { ok: false; error: string };
 
 /** 取出「## <name>」到下一個「## 」之間的文字；子標題（###）屬於該段。 */
-function section(body: string, name: string): string | undefined {
+export function section(body: string, name: string): string | undefined {
   const lines = body.split("\n");
   const heading = new RegExp(`^##[ \\t]+${name}[ \\t]*$`);
   const start = lines.findIndex((line) => heading.test(line));

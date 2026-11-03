@@ -818,6 +818,7 @@ const cleanedUp = {
   workspaceId: "w9",
   path: preparedWorktree.path,
   branch: preparedWorktree.branch,
+  repoPath: preparedWorktree.repoPath,
 };
 
 test("cleanup reports the removal, keeps the branch and the source workspace, and logs cleanup_done", async () => {
@@ -841,6 +842,7 @@ test("cleanup keeps a worktree with uncommitted changes, says so, and logs clean
       workspaceId: "w9",
       path: preparedWorktree.path,
       branch: preparedWorktree.branch,
+      repoPath: preparedWorktree.repoPath,
     }),
   });
   store.create(assignable("REQ-20261102-work", { status: "in_progress" }));
@@ -895,4 +897,81 @@ test("when the new Agent is blocked the worktree is recorded on the card, no tas
   assert.deepEqual(log.ok && log.entries.map((e) => e.event), [
     "worktree_created",
   ]);
+});
+
+test("the card shows the worktree as active after assign and as removed or kept after cleanup, in place", async () => {
+  const { store, run } = worktreeSetup({
+    cleanupWorktree: async () => cleanedUp,
+  });
+  store.create(assignable());
+  await run("assign", "REQ-20261102-work", "--worktree");
+  const active = store.read("REQ-20261102-work");
+  assert.ok(active.ok && active.card.body.includes("- worktree 狀態：作用中"));
+  assert.match(await run("show", "REQ-20261102-work"), /worktree 狀態：作用中/);
+
+  await run("cleanup", "REQ-20261102-work");
+  const removed = store.read("REQ-20261102-work");
+  assert.ok(
+    removed.ok &&
+      removed.card.body.includes("- worktree 狀態：已清理（分支保留）"),
+  );
+  assert.equal(removed.ok && removed.card.body.includes("作用中"), false);
+  assert.equal(
+    removed.ok && removed.card.body.split("- worktree 狀態：").length - 1,
+    1,
+  );
+});
+
+test("a kept dirty worktree is visible on the card", async () => {
+  const { store, run } = setup({
+    cleanupWorktree: async () => ({
+      removed: false as const,
+      reason: "dirty_worktree" as const,
+      workspaceId: "w9",
+      path: preparedWorktree.path,
+      branch: preparedWorktree.branch,
+      repoPath: preparedWorktree.repoPath,
+    }),
+  });
+  store.create(assignable("REQ-20261102-work", { status: "in_progress" }));
+  await run("cleanup", "REQ-20261102-work");
+  assert.match(
+    await run("show", "REQ-20261102-work"),
+    /worktree 狀態：保留（有未提交修改）/,
+  );
+});
+
+const withDecision = (decision: string) =>
+  assignable("REQ-20261102-work", {
+    body: `# 做事\n\n## 描述\n把報表匯出成 CSV。\n\n## 決議\n${decision}\n\n## 驗收條件\n- 可以下載\n`,
+  });
+
+test("card show prints the free-text decisions on their own, once, and redacts secrets", async () => {
+  const { store, run } = setup();
+  const token = cat("ghp_", "d".repeat(36));
+  store.create(
+    withDecision(
+      `- 2026-11-03 Agent：改用串流輸出，避免大檔 OOM\n- 連線用 ${token}`,
+    ),
+  );
+  const text = await run("show", "REQ-20261102-work");
+  assert.match(text, /── 決議 ──\n- 2026-11-03 Agent：改用串流輸出/);
+  assert.equal(text.split("改用串流輸出").length - 1, 1);
+  assert.equal(text.includes(token), false);
+  assert.match(text, /把報表匯出成 CSV。/);
+  assert.match(text, /可以下載/);
+});
+
+test("a long decision section is cut with a notice, and a card without one shows no decision header", async () => {
+  const { store, run } = setup();
+  store.create(withDecision("決".repeat(1500)));
+  const long = await run("show", "REQ-20261102-work");
+  assert.match(long, /…（已截斷，共 1500 字；完整內容請開卡片檔）/);
+
+  const plain = setup();
+  plain.store.create(assignable("REQ-20261102-work"));
+  assert.equal(
+    (await plain.run("show", "REQ-20261102-work")).includes("決議"),
+    false,
+  );
 });

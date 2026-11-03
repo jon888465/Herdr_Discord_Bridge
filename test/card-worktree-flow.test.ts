@@ -266,6 +266,7 @@ test("cleanup removes a clean worktree, marks it removed and withdraws the autho
     workspaceId: "w9",
     path: created.worktree.path,
     branch: `card/${CARD}`,
+    repoPath: "/Users/jon/git_wk/repo",
   });
   assert.deepEqual(log, [
     'worktree.remove:{"workspace_id":"w9"}',
@@ -289,6 +290,7 @@ test("cleanup keeps a worktree with uncommitted changes and changes nothing else
     workspaceId: "w9",
     path: created.worktree.path,
     branch: `card/${CARD}`,
+    repoPath: "/Users/jon/git_wk/repo",
   });
   assert.deepEqual(log, ['worktree.remove:{"workspace_id":"w9"}']);
 });

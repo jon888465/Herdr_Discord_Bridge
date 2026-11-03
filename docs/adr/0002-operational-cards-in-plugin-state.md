@@ -270,4 +270,8 @@ issue、README、CHANGELOG 等由 Agent 在該卡片的 worktree 裡依專案自
 
 ### 階段 3（worktree 隔離）進度（2026-11-02）
 
-3a（Herdr worktree 轉接層，`src/worktree.ts`）已實作、**未接線**，bridge 行為不變；決定、socket API 與實測結果見 [需求卡](../cards/REQ-20261101-worktree-isolation.md)「Socket API 與 3a 轉接層」。3b（`card assign --worktree`、`card cleanup`、thread 路由切換、授權、索引）原始碼與自動化測試完成，待 live 驗收（ISSUE-062）；實測發現新資料夾會讓 Claude Code 停在「信任資料夾」提示，見需求卡「3b 實作與實測」。
+3a（Herdr worktree 轉接層，`src/worktree.ts`）已實作、**未接線**，bridge 行為不變；決定、socket API 與實測結果見 [需求卡](../cards/REQ-20261101-worktree-isolation.md)「Socket API 與 3a 轉接層」。3b（`card assign --worktree`、`card cleanup`、thread 路由切換、授權、索引）原始碼與自動化測試完成，主流程 live 驗收通過 2026-11-03（ISSUE-062）；實測發現新資料夾會讓 Claude Code 停在「信任資料夾」提示，見需求卡「3b 實作與實測」。
+
+### 決定 11 的範圍澄清（2026-11-03，使用者提問後）
+
+決定 11 限制的只是 **bridge 自動寫進 `## 流程紀錄` 的說明**（預設只寫 bridge 產生的結構化事實；例外的短自由文字要過機敏檢查）。**人或 Agent 自己寫的卡片段落本來就是自由文字**，不受決定 11 限制。使用者要求「卡片也能記錄 AI 的決議」（2026-11-03）：先做**選項 1**——`## 決議` 由人或 Agent 自己寫、bridge 不改寫、`card show` 單獨顯示；bridge 另外在 `## 異動專案` 自動寫結構化的 worktree 狀況。**選項 2**（bridge 自動把有界、過機敏檢查的 Agent 摘要寫進 `## 決議`）尚未做，需要另行決定。
