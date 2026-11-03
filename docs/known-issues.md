@@ -2608,7 +2608,7 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 ## ISSUE-070：`card cleanup` 在卡片的任務仍在執行時仍會移除 worktree
 
-更新日期：2026-11-03。狀態：待調查（**尚未修正**）。
+更新日期：2026-11-03。狀態：已修正、待驗收（原始碼與自動化測試完成；執行中的 bridge 尚未載入修正，尚未 live 驗收）。
 
 來源：ISSUE-066 的 live 驗收：上一輪 B 步驟在 `agy` 還在跑任務時下了 `card cleanup`，worktree 與 `agy` 的 pane 一起被移除，無法驗證取消分支。
 
@@ -2616,7 +2616,13 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 根因（已確認）：`cleanupCard`（`src/card-command.ts`）只檢查 worktree 本身（未提交修改、branch 等），不查卡片的 task 狀態。
 
-修正範圍：尚未修正。建議：用 `taskInfo` 查卡片最新 task，非終態則拒絕。下一步：使用者同意後先寫測試再修。
+修正範圍（2026-11-03）：`src/card-command.ts` 的 `cleanupCard` 先用 `assignments.forCard` 取卡片最新任務、`taskInfo` 查狀態；狀態不是 `completed`／`failed`／`cancelled`／`blocked` 就丟錯，說明任務 id 與狀態，並提示等它完成或先 `team cancel` 後再清理，**不呼叫** `cleanupWorktree`。`blocked`（在等人處理）刻意放行，避免永遠無法清理；卡片沒有指派過任務、或任務紀錄已不存在時不擋。PR merge 後的自動清理直接走 `cleanupCardWorktree`，不經過這個檢查（merge 代表工作已結束）。
+
+測試（2026-11-03，本機 macOS、Node v26.12.0，非 CI）：`test/card-command.test.ts` 新增 2 項（`planning`／`running`／`synthesizing`／`cancelling` 都拒絕且不碰 worktree，且以最新任務為準；`completed`／`failed`／`cancelled`／`blocked` 可清理）。修正前拒絕那項為紅、修正後為綠。全套 833 項，832 通過、0 失敗、1 略過（原 831 項）；`lint` 通過。**沒有**對真實 Herdr 的測試。
+
+未驗證（待使用者，需先 merge 並重啟 bridge）：在任務執行中下 `card cleanup` 會被拒絕、任務完成後可清理。限制：只看最新一個任務；`blocked` 任務清理後 Agent 的 pane 會被移除。
+
+下一步：使用者驗收後改為「已驗收」。
 
 
 ## ISSUE-068：`card pr` 的 PR 內文列出卡住的舊 task id
