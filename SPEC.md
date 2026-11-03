@@ -654,7 +654,7 @@ Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*
 
 ### 開 PR 與 CI 回報（追蹤清單 F3，L1，**已實作，主要路徑 live 驗收通過 2026-11-03**，ISSUE-064；失敗路徑與 Discord 通知原文未取得證據）
 
-`card pr <id>`（Discord 與 console）：把卡片的分支 push 並開 PR。**這是 bridge 第一次對外 push。** 使用者 2026-11-03 的決定：卡片要 `done`、第一版包含 CI 輪詢與回報、第一次 live 驗收用 Herdr_Discord_Bridge 本身的無害文件卡、身分用現有的 `gh`／ssh 登入（F2；L2 要用什麼身分尚未決定）、PR 標題用卡片標題且內文只放卡片 id 與結構化事實。
+`card pr <id>`（Discord 與 console）：把卡片的分支 push 並開 PR。**這是 bridge 第一次對外 push。** 使用者 2026-11-03 的決定：卡片要 `done`、第一版包含 CI 輪詢與回報、第一次 live 驗收用 Herdr_Discord_Bridge 本身的無害文件卡、身分用現有的 `gh`／ssh 登入（F2；L2 也用現有登入，使用者 2026-11-03 選 A，尚未實作）、PR 標題用卡片標題且內文只放卡片 id 與結構化事實。
 
 - **前提（任何一項不符就拒絕，什麼都不 push、不開）：**
   1. 卡片 `status: done`（失敗或取消的任務卡片仍是 `in_progress`，不能開 PR）。

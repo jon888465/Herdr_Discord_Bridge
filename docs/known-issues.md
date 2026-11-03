@@ -51,7 +51,7 @@
 | ISSUE-049 | 對 pi 傳圖片被拒絕「此 Agent 尚未支援本機圖片交付」 | 已修正、待驗收（2026-10-29） | pi 加入圖片白名單；單元測試完成；bridge 尚未重啟；Discord 未驗收；見下方 ISSUE-049 |
 | ISSUE-050 | hook 啟用後 Codex 回應期間 TUI 偶爾滾動 | 重新開啟／待調查 | final 優先、工作中 visible；2026-10-29 使用者已重啟，Gateway 連線成功，實機滾動待驗收 |
 | ISSUE-051 | `npm start`／`dry-run` 與 bin 指向不存在的 `dist/index.js` | 已驗收（入口路徑） | 2026-10-29 使用者跑 `npm start` 不再 MODULE_NOT_FOUND；因缺 token 未完整啟動，屬啟動方式差異 |
-| ISSUE-052 | `main` 沒有 CI 與 branch protection，無法作為自動 merge 閘門 | 修正中 | CI（Ubuntu／macOS）與 ruleset `protect-main` 已在 `main`，直接 push 被拒已實測（2026-10-30）；剩紅燈 PR 被擋實測、Dependabot；`strict` 檢查、CODEOWNERS 與 bot 身分屬 L2 前置，見 [追蹤清單](card-to-merge-tracker.md) |
+| ISSUE-052 | `main` 沒有 CI 與 branch protection，無法作為自動 merge 閘門 | 修正中 | CI（Ubuntu／macOS）與 ruleset `protect-main` 已在 `main`，直接 push 被拒已實測（2026-10-30）；剩紅燈 PR 被擋實測、Dependabot；`strict` 檢查屬 L2 建議前置；bot 身分已決定不是前置（2026-11-03），CODEOWNERS 需第二個身分才有意義，見 [追蹤清單](card-to-merge-tracker.md) |
 | ISSUE-053 | 卡片 `x-` 自訂欄位解析後不保留，序列化後消失 | 已修正、待驗收 | 2026-10-30 使用者決定「禁止」；`parseCard` 已拒絕 `x-` key，已合併（PR #9）；無 live 驗收項目，等使用者決定是否標已驗收 |
 | ISSUE-054 | 缺少單檔卡片驗證指令，Agent 轉 Mantis 單後無法自我檢查 | 已修正、待驗收 | 2026-10-30 新增 `herdr-card-check`；自動化測試通過；待使用者用真實 Mantis 單請 Agent 轉卡片並以此指令驗收 |
 | ISSUE-055 | 遠端長期存在的 pod 上，開發完成後的 worktree／workspace／分支清理尚未設計 | 待調查（先紀錄，未來處理） | 2026-11-02 使用者要求先紀錄；功能尚未實作，無實際殘留；原則與 3 個問題待使用者決定 |
@@ -1977,7 +1977,7 @@ PR 閘門觀察（2026-10-30）：PR #4、#5 在 CI 執行期間觀察到 `merge
 ruleset 行為測試（2026-10-30）：由 ADMIN 帳號經 SSH 直接 push 一個空 commit（`255c726`，parent `1a65de4`）到 `main`，被 GitHub 拒絕（`push declined due to repository rule violations`；`Changes must be made through a pull request`；`2 of 2 required status checks are expected`），`origin/main` 維持 `1a65de4`。證明 bypass 清單為空時規則對管理員也生效。**未測試**：合併 CI 未過的 PR 是否被擋、force push、刪除 `main`（後兩者不實測，以設定核對為準）。
 5. 此 issue 不涵蓋自動 merge 的權限與政策，那屬於卡片規劃。
 
-剩餘（2026-11-02 盤點）：紅燈 PR 被擋的實測（直接 push 被拒已測）、Dependabot、`strict_required_status_checks_policy`；CODEOWNERS 與 bot 身分是 L2 自動 merge 的前置。逐項追蹤見 [Card-to-Merge 追蹤清單](card-to-merge-tracker.md) 的 G 節。
+剩餘（2026-11-02 盤點）：紅燈 PR 被擋的實測（直接 push 被拒已測）、Dependabot（`strict_required_status_checks_policy` 已於 2026-11-03 由使用者開啟，`gh api` 確認為 `true`）；CODEOWNERS 需要第二個身分才有意義；2026-11-03 使用者決定 L2 用現有登入，bot 身分不是前置。逐項追蹤見 [Card-to-Merge 追蹤清單](card-to-merge-tracker.md) 的 G 節。
 
 附註：舊分支的 `docs/ci.md` 曾引用 `ISSUE-021` 追蹤 CI；該編號在 `main` 已用於 Phase 3 Session Handoff Runtime，本 issue 以 ISSUE-052 取代，不沿用舊編號。
 
@@ -2496,7 +2496,7 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 - 已知限制不變：用使用者現有的 `gh`／ssh 登入，PR 顯示是使用者開的；commit 作者是本機 git 設定（`c <jon@cdexunijiqi.local>`，使用者決定保留，會公開在 GitHub 上）；只支援本機與 github.com。
 - 與先前政策檔提醒一致：政策檔保留 L1 表示這個 repo 的任何 `done` 卡片現在都能用 `card pr` 開 PR。
 
-下一步：E11（merge 後清理，需偵測 merge 方式以寫 `merged` 事件）、E13（只關 bridge 自己開的來源 workspace）、ISSUE-061 診斷；L2 要用什麼身分尚未決定（見需求卡「L2 的身分選擇」；獨立身分 G2 是 Agent 的建議、不是前提）。
+下一步：E11（merge 後清理，需偵測 merge 方式以寫 `merged` 事件）、E13（只關 bridge 自己開的來源 workspace）、ISSUE-061 診斷；L2 用現有登入（使用者 2026-11-03 選 A，見需求卡「L2 的身分選擇」；獨立身分 G2 不是前提）。
 
 ## ISSUE-065：PR 被 merge 後記 `merged` 並自動清理 worktree（E11）
 
