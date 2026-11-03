@@ -2608,7 +2608,7 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 ## ISSUE-070：`card cleanup` 在卡片的任務仍在執行時仍會移除 worktree
 
-更新日期：2026-11-03。狀態：已修正、待驗收（原始碼與自動化測試完成；執行中的 bridge 尚未載入修正，尚未 live 驗收）。
+更新日期：2026-11-03。狀態：已驗收（見「驗收證據」；`cancelling` 等其他非終態只有單元測試）。
 
 來源：ISSUE-066 的 live 驗收：上一輪 B 步驟在 `agy` 還在跑任務時下了 `card cleanup`，worktree 與 `agy` 的 pane 一起被移除，無法驗證取消分支。
 
@@ -2620,9 +2620,13 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 測試（2026-11-03，本機 macOS、Node v26.12.0，非 CI）：`test/card-command.test.ts` 新增 2 項（`planning`／`running`／`synthesizing`／`cancelling` 都拒絕且不碰 worktree，且以最新任務為準；`completed`／`failed`／`cancelled`／`blocked` 可清理）。修正前拒絕那項為紅、修正後為綠。全套 833 項，832 通過、0 失敗、1 略過（原 831 項）；`lint` 通過。**沒有**對真實 Herdr 的測試。
 
-未驗證（待使用者，需先 merge 並重啟 bridge）：在任務執行中下 `card cleanup` 會被拒絕、任務完成後可清理。限制：只看最新一個任務；`blocked` 任務清理後 Agent 的 pane 會被移除。
+驗收證據（2026-11-03，本機 macOS，bridge 載入 main `085d785`，Herdr 0.9.1，`agy` 當 Lead，worktree workspace w1E；由 Agent 在 bridge console 操作）：`card assign REQ-20261103-cleanup-accept --worktree` 後再 `card assign`，任務 `task-814cc300-e5c6-4bb2-9c9b-c21f1c7ab78b` 在 `planning` 時下 `card cleanup`，回覆「任務 task-814cc300-…（planning）尚未結束，不清理 worktree；請等它完成，或先 `team cancel …`」，worktree 未被移除；任務完成（`agy` 回報「sleep 完成」，卡片同步為 `done`）後再下 `card cleanup`，worktree 移除，流程紀錄有 `cleanup_done`。
 
-下一步：使用者驗收後改為「已驗收」。
+未實機驗證：`synthesizing`／`cancelling` 等其他非終態只有單元測試；`blocked` 放行的路徑只有單元測試。限制：只看最新一個任務；`blocked` 任務清理後 Agent 的 pane 會被移除。
+
+附帶觀察（未調查、未另立 issue）：驗收時 `use <新 pane>` 後 console 出現「selected Agent session changed; use agent use <pane> again」警告，與 ISSUE-066 修正的 team-turn 路徑不同。
+
+下一步：無。
 
 
 ## ISSUE-068：`card pr` 的 PR 內文列出卡住的舊 task id
