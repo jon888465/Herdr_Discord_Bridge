@@ -2408,3 +2408,25 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 - 使用者途中輸入 `card assign … --worktree 3`（多一個參數）被正確拒絕，沒有任何副作用（用法錯誤訊息沒有指出是哪個多餘參數，見下）。
 
 附帶觀察：`card assign` 對多餘參數只回整行用法，沒指出是哪個參數多了；使用者因此需要回頭看用法才找到原因。屬小改善，尚未處理。
+
+## ISSUE-063：專案政策檔載入與 `card policy`（F1）
+
+更新日期：2026-11-03。狀態：已修正、待驗收（功能新增；原始碼與自動化測試完成，執行中的 bridge 尚未載入此版本，尚未 live 驗收）。
+
+來源：card-to-merge 階段 4（追蹤清單 F1；使用者 2026-11-03 的決定：政策檔只放 plugin 設定目錄、受限 YAML 子集、第一版只做載入不碰 push、PR 內容只放卡片 id 與標題加結構化事實）。
+
+使用者可見行為：新增 `card policy [專案]`（唯讀）與 bridge 啟動時的政策檢查訊息。**沒有任何動作依政策行為**。見 SPEC「專案政策」。
+
+預期行為：檔案不存在 → 全部 L0（不是錯誤）；合法 → 載入；不合法或不安全 → 說明原因並用安全預設（全部 L0）；沒列出的專案用 `default`；bridge 永不寫這個檔案。
+
+根因／修正範圍：不適用（新功能）。新增 `src/policy.ts`（`parsePolicy`、`loadPolicy`、`levelFor`）；`src/card-command.ts` 的 `policy`；`src/main.ts` 啟動檢查與接線；`src/config.ts` 匯出 `configDirectory`。
+
+測試（2026-11-03，本機 macOS、Node v26.12.0，非 CI）：新增 `test/policy.test.ts`（31 項：合法與預設、CRLF、各種被拒絕的格式與值、上限、`levelFor`、載入的各種狀態——缺檔、合法、不合法、群組／其他人可寫、符號連結、目錄、過大、非 UTF-8），`test/card-command.test.ts` 的 `card policy`（3 項）。變異測試：移除「群組或其他人可寫」檢查會讓對應測試失敗。**沒有**自動化測試涵蓋 `main.ts` 的啟動訊息與接線。
+
+未驗證（待使用者，需先 merge 並用 `scripts/run.sh -r` 重啟 bridge）：
+1. 沒有政策檔時 `@bot card policy`：回「檔案不存在」與全部 L0。
+2. 在 `~/.config/herdr-discord-bridge/policy.yml`（權限 600）寫一個合法政策，`card policy` 與 `card policy local:<專案>` 顯示對的等級；重啟後 console 印出載入訊息。
+3. 故意寫錯（例如 `default: L3`）：`card policy` 說明哪一行有問題並用安全預設；把權限改成 666：被拒絕並提示 `chmod 600`。
+4. 已知限制：同一 OS 使用者的 Agent 能改檔案；政策目前不影響任何行為；`policy.yml` 的不合法內容只在啟動與 `card policy` 時才被報告。
+
+下一步：使用者驗收後改為「已驗收」；再討論 F2（GitHub 認證）與 F3（開 PR）。

@@ -30,6 +30,7 @@ import {
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { missingCardMessage, syncCards, taskSourceFrom } from "./card-sync.js";
+import { loadPolicy } from "./policy.js";
 import { basename, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { statSync } from "node:fs";
@@ -51,6 +52,7 @@ import {
 import { AgentPool } from "./agent-pool.js";
 import { runTeamTurn } from "./team-turn.js";
 import {
+  configDirectory,
   loadConfig,
   statePath,
   stateDirectory,
@@ -437,6 +439,7 @@ async function startBridge(
   watcher.start();
   const stopCleanup = startAttachmentCleanup(herdr);
   restoreWorktreeAuthorization(config.allowedWorkspaceIds);
+  reportProjectPolicy();
   const stopCardSync = startCardSync(tasks, discord);
   const stopHooks = await startHookServer().catch((error) => {
     console.error(`Hook socket unavailable: ${safeError(error)}`);
@@ -603,6 +606,7 @@ export async function handleCommand(
         download: downloadDiscordText,
         readLocalFile: readLocalCardFile,
         assignments: lazyCardAssignments(),
+        policy: () => loadPolicy(join(configDirectory(), "policy.yml")),
         prepareWorktree: async (card) => {
           const { workspaceId, lead } = await activeLeadFor(context, runtime);
           return prepareCardWorktree(
@@ -1982,6 +1986,23 @@ export async function promptMappedAgent(
 
 /** 啟動時與每 6 小時，清理各 Agent cwd 底下超過 3 天的附件目錄（本機與遠端，ISSUE-043）。 */
 const CARD_SYNC_INTERVAL_MS = 60 * 1000;
+
+/** 啟動時檢查一次專案政策檔：有問題就在 console 說明（會改用安全預設，全部 L0）。 */
+function reportProjectPolicy(): void {
+  try {
+    const loaded = loadPolicy(join(configDirectory(), "policy.yml"));
+    if (loaded.status === "loaded")
+      console.log(
+        `Project policy loaded: default ${loaded.policy.default}, ${Object.keys(loaded.policy.projects).length} project(s)`,
+      );
+    else if (loaded.status !== "missing")
+      console.error(
+        `Project policy ${loaded.status}: ${loaded.error ?? ""}; using the safe default (all L0)`,
+      );
+  } catch (error) {
+    console.error(`Project policy unavailable: ${safeError(error)}`);
+  }
+}
 const AGENT_SETTLE_MS = 30 * 1000;
 const execFileAsync = promisify(execFile);
 const nowSeconds = (): string =>
@@ -3329,7 +3350,7 @@ function helpText(prefix: string): string {
     `\`${prefix} team ask [--coding] <prompt>\` — 建立持久化任務，由 Lead 動態分工；--coding 才啟用本機 Git 驗收`,
     `\`${prefix} team questions <task-id>\` / \`${prefix} team reply <task-id> <question-id> <answer>\` — 指定問題回答`,
     `\`${prefix} team status [task-id]\` / \`${prefix} team cancel <task-id>\` — 查看／取消任務`,
-    `\`${prefix} card list [status]\` / \`${prefix} card show <id>\` — 查看營運卡片；\`card import\`（附上 .md 檔）匯入為 draft；\`card assign <id> [--coding]\` 把 ready 的卡片交給目前 workspace 的 Team（同 \`team ask\`）；任務還在跑卻刪了卡片時用 \`card recreate <id>\` 重建；\`card assign <id> --worktree\` 在隔離的 worktree 做，完成後 \`card cleanup <id>\` 清掉`,
+    `\`${prefix} card list [status]\` / \`${prefix} card show <id>\` — 查看營運卡片；\`card import\`（附上 .md 檔）匯入為 draft；\`card assign <id> [--coding]\` 把 ready 的卡片交給目前 workspace 的 Team（同 \`team ask\`）；任務還在跑卻刪了卡片時用 \`card recreate <id>\` 重建；\`card assign <id> --worktree\` 在隔離的 worktree 做，完成後 \`card cleanup <id>\` 清掉；\`card policy [專案]\` 查看專案政策（唯讀）`,
     `\`${prefix} quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds]\` — 明確額度回報；quota status 查詢`,
     `\`${prefix} failover arm <source> <candidate1,candidate2> <goal>\` → \`failover run <id> confirm-source-stopped\` — 確認停止後自動選擇候選並驗證切換；status/cancel 可查詢／取消`,
     `\`${prefix} handoff checkpoint <source> <goal>\` → \`handoff verify <id> <destination> confirm-source-stopped\` → \`handoff accept <id>\` → \`handoff continue <id>\` — 持久化交接；status/packet/cancel 可查詢／釋放`,
@@ -3389,6 +3410,7 @@ function consoleHelpText(): string {
     "card assign <id> [--coding] — 把 ready 的卡片交給目前 workspace 的 Team（同 team ask）",
     "card assign <id> --worktree [--coding] — 先在目前 Agent 所在 repo 建立隔離 worktree（分支 card/<id>）並啟動同種 Agent，再指派",
     "card cleanup <id> — 移除卡片的 worktree（有未提交修改就保留；不刪分支、不強制）",
+    "card policy [專案] — 查看專案政策（每個專案的自動化等級 L0／L1／L2；唯讀，政策檔在 plugin 設定目錄）",
     "card recreate <id> — 卡片被刪除但任務還在跑時，從任務紀錄重建卡片",
     "quota status [pane] / quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds] — 明確額度回報",
     "failover arm <source> <candidate1,candidate2> <goal-and-constraints> — 保存候選優先序與任務",

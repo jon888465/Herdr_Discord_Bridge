@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { LEDGER_MAX_FILE_BYTES, type Card } from "../src/card.js";
 import { CardStore } from "../src/card-store.js";
+import { DEFAULT_POLICY } from "../src/policy.js";
 import type { CardAssignment } from "../src/card-assignments.js";
 import { buildAssignmentPrompt } from "../src/card-handoff.js";
 import { runCardCommand, type CardCommandDeps } from "../src/card-command.js";
@@ -44,6 +45,11 @@ function setup(overrides: Partial<CardCommandDeps> = {}) {
     now: () => "2026-11-02T08:15:00Z",
     assignments: fakeAssignments(),
     taskInfo: () => undefined,
+    policy: () => ({
+      status: "missing" as const,
+      policy: DEFAULT_POLICY,
+      file: "/cfg/policy.yml",
+    }),
     prepareWorktree: async () => {
       throw new Error("prepareWorktree was not expected");
     },
@@ -974,4 +980,51 @@ test("a long decision section is cut with a notice, and a card without one shows
     (await plain.run("show", "REQ-20261102-work")).includes("決議"),
     false,
   );
+});
+
+const loadedPolicy = (
+  status: "loaded" | "missing" | "invalid" | "unsafe",
+  policy = DEFAULT_POLICY,
+  error?: string,
+) => ({ status, policy, file: "/cfg/policy.yml", ...(error ? { error } : {}) });
+
+test("card policy says the file is missing and that every project is L0", async () => {
+  const { run } = setup({ policy: () => loadedPolicy("missing") });
+  const text = await run("policy");
+  assert.match(text, /不存在/);
+  assert.match(text, /\/cfg\/policy\.yml/);
+  assert.match(text, /預設等級：L0/);
+  assert.match(text, /尚未有任何動作依政策行為/);
+});
+
+test("card policy lists the loaded default and projects, and one project's effective level", async () => {
+  const policy = {
+    default: "L0" as const,
+    projects: { "local:Foo": "L1" as const, "agy-pod:Bar": "L2" as const },
+  };
+  const { run } = setup({ policy: () => loadedPolicy("loaded", policy) });
+  const text = await run("policy");
+  assert.match(text, /已載入/);
+  assert.match(text, /- local:Foo → L1/);
+  assert.match(text, /- agy-pod:Bar → L2/);
+  assert.match(await run("policy", "local:Foo"), /local:Foo → L1/);
+  assert.match(
+    await run("policy", "local:Unlisted"),
+    /local:Unlisted → L0（沒列出，用預設等級）/,
+  );
+  await assert.rejects(run("policy", "bad name"), /專案名稱/);
+  await assert.rejects(run("policy", "local:Foo", "extra"), /usage/);
+});
+
+test("card policy reports an invalid or unsafe file and that the safe default is in use", async () => {
+  for (const status of ["invalid", "unsafe"] as const) {
+    const { run } = setup({
+      policy: () =>
+        loadedPolicy(status, DEFAULT_POLICY, "line 3: invalid level"),
+    });
+    const text = await run("policy");
+    assert.match(text, /line 3: invalid level/, status);
+    assert.match(text, /全部 L0/, status);
+    assert.match(await run("policy", "local:Foo"), /local:Foo → L0/, status);
+  }
 });
