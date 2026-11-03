@@ -625,7 +625,7 @@ Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*
   - 一張卡同時只能有一個作用中的 worktree。
 - `card cleanup <id>`：移除該卡的 worktree。**永不強制**（強制會永久丟失未提交修改）：有未提交修改就保留、回覆說明並寫 `cleanup_pending`；成功寫 `cleanup_done`、撤銷授權。**分支一律保留**（Herdr 從不刪分支），**來源 repo 的 workspace 不會被關閉**（它可能是你自己開的；關閉需要 `close_group` 會連帶關掉其他 worktree workspace）。不會自動清理，也不會自動把路由切回原 workspace（回覆提醒用 `wk use`）。
   - 限制：只處理本機；用 `workspace close` 關掉 worktree workspace 不會刪檢出；使用者自己手動移除 worktree 後，`card cleanup` 會因 Herdr 回報找不到而失敗（需人工處理索引）；索引檔損毀時只有用到索引的動作失敗並說明原因。
-- **卡片上的 worktree 狀況與自由文字決議**（階段 3b 後續 E12，使用者 2026-11-03 選「選項 1」，**已實作、待 live 驗收**）：
+- **卡片上的 worktree 狀況與自由文字決議**（階段 3b 後續 E12，使用者 2026-11-03 選「選項 1」，**已實作，主要路徑 live 驗收通過 2026-11-03**；「作用中」與「保留」兩個狀態的 Discord 顯示未取得證據）：
   - **worktree 狀況（bridge 產生的結構化事實）：** `## 異動專案` 小節新增一行 `- worktree 狀態：<文字>`，緊接在 `- worktree：` 之後；值只有三種——`作用中`（`card assign --worktree` 成功後）、`已清理（分支保留）`（`card cleanup` 移除後）、`保留（有未提交修改）`（`card cleanup` 因髒檢出保留）。`card cleanup` 會就地更新那一行（不重複、不清掉其他欄位）。`card show` 在卡片摘要中**單獨列出**這一行，內文很長被截斷時也看得到。
   - **`## 決議`（人或 Agent 自己寫的自由文字）：** 慣例的段落名稱；內容完全由人或 Agent 撰寫，**bridge 不會改寫它**（自動化測試涵蓋 `setStatus`／`recordTask`／`recordProject`／`recordEvent` 之後該段逐字不變）。建議格式：`- <日期> <誰>：<決議>`，需要時加縮排的理由。`card show` 會在 `── 決議 ──` 下**單獨顯示**（最多 1000 字，超過截斷並提示開卡片檔），顯示前經 `redactSecrets`；它**不會**出現在重複的「內容」區塊，也**不會**被交給 Agent 當作指派內容（指派只含標題、`## 描述`、`## 驗收條件`）。
   - **這不是放寬 ADR-0002 決定 11：** 決定 11 限制的是 bridge **自動**寫進 `## 流程紀錄` 的說明（預設只寫結構化事實）；人寫的段落（含 `## 決議`）本來就是自由文字。bridge 不會自動把 Agent 的輸出摘要寫進 `## 決議`；若之後要自動摘要，需另行決定並走機敏檢查（追蹤清單 E12 的選項 2，尚未做）。

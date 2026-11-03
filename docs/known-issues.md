@@ -2385,7 +2385,7 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 來源：ISSUE-062 驗收時使用者要求「從卡片先看到」無法清理的 worktree 狀況，並確認卡片說明欄位本來就可以寫自由文字、要求卡片能記錄 AI 的決議；使用者選**選項 1**（bridge 只寫結構化狀況、`## 決議` 由人或 Agent 自己寫）。
 
-狀態：已修正、待驗收（原始碼與自動化測試完成，執行中的 bridge 尚未載入此版本，尚未 live 驗收）。
+狀態：已驗收（主要路徑；見下方「live 驗收紀錄」，「作用中」與「保留」兩個狀態的顯示未取得證據）。
 
 內容：`## 異動專案` 新增 `- worktree 狀態：作用中／已清理（分支保留）／保留（有未提交修改）`（`card assign --worktree` 與 `card cleanup` 就地更新）；`card show` 單獨列出 worktree 狀態與 `── 決議 ──`；`## 決議` 不被 bridge 改寫。細節見 SPEC。
 
@@ -2394,3 +2394,17 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 未驗證（待使用者，merge 並重啟 bridge 後）：對一張走過 `--worktree` 的卡片 `card show` 看到 `worktree 狀態`；`card cleanup` 後狀態變成已清理／保留；在卡片檔手寫 `## 決議` 後 `card show` 單獨顯示、bridge 後續寫入（`card cleanup`、任務完成同步）不改動它。
 
 未做：選項 2（bridge 自動寫 Agent 摘要）、「尚未 merge 而保留」狀態（待 E11）。
+
+**2026-11-03 live 驗收（E12）：主要路徑通過。** 環境：本機 macOS，main `3ca4e6f`（PR #37），`scripts/run.sh -r` 重啟 bridge；驗收卡片 `REQ-20261103-wt-state`，目標 repo `~/tmp/wt-accept-repo`。使用者在 Discord 操作並貼上兩張截圖（Agent 已讀取）；Agent 事後另從卡片檔、索引與 Herdr 取得佐證。
+
+- **`## 決議` 顯示（Agent 在 bridge console 驗證）：** 在 `REQ-20261103-wt-accept` 手寫 `## 決議` 後 `card show`，於「── 決議 ──」下單獨顯示、沒有重複出現在「內容」，驗完已還原該卡。
+- **`card assign --worktree`（使用者在 Discord）：** 卡片紀錄 `worktree_created`、`assigned`、`started`（同秒，Agent 當下已是 idle，沒有被信任提示擋住）、`completed`（03:14:37Z）。
+- **`card cleanup`（截圖）：** 髒檢出時回覆「有未提交的修改，已保留」並記 `cleanup_pending`（03:17:37Z）；清乾淨後回覆「已移除 worktree …（workspace w15）」、「分支 … 仍保留」、「來源 repo 的 workspace 也不會被關閉」，記 `cleanup_done`（03:20:01Z）。
+- **`card show`（截圖，Discord）：** 摘要區出現單獨的一行「worktree 狀態：已清理（分支保留）」；`## 異動專案` 小節同樣有「worktree 狀態：已清理（分支保留）」，且在 `worktree` 與 `base` 之間、只有一行（就地更新，沒有重複）。卡片檔（Agent 讀取）與截圖一致；索引寫入 `removedAt`；workspace `w15` 已關閉，來源 workspace `w13` 如預期仍在。
+
+未驗證：
+- 「作用中」（`--worktree` 成功後）與「保留（有未提交修改）」（髒檢出後）兩個狀態在 `card show` 的實際顯示：這次截圖只有最後的「已清理」；這兩個狀態只有自動化測試與卡片紀錄（`cleanup_pending`）的間接證據。
+- bridge 之後的寫入（任務完成同步、`card cleanup`）不改動手寫 `## 決議` 的 live 路徑：只有自動化測試（`card-store` 測試）；實機只驗了顯示。
+- 使用者途中輸入 `card assign … --worktree 3`（多一個參數）被正確拒絕，沒有任何副作用（用法錯誤訊息沒有指出是哪個多餘參數，見下）。
+
+附帶觀察：`card assign` 對多餘參數只回整行用法，沒指出是哪個參數多了；使用者因此需要回頭看用法才找到原因。屬小改善，尚未處理。
