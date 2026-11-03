@@ -2562,7 +2562,7 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 ## ISSUE-067：`--worktree` 偶發失敗：`agent.start: agent_pane_busy … is not an available shell`
 
-更新日期：2026-11-03。狀態：待調查（**根因為推測，尚未確認**）。
+更新日期：2026-11-03。狀態：已修正、待驗收（**根因仍是推測**；原始碼與自動化測試完成，執行中的 bridge 尚未載入修正，因為是偶發競爭，**無法穩定重現，只能靠之後是否再出現來觀察**）。
 
 來源：ISSUE-065 的 live 驗收途中，使用者貼 Discord 截圖發現（Agent 已讀取）。
 
@@ -2574,13 +2574,13 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 根因（**推測，未確認**）：`createWorktree` 一回傳 `root_pane`，`prepareCardWorktree` 就立刻呼叫 `agent.start`；此時 pane 裡的 shell 可能還在初始化，Herdr 回報 `agent_pane_busy`。證據：錯誤訊息文字、事後 pane 已就緒、偶發。`startAgentInPane`（`src/main.ts`）對 `agent.start` 沒有任何重試。Herdr 沒有（我查得到的）保證 pane 一建好就能用的文件。
 
-修正範圍：尚未修正。方向（待使用者同意）：`agent_pane_busy` 時短暫重試（例如最多約 15 秒、每 0.5 秒），逾時才失敗。
+修正範圍（2026-11-03）：把 `startAgentInPane` 從 `src/main.ts` 抽到新模組 `src/agent-start.ts`（依賴注入，時鐘可替換）：`agent.start` 遇到 **`agent_pane_busy`** 時每 0.5 秒重試、最多約 15 秒，逾時才拋出原本的錯誤；**其他任何錯誤（`agent_start_failed`、`unsupported_agent_kind`、socket 錯誤等）仍立刻失敗、不重試**；啟動成功後等 Agent 被偵測到的輪詢（最多 30 秒）行為不變。
 
-測試：無（尚未修正）。
+測試（2026-11-03，本機 macOS、Node v26.12.0，非 CI）：新增 `test/agent-start.test.ts`（6 項，用假 port 與假時鐘，不會真的等：shell 就緒時只啟動一次且參數不變、先忙兩次再成功（兩次 500 ms 間隔）、一直忙會在重試視窗後以原本錯誤失敗且嘗試次數有上限、其他錯誤不重試、啟動後等偵測與逾時回傳最後紀錄、一直看不到 Agent 的錯誤）。變異測試：移除重試會讓兩項重試測試失敗。全套 821 項，820 通過、0 失敗、1 略過（原 815 項）；`lint` 通過。**沒有**對真實 Herdr 的測試，`main.ts` 接線沒有自動化測試。
 
-未驗證：重試是否足夠；其他 Herdr 錯誤碼是否也需要重試；`agent.start` 的 `timeout_ms`（30 秒）是否影響。
+未驗證（待使用者，需先 merge 並用 `scripts/run.sh -r` 重啟 bridge）：之後的 `card assign --worktree` 不再因 `agent_pane_busy` 失敗（偶發，只能累積觀察；若再出現同樣的錯誤，表示重試視窗不夠或根因不是 shell 初始化）；其他 Herdr 錯誤碼是否也需要重試。
 
-下一步：寫測試（假的 port 先回 `agent_pane_busy` 再成功）、再修；與 ISSUE-066 可一起處理。
+下一步：觀察；若根因被證實不是 shell 初始化，重新開啟本 issue。
 
 
 ## ISSUE-068：`card pr` 的 PR 內文列出卡住的舊 task id

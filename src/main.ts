@@ -27,6 +27,7 @@ import {
   cleanupCardWorktree,
   prepareCardWorktree,
 } from "./card-worktree-flow.js";
+import { startAgentInPane } from "./agent-start.js";
 import { CardStore } from "./card-store.js";
 import { LEDGER_MAX_FILE_BYTES } from "./card.js";
 import { recordCleanupOnCard } from "./card-cleanup.js";
@@ -2047,7 +2048,6 @@ function reportProjectPolicy(): void {
     console.error(`Project policy unavailable: ${safeError(error)}`);
   }
 }
-const AGENT_SETTLE_MS = 30 * 1000;
 const execFileAsync = promisify(execFile);
 const nowSeconds = (): string =>
   new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -2244,40 +2244,6 @@ function restoreWorktreeAuthorization(allowed: string[]): void {
   } catch (error) {
     console.error(`Card worktree index unavailable: ${safeError(error)}`);
   }
-}
-
-/** 在既有 pane 啟動指定種類的 Agent（與 Worker profile 的 `agent.start` 相同），等它出現在清單。 */
-async function startAgentInPane(
-  herdr: HerdrClient,
-  input: { paneId: string; kind: string; name: string },
-): Promise<AgentRecord> {
-  await herdr.request(
-    "agent.start",
-    {
-      pane_id: input.paneId,
-      name: input.name,
-      kind: input.kind,
-      timeout_ms: 30000,
-    },
-    { retries: 0, timeoutMs: 35000 },
-  );
-  // `agent.start` 回來時 Agent 常常還沒被偵測到（實測：先是沒有種類與 unknown，約 2–4 秒後才變成
-  // claude／blocked 或 idle）。輪詢到狀態離開 unknown 或逾時，回傳最後看到的紀錄，由呼叫端判斷是否 idle。
-  const deadline = Date.now() + AGENT_SETTLE_MS;
-  let agent: AgentRecord | undefined;
-  for (;;) {
-    agent = (await herdr.listAgentsWithWorkspaceNames()).find(
-      (item) => item.pane_id === input.paneId,
-    );
-    if (agent?.agent && agent.agent_status !== "unknown") return agent;
-    if (Date.now() >= deadline) break;
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-  }
-  if (!agent)
-    throw new Error(
-      `started Agent not visible in ${input.paneId}; inspect the pane before retrying`,
-    );
-  return agent;
 }
 
 /** 目前 thread 路由的 workspace 與它的 active Agent（Lead），與 `team ask` 的選法相同。 */
