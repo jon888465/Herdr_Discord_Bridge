@@ -2,7 +2,7 @@ import type { HerdrClient } from "./herdr.js";
 import type { AgentRecord, TargetMapping } from "./types.js";
 import { agentLabel } from "./types.js";
 import { agentHeader, stripAnsi } from "./format.js";
-import { sameAgentSession } from "./response-stream.js";
+import { hasAgentSession, sameAgentSession } from "./response-stream.js";
 
 type Port = Pick<
   HerdrClient,
@@ -113,7 +113,14 @@ export class ConsoleAgent {
     if (epoch !== this.epoch) throw new Error("selection changed; try again");
     if (!live)
       throw new Error("selected Agent exited; use agent use <pane> again");
-    if (this.pinned && !sameIdentity(this.pinned, live))
+    // ISSUE-069：剛啟動的 Agent（例如 agy）要處理完第一個 prompt 才有 session；pane／terminal／種類
+    // 都沒變時，從「沒有」變成「有」是第一次登記，不是被換掉。之後換成別的值或消失仍算身份改變。
+    const firstSession =
+      this.pinned &&
+      !hasAgentSession(this.pinned.agent_session) &&
+      hasAgentSession(live.agent_session) &&
+      sameIdentity({ ...this.pinned, agent_session: live.agent_session }, live);
+    if (this.pinned && !firstSession && !sameIdentity(this.pinned, live))
       throw new Error(
         "selected Agent session changed; use agent use <pane> again",
       );

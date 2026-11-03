@@ -2592,9 +2592,9 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 下一步：觀察；若根因被證實不是 shell 初始化，重新開啟本 issue。
 
 
-## ISSUE-069：`card assign --worktree` 遇到 Agent 的 trust-folder 提示後，thread 路由變成 `active:null`
+## ISSUE-069：`card assign --worktree` 的新 Agent 在 console 上變成「selected Agent session changed」，選取失效
 
-更新日期：2026-11-03。狀態：待調查（**根因為推測**，尚未修正）。
+更新日期：2026-11-03。狀態：已修正、待驗收（根因已由程式碼與 2026-11-03 的實機現象確認；原始碼與自動化測試完成，執行中的 bridge 尚未載入修正，尚未 live 驗收）。**標題與症狀在調查後修正**：原先登記為「路由 `active:null`」，那是 console 的設計（console 路由只記 workspace，選取的 Agent 存在 workspace 層），不是缺陷。
 
 來源：ISSUE-066 的 live 驗收。
 
@@ -2602,9 +2602,17 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 預期行為：回覆要明確告訴使用者「按信任後請 `use <pane>`」，或在 Agent 未就緒時保留／還原原本的路由。
 
-根因（**推測，未確認**）：`prepareCardWorktree` 在 Agent 未 idle（`agentReady` 為 false）時不切換路由；而切換前已清掉原本的 active。尚未逐步核對程式碼。
+調查結果（2026-11-03）：`prepareCardWorktree` 無論 Agent 是否就緒都會切換路由（程式與回覆文字皆如此），所以「Agent 未就緒就不切路由」的推測**不成立**。2026-11-03 在 console 實測 `use w1E:p1` 後再 `card assign`，console 出現「⚠️ Console Agent: selected Agent session changed; use agent use <pane> again」。
 
-修正範圍：尚未修正。下一步：先寫測試重現（blocked agent 之後 route 狀態），再決定提示文字或還原路由；不自動點信任提示。
+根因（**已確認**）：`src/console-agent.ts` 的 `target()` 用 `sameIdentity(pinned, live)` 比對，其中 session 用 `sameAgentSession`；剛啟動的 `agy` 選取當時沒有 session，處理完第一個 prompt 後 Herdr 才登記，`null → 有值` 被判為替換，console 就丟出這個錯誤並要求重新 `use`。與 ISSUE-066 同一類（那次在 team-turn）。
+
+修正範圍（2026-11-03）：`target()` 在選取當時沒有 session、現在有、且 pane／workspace／terminal／種類都沒變時，接受並記住第一次出現的 session；之後換成別的值或消失、或其他欄位改變，仍丟「session changed」。Discord 單 Agent 回覆觀察（`main.ts` 的 response capture）不在範圍內，規則不變。
+
+測試（2026-11-03，本機 macOS、Node v26.12.0，非 CI）：`test/local-agent.test.ts` 新增 3 項（沒有 session 的 Agent 第一次出現 session 可繼續傳送；adopt 後換成別的 session 或消失仍拒絕；第一次出現 session 同時 terminal 被換掉仍拒絕）。修正前第一項為紅、修正後為綠。全套 836 項，835 通過、0 失敗、1 略過（原 833 項）；`lint` 通過。**沒有**對真實 Herdr 的測試。
+
+未驗證（待使用者，需先 merge 並重啟 bridge）：`card assign --worktree`（agy）後 `use <新 pane>`、`card assign`，console 不再出現「session changed」；信任提示本身 bridge 仍不會替你確認（設計如此）。若 thread 是 Discord 而不是 console，路由是否有其他問題尚未調查。
+
+下一步：使用者驗收後改為「已驗收」。
 
 ## ISSUE-070：`card cleanup` 在卡片的任務仍在執行時仍會移除 worktree
 
