@@ -650,3 +650,25 @@ Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*
 - **`card policy [<機器 id>:<專案目錄>]`**（Discord 與 console）：列出檔案狀態、預設等級與各專案等級；帶專案名稱時顯示該專案的有效等級（沒列出就標示用預設）。bridge 啟動時也會檢查一次並在 console 印出載入結果或問題。
 - **限制（誠實說明）：** 同一個 OS 使用者的任何程序（包含 Agent）都能改這個檔案；這裡只拒絕「別人可寫」的檔案，**不能防止同一使用者的 Agent 改檔案**。要真正防止，需要之後的防護（追蹤清單 G）或把檔案放在 Agent 無法寫入的位置。政策檔改動後需重啟 bridge 才會在啟動檢查中反映；`card policy` 每次都重新讀檔。
 - **已決定、未實作（追蹤清單 F3）：** push 與開 PR 第一版不做（使用者 2026-11-03：先只做政策檔載入）。之後開 PR 時，標題用卡片標題，內文只放卡片 id 與 bridge 產生的結構化事實（分支、基準、task id 等），**不貼卡片的描述與驗收條件**（卡片不進 git、可能含 Mantis 內容；repo 是公開的）。
+
+### 開 PR 與 CI 回報（追蹤清單 F3，L1，**已實作、待 live 驗收**，ISSUE-064）
+
+`card pr <id>`（Discord 與 console）：把卡片的分支 push 並開 PR。**這是 bridge 第一次對外 push。** 使用者 2026-11-03 的決定：卡片要 `done`、第一版包含 CI 輪詢與回報、第一次 live 驗收用 Herdr_Discord_Bridge 本身的無害文件卡、身分用現有的 `gh`／ssh 登入（F2，L2 前必須改成獨立身分）、PR 標題用卡片標題且內文只放卡片 id 與結構化事實。
+
+- **前提（任何一項不符就拒絕，什麼都不 push、不開）：**
+  1. 卡片 `status: done`（失敗或取消的任務卡片仍是 `in_progress`，不能開 PR）。
+  2. 卡片有 worktree 紀錄（`card assign --worktree` 建立；worktree 已被 `card cleanup` 清掉也可以，改用 repo 的分支），且 `## 異動專案` 記有 `base`。
+  3. **專案政策是 L1 以上**（專案名稱 `local:<repo 目錄名>`；政策檔不存在、不合法或不安全時一律 L0，會拒絕並提示 `card policy <專案>`）。
+  4. repo 的 `origin` 是 github.com（`git@github.com:…`、`ssh://git@github.com/…`、`https://github.com/…`；其他主機一律拒絕）。
+  5. worktree（若還在）沒有未提交修改，且分支比基準多至少一個 commit。
+  6. 卡片標題不含疑似機敏資料（會放進 PR 標題）。
+  7. 分支先前沒有已 merge 或已關閉的 PR（bridge 不會自動再開第二個，請換新分支或手動處理）。
+- **bridge 對 GitHub 只做這些：** `git push origin refs/heads/card/<id>:refs/heads/card/<id>`（**只有 `card/` 分支、明確 refspec、不帶任何旗標，永不 `--force`**，不 push `main`、不 push 標籤）、`gh pr list`／`create`／`checks`／`view`、`gh repo view`（取得預設分支）。不 merge、不改設定或 workflow。外部程式一律以參數陣列執行（不經 shell），錯誤訊息先遮蔽機敏資料再截斷。
+- **PR 內容：** 標題＝卡片標題；內文只有卡片 id（並註明卡片不進 git、內容不隨 PR 公開）、分支、基準與 head 的前 12 位、最多 3 個 task id、政策等級；**不貼描述與驗收條件**。目標分支是 repo 的預設分支。
+- **已有開著的 PR：** 只 push 新的 commit（不重複開），回覆說明；bridge 沒追蹤過的開著的 PR 會被納入追蹤。push 被拒（例如遠端分支有不同的歷史）就失敗並說明，**不會強制**。push 成功但開 PR 失敗時，回覆說明「已 push」，可重下 `card pr <id>`（不會重複）。
+- **記錄：** 成功後卡片 `## 異動專案` 記 `PR` 網址與 `head`，流程紀錄寫 `pr_opened`（事件 id `pr-<number>-opened`）；索引 `<stateDirectory>/card-prs.json`（0600）記下 PR 與當初的來源 thread。
+- **CI 與狀態輪詢：** bridge 每分鐘檢查索引中仍開著的 PR（`gh pr view`／`gh pr checks`）：
+  - CI 全部完成（通過、失敗、取消、略過）→ 卡片寫 `ci_result`（事件 id `ci-<number>-<head 前 12 位>`）並在原 thread 通知（本機 console 的任務印在 console）；**每個 head sha 只回報一次**，push 新的 commit 後會對新的 head 再回報；還在進行中或沒有任何 check 就繼續等。
+  - PR 被 merge 或關閉 → 通知一次並停止輪詢。merge 的通知會提示 `card cleanup <id>`；**merge 後自動清理（E11）與 `merged` 事件尚未實作**（merge 方式需另行偵測）。
+  - 讀 GitHub 失敗只在 console 印出（內容改變時才再印），PR 維持追蹤中。通知送不出去時索引仍已更新、不會重送，訊息會印在 console。
+- **限制（誠實說明）：** 用的是使用者現有的 `gh`／ssh 登入，PR 會顯示是使用者開的；同一環境的 Agent 也能用同一份憑證。只支援本機、只支援 github.com；`card pr` 不會替 Agent commit（沒有 commit 就拒絕）；輪詢最多延遲約 60 秒；`gh` 需要已登入且有該 repo 的 Contents 與 Pull requests 讀寫權限。

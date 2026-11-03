@@ -15,6 +15,7 @@ import type { CardAssignment } from "./card-assignments.js";
 import { levelFor, type LoadedPolicy } from "./policy.js";
 import type { Card } from "./card.js";
 import type { CleanupResult, PreparedWorktree } from "./card-worktree-flow.js";
+import type { PrOutcome } from "./card-pr-flow.js";
 import {
   buildAssignmentPrompt,
   parseAssignmentPrompt,
@@ -60,6 +61,8 @@ export interface CardCommandDeps {
         state: string;
       }
     | undefined;
+  /** `card pr`：push 卡片分支並開 PR（或更新已開著的 PR）；不符合前提要丟出說明原因的錯誤。 */
+  openPullRequest: (card: Card) => Promise<PrOutcome>;
   /** 專案政策（唯讀）：`<config dir>/policy.yml` 的載入結果。 */
   policy: () => LoadedPolicy;
   /** `card assign --worktree`：建立 worktree、啟動同種 Agent、切換路由；失敗要丟出說明原因的錯誤。 */
@@ -69,7 +72,7 @@ export interface CardCommandDeps {
 }
 
 const USAGE =
-  "usage: card list [status] | card show <id> | card import [--slug <名稱>] [<本機路徑，僅 console>]（Discord 請附上 .md 檔） | card assign <id> [--coding] [--worktree] | card cleanup <id> | card policy [專案] | card recreate <id>（從任務紀錄重建被刪除的卡片）";
+  "usage: card list [status] | card show <id> | card import [--slug <名稱>] [<本機路徑，僅 console>]（Discord 請附上 .md 檔） | card assign <id> [--coding] [--worktree] | card cleanup <id> | card policy [專案] | card pr <id> | card recreate <id>（從任務紀錄重建被刪除的卡片）";
 const MAX_LIST_LINES = 30;
 const MAX_LIST_ERRORS = 5;
 const TITLE_CHARS = 50;
@@ -374,6 +377,61 @@ function recordWorktreeOnCard(
   if (!logged.ok) warnings.push(`紀錄 worktree_created：${logged.error}`);
 }
 
+/** `card pr <id>`：把卡片的分支 push 並開 PR，記錄到卡片（追蹤清單 F3，L1）。 */
+async function pullRequestForCard(
+  args: string[],
+  deps: CardCommandDeps,
+): Promise<string> {
+  if (args.length !== 1) throw new Error("usage: card pr <id>");
+  const id = args[0];
+  if (!isCardId(id)) throw new Error(`${id} 不是合法的卡片 id`);
+  const store = openDirectory(deps);
+  const read = store?.read(id);
+  if (!store || !read || (!read.ok && read.code === "not_found"))
+    throw new Error(`找不到卡片 ${id}`);
+  if (!read.ok) throw new Error(read.error);
+
+  const outcome = await deps.openPullRequest(read.card);
+
+  // PR 已經存在於 GitHub：之後的卡片更新失敗只警告，不丟錯誤，否則使用者會以為沒開成。
+  const warnings: string[] = [];
+  const project = store.recordProject(
+    id,
+    {
+      machine: "local",
+      repoPath: outcome.repoPath,
+      branch: outcome.branch,
+      prUrl: outcome.url,
+      headSha: outcome.headSha,
+    },
+    deps.now().slice(0, 10),
+  );
+  if (!project.ok) warnings.push(`異動專案：${project.error}`);
+  if (outcome.created) {
+    const logged = store.recordEvent(id, {
+      event: "pr_opened",
+      url: outcome.url,
+      number: outcome.number,
+      headSha: outcome.headSha,
+      time: deps.now(),
+      eventId: `pr-${outcome.number}-opened`,
+    });
+    if (!logged.ok) warnings.push(`紀錄 pr_opened：${logged.error}`);
+  }
+  const lines = outcome.created
+    ? [
+        `已開 PR #${outcome.number}：${outcome.url}`,
+        `分支 ${outcome.branch} 已 push（head ${outcome.headSha.slice(0, 12)}），目標分支 ${outcome.base}。`,
+        "bridge 會每分鐘檢查 CI，完成時在原 thread 通知；review 與 merge 由你決定。",
+      ]
+    : [
+        `這個分支已有 PR #${outcome.number}：${outcome.url}`,
+        `已把新的 commit push 上去（head ${outcome.headSha.slice(0, 12)}），沒有另外開新的 PR。`,
+      ];
+  for (const warning of warnings) lines.push(`⚠️ 卡片更新失敗：${warning}`);
+  return lines.join("\n");
+}
+
 /** 唯讀：顯示專案政策（每個專案的自動化等級）。 */
 function showPolicy(args: string[], deps: CardCommandDeps): string {
   if (args.length > 1)
@@ -619,6 +677,9 @@ export async function runCardCommand(
       break;
     case "show":
       text = showCard(rest, deps);
+      break;
+    case "pr":
+      text = await pullRequestForCard(rest, deps);
       break;
     case "policy":
       text = showPolicy(rest, deps);
