@@ -267,3 +267,7 @@ issue、README、CHANGELOG 等由 Agent 在該卡片的 worktree 裡依專案自
 - `src/main.ts`：`startCardSync` 在輪詢中通知（送成功才標記已通知，失敗下輪重試）、`card` 指令接線。`src/discord.ts`：`postToOrigin`。
 - 取捨：Discord 通知送不出去（thread 被刪、權限）時只在 console 印一次並每分鐘重試；沒有上限。`card recreate` 只還原交給 Agent 的三個欄位，這是 Q3 內容交接範圍的直接後果。
 - 測試（2026-11-02，本機 macOS、Node v26.12.0，非 CI）：全套 679 項，678 通過、0 失敗、1 略過（原 658 項）。沒有自動化測試涵蓋 `startCardSync` 的通知接線與 `postToOrigin`。
+
+### 階段 3（worktree 隔離）進度（2026-11-02）
+
+3a（Herdr worktree 轉接層，`src/worktree.ts`）已實作、**未接線**，bridge 行為不變；決定、socket API 與實測結果見 [需求卡](../cards/REQ-20261101-worktree-isolation.md)「Socket API 與 3a 轉接層」。3b（`card assign --worktree`、`card cleanup`、thread 路由切換）尚未開始，屆時需要使用者重啟 bridge 並 live 驗收。

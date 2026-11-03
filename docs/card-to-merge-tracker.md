@@ -72,15 +72,15 @@
 
 | ID | 項目 | 狀態 |
 |---|---|---|
-| E1 | 查出 Herdr socket API 中 worktree 方法的名稱與參數（`herdr api` 可查）；bridge 走 socket 而非 CLI | 未開始 |
-| E2 | 路徑與分支命名（含 `/` 的分支名 slug 規則需實測）；`--base` 預設與是否先 `git fetch` | 未開始 |
-| E3 | 建立與清理：永不使用 `--force`、有未提交修改時保留並通知、不自動刪分支 | 未開始 |
+| E1 | 查出 Herdr socket API 中 worktree 方法的名稱與參數（`herdr api` 可查）；bridge 走 socket 而非 CLI | **已完成（3a）**：`worktree.list`／`create`／`open`／`remove`，參數與回應見需求卡「Socket API 與 3a 轉接層」 |
+| E2 | 路徑與分支命名（含 `/` 的分支名 slug 規則需實測）；`--base` 預設與是否先 `git fetch` | **已決定並實測（3a）**：分支 `card/<卡片 id>`、基準＝repo 目前 HEAD、不先 `git fetch`（使用者 2026-11-02）；實測 slug：`/`→`-` 且轉小寫（`card/REQ-20261102-ab` → `card-req-20261102-ab`） |
+| E3 | 建立與清理：永不使用 `--force`、有未提交修改時保留並通知、不自動刪分支 | **轉接層已實作（3a，未接線）**：`removeWorktree` 不送 `force`、髒檢出回報 `dirty_worktree`；觸發與通知待 3b（使用者決定：只由 `card cleanup <id>` 手動觸發，不自動清理） |
 | E4 | `allowedWorkspaceIds` 規則：只自動納入 bridge 自己建立的 workspace | **待決定** |
-| E5 | 新 workspace 的 Discord thread 對應 | **待決定** |
-| E6 | 啟動時檢查 Herdr 最低版本（實測只在 0.9.1，文件為 v0.9.5） | 未開始 |
+| E5 | 新 workspace 的 Discord thread 對應 | **已決定**（使用者 2026-11-02）：沿用卡片的 thread，bridge 把該 thread 的路由切到新 workspace 並回報 pane，由使用者在新 workspace 選 Agent 後照常 `card assign`；第一版不自動啟動 Agent。實作屬 3b |
+| E6 | 啟動時檢查 Herdr 最低版本（實測只在 0.9.1，文件為 v0.9.5） | **檢查函式已實作（3a，未接線）**：`checkWorktreeSupport` 以 socket `ping` 的 `version` 判斷，最低 0.9.1（Agent 的選擇：實測過的版本）；何時呼叫屬 3b |
 | E7 | 版本指紋、單一 writer、不同 session review、artifact 在樹外，在 worktree 內仍成立 | 未開始 |
 | E8 | worktree 內 Agent 的結果 → 卡片紀錄（只寫結構化事實，不寫自由文字） | 未開始 |
-| E9 | 在 worktree 的 pane 啟動 Agent、含 `/` 的分支名等**未實測**項目 | 未開始 |
+| E9 | 在 worktree 的 pane 啟動 Agent、含 `/` 的分支名等**未實測**項目 | 部分：含 `/` 的分支名已實測（3a）；在 root pane 啟動 Agent 未測（第一版不做，見 E5） |
 | E10 | 專案政策 L0（不 push）是否也需要 worktree | **待決定**（需求卡待確認第 8 項） |
 
 ## F. 政策檔與 PR 自動化（階段 4：L0／L1，不 merge）
