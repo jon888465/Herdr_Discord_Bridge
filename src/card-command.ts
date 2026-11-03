@@ -5,12 +5,14 @@
 import fs from "node:fs";
 import {
   CARD_STATUSES,
+  PROJECT_NAME,
   type CardType,
   IMPORT_MAX_FILE_BYTES,
   LEDGER_MAX_FILE_BYTES,
   isCardId,
 } from "./card.js";
 import type { CardAssignment } from "./card-assignments.js";
+import { levelFor, type LoadedPolicy } from "./policy.js";
 import type { Card } from "./card.js";
 import type { CleanupResult, PreparedWorktree } from "./card-worktree-flow.js";
 import {
@@ -58,6 +60,8 @@ export interface CardCommandDeps {
         state: string;
       }
     | undefined;
+  /** 專案政策（唯讀）：`<config dir>/policy.yml` 的載入結果。 */
+  policy: () => LoadedPolicy;
   /** `card assign --worktree`：建立 worktree、啟動同種 Agent、切換路由；失敗要丟出說明原因的錯誤。 */
   prepareWorktree: (card: Card) => Promise<PreparedWorktree>;
   /** `card cleanup`：移除卡片的 worktree（永不強制）；髒檢出回報保留。 */
@@ -65,7 +69,7 @@ export interface CardCommandDeps {
 }
 
 const USAGE =
-  "usage: card list [status] | card show <id> | card import [--slug <名稱>] [<本機路徑，僅 console>]（Discord 請附上 .md 檔） | card assign <id> [--coding] [--worktree] | card cleanup <id> | card recreate <id>（從任務紀錄重建被刪除的卡片）";
+  "usage: card list [status] | card show <id> | card import [--slug <名稱>] [<本機路徑，僅 console>]（Discord 請附上 .md 檔） | card assign <id> [--coding] [--worktree] | card cleanup <id> | card policy [專案] | card recreate <id>（從任務紀錄重建被刪除的卡片）";
 const MAX_LIST_LINES = 30;
 const MAX_LIST_ERRORS = 5;
 const TITLE_CHARS = 50;
@@ -370,6 +374,46 @@ function recordWorktreeOnCard(
   if (!logged.ok) warnings.push(`紀錄 worktree_created：${logged.error}`);
 }
 
+/** 唯讀：顯示專案政策（每個專案的自動化等級）。 */
+function showPolicy(args: string[], deps: CardCommandDeps): string {
+  if (args.length > 1)
+    throw new Error("usage: card policy [<機器 id>:<專案目錄>]");
+  const loaded = deps.policy();
+  if (args.length === 1) {
+    if (!PROJECT_NAME.test(args[0]))
+      throw new Error(
+        `${args[0]} 不是合法的專案名稱（格式：<機器 id>:<目錄名>，例如 local:Foo）`,
+      );
+    const level = levelFor(loaded.policy, args[0]);
+    const listed = Object.hasOwn(loaded.policy.projects, args[0]);
+    return `${args[0]} → ${level}${listed ? "" : "（沒列出，用預設等級）"}${loaded.status === "loaded" || loaded.status === "missing" ? "" : "；政策檔有問題，目前用安全預設（全部 L0）"}`;
+  }
+  const lines: string[] = [];
+  if (loaded.status === "loaded")
+    lines.push(`專案政策已載入（${loaded.file}）`);
+  else if (loaded.status === "missing")
+    lines.push(
+      `專案政策檔不存在（${loaded.file}）：所有專案都是 L0（不 push）。`,
+    );
+  else
+    lines.push(
+      `專案政策檔${loaded.status === "invalid" ? "不合法" : "不安全"}（${loaded.file}）：${loaded.error ?? ""}`,
+      "已改用安全預設（全部 L0），請修正檔案後重啟 bridge。",
+    );
+  lines.push(`預設等級：${loaded.policy.default}`);
+  const names = Object.keys(loaded.policy.projects);
+  if (names.length) {
+    lines.push("專案：");
+    for (const name of names)
+      lines.push(`- ${name} → ${loaded.policy.projects[name]}`);
+  }
+  lines.push(
+    "等級：L0 只在 worktree／分支工作、不 push；L1 push 分支並開 PR、由人 merge；L2 review、測試與 CI 都過後自動 merge。",
+    "目前只有載入與查詢：尚未有任何動作依政策行為（還沒有 push／PR 功能）。政策檔只放在 plugin 設定目錄、由你手寫，bridge 不會寫它。",
+  );
+  return lines.join("\n");
+}
+
 /** 移除卡片的 worktree。永不強制；有未提交修改就保留並說明。 */
 async function cleanupCard(
   args: string[],
@@ -575,6 +619,9 @@ export async function runCardCommand(
       break;
     case "show":
       text = showCard(rest, deps);
+      break;
+    case "policy":
+      text = showPolicy(rest, deps);
       break;
     case "cleanup":
       text = await cleanupCard(rest, deps);

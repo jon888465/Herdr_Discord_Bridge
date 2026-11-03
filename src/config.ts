@@ -152,7 +152,7 @@ function stringArray(value: unknown, fallback: string[]): string[] {
   );
 }
 
-function configDirectory(): string {
+export function configDirectory(): string {
   return (
     process.env.HERDR_PLUGIN_CONFIG_DIR ||
     path.join(os.homedir(), ".config", "herdr-discord-bridge")

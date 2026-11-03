@@ -34,6 +34,7 @@ external: { notion: null, github: null, mantis: null }
    - L0：只在 worktree／分支工作，不 push。
    - L1：push 分支並開 PR，由人 merge（預設）。
    - L2：review 通過、測試通過、CI 綠後自動 merge。
+   - **（2026-11-03 修改）政策檔放在 plugin 設定目錄 `<config dir>/policy.yml`，不放專案 repo**：使用者擔心 Agent 在 worktree 裡改 repo 內的政策檔把自己升級到 L2。格式為受限 YAML 子集；檔案不存在或不合法時全部 L0。見 SPEC「專案政策」。
 6. **herdr bridge 本身目標為 L2（全自動到 merge）。** 授權止於 merge；**不含部署、重啟與 live 驗收**（見 AGENTS.md，merge 不等於「已驗收」）。
 7. **認領第一版為人工指派**（使用者在 CLI／Discord 指定一張卡）。自動撿 `status: ready` 的卡留待後續。
 8. **卡片開始開發時才建立 worktree**（討論、記錄、轉換、Vibe Coding 不建立），使用 Herdr 原生 `herdr worktree`，一卡一個 worktree workspace，bridge 彙整結果寫卡片；專案自己的 issue、README、CHANGELOG 由 Agent 在 worktree 裡修改、隨 PR 進專案（[REQ-20261101-worktree-isolation](REQ-20261101-worktree-isolation.md)）。

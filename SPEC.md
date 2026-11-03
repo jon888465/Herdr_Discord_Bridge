@@ -630,3 +630,23 @@ Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*
   - **`## 決議`（人或 Agent 自己寫的自由文字）：** 慣例的段落名稱；內容完全由人或 Agent 撰寫，**bridge 不會改寫它**（自動化測試涵蓋 `setStatus`／`recordTask`／`recordProject`／`recordEvent` 之後該段逐字不變）。建議格式：`- <日期> <誰>：<決議>`，需要時加縮排的理由。`card show` 會在 `── 決議 ──` 下**單獨顯示**（最多 1000 字，超過截斷並提示開卡片檔），顯示前經 `redactSecrets`；它**不會**出現在重複的「內容」區塊，也**不會**被交給 Agent 當作指派內容（指派只含標題、`## 描述`、`## 驗收條件`）。
   - **這不是放寬 ADR-0002 決定 11：** 決定 11 限制的是 bridge **自動**寫進 `## 流程紀錄` 的說明（預設只寫結構化事實）；人寫的段落（含 `## 決議`）本來就是自由文字。bridge 不會自動把 Agent 的輸出摘要寫進 `## 決議`；若之後要自動摘要，需另行決定並走機敏檢查（追蹤清單 E12 的選項 2，尚未做）。
   - 限制：`## 決議` 沒有機敏檢查保護（寫的人要小心，且若匯出到 Mantis／Notion 會一併帶出）；`card show` 只是顯示時遮蔽。
+
+### 專案政策（追蹤清單 F1，階段 4 第一步，**已實作、待 live 驗收**，ISSUE-063）
+
+每個專案的自動化等級（使用者 2026-11-03 決定）。**目前只有載入與唯讀查詢，沒有任何動作依政策行為**（還沒有 push／PR／merge 功能）。
+
+- **位置：只放在 plugin 設定目錄**（`<config dir>/policy.yml`，預設 `~/.config/herdr-discord-bridge/policy.yml`，由 `HERDR_PLUGIN_CONFIG_DIR` 決定），**不放在專案 repo**（取代先前「政策檔放專案 repo 的 `.herdr/policy.yml`」的預定做法）：Agent 在 worktree 或 PR 裡改 repo 的檔案不會影響 bridge 的權限。bridge **只讀、永不寫**這個檔案。
+- **格式：受限 YAML 子集，自己解析**（無相依套件）：
+  ```yaml
+  version: 1 # 必填，目前只有 1
+  default: L0 # 選填，預設 L0
+  projects: # 選填
+    local:Herdr_Discord_Bridge: L1
+    agy-pod:other.repo: L0
+  ```
+  只認這三個頂層 key，專案縮排固定 2 個空白，專案名稱是 `<機器 id>:<repo 目錄名>`（同卡片 `projects` 的格式），等級只能是 `L0`／`L1`／`L2`（大小寫敏感）。允許整行 `#` 註解與空行；**不支援**行尾註解、清單、錨點、tab、重複的 key 或專案。每行最多 200 字、最多 200 個專案、檔案最多 16 KiB。
+- **等級：** L0 只在 worktree／分支工作、不 push；L1 push 分支並開 PR、由人 merge；L2 review、測試與 CI 都過後自動 merge（授權止於 merge，不含部署、重啟與驗收）。
+- **安全預設：** 檔案不存在（不是錯誤）、不合法、或不安全（符號連結、非一般檔案、超過 16 KiB、非 UTF-8、群組或其他人可寫）時，**所有專案都是 L0**，並在 console／`card policy` 說明原因。沒列出的專案用 `default`。
+- **`card policy [<機器 id>:<專案目錄>]`**（Discord 與 console）：列出檔案狀態、預設等級與各專案等級；帶專案名稱時顯示該專案的有效等級（沒列出就標示用預設）。bridge 啟動時也會檢查一次並在 console 印出載入結果或問題。
+- **限制（誠實說明）：** 同一個 OS 使用者的任何程序（包含 Agent）都能改這個檔案；這裡只拒絕「別人可寫」的檔案，**不能防止同一使用者的 Agent 改檔案**。要真正防止，需要之後的防護（追蹤清單 G）或把檔案放在 Agent 無法寫入的位置。政策檔改動後需重啟 bridge 才會在啟動檢查中反映；`card policy` 每次都重新讀檔。
+- **已決定、未實作（追蹤清單 F3）：** push 與開 PR 第一版不做（使用者 2026-11-03：先只做政策檔載入）。之後開 PR 時，標題用卡片標題，內文只放卡片 id 與 bridge 產生的結構化事實（分支、基準、task id 等），**不貼卡片的描述與驗收條件**（卡片不進 git、可能含 Mantis 內容；repo 是公開的）。
