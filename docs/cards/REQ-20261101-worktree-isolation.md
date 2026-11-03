@@ -23,6 +23,10 @@ links: { parent: REQ-20261030-card-to-merge, related_docs: [docs/adr/0002-operat
 2. **用 Herdr 原生的 `herdr worktree` 建立**：一張卡一個 worktree workspace，Agent 在該 workspace 的 pane 工作，pane 的 cwd 就是 worktree 路徑。
 3. **結果由 bridge 彙整寫進卡片**（流程紀錄與異動專案，見 [ADR-0002](../adr/0002-operational-cards-in-plugin-state.md)）。專案自己的 issue、README、CHANGELOG 等由 Agent 在 worktree 裡修改、隨 PR 進專案，bridge 不代寫。
 4. 營運卡片放 plugin 狀態目錄、不進 git（ADR-0002）。
+5. **分階段（使用者 2026-11-02 選）：** 3a 先做 Herdr worktree 轉接層（不接線、bridge 行為不變、不需重啟）；3b 才接到 `card assign` 並 live 驗收。
+6. **觸發點：** `card assign <id> --worktree`（明確旗標）；沒帶旗標的 `card assign` 與 `team ask` 行為完全不變，可與 `--coding` 並用。
+7. **Agent 與 thread：** 沿用卡片的 Discord thread；bridge 建好 worktree 後把該 thread 的路由切到新 workspace 並回報 pane，使用者在新 workspace 開好 Agent、`use` 選取後照常 `card assign`。第一版**不**自動在 root pane 啟動 Agent。
+8. **分支、基準、清理：** 分支 `card/<卡片 id>`；基準＝repo 目前 HEAD，不先 `git fetch`；**不自動清理**——只在使用者下 `card cleanup <id>` 時才移除，髒檢出一律保留並通知，永不 `--force`、不刪分支。
 
 Agent 的推論（使用者未明說）：每個 worktree workspace 是自己的 Team，符合 `CONTEXT.md`「不同 workspace 的 Agent 是不同 Team」的不變式，所以不需要讓 Worker 加入原 workspace 的 Team。
 
@@ -112,3 +116,20 @@ Agent 的推論（使用者未明說）：每個 worktree workspace 是自己的
 ### 未實測
 
 在 worktree 的 root pane 啟動 Agent；含 `/` 的分支名（例如 `card/<id>`）的 slug 規則；`--trust-repository` 實際效果；遠端機器的 worktree；Herdr 重啟後 worktree workspace 是否保留；多個 worktree 同時存在的負載。
+
+## Socket API 與 3a 轉接層（2026-11-02）
+
+來源：`herdr api schema --json`（protocol 22，Herdr 0.9.1）與本機實測。
+
+- **方法與參數：** `worktree.list {cwd, workspace_id?, trust_repository?}`；`worktree.create {cwd, branch, base?, path?, label?, focus=false, workspace_id?, trust_repository?}`；`worktree.open {…}`；`worktree.remove {workspace_id（必填）, force=false, trust_repository?}`。回應：`worktree_created {workspace, worktree, root_pane, tab}`、`worktree_list {source, worktrees[]}`、`worktree_removed {workspace_id, forced, worktree}`。錯誤碼：`worktree_create_failed`、`dirty_worktree_requires_force`、`workspace_group_close_required`。
+- **版本：** socket `ping` 回 `{version, protocol, capabilities}`，可用來檢查最低版本。
+- **轉接層 `src/worktree.ts`（3a，已實作、未接線）：** `createWorktree`／`listWorktrees`／`removeWorktree`／`checkWorktreeSupport`／`branchForCard`。只送安全參數：永不送 `force`、`trust_repository`、`path`、`label`，`focus` 固定 false；分支、基準、repo 路徑、workspace id 送出前驗證；回應缺欄位就拒絕；髒檢出回報 `dirty_worktree`（保留）而不是丟錯誤；回應若顯示 `forced: true` 視為錯誤。
+- **實測（2026-11-02，拋棄式 git repo、真實 Herdr 0.9.1，事後已還原 workspace 到 w1–w5 並清除所有暫存目錄）：**
+  - `checkWorktreeSupport` → `{ok: true, version: "0.9.1"}`。
+  - 分支 `card/REQ-20261102-ab` 建立成功，路徑 `~/.herdr/worktrees/<repo>/card-req-20261102-ab`：**slug 規則＝`/` 換成 `-` 且轉小寫**；`root_pane` 回傳 `wV:p1`。
+  - 髒檢出（多一個未追蹤檔）`removeWorktree` → `dirty_worktree`，目錄保留；刪掉該檔後移除成功、目錄消失、**分支保留**。
+  - 對已移除 worktree 的既有分支再 `create` 成功（可續作），會**再開一個新的 workspace**。
+  - **`workspace close` 不刪檢出：** 關閉該 workspace 後，`~/.herdr/worktrees/<repo>/<slug>` 仍在，要用 `git worktree remove` 才清掉。
+  - **來源 repo 的 workspace 會被留下：** `create` 開的「來源 repo」workspace 在 worktree 移除後仍在；關閉它需要 `close_group`（否則回 `workspace_group_close_required`）。誰負責關閉屬 3b。
+- **仍未實測：** 在 worktree 的 root pane 啟動 Agent、`--trust-repository` 實際效果、遠端機器的 worktree（未取得同意）、Herdr 重啟後 worktree workspace 是否保留、多個 worktree 同時存在。
+- 測試（2026-11-02，本機 macOS、Node v26.12.0，非 CI）：`test/worktree.test.ts` 12 項（假 port）；沒有自動化測試連真實 Herdr（CI 沒有 Herdr），真實行為由上述實測涵蓋。
