@@ -103,7 +103,7 @@ test("console prompts preserve case and whitespace, controls remain commands", (
   });
 });
 
-function fixture() {
+function fixture(options: { withoutSession?: boolean } = {}) {
   let live: AgentRecord = {
     workspace_id: "w2",
     pane_id: "w2:p6",
@@ -111,7 +111,9 @@ function fixture() {
     tab_id: "w2:t1",
     agent: "agy",
     agent_status: "idle",
-    agent_session: { kind: "id", value: "session" },
+    agent_session: options.withoutSession
+      ? undefined
+      : { kind: "id", value: "session" },
     state_change_seq: 1,
   };
   let selection = { workspaceId: "w2", paneId: "w2:p6" };
@@ -151,6 +153,12 @@ function fixture() {
     },
     replace() {
       live = { ...live, terminal_id: "new-term" };
+    },
+    setSession(value: string | undefined) {
+      live = {
+        ...live,
+        agent_session: value ? { kind: "id", value } : undefined,
+      };
     },
     select(pane: string) {
       selection = { ...selection, paneId: pane };
@@ -406,4 +414,35 @@ test("changing display mode does not allow answering the same blocked question t
   await f.session.tick();
   await assert.rejects(f.session.send("yes"), /already sent/);
   assert.equal(f.sent.length, 1);
+});
+
+test("an Agent without a session may get its first session without being treated as replaced (ISSUE-069)", async () => {
+  const f = fixture({ withoutSession: true });
+  await f.session.tick();
+  f.setSession("first");
+  await f.session.tick();
+  assert.deepEqual(f.output.filter((line) => /session changed/.test(line)), []);
+  await f.session.send("hello");
+  assert.equal(f.sent.length, 1);
+});
+
+test("once a session is adopted, a different or vanished session is still a replacement (ISSUE-069)", async () => {
+  const f = fixture({ withoutSession: true });
+  await f.session.tick();
+  f.setSession("first");
+  await f.session.tick();
+  f.setSession("second");
+  await assert.rejects(f.session.send("hello"), /session changed/);
+  f.session.reset();
+  await f.session.tick();
+  f.setSession(undefined);
+  await assert.rejects(f.session.send("hello"), /session changed/);
+});
+
+test("a first session does not hide a replaced pane or terminal (ISSUE-069)", async () => {
+  const f = fixture({ withoutSession: true });
+  await f.session.tick();
+  f.setSession("first");
+  f.replace();
+  await assert.rejects(f.session.send("hello"), /session changed/);
 });
