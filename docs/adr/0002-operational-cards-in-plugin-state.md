@@ -270,4 +270,4 @@ issue、README、CHANGELOG 等由 Agent 在該卡片的 worktree 裡依專案自
 
 ### 階段 3（worktree 隔離）進度（2026-11-02）
 
-3a（Herdr worktree 轉接層，`src/worktree.ts`）已實作、**未接線**，bridge 行為不變；決定、socket API 與實測結果見 [需求卡](../cards/REQ-20261101-worktree-isolation.md)「Socket API 與 3a 轉接層」。3b（`card assign --worktree`、`card cleanup`、thread 路由切換）尚未開始，屆時需要使用者重啟 bridge 並 live 驗收。
+3a（Herdr worktree 轉接層，`src/worktree.ts`）已實作、**未接線**，bridge 行為不變；決定、socket API 與實測結果見 [需求卡](../cards/REQ-20261101-worktree-isolation.md)「Socket API 與 3a 轉接層」。3b（`card assign --worktree`、`card cleanup`、thread 路由切換、授權、索引）原始碼與自動化測試完成，待 live 驗收（ISSUE-062）；實測發現新資料夾會讓 Claude Code 停在「信任資料夾」提示，見需求卡「3b 實作與實測」。

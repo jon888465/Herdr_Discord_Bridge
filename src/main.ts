@@ -22,6 +22,13 @@ import {
 import { agentOrigin, recordAgentOrigin } from "./agent-origin.js";
 import { readLocalCardFile, runCardCommand } from "./card-command.js";
 import { sharedCardAssignments } from "./card-assignments.js";
+import { sharedCardWorktrees } from "./card-worktrees.js";
+import {
+  cleanupCardWorktree,
+  prepareCardWorktree,
+} from "./card-worktree-flow.js";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { missingCardMessage, syncCards, taskSourceFrom } from "./card-sync.js";
 import { basename, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
@@ -429,6 +436,7 @@ async function startBridge(
   );
   watcher.start();
   const stopCleanup = startAttachmentCleanup(herdr);
+  restoreWorktreeAuthorization(config.allowedWorkspaceIds);
   const stopCardSync = startCardSync(tasks, discord);
   const stopHooks = await startHookServer().catch((error) => {
     console.error(`Hook socket unavailable: ${safeError(error)}`);
@@ -595,6 +603,52 @@ export async function handleCommand(
         download: downloadDiscordText,
         readLocalFile: readLocalCardFile,
         assignments: lazyCardAssignments(),
+        prepareWorktree: async (card) => {
+          const { workspaceId, lead } = await activeLeadFor(context, runtime);
+          return prepareCardWorktree(
+            {
+              port: runtime.herdr,
+              lead,
+              sourceWorkspaceId: workspaceId,
+              repoRoot: gitRepoRoot,
+              headSha: gitHeadSha,
+              startAgent: (input) => startAgentInPane(runtime.herdr, input),
+              worktrees: lazyCardWorktrees(),
+              authorize: (id) =>
+                authorizeBridgeWorkspace(
+                  runtime.config.allowedWorkspaceIds,
+                  workspaceId,
+                  id,
+                ),
+              switchRoute: (_workspaceId, agent) => {
+                // 與 `use` 相同：選取新 workspace 的 Agent 當這個 thread 的對話目標。
+                if (context.routing.guildId === "local-console") {
+                  runtime.routing.bindWorkspace(
+                    agent.workspace_id,
+                    agentTarget(agent),
+                  );
+                  runtime.routing.bind(context.routing, {
+                    workspaceId: agent.workspace_id,
+                  });
+                } else
+                  runtime.routing.bind(context.routing, agentTarget(agent));
+              },
+              now: nowSeconds,
+            },
+            card.id,
+          );
+        },
+        cleanupWorktree: (cardId) =>
+          cleanupCardWorktree(
+            {
+              port: runtime.herdr,
+              worktrees: lazyCardWorktrees(),
+              deauthorize: (id) =>
+                revokeBridgeWorkspace(runtime.config.allowedWorkspaceIds, id),
+              now: nowSeconds,
+            },
+            cardId,
+          ),
         taskInfo: (taskId) => {
           try {
             const task = runtime.tasks?.store.get(taskId);
@@ -1928,6 +1982,146 @@ export async function promptMappedAgent(
 
 /** 啟動時與每 6 小時，清理各 Agent cwd 底下超過 3 天的附件目錄（本機與遠端，ISSUE-043）。 */
 const CARD_SYNC_INTERVAL_MS = 60 * 1000;
+const AGENT_SETTLE_MS = 30 * 1000;
+const execFileAsync = promisify(execFile);
+const nowSeconds = (): string =>
+  new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+
+/** 卡片 worktree 索引在「用到的時候」才開啟（理由同 lazyCardAssignments）。 */
+function lazyCardWorktrees() {
+  const open = () =>
+    sharedCardWorktrees(join(stateDirectory(), "card-worktrees.json"));
+  return {
+    active: (cardId: string) => open().active(cardId),
+    record: (
+      input: Parameters<ReturnType<typeof open>["record"]>[0],
+      at: string,
+    ) => open().record(input, at),
+    markRemoved: (cardId: string, at: string) => open().markRemoved(cardId, at),
+  };
+}
+
+async function git(directory: string, args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync("git", ["-C", directory, ...args], {
+    timeout: 10_000,
+  });
+  return stdout.trim();
+}
+
+async function gitRepoRoot(directory: string): Promise<string | undefined> {
+  try {
+    return (
+      (await git(directory, ["rev-parse", "--show-toplevel"])) || undefined
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+async function gitHeadSha(directory: string): Promise<string | undefined> {
+  try {
+    return (await git(directory, ["rev-parse", "HEAD"])) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * `allowedWorkspaceIds` 有設限時，只放行 bridge 自己建立並記錄的 worktree workspace，
+ * 而且前提是建立它的來源 workspace 本來就被授權。陣列與其他元件共用同一個參考，原地修改才會生效。
+ */
+function authorizeBridgeWorkspace(
+  allowed: string[],
+  sourceWorkspaceId: string,
+  workspaceId: string,
+): void {
+  if (
+    allowed.length > 0 &&
+    allowed.includes(sourceWorkspaceId) &&
+    !allowed.includes(workspaceId)
+  )
+    allowed.push(workspaceId);
+}
+
+function revokeBridgeWorkspace(allowed: string[], workspaceId: string): void {
+  const index = allowed.indexOf(workspaceId);
+  if (index >= 0) allowed.splice(index, 1);
+}
+
+/** 啟動時把索引中作用中的 worktree workspace 重新納入授權（記憶體中的清單重啟後會消失）。 */
+function restoreWorktreeAuthorization(allowed: string[]): void {
+  try {
+    const index = sharedCardWorktrees(
+      join(stateDirectory(), "card-worktrees.json"),
+    );
+    for (const entry of index.list())
+      if (!entry.removedAt)
+        authorizeBridgeWorkspace(
+          allowed,
+          entry.sourceWorkspaceId,
+          entry.workspaceId,
+        );
+  } catch (error) {
+    console.error(`Card worktree index unavailable: ${safeError(error)}`);
+  }
+}
+
+/** 在既有 pane 啟動指定種類的 Agent（與 Worker profile 的 `agent.start` 相同），等它出現在清單。 */
+async function startAgentInPane(
+  herdr: HerdrClient,
+  input: { paneId: string; kind: string; name: string },
+): Promise<AgentRecord> {
+  await herdr.request(
+    "agent.start",
+    {
+      pane_id: input.paneId,
+      name: input.name,
+      kind: input.kind,
+      timeout_ms: 30000,
+    },
+    { retries: 0, timeoutMs: 35000 },
+  );
+  // `agent.start` 回來時 Agent 常常還沒被偵測到（實測：先是沒有種類與 unknown，約 2–4 秒後才變成
+  // claude／blocked 或 idle）。輪詢到狀態離開 unknown 或逾時，回傳最後看到的紀錄，由呼叫端判斷是否 idle。
+  const deadline = Date.now() + AGENT_SETTLE_MS;
+  let agent: AgentRecord | undefined;
+  for (;;) {
+    agent = (await herdr.listAgentsWithWorkspaceNames()).find(
+      (item) => item.pane_id === input.paneId,
+    );
+    if (agent?.agent && agent.agent_status !== "unknown") return agent;
+    if (Date.now() >= deadline) break;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  if (!agent)
+    throw new Error(
+      `started Agent not visible in ${input.paneId}; inspect the pane before retrying`,
+    );
+  return agent;
+}
+
+/** 目前 thread 路由的 workspace 與它的 active Agent（Lead），與 `team ask` 的選法相同。 */
+async function activeLeadFor(
+  context: CommandContext,
+  runtime: Runtime,
+): Promise<{ workspaceId: string; lead: AgentRecord }> {
+  const workspaceId = await teamWorkspaceId(context, runtime);
+  const agents = await runtime.herdr.listAgentsWithWorkspaceNames();
+  const activeRoute = runtime.routing.resolve(context.routing);
+  const leadTarget =
+    activeRoute?.workspaceId === workspaceId && activeRoute.paneId
+      ? activeRoute
+      : runtime.routing.workspaceActiveTarget(workspaceId);
+  if (!leadTarget?.paneId)
+    throw new Error(
+      "請先選好目前 workspace 的 active Agent，再使用 --worktree",
+    );
+  const lead = agents.find((agent) => agent.pane_id === leadTarget.paneId);
+  if (!lead)
+    throw new Error(`Lead pane ${leadTarget.paneId} is stale or unavailable`);
+  validateAgentTarget(lead, leadTarget, runtime.config.allowedWorkspaceIds);
+  return { workspaceId, lead };
+}
 
 /**
  * 索引檔在「用到的時候」才開啟：檔案損毀時只有用到索引的動作失敗（並說明原因），
@@ -3135,7 +3329,7 @@ function helpText(prefix: string): string {
     `\`${prefix} team ask [--coding] <prompt>\` — 建立持久化任務，由 Lead 動態分工；--coding 才啟用本機 Git 驗收`,
     `\`${prefix} team questions <task-id>\` / \`${prefix} team reply <task-id> <question-id> <answer>\` — 指定問題回答`,
     `\`${prefix} team status [task-id]\` / \`${prefix} team cancel <task-id>\` — 查看／取消任務`,
-    `\`${prefix} card list [status]\` / \`${prefix} card show <id>\` — 查看營運卡片；\`card import\`（附上 .md 檔）匯入為 draft；\`card assign <id> [--coding]\` 把 ready 的卡片交給目前 workspace 的 Team（同 \`team ask\`）；任務還在跑卻刪了卡片時用 \`card recreate <id>\` 重建`,
+    `\`${prefix} card list [status]\` / \`${prefix} card show <id>\` — 查看營運卡片；\`card import\`（附上 .md 檔）匯入為 draft；\`card assign <id> [--coding]\` 把 ready 的卡片交給目前 workspace 的 Team（同 \`team ask\`）；任務還在跑卻刪了卡片時用 \`card recreate <id>\` 重建；\`card assign <id> --worktree\` 在隔離的 worktree 做，完成後 \`card cleanup <id>\` 清掉`,
     `\`${prefix} quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds]\` — 明確額度回報；quota status 查詢`,
     `\`${prefix} failover arm <source> <candidate1,candidate2> <goal>\` → \`failover run <id> confirm-source-stopped\` — 確認停止後自動選擇候選並驗證切換；status/cancel 可查詢／取消`,
     `\`${prefix} handoff checkpoint <source> <goal>\` → \`handoff verify <id> <destination> confirm-source-stopped\` → \`handoff accept <id>\` → \`handoff continue <id>\` — 持久化交接；status/packet/cancel 可查詢／釋放`,
@@ -3193,6 +3387,8 @@ function consoleHelpText(): string {
     "team cancel <task-id> — 停止任務派送並取消仍 active 的工作",
     "card list [status] | card show <id> | card import <本機 .md 路徑> [--slug <名稱>] — 營運卡片（匯入為 draft）",
     "card assign <id> [--coding] — 把 ready 的卡片交給目前 workspace 的 Team（同 team ask）",
+    "card assign <id> --worktree [--coding] — 先在目前 Agent 所在 repo 建立隔離 worktree（分支 card/<id>）並啟動同種 Agent，再指派",
+    "card cleanup <id> — 移除卡片的 worktree（有未提交修改就保留；不刪分支、不強制）",
     "card recreate <id> — 卡片被刪除但任務還在跑時，從任務紀錄重建卡片",
     "quota status [pane] / quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds] — 明確額度回報",
     "failover arm <source> <candidate1,candidate2> <goal-and-constraints> — 保存候選優先序與任務",

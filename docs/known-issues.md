@@ -2333,3 +2333,27 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 4. 驗收用的長時間任務（`sleep 150` 的卡片）可重用為「重現步驟」：它在 ISSUE-060 補測中已實際重現本問題（task `task-3be4f271-…`），可寫成自動化測試的 fixture。
 
 相關：ISSUE-055（另一個預定的端到端測試案例）、ISSUE-058／059／060、追蹤清單 H4。
+
+## ISSUE-062：`card assign --worktree` 與 `card cleanup`（隔離 worktree）
+
+更新日期：2026-11-03。狀態：已修正、待驗收（功能新增；原始碼與自動化測試完成，執行中的 bridge 尚未載入此版本，尚未 live 驗收）。
+
+來源：card-to-merge 階段 3b（需求卡 REQ-20261101-worktree-isolation；使用者 2026-11-03 的決定見需求卡與追蹤清單 E）。這是第一個由 bridge 建立並移除使用者 repo 檢出、並自動啟動 Agent 的功能，風險較高，因此單獨列為驗收項目。
+
+使用者可見行為：見 SPEC「隔離 worktree」與 `card cleanup`。
+
+預期行為：`card assign <id> --worktree` 在目前 thread Agent 所在 repo 建立 `card/<id>` 分支的 worktree 與 workspace、啟動同種 Agent、切換路由、記錄到卡片、啟動任務；Agent 被擋住時不啟動任務並說明；`card cleanup <id>` 永不強制、髒檢出保留、不刪分支、不關來源 workspace；沒帶旗標的流程完全不變。
+
+根因／修正範圍：不適用（新功能）。新增 `src/card-worktrees.ts`、`src/card-worktree-flow.ts`；`src/card-command.ts`（`--worktree`、`cleanup`）；`src/main.ts`（接線、git 輔助、`agent.start` 輪詢、授權）。
+
+測試（2026-11-03，本機 macOS、Node v26.12.0，非 CI）：新增 `test/card-worktrees.test.ts`（6）、`test/card-worktree-flow.test.ts`（10）、`test/card-command.test.ts` 的 worktree 與 cleanup 測試（10）；全套 717 項，716 通過、0 失敗、1 略過（原 691 項）；`lint` 通過。**沒有**自動化測試涵蓋 `main.ts` 的接線（git 輔助、`agent.start` 輪詢、授權、路由切換）；真實 Herdr 行為只有上述需求卡中的拋棄式 repo 實測。
+
+未驗證（待使用者，需先 merge 並用 `scripts/run.sh -r` 重啟 bridge）：
+1. 在 Discord thread（Agent 所在目錄是 git repo）對一張 `ready` 卡片下 `@bot card assign <id> --worktree`：預期建立 worktree、在新 workspace 啟動同種 Agent；若 Agent 被擋住（Claude Code 的信任提示），回覆應說明並指向該 pane，卡片維持 `ready`。
+2. 到該 pane 確認信任後，`@bot card assign <id>`：任務在新 workspace 執行；`card show <id>` 看到 `## 異動專案`、`worktree_created`、`assigned`、`started`。
+3. 任務結束後 `card cleanup <id>`：乾淨時移除、分支保留；先在 worktree 弄髒檔案再 `card cleanup`：應保留並說明。
+4. `allowedWorkspaceIds` 有設限時（若你有設）新 workspace 能正常使用，清理後被撤銷。
+5. 沒帶旗標的 `card assign` 與 `team ask` 不受影響（回歸）。
+6. 已知限制：Claude Code 新資料夾的信任提示無法自動通過；只支援本機；手動移除 worktree 後 `card cleanup` 會失敗；來源 repo 的 workspace 需自行關閉；Codex 等其他 Agent 種類未測；`--coding` 在 worktree 內的行為未測。
+
+下一步：使用者驗收後改為「已驗收」；再處理政策檔與 PR 自動化（追蹤清單 F）。
