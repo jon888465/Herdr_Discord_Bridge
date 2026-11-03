@@ -151,7 +151,8 @@ test("the PR title is the card title and the body holds only the card id and bri
   assert.match(create, /REQ-20261103-work/);
   assert.match(create, /03364e63f79f/);
   assert.match(create, /012345678/);
-  assert.match(create, /task-aaa/);
+  assert.match(create, /task-bbb/);
+  assert.equal(create.includes("task-aaa"), false);
   assert.equal(create.includes("內部描述"), false);
   assert.equal(create.includes("驗收條件"), false);
   assert.equal(create.includes("Mantis"), false);
@@ -429,4 +430,23 @@ test("without a worktree path the dirty check is skipped and the repository is u
     false,
   );
   assert.ok(log.some((l) => l.includes(`-C ${worktree.repoPath} push`)));
+});
+
+test("the PR body lists only the latest task, not earlier failed or stuck attempts (ISSUE-068)", async () => {
+  const { deps, log } = setup();
+  await openCardPullRequest(deps, {
+    card: card({ tasks: ["task-old", "task-stuck", "task-final"] }),
+    worktree,
+  });
+  const create = log.find((line) => line.includes("pr create")) ?? "";
+  assert.match(create, /task-final/);
+  assert.equal(create.includes("task-old"), false);
+  assert.equal(create.includes("task-stuck"), false);
+});
+
+test("the PR body has no task line when the card has no task", async () => {
+  const { deps, log } = setup();
+  await openCardPullRequest(deps, { card: card({ tasks: [] }), worktree });
+  const create = log.find((line) => line.includes("pr create")) ?? "";
+  assert.equal(create.includes("- task："), false);
 });
