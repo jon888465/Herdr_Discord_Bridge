@@ -631,11 +631,11 @@ Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*
   - **這不是放寬 ADR-0002 決定 11：** 決定 11 限制的是 bridge **自動**寫進 `## 流程紀錄` 的說明（預設只寫結構化事實）；人寫的段落（含 `## 決議`）本來就是自由文字。bridge 不會自動把 Agent 的輸出摘要寫進 `## 決議`；若之後要自動摘要，需另行決定並走機敏檢查（追蹤清單 E12 的選項 2，尚未做）。
   - 限制：`## 決議` 沒有機敏檢查保護（寫的人要小心，且若匯出到 Mantis／Notion 會一併帶出）；`card show` 只是顯示時遮蔽。
 
-### 專案政策（追蹤清單 F1，階段 4 第一步，**已實作、待 live 驗收**，ISSUE-063）
+### 專案政策（追蹤清單 F1，階段 4 第一步，**已實作，live 驗收通過 2026-11-03**，ISSUE-063）
 
 每個專案的自動化等級（使用者 2026-11-03 決定）。**目前只有載入與唯讀查詢，沒有任何動作依政策行為**（還沒有 push／PR／merge 功能）。
 
-- **位置：只放在 plugin 設定目錄**（`<config dir>/policy.yml`，預設 `~/.config/herdr-discord-bridge/policy.yml`，由 `HERDR_PLUGIN_CONFIG_DIR` 決定），**不放在專案 repo**（取代先前「政策檔放專案 repo 的 `.herdr/policy.yml`」的預定做法）：Agent 在 worktree 或 PR 裡改 repo 的檔案不會影響 bridge 的權限。bridge **只讀、永不寫**這個檔案。
+- **位置：只放在 plugin 設定目錄**（`<config dir>/policy.yml`，`<config dir>` 由 `HERDR_PLUGIN_CONFIG_DIR` 決定；**以 Herdr plugin 執行時是 `~/.config/herdr/plugins/config/herdr-discord-bridge/`，也就是 `config.json` 所在的目錄**；只有環境變數沒設時才退回 `~/.config/herdr-discord-bridge/`。`card policy` 會印出實際讀取的完整路徑），**不放在專案 repo**（取代先前「政策檔放專案 repo 的 `.herdr/policy.yml`」的預定做法）：Agent 在 worktree 或 PR 裡改 repo 的檔案不會影響 bridge 的權限。bridge **只讀、永不寫**這個檔案。
 - **格式：受限 YAML 子集，自己解析**（無相依套件）：
   ```yaml
   version: 1 # 必填，目前只有 1

@@ -2411,7 +2411,7 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 ## ISSUE-063：專案政策檔載入與 `card policy`（F1）
 
-更新日期：2026-11-03。狀態：已修正、待驗收（功能新增；原始碼與自動化測試完成，執行中的 bridge 尚未載入此版本，尚未 live 驗收）。
+更新日期：2026-11-03。狀態：已驗收（載入與唯讀查詢；啟動時的 console 訊息未驗證，見「live 驗收紀錄」）。
 
 來源：card-to-merge 階段 4（追蹤清單 F1；使用者 2026-11-03 的決定：政策檔只放 plugin 設定目錄、受限 YAML 子集、第一版只做載入不碰 push、PR 內容只放卡片 id 與標題加結構化事實）。
 
@@ -2430,3 +2430,21 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 4. 已知限制：同一 OS 使用者的 Agent 能改檔案；政策目前不影響任何行為；`policy.yml` 的不合法內容只在啟動與 `card policy` 時才被報告。
 
 下一步：使用者驗收後改為「已驗收」；再討論 F2（GitHub 認證）與 F3（開 PR）。
+
+### live 驗收紀錄
+
+**2026-11-03 live 驗收：通過。** 環境：本機 macOS，main `c893fd1`（PR #39），`scripts/run.sh -r` 重啟 bridge。以下全部由 Agent 在 bridge console 輸入並觀察；Discord 端沒有操作。使用者明確授權（2026-11-03）Agent 在設定目錄建立驗收用的 `policy.yml`、驗完刪除；已刪除，`card policy` 回到「檔案不存在」。
+
+- **實際路徑：** bridge 以 Herdr plugin 執行，`card policy` 印出的路徑是 `/Users/jon/.config/herdr/plugins/config/herdr-discord-bridge/policy.yml`（與 `config.json` 同目錄），**不是** SPEC 原本寫的預設 `~/.config/herdr-discord-bridge/policy.yml`（那是環境變數沒設時的後備路徑）。已修正 SPEC 與 README。
+- **沒有檔案：** `card policy` →「專案政策檔不存在…所有專案都是 L0（不 push）」，預設等級 L0。
+- **合法檔案（權限 600，`local:Herdr_Discord_Bridge: L1`、`local:wt-accept-repo: L2`）：** 「專案政策已載入」，列出預設 L0 與兩個專案的等級；`card policy local:wt-accept-repo` → `L2`；`card policy local:Unlisted` →「L0（沒列出，用預設等級）」。
+- **不合法（`default: L3`）：** 「專案政策檔不合法」，訊息為 `line 2: invalid level for "default"…`，並說明已改用安全預設（全部 L0）；`card policy local:wt-accept-repo` → `L0（沒列出，用預設等級）；政策檔有問題，目前用安全預設（全部 L0）`——即使該專案在檔案中原本寫 L2，也沒有被採用。
+- **不安全（權限 666，內容含 `local:wt-accept-repo: L2`）：** 「專案政策檔不安全」，訊息含 `can be modified by group or others (mode 666); run: chmod 600 <路徑>`，改用安全預設；查單一專案同樣回 L0。
+- **刪除後：** 回到「檔案不存在」。
+
+未驗證：
+- bridge **啟動時**的 console 檢查訊息（`Project policy loaded…` 或問題說明）：重啟時檔案還不存在（這種情況本來就不印），之後才建檔，所以沒有看到啟動訊息；只有程式碼與自動化測試的證據。
+- Discord 端的 `card policy`（只在 console 驗）。
+- 已知限制不變：同一 OS 使用者的 Agent 能改這個檔案；政策目前不影響任何行為；政策檔改動後 `card policy` 每次重新讀檔，但啟動檢查只在重啟時做。
+
+下一步：F2（GitHub 認證）與 F3（開 PR）。F3 第一版已決定先不碰 push；F2 是前提（bridge 用誰的身分 push 與開 PR），需要先整理選項給使用者決定。
