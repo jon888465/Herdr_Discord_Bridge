@@ -137,6 +137,13 @@ export class CardWorktreeStore {
     return found ? structuredClone(found) : undefined;
   }
 
+  /** 卡片最近的 worktree 紀錄：作用中的優先，否則是最後一筆（可能已清理）。 */
+  latest(cardId: string): CardWorktree | undefined {
+    const mine = this.worktrees.filter((entry) => entry.cardId === cardId);
+    const found = mine.find((entry) => !entry.removedAt) ?? mine.at(-1);
+    return found ? structuredClone(found) : undefined;
+  }
+
   activeWorkspaceIds(): string[] {
     return this.worktrees
       .filter((entry) => !entry.removedAt)

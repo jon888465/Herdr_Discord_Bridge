@@ -124,3 +124,15 @@ test("a corrupt or tampered file is refused instead of being treated as empty", 
     );
   }
 });
+
+test("latest prefers the active worktree, else the most recent removed one, else nothing", () => {
+  const store = new CardWorktreeStore(file());
+  assert.equal(store.latest("REQ-20261103-one"), undefined);
+  store.record(entry, T1);
+  store.markRemoved("REQ-20261103-one", T2);
+  assert.equal(store.latest("REQ-20261103-one")?.workspaceId, "w9");
+  assert.equal(store.latest("REQ-20261103-one")?.removedAt, T2);
+  store.record({ ...entry, workspaceId: "w12" }, "2026-11-03T10:00:00Z");
+  assert.equal(store.latest("REQ-20261103-one")?.workspaceId, "w12");
+  assert.equal(store.latest("REQ-20261103-one")?.removedAt, undefined);
+});

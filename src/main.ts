@@ -31,6 +31,10 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { missingCardMessage, syncCards, taskSourceFrom } from "./card-sync.js";
 import { loadPolicy } from "./policy.js";
+import { defaultExec } from "./github.js";
+import { sharedCardPullRequests } from "./card-prs.js";
+import { openCardPullRequest } from "./card-pr-flow.js";
+import { syncPullRequests } from "./card-pr-sync.js";
 import { basename, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { statSync } from "node:fs";
@@ -441,6 +445,7 @@ async function startBridge(
   restoreWorktreeAuthorization(config.allowedWorkspaceIds);
   reportProjectPolicy();
   const stopCardSync = startCardSync(tasks, discord);
+  const stopPullRequestSync = startPullRequestSync(discord);
   const stopHooks = await startHookServer().catch((error) => {
     console.error(`Hook socket unavailable: ${safeError(error)}`);
     return () => undefined;
@@ -454,6 +459,7 @@ async function startBridge(
   installShutdown(() => {
     stopCleanup();
     stopCardSync();
+    stopPullRequestSync();
     herdr.stopTunnels();
     stopSend();
     stopHooks();
@@ -607,6 +613,37 @@ export async function handleCommand(
         readLocalFile: readLocalCardFile,
         assignments: lazyCardAssignments(),
         policy: () => loadPolicy(join(configDirectory(), "policy.yml")),
+        openPullRequest: async (card) => {
+          const entry = lazyCardWorktrees().latest(card.id);
+          if (!entry)
+            throw new Error(
+              `卡片 ${card.id} 沒有 worktree（用 \`card assign ${card.id} --worktree\` 建立），沒有分支可以 push`,
+            );
+          // 通知（CI 結果、merge）送回當初指派這張卡的 thread；本機 console 的任務就印在 console。
+          const taskId = lazyCardAssignments().forCard(card.id).at(-1)?.taskId;
+          const origin = taskId
+            ? runtime.tasks?.store.get(taskId).origin
+            : undefined;
+          return openCardPullRequest(
+            {
+              exec: defaultExec,
+              policy: () => loadPolicy(join(configDirectory(), "policy.yml")),
+              prs: lazyCardPullRequests(),
+              now: nowSeconds,
+            },
+            {
+              card,
+              worktree: {
+                repoPath: entry.repoPath,
+                ...(entry.removedAt ? {} : { path: entry.path }),
+                branch: entry.branch,
+              },
+              ...(origin && origin.guildId !== "local-console"
+                ? { origin }
+                : {}),
+            },
+          );
+        },
         prepareWorktree: async (card) => {
           const { workspaceId, lead } = await activeLeadFor(context, runtime);
           return prepareCardWorktree(
@@ -2008,12 +2045,95 @@ const execFileAsync = promisify(execFile);
 const nowSeconds = (): string =>
   new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 
+/** 卡片的 PR 索引在「用到的時候」才開啟（理由同 lazyCardAssignments）。 */
+function lazyCardPullRequests() {
+  const open = () =>
+    sharedCardPullRequests(join(stateDirectory(), "card-prs.json"));
+  return {
+    forCard: (cardId: string) => open().forCard(cardId),
+    record: (
+      input: Parameters<ReturnType<typeof open>["record"]>[0],
+      at: string,
+    ) => open().record(input, at),
+    updateHead: (repo: string, number: number, headSha: string) =>
+      open().updateHead(repo, number, headSha),
+    open: () => open().open(),
+    markEnded: (
+      repo: string,
+      number: number,
+      state: "MERGED" | "CLOSED",
+      at: string,
+    ) => open().markEnded(repo, number, state, at),
+    markCiReported: (repo: string, number: number, headSha: string) =>
+      open().markCiReported(repo, number, headSha),
+  };
+}
+
+/**
+ * 每分鐘檢查 bridge 開出的 PR：CI 完成與 merge／關閉時通知原 thread（本機 console 的任務印在 console），
+ * 並把 CI 結果寫進卡片。讀 GitHub 失敗只在內容改變時印一次。一次只跑一輪，避免輪詢疊在一起。
+ */
+function startPullRequestSync(discord: DiscordAdapter): () => void {
+  const rootDir = join(stateDirectory(), "cards");
+  let running = false;
+  let lastProblems = "";
+  const failedNotices = new Set<string>();
+  const sweep = async (): Promise<void> => {
+    if (running) return;
+    running = true;
+    try {
+      const prs = lazyCardPullRequests();
+      if (prs.open().length === 0) return;
+      const result = await syncPullRequests({
+        rootDir,
+        prs,
+        exec: defaultExec,
+        now: nowSeconds,
+      });
+      for (const report of result.reports) {
+        try {
+          if (report.origin)
+            await discord.postToOrigin(report.origin, report.text);
+          else console.log(report.text);
+        } catch (error) {
+          // 狀態已寫入索引，這則通知不會重送；至少讓使用者在 console 看得到。
+          if (
+            !failedNotices.has(
+              `${report.cardId}:${report.number}:${report.kind}`,
+            )
+          ) {
+            failedNotices.add(
+              `${report.cardId}:${report.number}:${report.kind}`,
+            );
+            console.error(
+              `PR notice failed (#${report.number}): ${safeError(error)}\n${report.text}`,
+            );
+          }
+        }
+      }
+      const problems = result.problems.join("\n");
+      if (problems && problems !== lastProblems)
+        console.error(`PR sync problems:\n${problems}`);
+      lastProblems = problems;
+    } catch (error) {
+      console.error(`PR sync failed: ${safeError(error)}`);
+    } finally {
+      running = false;
+    }
+  };
+  void sweep();
+  const timer = setInterval(() => void sweep(), CARD_SYNC_INTERVAL_MS);
+  timer.unref();
+  return () => clearInterval(timer);
+}
+
 /** 卡片 worktree 索引在「用到的時候」才開啟（理由同 lazyCardAssignments）。 */
 function lazyCardWorktrees() {
   const open = () =>
     sharedCardWorktrees(join(stateDirectory(), "card-worktrees.json"));
   return {
     active: (cardId: string) => open().active(cardId),
+    latest: (cardId: string) => open().latest(cardId),
     record: (
       input: Parameters<ReturnType<typeof open>["record"]>[0],
       at: string,
@@ -3350,7 +3470,7 @@ function helpText(prefix: string): string {
     `\`${prefix} team ask [--coding] <prompt>\` — 建立持久化任務，由 Lead 動態分工；--coding 才啟用本機 Git 驗收`,
     `\`${prefix} team questions <task-id>\` / \`${prefix} team reply <task-id> <question-id> <answer>\` — 指定問題回答`,
     `\`${prefix} team status [task-id]\` / \`${prefix} team cancel <task-id>\` — 查看／取消任務`,
-    `\`${prefix} card list [status]\` / \`${prefix} card show <id>\` — 查看營運卡片；\`card import\`（附上 .md 檔）匯入為 draft；\`card assign <id> [--coding]\` 把 ready 的卡片交給目前 workspace 的 Team（同 \`team ask\`）；任務還在跑卻刪了卡片時用 \`card recreate <id>\` 重建；\`card assign <id> --worktree\` 在隔離的 worktree 做，完成後 \`card cleanup <id>\` 清掉；\`card policy [專案]\` 查看專案政策（唯讀）`,
+    `\`${prefix} card list [status]\` / \`${prefix} card show <id>\` — 查看營運卡片；\`card import\`（附上 .md 檔）匯入為 draft；\`card assign <id> [--coding]\` 把 ready 的卡片交給目前 workspace 的 Team（同 \`team ask\`）；任務還在跑卻刪了卡片時用 \`card recreate <id>\` 重建；\`card assign <id> --worktree\` 在隔離的 worktree 做，完成後 \`card cleanup <id>\` 清掉；\`card policy [專案]\` 查看專案政策（唯讀）；\`card pr <id>\` 把 done 卡片的分支 push 並開 PR（需專案政策 L1 以上）`,
     `\`${prefix} quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds]\` — 明確額度回報；quota status 查詢`,
     `\`${prefix} failover arm <source> <candidate1,candidate2> <goal>\` → \`failover run <id> confirm-source-stopped\` — 確認停止後自動選擇候選並驗證切換；status/cancel 可查詢／取消`,
     `\`${prefix} handoff checkpoint <source> <goal>\` → \`handoff verify <id> <destination> confirm-source-stopped\` → \`handoff accept <id>\` → \`handoff continue <id>\` — 持久化交接；status/packet/cancel 可查詢／釋放`,
@@ -3410,6 +3530,7 @@ function consoleHelpText(): string {
     "card assign <id> [--coding] — 把 ready 的卡片交給目前 workspace 的 Team（同 team ask）",
     "card assign <id> --worktree [--coding] — 先在目前 Agent 所在 repo 建立隔離 worktree（分支 card/<id>）並啟動同種 Agent，再指派",
     "card cleanup <id> — 移除卡片的 worktree（有未提交修改就保留；不刪分支、不強制）",
+    "card pr <id> — 把 done 卡片的分支 push 並開 PR（專案政策要 L1 以上；之後每分鐘檢查 CI 與 merge）",
     "card policy [專案] — 查看專案政策（每個專案的自動化等級 L0／L1／L2；唯讀，政策檔在 plugin 設定目錄）",
     "card recreate <id> — 卡片被刪除但任務還在跑時，從任務紀錄重建卡片",
     "quota status [pane] / quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds] — 明確額度回報",

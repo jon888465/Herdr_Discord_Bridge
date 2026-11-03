@@ -45,6 +45,9 @@ function setup(overrides: Partial<CardCommandDeps> = {}) {
     now: () => "2026-11-02T08:15:00Z",
     assignments: fakeAssignments(),
     taskInfo: () => undefined,
+    openPullRequest: async () => {
+      throw new Error("openPullRequest was not expected");
+    },
     policy: () => ({
       status: "missing" as const,
       policy: DEFAULT_POLICY,
@@ -1027,4 +1030,88 @@ test("card policy reports an invalid or unsafe file and that the safe default is
     assert.match(text, /全部 L0/, status);
     assert.match(await run("policy", "local:Foo"), /local:Foo → L0/, status);
   }
+});
+
+const prOutcome = {
+  created: true,
+  number: 42,
+  url: "https://github.com/jon888465/Herdr_Discord_Bridge/pull/42",
+  headSha: "0123456789abcdef0123456789abcdef01234567",
+  base: "main",
+  branch: "card/REQ-20261102-work",
+  repo: "jon888465/Herdr_Discord_Bridge",
+  repoPath: "/Users/jon/git_wk/Herdr_Discord_Bridge",
+};
+
+test("card pr opens the pull request, prints its full URL, and records it on the card", async () => {
+  const seen: string[] = [];
+  const { store, run } = setup({
+    openPullRequest: async (card) => {
+      seen.push(`${card.id}:${card.status}`);
+      return prOutcome;
+    },
+  });
+  store.create(assignable("REQ-20261102-work", { status: "done" }));
+  const reply = await run("pr", "REQ-20261102-work");
+  assert.deepEqual(seen, ["REQ-20261102-work:done"]);
+  assert.match(
+    reply,
+    /https:\/\/github\.com\/jon888465\/Herdr_Discord_Bridge\/pull\/42/,
+  );
+  assert.match(reply, /#42/);
+  assert.match(reply, /main/);
+  assert.match(reply, /CI/);
+  const read = store.read("REQ-20261102-work");
+  assert.ok(
+    read.ok &&
+      read.card.body.includes(
+        "- PR：https://github.com/jon888465/Herdr_Discord_Bridge/pull/42",
+      ),
+  );
+  assert.ok(read.ok && read.card.body.includes("- head：0123456789ab"));
+  const log = store.readLog("REQ-20261102-work");
+  assert.deepEqual(log.ok && log.entries.map((e) => [e.event, e.eventId]), [
+    ["pr_opened", "pr-42-opened"],
+  ]);
+  assert.match(
+    (log.ok && log.entries[0].text) || "",
+    /^PR #42 0123456789ab https:\/\/github\.com\//,
+  );
+});
+
+test("card pr on a branch that already had an open PR says it only pushed, and logs no new pr_opened", async () => {
+  const { store, run } = setup({
+    openPullRequest: async () => ({ ...prOutcome, created: false, base: "" }),
+  });
+  store.create(assignable("REQ-20261102-work", { status: "done" }));
+  const reply = await run("pr", "REQ-20261102-work");
+  assert.match(reply, /已有.*PR #42/);
+  assert.match(reply, /push/);
+  const log = store.readLog("REQ-20261102-work");
+  assert.deepEqual(log.ok && log.entries, []);
+});
+
+test("card pr passes the flow's refusals through and changes nothing on the card", async () => {
+  const { store, run, rootDir } = setup({
+    openPullRequest: async () => {
+      throw new Error("專案 local:repo 的政策等級是 L0（不 push）");
+    },
+  });
+  store.create(assignable("REQ-20261102-work", { status: "done" }));
+  const file = path.join(rootDir, "REQ-20261102-work.md");
+  const before = fs.readFileSync(file, "utf8");
+  await assert.rejects(run("pr", "REQ-20261102-work"), /L0/);
+  assert.equal(fs.readFileSync(file, "utf8"), before);
+});
+
+test("card pr validates its arguments and the card", async () => {
+  const { run } = setup({
+    openPullRequest: async () => {
+      throw new Error("openPullRequest was not expected");
+    },
+  });
+  await assert.rejects(run("pr"), /usage/);
+  await assert.rejects(run("pr", "REQ-20261102-work", "x"), /usage/);
+  await assert.rejects(run("pr", "../x"), /不是合法的卡片 id/);
+  await assert.rejects(run("pr", "REQ-20261102-none"), /找不到卡片/);
 });

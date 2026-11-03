@@ -2448,3 +2448,29 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 - 已知限制不變：同一 OS 使用者的 Agent 能改這個檔案；政策目前不影響任何行為；政策檔改動後 `card policy` 每次重新讀檔，但啟動檢查只在重啟時做。
 
 下一步：F2（GitHub 認證）與 F3（開 PR）。F3 第一版已決定先不碰 push；F2 是前提（bridge 用誰的身分 push 與開 PR），需要先整理選項給使用者決定。
+
+## ISSUE-064：`card pr`（push 卡片分支並開 PR）與 CI／merge 回報（F3）
+
+更新日期：2026-11-03。狀態：已修正、待驗收（功能新增；原始碼與自動化測試完成，執行中的 bridge 尚未載入此版本，**尚未 live 驗收、沒有對 GitHub 做過任何真實的 push 或開 PR**）。
+
+來源：card-to-merge 階段 4（追蹤清單 F3；使用者 2026-11-03 的決定見 SPEC「開 PR 與 CI 回報」）。**這是 bridge 第一次對外 push**，風險最高的一步，因此單獨列為驗收項目。
+
+使用者可見行為：新增 `card pr <id>`；bridge 每分鐘檢查已開出的 PR 的 CI 與 merge／關閉並通知。見 SPEC。
+
+預期行為：前提不符（卡片非 done、無 worktree 紀錄或 base、專案政策 L0、origin 非 github.com、有未提交修改、沒有 commit、標題疑似機敏、分支先前的 PR 已 merge／關閉）一律拒絕且不 push；成功時只 push `card/<id>` 分支（明確 refspec、不強制）並開 PR；已有開著的 PR 只 push 不重開；每個 head sha 的 CI 結果只回報一次；merge 只回報、不自動清理。
+
+根因／修正範圍：不適用（新功能）。新增 `src/github.ts`（git／gh 轉接層）、`src/card-prs.ts`（PR 索引 `card-prs.json`）、`src/card-pr-flow.ts`（`card pr` 流程）、`src/card-pr-sync.ts`（CI／merge 輪詢）；`src/card-command.ts` 的 `pr`；`src/main.ts` 接線與輪詢；`src/card-worktrees.ts` 新增 `latest`。
+
+測試（2026-11-03，本機 macOS、Node v26.12.0，非 CI）：新增 `test/github.test.ts`（14：遠端解析、參數驗證、push 只允許 `card/` 分支且不帶旗標、錯誤遮蔽、checks 彙整、PR 狀態）、`test/card-prs.test.ts`（8）、`test/card-pr-flow.test.ts`（10：前提檢查、先 push 再開、PR 內文不含描述、已有開著／已 merge 的 PR、push 被拒、開 PR 失敗）、`test/card-pr-sync.test.ts`（9）、`test/card-command.test.ts` 的 `card pr`（4）、`test/card-worktrees.test.ts`（+1）；全套 805 項（原 759 項）由本機 `npm test` 執行，lint 通過。變異測試：在 push 指令加入 `--force` 會讓「從不強制」的測試失敗。**所有 `gh`／`git` 都是假的 `Exec`**；`main.ts` 的接線與輪詢沒有自動化測試。
+
+未驗證（待使用者，需先 merge 並用 `scripts/run.sh -r` 重啟 bridge）——**請依序、每一步確認後再進下一步**：
+1. **政策檔（需要你明確授權或自己建）：** 在 `~/.config/herdr/plugins/config/herdr-discord-bridge/policy.yml`（權限 600）寫 `version: 1` 與 `projects:` 下 `local:Herdr_Discord_Bridge: L1`。沒有這個檔案時 `card pr` 應拒絕並提示 `card policy`（可先驗這個拒絕路徑）。
+2. **拒絕路徑（不 push）：** 對非 `done` 的卡片、沒有 worktree 的卡片 `card pr`，確認被拒絕、沒有任何 push。
+3. **建一張無害的文件卡：** 描述要求 Agent 在 `docs/` 加一小段文字並 `git commit`（Agent 必須自己 commit，`card pr` 不會代為 commit）；在 active Agent 位於 Herdr_Discord_Bridge repo 的 thread 以 `card assign <id> --worktree` 指派，任務完成、卡片變 `done`。
+4. **第一次真實 push：** `card pr <id>`，預期回覆含完整 PR 網址；到 GitHub 確認 PR 標題是卡片標題、內文**沒有**卡片描述；`card show` 看到 `PR` 與 `pr_opened`。
+5. **CI 回報：** 約 1–2 分鐘內原 thread 收到 CI 通過（或失敗）的通知，卡片多一筆 `ci_result`；再等幾分鐘不重複通知。
+6. **重複執行：** 再下一次 `card pr <id>`：應回報已有 PR、沒有新開。
+7. **收尾（由你操作）：** 在 GitHub 關閉這個 PR（不 merge）並刪除遠端分支 `card/<id>`；確認 bridge 通知「已關閉」；`card cleanup <id>` 清理 worktree。
+8. 已知限制：用你現有的 `gh`／ssh 登入（PR 顯示是你開的）；只支援本機與 github.com；merge 後自動清理與 `merged` 事件尚未做（E11）；`gh` 需要已登入。
+
+下一步：使用者驗收後改為「已驗收」；E11（merge 後清理）、E13，以及 ISSUE-061 診斷。
