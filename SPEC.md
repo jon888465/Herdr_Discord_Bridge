@@ -651,7 +651,7 @@ Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*
 - **限制（誠實說明）：** 同一個 OS 使用者的任何程序（包含 Agent）都能改這個檔案；這裡只拒絕「別人可寫」的檔案，**不能防止同一使用者的 Agent 改檔案**。要真正防止，需要之後的防護（追蹤清單 G）或把檔案放在 Agent 無法寫入的位置。政策檔改動後需重啟 bridge 才會在啟動檢查中反映；`card policy` 每次都重新讀檔。
 - **已決定、未實作（追蹤清單 F3）：** push 與開 PR 第一版不做（使用者 2026-11-03：先只做政策檔載入）。之後開 PR 時，標題用卡片標題，內文只放卡片 id 與 bridge 產生的結構化事實（分支、基準、task id 等），**不貼卡片的描述與驗收條件**（卡片不進 git、可能含 Mantis 內容；repo 是公開的）。
 
-### 開 PR 與 CI 回報（追蹤清單 F3，L1，**已實作、待 live 驗收**，ISSUE-064）
+### 開 PR 與 CI 回報（追蹤清單 F3，L1，**已實作，主要路徑 live 驗收通過 2026-11-03**，ISSUE-064；失敗路徑與 Discord 通知原文未取得證據）
 
 `card pr <id>`（Discord 與 console）：把卡片的分支 push 並開 PR。**這是 bridge 第一次對外 push。** 使用者 2026-11-03 的決定：卡片要 `done`、第一版包含 CI 輪詢與回報、第一次 live 驗收用 Herdr_Discord_Bridge 本身的無害文件卡、身分用現有的 `gh`／ssh 登入（F2，L2 前必須改成獨立身分）、PR 標題用卡片標題且內文只放卡片 id 與結構化事實。
 

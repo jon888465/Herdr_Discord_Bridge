@@ -2451,7 +2451,7 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 ## ISSUE-064：`card pr`（push 卡片分支並開 PR）與 CI／merge 回報（F3）
 
-更新日期：2026-11-03。狀態：已修正、待驗收（功能新增；原始碼與自動化測試完成，執行中的 bridge 尚未載入此版本，**尚未 live 驗收、沒有對 GitHub 做過任何真實的 push 或開 PR**）。
+更新日期：2026-11-03。狀態：已驗收（主要路徑：第一次真實 push 與開 PR、PR 內容、CI 回報、重複執行、PR 關閉通知、清理；失敗路徑與 Discord 通知原文未取得證據，見「live 驗收紀錄」）。
 
 來源：card-to-merge 階段 4（追蹤清單 F3；使用者 2026-11-03 的決定見 SPEC「開 PR 與 CI 回報」）。**這是 bridge 第一次對外 push**，風險最高的一步，因此單獨列為驗收項目。
 
@@ -2474,3 +2474,26 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 8. 已知限制：用你現有的 `gh`／ssh 登入（PR 顯示是你開的）；只支援本機與 github.com；merge 後自動清理與 `merged` 事件尚未做（E11）；`gh` 需要已登入。
 
 下一步：使用者驗收後改為「已驗收」；E11（merge 後清理）、E13，以及 ISSUE-061 診斷。
+
+### live 驗收紀錄
+
+**2026-11-03 live 驗收：主要路徑通過（bridge 第一次對外 push）。** 環境：本機 macOS，main `b8e1445`（PR #42），`scripts/run.sh -r` 重啟 bridge；目標 repo 是公開的 `jon888465/Herdr_Discord_Bridge` 本身；政策檔（使用者授權 Agent 建立）已把 `local:Herdr_Discord_Bridge` 設為 L1。使用者在 Discord 指派並明確同意「push、commit 作者保留」後，Agent 在 bridge console 執行 `card pr`；其餘由 Agent 用 `git`、`gh`、卡片檔與索引核對。
+
+- **拒絕路徑（不碰網路）：** 對沒有 worktree 的卡片 `card pr` → 「沒有 worktree（用 `card assign … --worktree` 建立），沒有分支可以 push」，沒有任何 push。（註：worktree 檢查在主程式先於「卡片非 done」檢查，所以這一步只驗到前者。）
+- **準備：** 驗收卡片 `REQ-20261103-pr-accept`（要求 Agent 在 `docs/` 新增 `pr-accept-note.md` 一行並自己 `git commit`、不要 push）以 `--worktree` 指派；任務完成、卡片 `done`。Agent 實測核對 worktree：`git log` 基準..HEAD 只有 `f3e1252 docs: card pr 驗收用`、`git show --stat` 只動 `docs/pr-accept-note.md`、`git status --short` 無輸出；`git ls-remote` 顯示遠端當時沒有任何 `card/*` 分支。
+- **第一次真實 push 與開 PR（使用者同意後）：** `card pr REQ-20261103-pr-accept` →「已開 PR #43」，完整網址 `https://github.com/jon888465/Herdr_Discord_Bridge/pull/43`，分支已 push（head `f3e1252965cd`）、目標 `main`。GitHub 核對（`gh pr view`）：標題「card pr 驗收（文件）」、狀態 OPEN、base `main`、作者 `jon888465`、只改 `docs/pr-accept-note.md`（+1/-0）；**內文只有**卡片 id、分支、基準、head、task id 與政策等級，**沒有卡片描述**；`git ls-remote` 遠端 `card/*` 只有這一個分支。
+- **卡片與索引：** `## 異動專案` 有 `PR` 網址與 `head`；流程紀錄 `pr_opened`（`pr-43-opened`）；`card-prs.json` 有該 PR 與來源 thread。
+- **CI 回報：** GitHub 上兩個平台的 CI 通過；約 1 分鐘後輪詢寫入卡片 `ci_result`（`CI success …/actions/runs/41586013177/job/125751548146`，事件 id `ci-43-f3e1252965cd`，05:49:12Z），索引 `ciReportedSha` 設為該 head；bridge console 沒有出現 PR 通知失敗訊息。
+- **重複執行：** 再下 `card pr` →「這個分支已有 PR #43 … 沒有另外開新的 PR」；GitHub 上該分支只有 #43；卡片仍各只有 1 筆 `pr_opened`、`ci_result`。
+- **PR 關閉（使用者操作）：** 使用者在 GitHub 關閉 PR #43（不 merge）並刪除遠端分支；使用者貼上 bridge 在原 thread 發出的通知「PR #43 已關閉、沒有 merge（卡片 REQ-20261103-pr-accept）：<網址>」；索引 PR 狀態 `CLOSED`（`endedAt` 05:51:11Z）。
+- **清理：** 確認 PR `CLOSED`、遠端無 `card/*`、worktree 乾淨後，`card cleanup` 移除 worktree（workspace `w16` 關閉）；使用者授權後 Agent 刪除本機分支（`git branch -D card/REQ-20261103-pr-accept`，was `f3e1252`）與兩張驗收卡（`pr-accept`、`pr-reject`）。政策檔依使用者決定**保留** `local:Herdr_Discord_Bridge: L1`。
+
+未驗證：
+- **失敗路徑只有自動化測試：** CI 失敗的通知與 `ci_result`、push 被拒（遠端歷史不同）、開 PR 失敗、「卡片非 done」「政策 L0」「origin 非 github.com」「有未提交修改」的實機拒絕。
+- Discord 端 CI 通過通知的原文（使用者只貼了「已關閉」通知；console 沒有失敗訊息作為間接證據）。
+- PR 被 **merge** 時的通知與輪詢停止（這次只驗了關閉）；`merged` 事件與 merge 後自動清理（E11）尚未實作。
+- 通知送不出去（thread 被刪、權限）的情況。
+- 已知限制不變：用使用者現有的 `gh`／ssh 登入，PR 顯示是使用者開的；commit 作者是本機 git 設定（`c <jon@cdexunijiqi.local>`，使用者決定保留，會公開在 GitHub 上）；只支援本機與 github.com。
+- 與先前政策檔提醒一致：政策檔保留 L1 表示這個 repo 的任何 `done` 卡片現在都能用 `card pr` 開 PR。
+
+下一步：E11（merge 後清理，需偵測 merge 方式以寫 `merged` 事件）、E13（只關 bridge 自己開的來源 workspace）、ISSUE-061 診斷；L2 之前必須先做獨立身分（G2）。
