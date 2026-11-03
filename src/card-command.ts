@@ -16,6 +16,7 @@ import type { CleanupResult, PreparedWorktree } from "./card-worktree-flow.js";
 import {
   buildAssignmentPrompt,
   parseAssignmentPrompt,
+  section,
 } from "./card-handoff.js";
 import { ensureCardsDirectory } from "./card-directory.js";
 import { CardStore } from "./card-store.js";
@@ -69,6 +70,7 @@ const MAX_LIST_LINES = 30;
 const MAX_LIST_ERRORS = 5;
 const TITLE_CHARS = 50;
 const BODY_CHARS = 1200;
+const DECISION_CHARS = 1000;
 const RECENT_LOG = 5;
 
 function shorten(value: string, limit: number): string {
@@ -126,6 +128,22 @@ function listCards(args: string[], deps: CardCommandDeps): string {
   return lines.join("\n");
 }
 
+/** 移除「## <name>」到下一個「## 」之前的整段（含標題）。 */
+function withoutSection(body: string, name: string): string {
+  const heading = new RegExp(`^##[ \\t]+${name}[ \\t]*$`);
+  const kept: string[] = [];
+  let skipping = false;
+  for (const line of body.split("\n")) {
+    if (heading.test(line)) {
+      skipping = true;
+      continue;
+    }
+    if (skipping && /^##[ \t]/.test(line)) skipping = false;
+    if (!skipping) kept.push(line);
+  }
+  return kept.join("\n");
+}
+
 function showCard(args: string[], deps: CardCommandDeps): string {
   const id = args[0];
   if (!id) throw new Error("usage: card show <id>");
@@ -146,11 +164,17 @@ function showCard(args: string[], deps: CardCommandDeps): string {
   ];
   if (card.projects?.length) lines.push(`專案：${card.projects.join("、")}`);
   if (card.source) lines.push(`來源：${card.source}`);
+  // worktree 的狀況（作用中／已清理／保留）由 bridge 寫在 `## 異動專案`，內容很長時不會被截掉。
+  const projectSection = section(card.body, "異動專案") ?? "";
+  for (const match of projectSection.matchAll(/^- worktree 狀態：(.+)$/gm))
+    lines.push(`worktree 狀態：${match[1]}`);
 
-  // 只顯示人寫的部分；流程紀錄另外列出最新的幾筆。
+  // 只顯示人寫的部分；流程紀錄另外列出最新的幾筆。`## 決議` 是人或 Agent 自己寫的自由文字，
+  // bridge 不會改寫它，在下面單獨顯示。
   const logStart = card.body.search(/^## 流程紀錄[ \t]*$/m);
-  const human = (
-    logStart < 0 ? card.body : card.body.slice(0, logStart)
+  const human = withoutSection(
+    logStart < 0 ? card.body : card.body.slice(0, logStart),
+    "決議",
   ).trim();
   const humanChars = Array.from(human);
   lines.push("", "── 內容 ──");
@@ -159,6 +183,17 @@ function showCard(args: string[], deps: CardCommandDeps): string {
       ? `${humanChars.slice(0, BODY_CHARS).join("")}\n…（已截斷，共 ${humanChars.length} 字）`
       : human,
   );
+
+  const decisions = section(card.body, "決議");
+  if (decisions) {
+    const chars = Array.from(decisions);
+    lines.push("", "── 決議 ──");
+    lines.push(
+      chars.length > DECISION_CHARS
+        ? `${chars.slice(0, DECISION_CHARS).join("")}\n…（已截斷，共 ${chars.length} 字；完整內容請開卡片檔）`
+        : decisions,
+    );
+  }
 
   lines.push("", `── 最近紀錄（最多 ${RECENT_LOG} 筆）──`);
   const log = store.readLog(id);
@@ -316,6 +351,7 @@ function recordWorktreeOnCard(
       repoPath: prepared.repoPath,
       branch: prepared.branch,
       worktreePath: prepared.path,
+      worktreeState: "active",
       ...(prepared.baseSha ? { baseSha: prepared.baseSha } : {}),
     },
     today,
@@ -365,6 +401,20 @@ async function cleanupCard(
             },
       )
     : undefined;
+  // 卡片上的 `## 異動專案` 同步顯示 worktree 目前的狀況，讓人從卡片就看得到（保留中或已清理）。
+  const project = exists
+    ? store!.recordProject(
+        id,
+        {
+          machine: "local",
+          repoPath: result.repoPath,
+          branch: result.branch,
+          worktreePath: result.path,
+          worktreeState: result.removed ? "removed" : "kept_dirty",
+        },
+        deps.now().slice(0, 10),
+      )
+    : undefined;
   if (result.removed) {
     lines.push(
       `已移除 worktree ${result.path}（workspace ${result.workspaceId}）。`,
@@ -379,6 +429,8 @@ async function cleanupCard(
   }
   if (!exists) lines.push("（卡片檔不存在，沒有寫入流程紀錄。）");
   else if (logged && !logged.ok) lines.push(`⚠️ 紀錄失敗：${logged.error}`);
+  if (project && !project.ok)
+    lines.push(`⚠️ 卡片的 worktree 狀態更新失敗：${project.error}`);
   return lines.join("\n");
 }
 

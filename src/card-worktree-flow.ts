@@ -146,13 +146,20 @@ export interface CleanupDeps {
 }
 
 export type CleanupResult =
-  | { removed: true; workspaceId: string; path: string; branch: string }
+  | {
+      removed: true;
+      workspaceId: string;
+      path: string;
+      branch: string;
+      repoPath: string;
+    }
   | {
       removed: false;
       reason: "dirty_worktree";
       workspaceId: string;
       path: string;
       branch: string;
+      repoPath: string;
     };
 
 /** 移除卡片的 worktree：永不強制；有未提交修改就保留，分支一律保留。 */
@@ -166,6 +173,7 @@ export async function cleanupCardWorktree(
     workspaceId: entry.workspaceId,
     path: entry.path,
     branch: entry.branch,
+    repoPath: entry.repoPath,
   };
   const result = await removeWorktree(deps.port, entry.workspaceId);
   if (!result.ok) return { removed: false, reason: result.reason, ...info };

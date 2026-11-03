@@ -74,13 +74,16 @@
 |---|---|---|
 | E1 | 查出 Herdr socket API 中 worktree 方法的名稱與參數（`herdr api` 可查）；bridge 走 socket 而非 CLI | **已完成（3a）**：`worktree.list`／`create`／`open`／`remove`，參數與回應見需求卡「Socket API 與 3a 轉接層」 |
 | E2 | 路徑與分支命名（含 `/` 的分支名 slug 規則需實測）；`--base` 預設與是否先 `git fetch` | **已決定並實測（3a）**：分支 `card/<卡片 id>`、基準＝repo 目前 HEAD、不先 `git fetch`（使用者 2026-11-02）；實測 slug：`/`→`-` 且轉小寫（`card/REQ-20261102-ab` → `card-req-20261102-ab`） |
-| E3 | 建立與清理：永不使用 `--force`、有未提交修改時保留並通知、不自動刪分支 | **已實作（3a 轉接層＋3b `card cleanup`，ISSUE-062，待 live 驗收）**：`removeWorktree` 不送 `force`、髒檢出保留並寫 `cleanup_pending`；只由 `card cleanup <id>` 手動觸發，不自動清理 |
-| E4 | `allowedWorkspaceIds` 規則：只自動納入 bridge 自己建立的 workspace | **已決定並實作（3b，待 live 驗收）**：只放行索引 `card-worktrees.json` 記錄的 worktree workspace，且來源 workspace 本來就被授權；重啟依索引重新納入；清理時撤銷（使用者 2026-11-03 決定） |
-| E5 | 新 workspace 的 Discord thread 對應 | **已決定**（使用者 2026-11-02）：沿用卡片的 thread，bridge 把該 thread 的路由切到新 workspace。**使用者 2026-11-03 改選「一步」**：`card assign --worktree` 在新 workspace 自動啟動同種 Agent 再啟動任務（取代先前「第一版不自動啟動 Agent」）。已實作（3b，待 live 驗收）；Agent 被擋住（blocked）時不啟動任務，見 E9 |
+| E3 | 建立與清理：永不使用 `--force`、有未提交修改時保留並通知、不自動刪分支 | **已實作並驗收（3a 轉接層＋3b `card cleanup`，ISSUE-062，2026-11-03）**；清理觸發改為「卡片 merge 後」見 E11：`removeWorktree` 不送 `force`、髒檢出保留並寫 `cleanup_pending`；只由 `card cleanup <id>` 手動觸發，不自動清理 |
+| E4 | `allowedWorkspaceIds` 規則：只自動納入 bridge 自己建立的 workspace | **已決定並實作（3b；本機未設 `allowedWorkspaceIds` 限制，限制情境未驗）**：只放行索引 `card-worktrees.json` 記錄的 worktree workspace，且來源 workspace 本來就被授權；重啟依索引重新納入；清理時撤銷（使用者 2026-11-03 決定） |
+| E5 | 新 workspace 的 Discord thread 對應 | **已決定**（使用者 2026-11-02）：沿用卡片的 thread，bridge 把該 thread 的路由切到新 workspace。**使用者 2026-11-03 改選「一步」**：`card assign --worktree` 在新 workspace 自動啟動同種 Agent 再啟動任務（取代先前「第一版不自動啟動 Agent」）。已實作並驗收（3b）；Agent 被擋住（blocked）時不啟動任務，見 E9 |
 | E6 | 啟動時檢查 Herdr 最低版本（實測只在 0.9.1，文件為 v0.9.5） | **檢查函式已實作（3a，未接線）**：`checkWorktreeSupport` 以 socket `ping` 的 `version` 判斷，最低 0.9.1（Agent 的選擇：實測過的版本）；何時呼叫屬 3b |
 | E7 | 版本指紋、單一 writer、不同 session review、artifact 在樹外，在 worktree 內仍成立 | 未開始 |
 | E8 | worktree 內 Agent 的結果 → 卡片紀錄（只寫結構化事實，不寫自由文字） | 未開始 |
 | E9 | 在 worktree 的 pane 啟動 Agent、含 `/` 的分支名等**未實測**項目 | 部分：含 `/` 的分支名已實測（3a）。**在 root pane 啟動 Agent 已實測（3b，2026-11-03）**：`agent.start` 後 Agent 約 2–4 秒才被偵測到；Claude Code 在新資料夾會先問「信任這個資料夾」→ 狀態 `blocked`，所以一步流程在新資料夾通常會停在需要人確認的狀態（bridge 不替你確認）；Codex 等其他 Agent 未測 |
+| E11 | **卡片 merge 後清理 worktree**（使用者 2026-11-03）：完成不等於清理；**卡片已 merge 才應該清理**。對「沒辦法 merge、沒辦法被清理」的卡片（髒檢出、PR 未 merge、被擋住），要讓使用者能**從卡片先看到狀況**（見 E12）。依賴 PR／merge 事件，屬政策檔與 PR 自動化（F、G）；在那之前維持手動 `card cleanup` | **已決定、未實作** |
+| E12 | **卡片呈現 worktree 與清理狀況與決議**（使用者 2026-11-03）：使用者確認「卡片的說明欄位本來就可以寫自由文字」，並**選選項 1**：(a) bridge 在 `## 異動專案` 自動寫結構化的 `worktree 狀態`（作用中／已清理／因未提交修改保留），`card show` 單獨列出；(b) `## 決議` 由人或 Agent 自己寫、bridge 不改寫、`card show` 單獨顯示。「尚未 merge 而保留」等狀態待 E11（merge 自動化）。選項 2（bridge 自動寫 Agent 摘要，需機敏檢查、放寬決定 11）尚未做 | **選項 1 已實作、待 live 驗收**（ISSUE-062 後續） |
+| E13 | **關閉 bridge 自己開的來源 workspace**（使用者 2026-11-03）：`create` 若是為了這個 worktree 才開了來源 repo 的 workspace，清理最後一個 worktree 時一併關閉；使用者自己開的來源 workspace 不動。需要在建立時記錄「來源 workspace 是否由 bridge 開啟」（`worktree.list` 的 `open_workspace_id` 可在建立前判斷）；關閉要用 `close_group` | **已決定、未實作** |
 | E10 | 專案政策 L0（不 push）是否也需要 worktree | **待決定**（需求卡待確認第 8 項）；目前由 `--worktree` 旗標決定，政策檔階段（F）再議 |
 
 ## F. 政策檔與 PR 自動化（階段 4：L0／L1，不 merge）

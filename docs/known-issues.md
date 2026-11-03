@@ -2336,7 +2336,7 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 ## ISSUE-062：`card assign --worktree` 與 `card cleanup`（隔離 worktree）
 
-更新日期：2026-11-03。狀態：已修正、待驗收（功能新增；原始碼與自動化測試完成，執行中的 bridge 尚未載入此版本，尚未 live 驗收）。
+更新日期：2026-11-03。狀態：已驗收（主流程與清理；Discord 回覆原文、信任提示、`allowedWorkspaceIds` 限制情境、回歸等未驗證項目見「live 驗收紀錄」；使用者提出的後續需求見追蹤清單 E11–E13）。
 
 來源：card-to-merge 階段 3b（需求卡 REQ-20261101-worktree-isolation；使用者 2026-11-03 的決定見需求卡與追蹤清單 E）。這是第一個由 bridge 建立並移除使用者 repo 檢出、並自動啟動 Agent 的功能，風險較高，因此單獨列為驗收項目。
 
@@ -2357,3 +2357,40 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 6. 已知限制：Claude Code 新資料夾的信任提示無法自動通過；只支援本機；手動移除 worktree 後 `card cleanup` 會失敗；來源 repo 的 workspace 需自行關閉；Codex 等其他 Agent 種類未測；`--coding` 在 worktree 內的行為未測。
 
 下一步：使用者驗收後改為「已驗收」；再處理政策檔與 PR 自動化（追蹤清單 F）。
+
+### live 驗收紀錄
+
+**2026-11-03 live 驗收：主流程與清理通過。** 環境：本機 macOS，main `fe8ee56`（PR #36），`scripts/run.sh -r` 重新編譯並重啟 bridge；目標是拋棄式 repo `/Users/jon/tmp/wt-accept-repo`（一個 commit），驗收卡片 `REQ-20261103-wt-accept`。使用者操作 Discord 並貼上終端機截圖（Agent 已讀取）；**使用者沒有貼回覆原文**，以下由 Agent 事後從 bridge 狀態檔、卡片檔、Herdr 與 git 取得證據。
+
+- **`card assign --worktree`（使用者在 Discord 執行）：** 卡片檔有 `## 異動專案`（repo、分支 `card/REQ-20261103-wt-accept`、worktree 路徑 `~/.herdr/worktrees/wt-accept-repo/card-req-20261103-wt-accept`、base `03364e63f79f`）與紀錄 `worktree_created`（01:46:12Z）、`assigned`、`started`（同秒）、`completed`（01:46:22Z）；狀態 `done`。索引 `card-worktrees.json` 有該卡（workspace `w14`、來源 `w13`）。`git worktree list` 與分支都存在。截圖顯示 Lead 收到的是新 worktree workspace 裡的 Agent 提示（`<<<CARD_DATA>>>` 內容，回覆「收到」）。
+- **Agent 沒有被信任提示擋住**：`worktree_created` 與 `started` 同一秒，表示 Agent 當下已是 idle，與先前拋棄式 repo 實測的 `blocked` 不同。**原因未確認**（可能 `~/.herdr/worktrees` 底下已被信任）。因此「blocked 時停下並說明」的實機路徑**沒有被這次驗收涵蓋**（只有自動化測試）。
+- **清理（Agent 在 bridge console 執行並觀察）：** worktree 放一個未追蹤檔 `dirty.txt` 後 `card cleanup` → 回覆「有未提交的修改，已保留」，workspace `w14` 仍開著，記 `cleanup_pending`；刪掉檔案後再 `card cleanup` → 回覆已移除，workspace `w14` 關閉、目錄消失、`git worktree list` 只剩主檢出、分支 `card/REQ-20261103-wt-accept` **保留**、索引寫入 `removedAt`、記 `cleanup_done`。
+- **使用者觀察（2026-11-03）：** 任務完成後 worktree workspace 沒有被清理與關閉，來源 repo 的 workspace 也留在側邊欄。這是既定行為（不自動清理、不關來源 workspace），**不是缺陷**；但使用者決定改變方向，見下。
+
+使用者的後續決定（尚未實作，已列入追蹤清單）：
+1. **E11：卡片 merge 後才清理**（不是完成就清理）；merge 自動化屬 F、G，在那之前維持手動 `card cleanup`。
+2. **E12：卡片要能呈現 worktree／清理狀況**，讓無法 merge、無法清理的卡片先從卡片看到狀況；「AI 決議」的範圍與 ADR-0002 決定 11 的關係待確認。
+3. **E13：只有 bridge 自己開的來源 workspace 才在清理最後一個 worktree 時自動關閉。**
+
+未驗證：
+- Discord 端 `card assign --worktree` 的回覆原文（含 blocked 說明）、`card cleanup` 的 Discord 回覆。
+- Agent 被信任提示擋住（blocked）的實機路徑；Codex 等其他 Agent 種類；`--coding` 在 worktree 內。
+- `allowedWorkspaceIds` 有設限時的授權與撤銷（本機未設限）。
+- 回歸：沒帶旗標的 `card assign` 與一般 `team ask`（驗收流程的 E 步驟沒有取得證據）。
+- 未清理的殘留：來源 repo workspace `w13`（wt-accept-repo）、分支 `card/REQ-20261103-wt-accept`、`~/tmp/wt-accept-repo` 與驗收卡片，需使用者自行處理。
+
+下一步：E11–E13 需要先確認 E12 的範圍再設計；merge 自動化（F、G）完成前不會自動清理。
+
+### 後續：卡片呈現 worktree 狀況與 `## 決議`（E12 選項 1，2026-11-03）
+
+來源：ISSUE-062 驗收時使用者要求「從卡片先看到」無法清理的 worktree 狀況，並確認卡片說明欄位本來就可以寫自由文字、要求卡片能記錄 AI 的決議；使用者選**選項 1**（bridge 只寫結構化狀況、`## 決議` 由人或 Agent 自己寫）。
+
+狀態：已修正、待驗收（原始碼與自動化測試完成，執行中的 bridge 尚未載入此版本，尚未 live 驗收）。
+
+內容：`## 異動專案` 新增 `- worktree 狀態：作用中／已清理（分支保留）／保留（有未提交修改）`（`card assign --worktree` 與 `card cleanup` 就地更新）；`card show` 單獨列出 worktree 狀態與 `── 決議 ──`；`## 決議` 不被 bridge 改寫。細節見 SPEC。
+
+測試（2026-11-03，本機 macOS、Node v26.12.0，非 CI）：`test/card-projects.test.ts`（+3：狀態文字與位置、就地更新與冪等、不合法值）、`test/card-command.test.ts`（+4：assign 後作用中、cleanup 後已清理／保留、`card show` 的決議顯示與遮蔽、長決議截斷、無決議不顯示標題）、`test/card-store.test.ts`（+1：bridge 各種寫入後 `## 決議` 逐字不變）。
+
+未驗證（待使用者，merge 並重啟 bridge 後）：對一張走過 `--worktree` 的卡片 `card show` 看到 `worktree 狀態`；`card cleanup` 後狀態變成已清理／保留；在卡片檔手寫 `## 決議` 後 `card show` 單獨顯示、bridge 後續寫入（`card cleanup`、任務完成同步）不改動它。
+
+未做：選項 2（bridge 自動寫 Agent 摘要）、「尚未 merge 而保留」狀態（待 E11）。

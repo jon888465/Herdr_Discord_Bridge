@@ -144,3 +144,13 @@ Agent 的推論（使用者未明說）：每個 worktree workspace 是自己的
   - 所以 `card assign --worktree` 在新 worktree 路徑上通常會得到 `blocked` 的 Agent：bridge 記錄 worktree 與路由後停下，請使用者到該 pane 確認，再 `card assign <id>`。若使用者先前已讓 Claude Code 信任 `~/.herdr/worktrees` 的父目錄，可能不會被擋（**未測**）。
   - 乾淨的 worktree 經 `cleanupCardWorktree` 移除成功，即使裡面的 Claude 正停在 `blocked` 提示；來源 repo 的 workspace 如預期被留下，需另外關閉（本次測試手動關閉）。
 - **仍未實測：** 信任提示被確認後 Agent 變 `idle` 並接任務；Codex／其他 Agent 種類的 `agent.start`；`--coding` 在 worktree 內的行為（版本指紋、artifact 在樹外）；遠端機器。
+
+## 3b live 驗收結果與使用者後續決定（2026-11-03）
+
+- **驗收（拋棄式 repo `~/tmp/wt-accept-repo`、本機 Herdr 0.9.1）：** `card assign --worktree` 建立 worktree（分支 `card/REQ-20261103-wt-accept`）、啟動 claude、任務完成、卡片 `done`；卡片有 `## 異動專案` 與 `worktree_created`／`assigned`／`started`／`completed` 紀錄。**這次 Agent 沒有被信任提示擋住**（`worktree_created` 與 `started` 在同一秒，Agent 已是 idle）——與先前拋棄式 repo 實測的 blocked 不同，推測 `~/.herdr/worktrees` 底下已被信任，**未確認原因**。
+- **清理：** 在 worktree 放一個未追蹤檔後 `card cleanup` → 保留並說明（索引仍作用中、記 `cleanup_pending`）；刪掉檔案再 `card cleanup` → 移除（workspace w14 關閉、目錄消失、分支 `card/REQ-20261103-wt-accept` 保留、記 `cleanup_done`、索引寫入 `removedAt`）。這兩步由 Agent 在 bridge console 執行並觀察。
+- **使用者觀察：** 任務完成後 worktree workspace 仍開著、來源 repo 的 workspace 也留在側邊欄（這是先前「不自動清理、不關來源 workspace」決定的結果）。
+- **使用者的新決定（2026-11-03，取代「完成後只提醒」的建議）：**
+  1. **清理的觸發應該是「卡片 merge 了」**，不是任務完成。對沒辦法 merge、沒辦法被清理的卡片，要能**從卡片先看到狀況**（也提到卡片記錄 AI 的某些決議）。→ 追蹤清單 E11、E12。「AI 決議」的範圍與 ADR-0002 決定 11（Agent 自由文字不寫進卡片）的關係待確認。
+  2. **只有 bridge 自己開的來源 workspace 才自動關閉**；使用者自己開的不動。→ 追蹤清單 E13。
+  3. 在 merge 自動化（追蹤清單 F、G）存在之前，維持手動 `card cleanup`。

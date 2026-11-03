@@ -1283,3 +1283,48 @@ test("recordTask stops at 50 tasks without touching the file", () => {
   assert.equal(!over.ok && over.code, "invalid");
   assert.equal(fs.readFileSync(file, "utf8"), before);
 });
+
+test("bridge writes never rewrite a free-text decision section written by a person or an Agent", () => {
+  const { store } = seededReady();
+  const decisions =
+    "## 決議\n\n- 2026-11-03 Agent：改用串流輸出\n  - 理由：大檔會 OOM\n- 2026-11-03 使用者：同意，先不做壓縮\n";
+  const current = store.read(ready.id);
+  assert.equal(current.ok, true);
+  if (!current.ok) return;
+  const body = `${current.card.body.trimEnd()}\n\n${decisions}`;
+  const hash = current.hash;
+  assert.equal(
+    store.update(ready.id, hash, (card) => ({ ...card, body })).ok,
+    true,
+  );
+
+  store.setStatus(ready.id, "in_progress", "2026-11-03");
+  store.recordTask(ready.id, "task-x", "2026-11-03");
+  store.recordProject(
+    ready.id,
+    {
+      machine: "local",
+      repoPath: "/a/Foo",
+      branch: "card/ab",
+      worktreeState: "active",
+    },
+    "2026-11-03",
+  );
+  store.recordEvent(ready.id, {
+    time: "2026-11-03T08:00:00Z",
+    eventId: "ev-decision-check",
+    event: "resumed",
+  });
+  store.recordProject(
+    ready.id,
+    { machine: "local", repoPath: "/a/Foo", worktreeState: "removed" },
+    "2026-11-03",
+  );
+
+  const after = store.read(ready.id);
+  assert.equal(after.ok, true);
+  if (!after.ok) return;
+  assert.ok(after.card.body.includes(decisions), "decision section changed");
+  assert.ok(after.card.body.includes("- worktree 狀態：已清理（分支保留）"));
+  assert.ok(after.card.body.includes("## 流程紀錄"));
+});

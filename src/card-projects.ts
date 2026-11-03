@@ -23,6 +23,13 @@ export const PROJECTS_HEADING = "## 異動專案";
 /** 單一欄位疑似含機敏內容時，該欄位改寫成這段固定訊息。 */
 export const FIELD_OMITTED = "（已省略：疑似含機敏資料）";
 
+export const WORKTREE_STATE_TEXT = {
+  active: "作用中",
+  removed: "已清理（分支保留）",
+  kept_dirty: "保留（有未提交修改）",
+} as const;
+export type WorktreeState = keyof typeof WORKTREE_STATE_TEXT;
+
 export interface ProjectInfo {
   /** `local` 或 `machines` 設定裡的機器 id。 */
   machine: string;
@@ -30,6 +37,8 @@ export interface ProjectInfo {
   repoPath: string;
   branch?: string;
   worktreePath?: string;
+  /** worktree 目前的狀況（bridge 產生的事實）；寫成文字顯示在 `worktree 狀態` 那一行。 */
+  worktreeState?: WorktreeState;
   baseSha?: string;
   headSha?: string;
   prUrl?: string;
@@ -76,6 +85,7 @@ const FIELDS = [
   ["repoPath", "repo"],
   ["branch", "分支"],
   ["worktreePath", "worktree"],
+  ["worktreeState", "worktree 狀態"],
   ["baseSha", "base"],
   ["headSha", "head"],
   ["prUrl", "PR"],
@@ -134,6 +144,12 @@ function collect(info: ProjectInfo): {
     );
   if (present("worktreePath"))
     values.worktreePath = absolutePath(fields, "worktreePath");
+  if (present("worktreeState")) {
+    const state = fields.worktreeState;
+    if (typeof state !== "string" || !Object.hasOwn(WORKTREE_STATE_TEXT, state))
+      bad("worktreeState", "one of active, removed, kept_dirty");
+    values.worktreeState = WORKTREE_STATE_TEXT[state as WorktreeState];
+  }
   if (present("baseSha")) values.baseSha = sha12(fields, "baseSha");
   if (present("headSha")) values.headSha = sha12(fields, "headSha");
   if (present("prUrl")) values.prUrl = url(fields, "prUrl");

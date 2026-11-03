@@ -224,3 +224,69 @@ test("a repository directory that looks like a secret cannot be named and is rej
   assert.equal(result.ok, false);
   if (!result.ok) assert.match(result.error, /repoPath/);
 });
+
+test("worktreeState is shown right after the worktree path, in words, and each state has its own text", () => {
+  const base = {
+    machine: "local",
+    repoPath: "/a/Foo",
+    worktreePath: "/w/foo-card",
+  };
+  const expected: Array<[ProjectInfo["worktreeState"], string]> = [
+    ["active", "作用中"],
+    ["removed", "已清理（分支保留）"],
+    ["kept_dirty", "保留（有未提交修改）"],
+  ];
+  for (const [state, text] of expected) {
+    const result = upsertProjectSection("# T\n", {
+      ...base,
+      worktreeState: state,
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) continue;
+    const lines = result.body.split("\n");
+    const at = lines.indexOf("- worktree：/w/foo-card");
+    assert.equal(lines[at + 1], `- worktree 狀態：${text}`, String(state));
+  }
+});
+
+test("the worktree state is updated in place as the worktree goes from active to removed, and writing it again changes nothing", () => {
+  const base = { machine: "local", repoPath: "/a/Foo", branch: "card/ab" };
+  const active = upsertProjectSection("# T\n", {
+    ...base,
+    worktreeState: "active",
+  });
+  assert.equal(active.ok, true);
+  if (!active.ok) return;
+  const removed = upsertProjectSection(active.body, {
+    ...base,
+    worktreeState: "removed",
+  });
+  assert.equal(removed.ok && removed.changed, true);
+  if (!removed.ok) return;
+  assert.equal(removed.body.includes("作用中"), false);
+  assert.equal(removed.body.split("- worktree 狀態：").length - 1, 1);
+  const again = upsertProjectSection(removed.body, {
+    ...base,
+    worktreeState: "removed",
+  });
+  assert.equal(again.ok && again.changed, false);
+
+  // 沒有帶 worktreeState 的後續寫入（例如更新 head）不會清掉既有的狀態。
+  const later = upsertProjectSection(removed.body, {
+    ...base,
+    headSha: "abcdef1234567890abcdef1234567890abcdef12",
+  });
+  assert.equal(later.ok && later.body.includes("已清理（分支保留）"), true);
+});
+
+test("an unknown worktree state is rejected, naming the field", () => {
+  for (const state of ["done", "", "ACTIVE", 5]) {
+    const result = upsertProjectSection("# T\n", {
+      machine: "local",
+      repoPath: "/a/Foo",
+      worktreeState: state as never,
+    });
+    assert.equal(result.ok, false, String(state));
+    if (!result.ok) assert.match(result.error, /worktreeState/);
+  }
+});
