@@ -93,7 +93,7 @@
 | ID | 項目 | 狀態 |
 |---|---|---|
 | F1 | 專案政策檔的 schema、載入方式與信任邊界（Agent 不得自行升級權限） | **已實作並驗收 2026-11-03**（ISSUE-063）。使用者 2026-11-03 決定：**只放 plugin 設定目錄、不放專案 repo**（取代原預定的 `.herdr/policy.yml`）；受限 YAML 子集自己解析；第一版只做載入與唯讀查詢。限制：同一 OS 使用者的 Agent 仍能改檔案 |
-| F2 | GitHub 認證：bot 帳號或 App、階段二 token 權限（見 ISSUE-052 討論） | 未開始 |
+| F2 | GitHub 認證：bot 帳號或 App、階段二 token 權限（見 ISSUE-052 討論） | **已決定、未實作**（使用者 2026-11-03）：**L1 第一版先用你現有的 `gh`／ssh 登入**（`jon888465`），不新增帳號或憑證；**進 F3 前再做**，目前沒有程式。**L2 之前必須改成獨立身分（G2）**。最小權限清單見需求卡「F2 決定」 |
 | F3 | 開 PR、等 CI、回報（L0 只在 worktree、L1 開 PR 由人 merge） | 未開始。使用者 2026-11-03 決定：第一版先不碰 push（先只做 F1）；之後開 PR 的標題用卡片標題、內文只放卡片 id 與結構化事實，不貼描述與驗收條件 |
 | F4 | 失敗處理：review 不過、測試失敗、CI 紅、衝突都退回人工並附證據，不無限重試 | 未開始 |
 
@@ -104,7 +104,7 @@
 | ID | 項目 | 狀態 |
 |---|---|---|
 | G1 | CODEOWNERS：政策檔、`.github/`、`AGENTS.md` 強制人工審查（需要第二個身分才有意義） | 未開始 |
-| G2 | Agent 專用 bot 帳號或 GitHub App | 未開始 |
+| G2 | Agent 專用 bot 帳號或 GitHub App | 未開始。**L2 的前提**（使用者 2026-11-03：L1 先用現有登入，L2 前必須改獨立身分，否則 PR 作者與 merge 者是同一人、CODEOWNERS 無法要求獨立審查） |
 | G3 | 打開 `strict_required_status_checks_policy` | **待決定**（自動 merge 前建議開） |
 | G4 | 紅燈 PR 被擋的實測（直接 push 被拒已測） | 未開始（ISSUE-052 剩餘） |
 | G5 | 啟用 Dependabot（action 已釘 SHA） | 未開始（ISSUE-052 剩餘） |
