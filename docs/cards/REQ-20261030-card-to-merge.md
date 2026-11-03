@@ -105,8 +105,20 @@ external: { notion: null, github: null, mantis: null }
 
 - **L1 第一版先用現有的 `gh`／ssh 登入**（本機 `jon888465`：`gh` 為 fine-grained token、git 走 ssh）。不新增 bot 帳號或 GitHub App。
 - **代價（已知）：** 所有 PR 都會顯示是 `jon888465` 開的；CODEOWNERS 無法要求「獨立審查」（作者與審查者是同一人）；Agent 若能在同一環境執行 `gh`／`git`，就能用同一份憑證（目前已是如此）。因為第一版只做 L1（你自己 merge），這個代價可以接受。
-- **L2 之前必須改成獨立身分（追蹤清單 G2：bot 帳號或 GitHub App）**，並搭配 G1（CODEOWNERS）、G3（strict status checks）。
+- **L2 用什麼身分尚未決定**（2026-11-03 更正：此處原本寫「L2 之前必須改成獨立身分」，那是 Agent 的建議，不是使用者的決定；使用者只決定 L1 先用現有登入）。取捨見下方「L2 的身分選擇」。
 - **bridge 只做這些 GitHub 動作（L1）：** push `card/<卡片 id>` 分支、開 PR、讀 CI 狀態。**不做**：push `main`（ruleset `protect-main` 也會擋）、merge、改設定、改 workflow。
 - **最小權限（fine-grained token，單一 repo）：** Contents 讀寫（push 分支）、Pull requests 讀寫（開 PR）、Metadata 讀取；讀 CI 結果需要 Commit statuses／Checks 讀取。**不要給**：Administration、Workflows、Secrets、Actions 寫入。（ssh push 用的是帳號的 ssh key，權限比 token 寬，這是用現有登入的另一項代價。）
 - **PR 內容（已決定）：** 標題用卡片標題，內文只放卡片 id 與 bridge 產生的結構化事實，不貼描述與驗收條件。
 - **受專案政策限制：** 只有政策等級為 L1 以上的專案才允許 push 與開 PR（F1 已提供查詢；強制屬 F3）。
+
+### L2 的身分選擇（2026-11-03，使用者問「不能繼續使用現在身份 merge 嗎」後的整理，尚未決定）
+
+**可以繼續用現在的身份做 L2，技術上可行。** `gh pr merge` 只需要該 repo 的 Pull requests 寫入權限；ruleset `protect-main` 要求經過 PR 與兩個平台的 CI、沒有 bypass，所以自動 merge 仍會被 CI 擋住，被拿掉的只有「人」這個關卡。目前核准數是 0，使用者本來就是自己 merge 自己的 PR，所以獨立身分**不會**自動讓「第二個人 review」成立（除非有第二個真人）。
+
+獨立身分真正多出來的好處（不是前提）：
+
+1. **憑證範圍：** 現在 push 用 ssh key＝整個 GitHub 帳號的權限（所有 repo）。改用**單一 repo 的 fine-grained token** 就能把 Agent 可能用到的範圍縮到這個 repo，**不需要新帳號**——這是最實際的理由。
+2. **稽核與撤銷：** PR 作者不是使用者；出問題只撤銷 bot 而不影響使用者本人。
+3. **CODEOWNERS：** 只有存在第二個真人 reviewer 時才有意義。
+
+**Agent 的建議（待使用者決定）：** L2 可以先用現有身份，但至少做兩件事：(a) push 與 merge 改用單一 repo 的 fine-grained token、不用 ssh key；(b) 打開 `strict_required_status_checks_policy`（G3）。獨立 bot 帳號或 GitHub App 是更強的選項、不是前提。

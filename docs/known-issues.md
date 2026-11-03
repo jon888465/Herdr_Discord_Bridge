@@ -2496,4 +2496,4 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 - 已知限制不變：用使用者現有的 `gh`／ssh 登入，PR 顯示是使用者開的；commit 作者是本機 git 設定（`c <jon@cdexunijiqi.local>`，使用者決定保留，會公開在 GitHub 上）；只支援本機與 github.com。
 - 與先前政策檔提醒一致：政策檔保留 L1 表示這個 repo 的任何 `done` 卡片現在都能用 `card pr` 開 PR。
 
-下一步：E11（merge 後清理，需偵測 merge 方式以寫 `merged` 事件）、E13（只關 bridge 自己開的來源 workspace）、ISSUE-061 診斷；L2 之前必須先做獨立身分（G2）。
+下一步：E11（merge 後清理，需偵測 merge 方式以寫 `merged` 事件）、E13（只關 bridge 自己開的來源 workspace）、ISSUE-061 診斷；L2 要用什麼身分尚未決定（見需求卡「L2 的身分選擇」；獨立身分 G2 是 Agent 的建議、不是前提）。
