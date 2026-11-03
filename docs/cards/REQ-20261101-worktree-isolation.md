@@ -25,7 +25,7 @@ links: { parent: REQ-20261030-card-to-merge, related_docs: [docs/adr/0002-operat
 4. 營運卡片放 plugin 狀態目錄、不進 git（ADR-0002）。
 5. **分階段（使用者 2026-11-02 選）：** 3a 先做 Herdr worktree 轉接層（不接線、bridge 行為不變、不需重啟）；3b 才接到 `card assign` 並 live 驗收。
 6. **觸發點：** `card assign <id> --worktree`（明確旗標）；沒帶旗標的 `card assign` 與 `team ask` 行為完全不變，可與 `--coding` 並用。
-7. **Agent 與 thread：** 沿用卡片的 Discord thread；bridge 建好 worktree 後把該 thread 的路由切到新 workspace 並回報 pane，使用者在新 workspace 開好 Agent、`use` 選取後照常 `card assign`。第一版**不**自動在 root pane 啟動 Agent。
+7. **Agent 與 thread：** 沿用卡片的 Discord thread；bridge 建好 worktree 後把該 thread 的路由切到新 workspace。**（2026-11-03 修改）** 使用者改選「一步」：`card assign --worktree` 用 `agent.start` 在新 workspace 的 root pane 啟動**與目前 Agent 同種**的 Agent，再啟動任務；取代原本「第一版不自動啟動 Agent」。Agent 被擋住（blocked）時不啟動任務、不替使用者確認，見下方 3b 實測。
 8. **分支、基準、清理：** 分支 `card/<卡片 id>`；基準＝repo 目前 HEAD，不先 `git fetch`；**不自動清理**——只在使用者下 `card cleanup <id>` 時才移除，髒檢出一律保留並通知，永不 `--force`、不刪分支。
 
 Agent 的推論（使用者未明說）：每個 worktree workspace 是自己的 Team，符合 `CONTEXT.md`「不同 workspace 的 Agent 是不同 Team」的不變式，所以不需要讓 Worker 加入原 workspace 的 Team。
@@ -133,3 +133,14 @@ Agent 的推論（使用者未明說）：每個 worktree workspace 是自己的
   - **來源 repo 的 workspace 會被留下：** `create` 開的「來源 repo」workspace 在 worktree 移除後仍在；關閉它需要 `close_group`（否則回 `workspace_group_close_required`）。誰負責關閉屬 3b。
 - **仍未實測：** 在 worktree 的 root pane 啟動 Agent、`--trust-repository` 實際效果、遠端機器的 worktree（未取得同意）、Herdr 重啟後 worktree workspace 是否保留、多個 worktree 同時存在。
 - 測試（2026-11-02，本機 macOS、Node v26.12.0，非 CI）：`test/worktree.test.ts` 12 項（假 port）；沒有自動化測試連真實 Herdr（CI 沒有 Herdr），真實行為由上述實測涵蓋。
+
+## 3b 實作與實測（2026-11-03）
+
+- **實作：** `src/card-worktrees.ts`（索引 `card-worktrees.json`）、`src/card-worktree-flow.ts`（`prepareCardWorktree`／`cleanupCardWorktree`，依賴全部注入）、`card assign --worktree`、`card cleanup`、`src/main.ts` 接線（repo 根目錄用 `git rev-parse --show-toplevel`、`agent.start`、路由切換、授權）。決定與行為見 SPEC「隔離 worktree」；問題追蹤見 ISSUE-062。
+- **使用者決定（2026-11-03）：** repo 取自目前 thread active Agent 的工作目錄；一步流程且自動啟動同種 Agent；只放行 bridge 記錄的 worktree workspace、不自動關來源 workspace。
+- **實測（拋棄式 git repo、真實 Herdr 0.9.1、`kind: claude`，事後已還原 workspace 到 w1–w5 並清除暫存）：**
+  - `agent.start` 回來時 Agent 紀錄尚未有種類、狀態 `unknown`；約 2 秒後種類變 `claude`，約 4 秒後狀態變 `blocked`。
+  - 阻擋原因：Claude Code 對**新資料夾**顯示「Quick safety check: Is this a project you created or one you trust?」，要人選 `Yes, I trust this folder` 才會繼續。bridge 刻意**不自動確認**（信任資料夾是安全決定）。
+  - 所以 `card assign --worktree` 在新 worktree 路徑上通常會得到 `blocked` 的 Agent：bridge 記錄 worktree 與路由後停下，請使用者到該 pane 確認，再 `card assign <id>`。若使用者先前已讓 Claude Code 信任 `~/.herdr/worktrees` 的父目錄，可能不會被擋（**未測**）。
+  - 乾淨的 worktree 經 `cleanupCardWorktree` 移除成功，即使裡面的 Claude 正停在 `blocked` 提示；來源 repo 的 workspace 如預期被留下，需另外關閉（本次測試手動關閉）。
+- **仍未實測：** 信任提示被確認後 Agent 變 `idle` 並接任務；Codex／其他 Agent 種類的 `agent.start`；`--coding` 在 worktree 內的行為（版本指紋、artifact 在樹外）；遠端機器。

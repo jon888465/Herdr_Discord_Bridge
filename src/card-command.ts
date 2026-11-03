@@ -11,6 +11,8 @@ import {
   isCardId,
 } from "./card.js";
 import type { CardAssignment } from "./card-assignments.js";
+import type { Card } from "./card.js";
+import type { CleanupResult, PreparedWorktree } from "./card-worktree-flow.js";
 import {
   buildAssignmentPrompt,
   parseAssignmentPrompt,
@@ -55,10 +57,14 @@ export interface CardCommandDeps {
         state: string;
       }
     | undefined;
+  /** `card assign --worktree`：建立 worktree、啟動同種 Agent、切換路由；失敗要丟出說明原因的錯誤。 */
+  prepareWorktree: (card: Card) => Promise<PreparedWorktree>;
+  /** `card cleanup`：移除卡片的 worktree（永不強制）；髒檢出回報保留。 */
+  cleanupWorktree: (cardId: string) => Promise<CleanupResult>;
 }
 
 const USAGE =
-  "usage: card list [status] | card show <id> | card import [--slug <名稱>] [<本機路徑，僅 console>]（Discord 請附上 .md 檔） | card assign <id> [--coding] | card recreate <id>（從任務紀錄重建被刪除的卡片）";
+  "usage: card list [status] | card show <id> | card import [--slug <名稱>] [<本機路徑，僅 console>]（Discord 請附上 .md 檔） | card assign <id> [--coding] [--worktree] | card cleanup <id> | card recreate <id>（從任務紀錄重建被刪除的卡片）";
 const MAX_LIST_LINES = 30;
 const MAX_LIST_ERRORS = 5;
 const TITLE_CHARS = 50;
@@ -189,9 +195,10 @@ async function assignCard(
   deps: CardCommandDeps,
 ): Promise<string> {
   const coding = args.includes("--coding");
-  const rest = args.filter((arg) => arg !== "--coding");
+  const useWorktree = args.includes("--worktree");
+  const rest = args.filter((arg) => arg !== "--coding" && arg !== "--worktree");
   if (rest.length !== 1 || rest[0].startsWith("--"))
-    throw new Error("usage: card assign <id> [--coding]");
+    throw new Error("usage: card assign <id> [--coding] [--worktree]");
   const id = rest[0];
   if (!isCardId(id)) throw new Error(`${id} 不是合法的卡片 id`);
   if (assigning.has(id)) throw new Error(`卡片 ${id} 正在指派中`);
@@ -210,12 +217,35 @@ async function assignCard(
     const built = buildAssignmentPrompt(card);
     if (!built.ok) throw new Error(built.error);
 
-    const task = await deps.startTask(built.prompt, { coding });
+    // worktree 先於任務：失敗時卡片完全不動；成功後即使任務沒啟動，worktree 也已記在索引與卡片上。
+    let prepared: PreparedWorktree | undefined;
+    const worktreeWarnings: string[] = [];
+    if (useWorktree) {
+      prepared = await deps.prepareWorktree(card);
+      recordWorktreeOnCard(store, id, prepared, deps, worktreeWarnings);
+      // Agent 還沒準備好（例如 Claude Code 在等你確認「信任這個資料夾」）：不替你確認，也不啟動任務。
+      if (!prepared.agentReady)
+        return [
+          `已建立 worktree ${prepared.path}（分支 ${prepared.branch}，workspace ${prepared.workspaceId}），並在新 workspace 啟動了 ${prepared.agent.agent ?? "Agent"}，但它目前的狀態是 ${prepared.agent.agent_status}（常見原因：Claude Code 在等你確認信任這個資料夾；pane ${prepared.agent.pane_id}）。`,
+          `任務沒有啟動，卡片仍是 ready。這個 thread 的路由已切到新 workspace；請到該 pane 處理後，再下 \`card assign ${id}\`（不帶 --worktree），或用 \`card cleanup ${id}\` 清掉。`,
+          ...worktreeWarnings.map((warning) => `⚠️ ${warning}`),
+        ].join("\n");
+    }
+
+    let task: Awaited<ReturnType<CardCommandDeps["startTask"]>>;
+    try {
+      task = await deps.startTask(built.prompt, { coding });
+    } catch (error) {
+      if (!prepared) throw error;
+      throw new Error(
+        `worktree 已建立（workspace ${prepared.workspaceId}，${prepared.path}）但任務沒有啟動：${error instanceof Error ? error.message : "unknown error"}。卡片仍是 ready；這個 thread 的路由已切到新 workspace，可直接再下 \`card assign ${id}\`（不帶 --worktree）重試，或用 \`card cleanup ${id}\` 清掉 worktree`,
+      );
+    }
     const assignedAt = deps.now();
 
     // 任務已經啟動：之後的卡片更新失敗只警告，不丟錯誤，否則使用者會以為沒指派而重複指派。
     const today = deps.now().slice(0, 10);
-    const warnings: string[] = [];
+    const warnings: string[] = [...worktreeWarnings];
     const note = (what: string, error: string): void => {
       warnings.push(`${what}：${error}`);
     };
@@ -255,6 +285,10 @@ async function assignCard(
     const lines = [
       `已指派 ${id} 給 ${task.lead.agent}（${task.lead.machine}），task ${task.taskId}${coding ? "（--coding）" : ""}`,
     ];
+    if (prepared)
+      lines.push(
+        `worktree：${prepared.path}（分支 ${prepared.branch}，workspace ${prepared.workspaceId}）；這個 thread 的路由已切到該 workspace，Agent 在那裡工作。`,
+      );
     if (warnings.length)
       lines.push(
         `⚠️ 任務已啟動，但卡片更新失敗：${warnings.join("；")}。請不要重複指派；用 \`team status ${task.taskId}\` 查看任務。`,
@@ -264,6 +298,88 @@ async function assignCard(
   } finally {
     assigning.delete(id);
   }
+}
+
+/** 把 worktree 記到卡片：`## 異動專案` 與 `worktree_created` 事件。失敗只警告（worktree 已經存在）。 */
+function recordWorktreeOnCard(
+  store: CardStore,
+  id: string,
+  prepared: PreparedWorktree,
+  deps: CardCommandDeps,
+  warnings: string[],
+): void {
+  const today = deps.now().slice(0, 10);
+  const project = store.recordProject(
+    id,
+    {
+      machine: "local",
+      repoPath: prepared.repoPath,
+      branch: prepared.branch,
+      worktreePath: prepared.path,
+      ...(prepared.baseSha ? { baseSha: prepared.baseSha } : {}),
+    },
+    today,
+  );
+  if (!project.ok) warnings.push(`異動專案：${project.error}`);
+  if (!prepared.baseSha) return;
+  const logged = store.recordEvent(id, {
+    event: "worktree_created",
+    machine: "local",
+    path: prepared.path,
+    branch: prepared.branch,
+    baseSha: prepared.baseSha,
+    time: deps.now(),
+    eventId: `${prepared.workspaceId}-worktree-created`,
+  });
+  if (!logged.ok) warnings.push(`紀錄 worktree_created：${logged.error}`);
+}
+
+/** 移除卡片的 worktree。永不強制；有未提交修改就保留並說明。 */
+async function cleanupCard(
+  args: string[],
+  deps: CardCommandDeps,
+): Promise<string> {
+  if (args.length !== 1) throw new Error("usage: card cleanup <id>");
+  const id = args[0];
+  if (!isCardId(id)) throw new Error(`${id} 不是合法的卡片 id`);
+  const result = await deps.cleanupWorktree(id);
+  const lines: string[] = [];
+  const store = openDirectory(deps);
+  const exists = store?.read(id).ok === true;
+  const safeWorkspace = result.workspaceId.replace(/[^A-Za-z0-9_-]/g, "-");
+  const logged = exists
+    ? store!.recordEvent(
+        id,
+        result.removed
+          ? {
+              event: "cleanup_done",
+              result: "removed",
+              time: deps.now(),
+              eventId: `${safeWorkspace}-cleanup-removed`,
+            }
+          : {
+              event: "cleanup_pending",
+              reason: result.reason,
+              time: deps.now(),
+              eventId: `${safeWorkspace}-cleanup-pending`,
+            },
+      )
+    : undefined;
+  if (result.removed) {
+    lines.push(
+      `已移除 worktree ${result.path}（workspace ${result.workspaceId}）。`,
+      `分支 ${result.branch} 仍保留（不自動刪分支）；來源 repo 的 workspace 也不會被關閉。`,
+      "如果這個 thread 的路由還指向已移除的 workspace，請用 `wk use <workspace>` 切回。",
+    );
+  } else {
+    lines.push(
+      `worktree ${result.path} 有未提交的修改，已保留（bridge 永不強制移除，強制會永久丟失修改）。`,
+      "請先在該 worktree 提交或處理修改，再重下 `card cleanup " + id + "`。",
+    );
+  }
+  if (!exists) lines.push("（卡片檔不存在，沒有寫入流程紀錄。）");
+  else if (logged && !logged.ok) lines.push(`⚠️ 紀錄失敗：${logged.error}`);
+  return lines.join("\n");
 }
 
 /** 卡片被刪除、任務還在跑時，由人決定要重建（ADR-0002 階段 2c，Q6）。 */
@@ -407,6 +523,9 @@ export async function runCardCommand(
       break;
     case "show":
       text = showCard(rest, deps);
+      break;
+    case "cleanup":
+      text = await cleanupCard(rest, deps);
       break;
     case "recreate":
       text = recreateCard(rest, deps);

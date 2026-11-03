@@ -44,6 +44,12 @@ function setup(overrides: Partial<CardCommandDeps> = {}) {
     now: () => "2026-11-02T08:15:00Z",
     assignments: fakeAssignments(),
     taskInfo: () => undefined,
+    prepareWorktree: async () => {
+      throw new Error("prepareWorktree was not expected");
+    },
+    cleanupWorktree: async () => {
+      throw new Error("cleanupWorktree was not expected");
+    },
     startTask: async () => {
       throw new Error("startTask was not expected");
     },
@@ -675,4 +681,218 @@ test("recreate creates the cards directory when it is gone, and refuses an unsaf
   fs.mkdirSync(unsafe.rootDir, { mode: 0o700 });
   fs.chmodSync(unsafe.rootDir, 0o755);
   await assert.rejects(unsafe.run("recreate", recreateId), /chmod 700/);
+});
+
+const preparedWorktree = {
+  workspaceId: "w9",
+  path: "/Users/jon/.herdr/worktrees/repo/card-req-20261102-work",
+  branch: "card/REQ-20261102-work",
+  repoPath: "/Users/jon/git_wk/repo",
+  baseSha: "0123456789abcdef0123456789abcdef01234567",
+  agent: { agent: "claude", pane_id: "w9:p1", agent_status: "idle" },
+  agentReady: true,
+};
+
+function worktreeSetup(overrides: Partial<CardCommandDeps> = {}) {
+  const prepared: string[] = [];
+  const s = assignSetup({
+    prepareWorktree: async (card) => {
+      prepared.push(card.id);
+      return preparedWorktree as never;
+    },
+    ...overrides,
+  });
+  return { ...s, prepared };
+}
+
+test("assign --worktree prepares the worktree first, records the project and the event, then starts the task", async () => {
+  const { store, run, calls, prepared } = worktreeSetup();
+  store.create(assignable());
+  const reply = await run("assign", "REQ-20261102-work", "--worktree");
+  assert.deepEqual(prepared, ["REQ-20261102-work"]);
+  assert.equal(calls.length, 1);
+  assert.match(reply, /已指派 REQ-20261102-work/);
+  assert.match(reply, /card-req-20261102-work/);
+  assert.match(reply, /w9/);
+  const read = store.read("REQ-20261102-work");
+  assert.equal(read.ok && read.card.status, "in_progress");
+  assert.deepEqual(read.ok && read.card.projects, ["local:repo"]);
+  assert.ok(
+    read.ok &&
+      read.card.body.includes(
+        "- worktree：/Users/jon/.herdr/worktrees/repo/card-req-20261102-work",
+      ),
+  );
+  const log = store.readLog("REQ-20261102-work");
+  assert.deepEqual(log.ok && log.entries.map((e) => e.event), [
+    "worktree_created",
+    "assigned",
+    "started",
+  ]);
+});
+
+test("assign without --worktree never touches worktrees, and --worktree combines with --coding", async () => {
+  const plain = worktreeSetup();
+  plain.store.create(assignable());
+  await plain.run("assign", "REQ-20261102-work");
+  assert.deepEqual(plain.prepared, []);
+
+  const both = worktreeSetup();
+  both.store.create(assignable());
+  await both.run("assign", "REQ-20261102-work", "--worktree", "--coding");
+  assert.deepEqual(both.prepared, ["REQ-20261102-work"]);
+  assert.equal(both.calls[0].coding, true);
+});
+
+test("--worktree on a card that cannot be assigned prepares nothing", async () => {
+  const { store, run, prepared } = worktreeSetup();
+  store.create(assignable("REQ-20261102-work", { status: "draft" }));
+  await assert.rejects(
+    run("assign", "REQ-20261102-work", "--worktree"),
+    /ready/,
+  );
+  store.create(assignable("REQ-20261102-nodesc", { body: "# t\n" }));
+  await assert.rejects(
+    run("assign", "REQ-20261102-nodesc", "--worktree"),
+    /描述/,
+  );
+  assert.deepEqual(prepared, []);
+});
+
+test("if the worktree cannot be prepared the error reaches the caller and the card is untouched", async () => {
+  const { store, run, calls } = worktreeSetup({
+    prepareWorktree: async () => {
+      throw new Error("目前 Agent 的工作目錄 /x 不在 git repository 內");
+    },
+  });
+  store.create(assignable());
+  await assert.rejects(
+    run("assign", "REQ-20261102-work", "--worktree"),
+    /不在 git/,
+  );
+  assert.equal(calls.length, 0);
+  const read = store.read("REQ-20261102-work");
+  assert.equal(read.ok && read.card.status, "ready");
+  assert.equal(read.ok && read.card.projects, undefined);
+});
+
+test("if the task cannot start after the worktree exists the error says where the worktree is and how to continue", async () => {
+  const { store, run } = worktreeSetup({
+    startTask: async () => {
+      throw new Error("Lead pane is busy");
+    },
+  });
+  store.create(assignable());
+  await assert.rejects(
+    run("assign", "REQ-20261102-work", "--worktree"),
+    (error: unknown) =>
+      error instanceof Error &&
+      /Lead pane is busy/.test(error.message) &&
+      /card-req-20261102-work/.test(error.message) &&
+      /card assign REQ-20261102-work/.test(error.message) &&
+      /card cleanup/.test(error.message),
+  );
+  const read = store.read("REQ-20261102-work");
+  assert.equal(read.ok && read.card.status, "ready");
+  assert.deepEqual(read.ok && read.card.projects, ["local:repo"]);
+});
+
+test("a missing base sha still records the project but skips the worktree event", async () => {
+  const { store, run } = worktreeSetup({
+    prepareWorktree: async () =>
+      ({ ...preparedWorktree, baseSha: undefined }) as never,
+  });
+  store.create(assignable());
+  await run("assign", "REQ-20261102-work", "--worktree");
+  const log = store.readLog("REQ-20261102-work");
+  assert.deepEqual(log.ok && log.entries.map((e) => e.event), [
+    "assigned",
+    "started",
+  ]);
+  const read = store.read("REQ-20261102-work");
+  assert.deepEqual(read.ok && read.card.projects, ["local:repo"]);
+});
+
+const cleanedUp = {
+  removed: true as const,
+  workspaceId: "w9",
+  path: preparedWorktree.path,
+  branch: preparedWorktree.branch,
+};
+
+test("cleanup reports the removal, keeps the branch and the source workspace, and logs cleanup_done", async () => {
+  const { store, run } = setup({ cleanupWorktree: async () => cleanedUp });
+  store.create(assignable("REQ-20261102-work", { status: "in_progress" }));
+  const reply = await run("cleanup", "REQ-20261102-work");
+  assert.match(reply, /已移除 worktree/);
+  assert.match(reply, /分支 card\/REQ-20261102-work 仍保留/);
+  assert.match(reply, /來源 repo 的 workspace/);
+  const log = store.readLog("REQ-20261102-work");
+  assert.deepEqual(log.ok && log.entries.map((e) => [e.event, e.text]), [
+    ["cleanup_done", "清理完成：removed"],
+  ]);
+});
+
+test("cleanup keeps a worktree with uncommitted changes, says so, and logs cleanup_pending", async () => {
+  const { store, run } = setup({
+    cleanupWorktree: async () => ({
+      removed: false as const,
+      reason: "dirty_worktree" as const,
+      workspaceId: "w9",
+      path: preparedWorktree.path,
+      branch: preparedWorktree.branch,
+    }),
+  });
+  store.create(assignable("REQ-20261102-work", { status: "in_progress" }));
+  const reply = await run("cleanup", "REQ-20261102-work");
+  assert.match(reply, /未提交/);
+  assert.match(reply, /保留/);
+  assert.match(reply, /card-req-20261102-work/);
+  const log = store.readLog("REQ-20261102-work");
+  assert.deepEqual(log.ok && log.entries.map((e) => [e.event, e.text]), [
+    ["cleanup_pending", "清理待處理：dirty_worktree"],
+  ]);
+});
+
+test("cleanup validates its arguments, passes errors through, and still reports when the card is gone", async () => {
+  const { run } = setup({ cleanupWorktree: async () => cleanedUp });
+  await assert.rejects(run("cleanup"), /usage/);
+  await assert.rejects(run("cleanup", "../x"), /不是合法的卡片 id/);
+  await assert.rejects(run("cleanup", "REQ-20261102-work", "x"), /usage/);
+  assert.match(await run("cleanup", "REQ-20261102-work"), /已移除 worktree/);
+
+  const failing = setup({
+    cleanupWorktree: async () => {
+      throw new Error("卡片 REQ-20261102-work 沒有作用中的 worktree");
+    },
+  });
+  await assert.rejects(
+    failing.run("cleanup", "REQ-20261102-work"),
+    /沒有作用中/,
+  );
+});
+
+test("when the new Agent is blocked the worktree is recorded on the card, no task starts, and the reply says what to do", async () => {
+  const { store, run, calls } = worktreeSetup({
+    prepareWorktree: async () =>
+      ({
+        ...preparedWorktree,
+        agent: { agent: "claude", pane_id: "w9:p1", agent_status: "blocked" },
+        agentReady: false,
+      }) as never,
+  });
+  store.create(assignable());
+  const reply = await run("assign", "REQ-20261102-work", "--worktree");
+  assert.equal(calls.length, 0);
+  assert.match(reply, /blocked/);
+  assert.match(reply, /信任/);
+  assert.match(reply, /card assign REQ-20261102-work/);
+  assert.match(reply, /card cleanup REQ-20261102-work/);
+  const read = store.read("REQ-20261102-work");
+  assert.equal(read.ok && read.card.status, "ready");
+  assert.deepEqual(read.ok && read.card.projects, ["local:repo"]);
+  const log = store.readLog("REQ-20261102-work");
+  assert.deepEqual(log.ok && log.entries.map((e) => e.event), [
+    "worktree_created",
+  ]);
 });
