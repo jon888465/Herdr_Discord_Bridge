@@ -2297,7 +2297,7 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 ## ISSUE-061：`team cancel` 要等到 Agent 目前的長時間指令結束才會生效
 
-更新日期：2026-11-03。狀態：已修正、待驗收（根因已由程式碼與 2026-11-02 的任務 journal 確認；原始碼與自動化測試完成，執行中的 bridge 尚未載入修正，尚未 live 驗收）。**這次是 Agent 手動診斷與修正，沒有走「建單 → … → merge」的自動化流程**（該流程的 review、test、merge 自動化尚未實作），所以本 issue 已不能再當 H4 的端到端測試案例，見下方「預定用途」。
+更新日期：2026-11-03。狀態：已驗收（agy；claude、Worker 路徑未實測，見「驗收證據」）。**這次是 Agent 手動診斷與修正，沒有走「建單 → … → merge」的自動化流程**（該流程的 review、test、merge 自動化尚未實作），所以本 issue 已不能再當 H4 的端到端測試案例，見下方「預定用途」。
 
 使用者可見症狀：任務的 Lead 正在執行長時間的 shell 指令（驗收用的 `sleep 150`）時輸入 `team cancel <task-id>`，取消看起來被擋住，要等指令跑完才完成。使用者原話：「team cancel 會被 block 等到 120 秒後」。
 
@@ -2315,9 +2315,15 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 測試（2026-11-03，本機 macOS、Node v26.12.0，非 CI）：`test/team-task-engine.test.ts` 新增 2 項（派送還在等待、Agent 已 working 時取消，會在不等 prompt 返回的情況下送一次 Ctrl-C 並進入 `cancelled`；Agent 還沒開始工作時不送、開始工作後只送一次、不重送）。修正前第一項因取消永遠等不到派送完成而逾時、第二項在「working 後應送」斷言失敗；修正後綠燈。既有的「cancel during pending atomic dispatch waits for dispatch…」等 25 項取消測試全部維持通過。全套 840 項，839 通過、0 失敗、1 略過（原 838 項）；`lint` 通過。**沒有**對真實 Herdr／Claude Code／agy 的測試。
 
-未驗證（待使用者，需先 merge 並重啟 bridge）：Claude Code、agy 在執行 `sleep` 等 shell 指令時，Ctrl-C 是否真的中止指令並讓 Herdr 回報 idle（這是 Agent 端的行為，**本修正只保證 bridge 會及時送出 Ctrl-C**，不保證 CLI 一定停下；停不下來時任務仍會停在 `cancelling` 並如實回報「cancel sent; stop not yet confirmed」）；Lead 不是長時間指令而是一般回覆中取消的行為；Worker 路徑（同一套 `cancelTask`）；其他 CLI（codex 等）。限制：1 秒輪詢，取消後最多約 1 秒才會送出 Ctrl-C。
+未驗證：Claude Code 在執行 `sleep` 等 shell 指令時 Ctrl-C 的效果（**本修正只保證 bridge 會及時送出 Ctrl-C**，不保證 CLI 一定停下；停不下來時任務仍會停在 `cancelling` 並如實回報「cancel sent; stop not yet confirmed」）；Lead 不是長時間指令而是一般回覆中取消的行為；Worker 路徑（同一套 `cancelTask`）；其他 CLI（codex 等）。限制：1 秒輪詢，取消後最多約 1 秒才會送出 Ctrl-C。
 
-下一步：使用者驗收後改為「已驗收」。
+驗收證據（2026-11-03，本機 macOS，bridge 載入 main `98e6a0b`，Herdr 0.9.1，`agy` 當 Lead，pane `w1:p8`，沒有用 `--worktree`；由 Agent 在 bridge console 操作）：驗收卡的任務 `task-1e9f4231-70ff-4193-aaa7-574092399f0c` 讓 `agy` 執行 `sleep 120`，Herdr 回報 `working` 時下 `team cancel`。journal：09:19:31.957 `cancel_requested` → 09:19:33.241 `cancel_signal_intent`（Ctrl-C 送出，約 1.3 秒後）→ 09:19:34.021 `cancel_turn_settled` → 09:19:34.049 `task_cancelled`；約 2 秒進入 `cancelled`（修正前同樣情境約 110 秒、Ctrl-C 從未送出）。驗收條件（約 10 秒內）達成。
+
+附帶觀察（未另立 issue）：(1) Ctrl-C 讓 `agy` 回到 idle，但 `agy` 把 `sleep 120` 轉成背景任務，畫面仍顯示 `1 task(s)`，`sleep` 沒有被殺掉——Ctrl-C 只中斷 `agy` 的 turn，不保證結束它啟動的子行程。(2) 收尾訊息「already settled; recorded session was empty … no signal sent」在本情境不準確：Ctrl-C 其實已在前面送出（見 `cancel_signal_intent`），是 Agent 停下後走了 ISSUE-066 的「session 為空且 idle」分支才寫了這段文字；行為正確，文字誤導。
+
+未實機驗證：Claude Code 為 Lead（使用者決定不補測）；Worker 路徑；Lead 在一般回覆中取消；其他 CLI（codex 等）。限制同上：1 秒輪詢；Ctrl-C 不保證 CLI 或其子行程停下。
+
+下一步：無。
 
 預定用途（使用者，2026-11-02；**2026-11-03 已失效：本 issue 已由 Agent 手動修正，不能再當端到端案例，H4 需另選案例**）：本 issue **保留起來，等「建單 → 分配任務 → 處理 → review → test → PR → merge → 結單」的自動化流程完成後，拿來當端到端的自動化測試案例**，實際跑一次整條流程。這是未來的計畫，目前不能自動跑。與 ISSUE-055 的用途並列（見追蹤清單 H4）：本 issue 範圍較小、風險較低，建議**先用它驗證流程本身**，再用 ISSUE-055（刪除檢出，風險較高）。
 
