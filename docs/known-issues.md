@@ -2500,7 +2500,7 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 ## ISSUE-065：PR 被 merge 後記 `merged` 並自動清理 worktree（E11）
 
-更新日期：2026-11-03。狀態：已修正、待驗收（功能新增；原始碼與自動化測試完成，執行中的 bridge 尚未載入此版本，**尚未 live 驗收、沒有真實的 PR 被 merge 過**）。
+更新日期：2026-11-03。狀態：已驗收（主要路徑：真實 PR 被 merge 後記 `merged` 並自動清理；髒檢出保留、squash／rebase 推斷、清理失敗通知與 Discord 通知原文未取得證據，見「live 驗收紀錄」）。
 
 來源：追蹤清單 E11（使用者 2026-11-03：「如果卡片有 merge 了那就應該清理」）。接在 ISSUE-064（`card pr`）之後，補上「PR 被 merge」這條 live 尚未驗證的路徑。
 
@@ -2522,3 +2522,81 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 **驗收目標（使用者 2026-11-03 選定）：用 Herdr_Discord_Bridge 本身。** merge 會真的把變更帶進 `main`：驗收用的文件（例如 `docs/pr-accept-note.md`）會進入 `main` 與其 git 歷史，**之後要再開一個 PR 把它移除**（歷史裡仍會留下這兩次提交）。Agent 先前建議較乾淨的做法是私人 scratch repo，使用者選了前者。**merge 由使用者在 GitHub 網頁上按**，Agent 不會替使用者 merge。
 
 下一步：本 PR merge 並重啟 bridge 後，依上述步驟驗收；驗收後開一個 PR 移除驗收用文件；全部完成後改為「已驗收」。
+
+### live 驗收紀錄
+
+**2026-11-03 live 驗收：主要路徑通過（第一次有真實的 PR 被 merge）。** 環境：本機 macOS，main `ffa1e47`（PR #46），`scripts/run.sh -r` 重啟 bridge；目標 repo 是 Herdr_Discord_Bridge 本身（使用者選定）；政策 L1。驗收卡片 `REQ-20261103-merge-accept`（要求 Agent 在 `docs/` 新增 `merge-accept-note.md` 一行並自己 `git commit`）。使用者在 Discord 指派、明確同意 push（含 commit 作者保留），Agent 在 bridge console 執行 `card pr`，使用者在 GitHub 用 **merge commit** 按 merge；其餘由 Agent 用 `git`、`gh`、卡片檔、索引與 Herdr 核對。
+
+- **push 與 PR（使用者同意後）：** `card pr` → PR #47，https://github.com/jon888465/Herdr_Discord_Bridge/pull/47；GitHub 核對：標題「merge 後清理驗收（文件）」、base `main`、只改 `docs/merge-accept-note.md`（+1/-0）、head `b97829e93c67`；內文只有卡片 id、分支、基準、head、task id 與政策等級（無卡片描述）；遠端 `card/*` 只有這一個分支。CI 通過（06:53:04Z 寫入卡片 `ci_result`）。
+- **merge 與自動清理：** 使用者於 06:53:10Z merge（merge commit `a28a7f5aa5a3`）。bridge 在約 53 秒後（06:54:03Z）處理：索引 PR #47 `MERGED`（`endedAt` 06:54:03Z）；卡片流程紀錄 `merged：已合併 a28a7f5aa5a3（merge）`（事件 id `pr-47-merged`，**方式推斷為 `merge`，與 GitHub 的 `Merge pull request #47 …` 一致**）與 `06:54:04Z cleanup_done：清理完成：removed`（事件 id `w1A-cleanup-removed`）；卡片 `worktree 狀態` 變「已清理（分支保留）」（只有一行、就地更新）；worktree 與 workspace `w1A` 已移除（Herdr 回到 w1–w5，`git worktree list` 只剩主檢出）；本機分支 `card/REQ-20261103-merge-accept` 保留。**沒有任何手動清理，全部由 bridge 自動完成。**
+- **收尾：** `docs/merge-accept-note.md` 已隨本 PR 從 `main` 移除（`git` 歷史仍保留這兩次提交）；本機分支 `card/REQ-20261103-merge-accept` 與驗收卡片仍在，待使用者處理。
+
+未驗證：
+- **Discord 通知原文：** 使用者尚未貼上「PR #47 已 merge（merge）…已自動清理 worktree」通知；只有索引與卡片狀態的間接證據。
+- squash 與 rebase 的推斷（只有自動化測試）；merge 前 worktree 有未提交修改而被保留的實機路徑；清理失敗（例如 Herdr 連不上）的通知。
+- 已知限制不變：merge 方式是推斷；清理失敗不自動重試；不更新本機 `main`、不刪分支；通知送不出去不重送。
+
+
+## ISSUE-066：剛啟動、還沒有 session 的 Agent 被誤判為「Agent identity changed」，且 `team cancel` 無法收尾
+
+更新日期：2026-11-03。狀態：待調查（**根因已由程式碼與任務 journal 確認，修正尚未開始**）。
+
+來源：ISSUE-065 的 live 驗收途中發現，不是 E11 的缺陷。
+
+使用者可見症狀：`card assign … --worktree` 在新 workspace 啟動 `agy`（Antigravity CLI）當 Lead；之後再 `card assign` 時，任務在 8 秒後變 `blocked`，訊息「Agent identity changed while waiting for w17:p1」。但 w17 的 pane 顯示 `agy` 其實已正確回覆規劃階段的結果（`{"assignments": []}`）。接著 `team cancel` 讓任務停在 `cancelling`：「Recovery: unknown · Unsettled dispatch; inspect before cancelling. No automatic replay.」「w17:p1: session identity unknown; no signal sent」，任務永遠無法進入 `cancelled`，並可能佔著該 Agent 的保留。
+
+預期行為：一個剛啟動的 Agent（處理第一個 prompt 之前沒有 session）接第一個任務時不應被判為「身份改變」；`team cancel` 在能夠確認 pane 仍是同一個 Agent 時應能收尾。
+
+重現方式／環境（2026-11-03，本機 macOS，main `ffa1e47`，Herdr 0.9.1）：用 `agy` 當 thread 的 active Agent，`card assign <id> --worktree` 建立 worktree 與 `agy`；等 `agy` 閒置後（此時 Herdr 尚未登記它的 session）`card assign <id>`。任務 `task-efb29d5c-3597-469a-8769-172f805a57de`：journal `task_started` → `turn_dispatched`（06:30:43Z）→ `task_failed`（06:30:51Z），任務 `lead.agent_session` 為 `null`；事後 `herdr agent list` 顯示該 Agent 的 session 是 `0dec81d7-19b3-4b4a-ae0d-7f7cec0cac36`（`herdr:antigravity_cli`）。先前用 `claude` 的所有驗收都沒有發生（claude 一啟動就有 session）。
+
+根因（**已確認**）：`src/team-turn.ts` 在等 Agent 回應時比對 pane、terminal、workspace、Agent 種類與 session；session 用 `sameAgentSession(left, right)`（`src/response-stream.ts`），其第一行 `if (left == null || right == null) return left == null && right == null;`——派工時 session 是 `null`、回應時變成有值，就回傳 `false`，被判為身份改變。`team cancel` 因為任務記錄的 session 是 `null`、現在的 Agent 有 session，永遠無法確認身份而拒絕送 Ctrl-C。
+
+修正範圍：尚未修正。方向（待使用者同意）：在 `team-turn.ts` 記住「第一次看到的 session」，允許 session 從無到有（其他身份欄位都沒變時），之後換成別的值才算改變；取消路徑需另行處理「任務記錄的 session 是 null」的情況。風險：身份檢查是防止 Agent 在任務中途被替換的保護，放寬要窄。
+
+測試：無（尚未修正）。
+
+未驗證：其他種類的 Agent（codex 等）是否有相同的「第一個任務前沒有 session」行為；Worker 路徑是否同樣受影響；殘留的孤兒任務 `task-efb29d5c-…` 仍留在使用者的任務 journal（`cancelling`），其 pane 已不存在。
+
+下一步：先寫測試重現（任務記錄 session 為 null、回應有 session），再修；一併檢查 cancel 路徑。
+
+
+## ISSUE-067：`--worktree` 偶發失敗：`agent.start: agent_pane_busy … is not an available shell`
+
+更新日期：2026-11-03。狀態：待調查（**根因為推測，尚未確認**）。
+
+來源：ISSUE-065 的 live 驗收途中，使用者貼 Discord 截圖發現（Agent 已讀取）。
+
+使用者可見症狀：`card assign REQ-20261103-merge-accept --worktree` 回覆「❌ worktree 已建立（workspace w19，…）但 Agent 沒有啟動：herdr agent.start: agent_pane_busy agent target pane w19:p1 is not an available shell。任務沒有啟動；可 `card cleanup REQ-20261103-merge-accept` 清掉」。重下一次就成功。
+
+預期行為：新建的 worktree workspace 的 shell 稍晚才就緒時，bridge 應稍等或重試，不因一次 `agent_pane_busy` 就放棄。
+
+重現方式／環境（2026-11-03，本機 macOS，Herdr 0.9.1）：偶發，不是每次。先前三次 `--worktree`（claude）都成功；這次失敗後立刻查 `w19:p1`，已是正常的 zsh 提示（`jon@cdexunijiqi card-req-… %`），Agent 欄位為 null。同一輪使用者還有一次 `w18` 的嘗試（建立後約 22 秒被 `card cleanup`），結果未知。重下後成功（`w1A`，`worktree_created` 與 `started` 相差 1 秒）。
+
+根因（**推測，未確認**）：`createWorktree` 一回傳 `root_pane`，`prepareCardWorktree` 就立刻呼叫 `agent.start`；此時 pane 裡的 shell 可能還在初始化，Herdr 回報 `agent_pane_busy`。證據：錯誤訊息文字、事後 pane 已就緒、偶發。`startAgentInPane`（`src/main.ts`）對 `agent.start` 沒有任何重試。Herdr 沒有（我查得到的）保證 pane 一建好就能用的文件。
+
+修正範圍：尚未修正。方向（待使用者同意）：`agent_pane_busy` 時短暫重試（例如最多約 15 秒、每 0.5 秒），逾時才失敗。
+
+測試：無（尚未修正）。
+
+未驗證：重試是否足夠；其他 Herdr 錯誤碼是否也需要重試；`agent.start` 的 `timeout_ms`（30 秒）是否影響。
+
+下一步：寫測試（假的 port 先回 `agent_pane_busy` 再成功）、再修；與 ISSUE-066 可一起處理。
+
+
+## ISSUE-068：`card pr` 的 PR 內文列出卡住的舊 task id
+
+更新日期：2026-11-03。狀態：待調查（小問題，**尚未決定是否修改**）。
+
+來源：ISSUE-065 的 live 驗收，核對公開 PR #47 內文時發現。
+
+使用者可見症狀：PR #47 內文的 task 欄列了兩個 task id，其中 `task-efb29d5c-…` 是因 ISSUE-066 而卡住（`cancelling`）的舊任務，新任務才是真正完成這張卡的。
+
+預期行為：待決定——只列最新（完成）的 task，或列出所有嘗試過的 task（含失敗的）以便稽核。
+
+根因（已確認）：`src/card-pr-flow.ts` 的 `prBody` 取卡片 `tasks` 的前 3 個；卡片的 `tasks` 保留所有指派過的 task（包含失敗、卡住的）。
+
+風險評估：task id 只是一個隨機 id，不含機敏內容；但它把一個「卡住的內部任務」暴露在公開 PR 內文，沒有實質價值。
+
+修正範圍：尚未修正。
+
+下一步：使用者決定要列哪些 task；若只列最新的，是一行修改加一個測試。
