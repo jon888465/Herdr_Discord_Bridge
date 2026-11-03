@@ -59,7 +59,8 @@ function prBody(
   card: Card,
   input: { branch: string; baseSha: string; headSha: string; level: string },
 ): string {
-  const tasks = (card.tasks ?? []).slice(0, 3);
+  // ISSUE-068：只列最新的 task；先前失敗或卡住的嘗試留在卡片的流程紀錄，不公開到 PR。
+  const tasks = (card.tasks ?? []).slice(-1);
   return [
     "## 摘要",
     "",

@@ -665,7 +665,7 @@ Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*
   6. 卡片標題不含疑似機敏資料（會放進 PR 標題）。
   7. 分支先前沒有已 merge 或已關閉的 PR（bridge 不會自動再開第二個，請換新分支或手動處理）。
 - **bridge 對 GitHub 只做這些：** `git push origin refs/heads/card/<id>:refs/heads/card/<id>`（**只有 `card/` 分支、明確 refspec、不帶任何旗標，永不 `--force`**，不 push `main`、不 push 標籤）、`gh pr list`／`create`／`checks`／`view`、`gh repo view`（取得預設分支）。不 merge、不改設定或 workflow。外部程式一律以參數陣列執行（不經 shell），錯誤訊息先遮蔽機敏資料再截斷。
-- **PR 內容：** 標題＝卡片標題；內文只有卡片 id（並註明卡片不進 git、內容不隨 PR 公開）、分支、基準與 head 的前 12 位、最多 3 個 task id、政策等級；**不貼描述與驗收條件**。目標分支是 repo 的預設分支。
+- **PR 內容：** 標題＝卡片標題；內文只有卡片 id（並註明卡片不進 git、內容不隨 PR 公開）、分支、基準與 head 的前 12 位、**最新一個** task id（ISSUE-068，已修正、待驗收：先前失敗或卡住的嘗試留在卡片的流程紀錄，不公開到 PR）、政策等級；**不貼描述與驗收條件**。目標分支是 repo 的預設分支。
 - **已有開著的 PR：** 只 push 新的 commit（不重複開），回覆說明；bridge 沒追蹤過的開著的 PR 會被納入追蹤。push 被拒（例如遠端分支有不同的歷史）就失敗並說明，**不會強制**。push 成功但開 PR 失敗時，回覆說明「已 push」，可重下 `card pr <id>`（不會重複）。
 - **記錄：** 成功後卡片 `## 異動專案` 記 `PR` 網址與 `head`，流程紀錄寫 `pr_opened`（事件 id `pr-<number>-opened`）；索引 `<stateDirectory>/card-prs.json`（0600）記下 PR 與當初的來源 thread。
 - **CI 與狀態輪詢：** bridge 每分鐘檢查索引中仍開著的 PR（`gh pr view`／`gh pr checks`）：
