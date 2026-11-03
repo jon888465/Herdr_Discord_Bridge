@@ -473,7 +473,15 @@ function showPolicy(args: string[], deps: CardCommandDeps): string {
   return lines.join("\n");
 }
 
-/** 移除卡片的 worktree。永不強制；有未提交修改就保留並說明。 */
+/** 任務在這些狀態時可以清理 worktree（blocked 在等人處理，不擋清理，避免卡死）。 */
+const CLEANUP_READY_STATES = new Set([
+  "completed",
+  "failed",
+  "cancelled",
+  "blocked",
+]);
+
+/** 移除卡片的 worktree。永不強制；有未提交修改就保留並說明；最新任務還在跑時拒絕。 */
 async function cleanupCard(
   args: string[],
   deps: CardCommandDeps,
@@ -481,6 +489,14 @@ async function cleanupCard(
   if (args.length !== 1) throw new Error("usage: card cleanup <id>");
   const id = args[0];
   if (!isCardId(id)) throw new Error(`${id} 不是合法的卡片 id`);
+  // ISSUE-070：最新任務還在跑，移除 worktree 會連 Agent 的 pane 一起拿掉。
+  const known = deps.assignments.forCard(id);
+  const latest = known[known.length - 1];
+  const info = latest ? deps.taskInfo(latest.taskId) : undefined;
+  if (latest && info && !CLEANUP_READY_STATES.has(info.state))
+    throw new Error(
+      `任務 ${latest.taskId}（${info.state}）尚未結束，不清理 worktree；請等它完成，或先 \`team cancel ${latest.taskId}\` 並確認收尾後再 \`card cleanup ${id}\`。`,
+    );
   const result = await deps.cleanupWorktree(id);
   const lines: string[] = [];
   // 記到卡片（流程紀錄與 `## 異動專案` 的 worktree 狀態）；與 PR merge 後的自動清理共用。

@@ -1115,3 +1115,63 @@ test("card pr validates its arguments and the card", async () => {
   await assert.rejects(run("pr", "../x"), /不是合法的卡片 id/);
   await assert.rejects(run("pr", "REQ-20261102-none"), /找不到卡片/);
 });
+
+test("cleanup refuses while the card's latest task is still running and does not touch the worktree", async () => {
+  let removed = false;
+  const assignments = fakeAssignments([
+    {
+      taskId: "task-old",
+      cardId: "REQ-20261102-work",
+      type: "requirement",
+      assignedAt: "2026-11-02T08:00:00Z",
+    },
+    {
+      taskId: "task-live",
+      cardId: "REQ-20261102-work",
+      type: "requirement",
+      assignedAt: "2026-11-02T09:00:00Z",
+    },
+  ]);
+  for (const state of ["planning", "running", "synthesizing", "cancelling"]) {
+    const { run } = setup({
+      assignments,
+      taskInfo: (taskId) => ({
+        originalPrompt: "",
+        lead: { agent: "agy", machine: "local" },
+        state: taskId === "task-live" ? state : "completed",
+      }),
+      cleanupWorktree: async () => {
+        removed = true;
+        return cleanedUp;
+      },
+    });
+    await assert.rejects(
+      run("cleanup", "REQ-20261102-work"),
+      /任務 task-live（.*）尚未結束/,
+    );
+  }
+  assert.equal(removed, false);
+});
+
+test("cleanup proceeds once the latest task reached a terminal or blocked state", async () => {
+  for (const state of ["completed", "failed", "cancelled", "blocked"]) {
+    const assignments = fakeAssignments([
+      {
+        taskId: "task-1",
+        cardId: "REQ-20261102-work",
+        type: "requirement",
+        assignedAt: "2026-11-02T09:00:00Z",
+      },
+    ]);
+    const { run } = setup({
+      assignments,
+      taskInfo: () => ({
+        originalPrompt: "",
+        lead: { agent: "agy", machine: "local" },
+        state,
+      }),
+      cleanupWorktree: async () => cleanedUp,
+    });
+    assert.match(await run("cleanup", "REQ-20261102-work"), /已移除 worktree/);
+  }
+});
