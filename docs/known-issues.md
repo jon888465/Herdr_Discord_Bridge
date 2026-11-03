@@ -2594,7 +2594,7 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 ## ISSUE-069：`card assign --worktree` 的新 Agent 在 console 上變成「selected Agent session changed」，選取失效
 
-更新日期：2026-11-03。狀態：已修正、待驗收（根因已由程式碼與 2026-11-03 的實機現象確認；原始碼與自動化測試完成，執行中的 bridge 尚未載入修正，尚未 live 驗收）。**標題與症狀在調查後修正**：原先登記為「路由 `active:null`」，那是 console 的設計（console 路由只記 workspace，選取的 Agent 存在 workspace 層），不是缺陷。
+更新日期：2026-11-03。狀態：已驗收（console 路徑，agy；Discord thread 路由未測，見「驗收證據」）。**標題與症狀在調查後修正**：原先登記為「路由 `active:null`」，那是 console 的設計（console 路由只記 workspace，選取的 Agent 存在 workspace 層），不是缺陷。
 
 來源：ISSUE-066 的 live 驗收。
 
@@ -2610,9 +2610,11 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 測試（2026-11-03，本機 macOS、Node v26.12.0，非 CI）：`test/local-agent.test.ts` 新增 3 項（沒有 session 的 Agent 第一次出現 session 可繼續傳送；adopt 後換成別的 session 或消失仍拒絕；第一次出現 session 同時 terminal 被換掉仍拒絕）。修正前第一項為紅、修正後為綠。全套 836 項，835 通過、0 失敗、1 略過（原 833 項）；`lint` 通過。**沒有**對真實 Herdr 的測試。
 
-未驗證（待使用者，需先 merge 並重啟 bridge）：`card assign --worktree`（agy）後 `use <新 pane>`、`card assign`，console 不再出現「session changed」；信任提示本身 bridge 仍不會替你確認（設計如此）。若 thread 是 Discord 而不是 console，路由是否有其他問題尚未調查。
+驗收證據（2026-11-03，本機 macOS，bridge 載入 main `d7c292f`，Herdr 0.9.1，`agy`，worktree workspace w1F；由 Agent 在 bridge console 操作，信任提示經使用者同意後由 Agent 對 `w1F:p1` 送 Enter）：`use w1:p8` → `card assign REQ-20261103-console-accept --worktree` → 信任提示 → `use w1F:p1` → `card assign`，任務 `task-eaea033f-f278-49b9-969b-c1db052e3704` 完成；整段 console 輸出沒有「Console Agent: selected Agent session changed」（唯一含該字樣的是 `agy` 回覆引用卡片文字的那一行）。事後 `herdr agent list` 該 pane 的 session 為 `7cf72cb0-ec35-4544-9801-dba0c0942576`，確認選取當時沒有 session、之後才登記。上次（修正前）同樣流程會在「Team Task accepted」後出現該警告。
 
-下一步：使用者驗收後改為「已驗收」。
+未驗證：Discord thread 路由（本次只驗 console）；其他種類 Agent；信任提示本身 bridge 仍不會替你確認（設計如此）。限制同 ISSUE-066：無法分辨「同一 Agent 第一次登記 session」與「期間被換成同種 Agent」。
+
+下一步：無。
 
 ## ISSUE-070：`card cleanup` 在卡片的任務仍在執行時仍會移除 worktree
 
