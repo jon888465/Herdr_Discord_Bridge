@@ -7,6 +7,7 @@ import {
   findPullRequests,
   getDefaultBranch,
   getRemoteRepo,
+  mergeMethod,
   parseGithubRemote,
   pullRequestChecks,
   pullRequestState,
@@ -421,6 +422,57 @@ test("pullRequestState returns whether the PR is open, merged or closed", async 
       fakeExec(() => JSON.stringify({ state: "WEIRD" })),
       repo,
       41,
+    ),
+    /unexpected/,
+  );
+});
+
+test("mergeMethod tells a merge commit, a squash merge and a rebase merge apart, and asks GitHub about exactly that commit", async () => {
+  const sha = "e8f2cbeb211296cf5664491bbc0a6985c604ea43";
+  const table: Array<[unknown, string]> = [
+    [{ parents: 2, subject: "Merge pull request #45 from o/docs-x" }, "merge"],
+    [{ parents: 1, subject: "docs: 更正 (#45)" }, "squash"],
+    [{ parents: 1, subject: "docs: 更正" }, "rebase"],
+    [{ parents: 1, subject: "docs: 更正 (#9)" }, "rebase"],
+  ];
+  for (const [reply, expected] of table) {
+    const exec = fakeExec(() => JSON.stringify(reply));
+    assert.equal(
+      await mergeMethod(exec, repo, { number: 45, mergeSha: sha }),
+      expected,
+      JSON.stringify(reply),
+    );
+    assert.deepEqual(exec.calls[0].args.slice(0, 2), [
+      "api",
+      `repos/jon888465/Herdr_Discord_Bridge/commits/${sha}`,
+    ]);
+  }
+});
+
+test("mergeMethod refuses a bad sha or number and an unexpected answer", async () => {
+  const exec = fakeExec(() => "{}");
+  await assert.rejects(
+    mergeMethod(exec, repo, { number: 45, mergeSha: "zz" }),
+    GithubError,
+  );
+  await assert.rejects(
+    mergeMethod(exec, repo, { number: 0, mergeSha: "a".repeat(40) }),
+    GithubError,
+  );
+  assert.equal(exec.calls.length, 0);
+  await assert.rejects(
+    mergeMethod(
+      fakeExec(() => "{}"),
+      repo,
+      { number: 45, mergeSha: "a".repeat(40) },
+    ),
+    /unexpected/,
+  );
+  await assert.rejects(
+    mergeMethod(
+      fakeExec(() => JSON.stringify({ parents: 0, subject: "x" })),
+      repo,
+      { number: 45, mergeSha: "a".repeat(40) },
     ),
     /unexpected/,
   );

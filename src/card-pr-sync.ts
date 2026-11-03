@@ -4,17 +4,20 @@
 // - 先寫卡片事件、再標記已回報：中途當機時下一輪補回報，事件 id 去重不會重複記錄。
 // - 讀 GitHub 失敗只回報問題、PR 維持追蹤中，不寫任何東西。
 // - 卡片被刪除不影響回報（索引才是輪詢的依據）。
-// - merge 只回報、不自動清理：merge 後清理屬 E11（尚未實作），回報裡提示 `card cleanup`。
+// - merge：卡片寫 `merged`（含 merge commit 與推斷出的方式），再呼叫 `onMerged`（自動清理 worktree，
+//   永不強制，由呼叫端實作）；沒有提供時回報裡提示手動 `card cleanup`。方式取得失敗只回報問題、略過事件。
 
 import fs from "node:fs";
 import { LEDGER_MAX_FILE_BYTES } from "./card.js";
 import type { CardPullRequest, CardPullRequestStore } from "./card-prs.js";
 import { CardStore } from "./card-store.js";
 import {
+  mergeMethod,
   pullRequestChecks,
   pullRequestState,
   type ChecksConclusion,
   type Exec,
+  type MergeMethod,
 } from "./github.js";
 
 export interface PrReport {
@@ -54,6 +57,8 @@ export async function syncPullRequests(options: {
   >;
   exec: Exec;
   now: () => string;
+  /** PR 被 merge 後呼叫（例如自動清理 worktree）；回傳的文字會接在 merge 回報後面。丟錯誤不會讓回報消失。 */
+  onMerged?: (pr: CardPullRequest) => Promise<string | undefined>;
 }): Promise<PrSyncResult> {
   const result: PrSyncResult = { reports: [], problems: [] };
   const open = options.prs.open();
@@ -69,16 +74,26 @@ export async function syncPullRequests(options: {
       const state = await pullRequestState(options.exec, repo, pr.number);
       if (state.state !== "OPEN") {
         options.prs.markEnded(pr.repo, pr.number, state.state, options.now());
+        if (state.state === "MERGED") {
+          result.reports.push(
+            await mergedReport(
+              options,
+              cards,
+              pr,
+              repo,
+              state.mergeSha,
+              result.problems,
+            ),
+          );
+          continue;
+        }
         result.reports.push({
-          kind: state.state === "MERGED" ? "merged" : "closed",
+          kind: "closed",
           cardId: pr.cardId,
           number: pr.number,
           url: pr.url,
           origin: pr.origin,
-          text:
-            state.state === "MERGED"
-              ? `🎉 PR #${pr.number} 已 merge（卡片 ${pr.cardId}）：${pr.url}\n分支與 worktree 還在；要清理請 \`card cleanup ${pr.cardId}\`（merge 後自動清理尚未實作）。`
-              : `PR #${pr.number} 已關閉、沒有 merge（卡片 ${pr.cardId}）：${pr.url}`,
+          text: `PR #${pr.number} 已關閉、沒有 merge（卡片 ${pr.cardId}）：${pr.url}`,
         });
         continue;
       }
@@ -113,4 +128,62 @@ export async function syncPullRequests(options: {
     }
   }
   return result;
+}
+
+async function mergedReport(
+  options: {
+    exec: Exec;
+    now: () => string;
+    onMerged?: (pr: CardPullRequest) => Promise<string | undefined>;
+  },
+  cards: CardStore | undefined,
+  pr: CardPullRequest,
+  repo: { owner: string; repo: string },
+  mergeSha: string | undefined,
+  problems: string[],
+): Promise<PrReport> {
+  let method: MergeMethod | undefined;
+  if (mergeSha) {
+    try {
+      method = await mergeMethod(options.exec, repo, {
+        number: pr.number,
+        mergeSha,
+      });
+      cards?.recordEvent(pr.cardId, {
+        event: "merged",
+        sha: mergeSha,
+        method,
+        time: options.now(),
+        eventId: `pr-${pr.number}-merged`,
+      });
+    } catch (error) {
+      problems.push(
+        `PR #${pr.number}：merge 方式取得失敗：${error instanceof Error ? error.message : "unknown error"}`,
+      );
+    }
+  }
+  const lines = [
+    `🎉 PR #${pr.number} 已 merge${method ? `（${method}）` : ""}（卡片 ${pr.cardId}）：${pr.url}`,
+  ];
+  if (options.onMerged) {
+    try {
+      const extra = await options.onMerged(pr);
+      if (extra) lines.push(extra);
+    } catch (error) {
+      lines.push(
+        `⚠️ 自動清理失敗：${error instanceof Error ? error.message : "unknown error"}；請手動 \`card cleanup ${pr.cardId}\``,
+      );
+    }
+  } else
+    lines.push(
+      `分支與 worktree 還在；要清理請 \`card cleanup ${pr.cardId}\`。`,
+    );
+  return {
+    kind: "merged",
+    cardId: pr.cardId,
+    number: pr.number,
+    url: pr.url,
+    origin: pr.origin,
+    text: lines.join("\n"),
+  };
 }

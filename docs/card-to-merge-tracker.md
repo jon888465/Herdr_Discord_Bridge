@@ -81,7 +81,7 @@
 | E7 | 版本指紋、單一 writer、不同 session review、artifact 在樹外，在 worktree 內仍成立 | 未開始 |
 | E8 | worktree 內 Agent 的結果 → 卡片紀錄（只寫結構化事實，不寫自由文字） | 未開始 |
 | E9 | 在 worktree 的 pane 啟動 Agent、含 `/` 的分支名等**未實測**項目 | 部分：含 `/` 的分支名已實測（3a）。**在 root pane 啟動 Agent 已實測（3b，2026-11-03）**：`agent.start` 後 Agent 約 2–4 秒才被偵測到；Claude Code 在新資料夾會先問「信任這個資料夾」→ 狀態 `blocked`，所以一步流程在新資料夾通常會停在需要人確認的狀態（bridge 不替你確認）；Codex 等其他 Agent 未測 |
-| E11 | **卡片 merge 後清理 worktree**（使用者 2026-11-03）：完成不等於清理；**卡片已 merge 才應該清理**。對「沒辦法 merge、沒辦法被清理」的卡片（髒檢出、PR 未 merge、被擋住），要讓使用者能**從卡片先看到狀況**（見 E12）。依賴 PR／merge 事件，屬政策檔與 PR 自動化（F、G）；在那之前維持手動 `card cleanup` | **已決定、未實作** |
+| E11 | **卡片 merge 後清理 worktree**（使用者 2026-11-03）：完成不等於清理；**卡片已 merge 才應該清理**。對「沒辦法 merge、沒辦法被清理」的卡片（髒檢出、PR 未 merge、被擋住），要讓使用者能**從卡片先看到狀況**（見 E12） | **已實作、待 live 驗收**（ISSUE-065）：PR 被 merge → 卡片寫 `merged`（方式為推斷）→ 自動清理 worktree（永不強制、髒檢出保留）→ 通知。PR 被關閉不清理；「尚未 merge 而保留」的狀況可從卡片的 PR 與 worktree 狀態看到 |
 | E12 | **卡片呈現 worktree 與清理狀況與決議**（使用者 2026-11-03）：使用者確認「卡片的說明欄位本來就可以寫自由文字」，並**選選項 1**：(a) bridge 在 `## 異動專案` 自動寫結構化的 `worktree 狀態`（作用中／已清理／因未提交修改保留），`card show` 單獨列出；(b) `## 決議` 由人或 Agent 自己寫、bridge 不改寫、`card show` 單獨顯示。「尚未 merge 而保留」等狀態待 E11（merge 自動化）。選項 2（bridge 自動寫 Agent 摘要，需機敏檢查、放寬決定 11）尚未做 | **選項 1 已實作並驗收 2026-11-03**（ISSUE-062 後續；「作用中」與「保留」狀態的顯示只有自動化測試證據） |
 | E13 | **關閉 bridge 自己開的來源 workspace**（使用者 2026-11-03）：`create` 若是為了這個 worktree 才開了來源 repo 的 workspace，清理最後一個 worktree 時一併關閉；使用者自己開的來源 workspace 不動。需要在建立時記錄「來源 workspace 是否由 bridge 開啟」（`worktree.list` 的 `open_workspace_id` 可在建立前判斷）；關閉要用 `close_group` | **已決定、未實作** |
 | E10 | 專案政策 L0（不 push）是否也需要 worktree | **待決定**（需求卡待確認第 8 項）；目前由 `--worktree` 旗標決定，政策檔階段（F）再議 |

@@ -489,3 +489,44 @@ export async function pullRequestState(
     ...(typeof merge?.oid === "string" ? { mergeSha: merge.oid } : {}),
   };
 }
+
+export type MergeMethod = "merge" | "squash" | "rebase";
+
+/**
+ * PR 是用哪種方式 merge 的（GitHub 不直接告訴我們，這裡由 merge commit 推斷）：
+ * 兩個 parent → merge commit；一個 parent 且標題以 ` (#<PR 編號>)` 結尾 → squash；其餘 → rebase。
+ * 這是推斷，不是 GitHub 回報的事實（自訂過 squash 標題的 repo 可能被誤判成 rebase）。
+ */
+export async function mergeMethod(
+  exec: Exec,
+  repo: GithubRepo,
+  input: { number: number; mergeSha: string },
+): Promise<MergeMethod> {
+  assertNumber(input.number);
+  if (!/^[0-9a-f]{40}$/.test(input.mergeSha))
+    throw new GithubError("invalid", "invalid merge commit sha");
+  const data = parseJson(
+    await run(
+      exec,
+      "gh",
+      [
+        "api",
+        `repos/${slug(repo)}/commits/${input.mergeSha}`,
+        "--jq",
+        '{parents: (.parents|length), subject: (.commit.message|split("\\n")[0])}',
+      ],
+      "gh_failed",
+    ),
+  ) as { parents?: unknown; subject?: unknown };
+  if (
+    !data ||
+    typeof data.parents !== "number" ||
+    data.parents < 1 ||
+    typeof data.subject !== "string"
+  )
+    throw new GithubError("unexpected", "unexpected gh api commit output");
+  if (data.parents >= 2) return "merge";
+  return data.subject.trimEnd().endsWith(` (#${input.number})`)
+    ? "squash"
+    : "rebase";
+}
