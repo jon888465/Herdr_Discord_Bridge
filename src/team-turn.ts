@@ -2,7 +2,11 @@ import { randomBytes } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { normalizeTerminalResponse } from "./cli-adapter.js";
 import { stripAnsi } from "./format.js";
-import { CodexTranscript, sameAgentSession } from "./response-stream.js";
+import {
+  CodexTranscript,
+  hasAgentSession,
+  sameAgentSession,
+} from "./response-stream.js";
 import type { AgentRecord, ReadSource } from "./types.js";
 import type { OrchestrationPort } from "./team-orchestration.js";
 
@@ -103,6 +107,9 @@ export async function runTeamTurn(
   // agent.prompt(wait=...) already waited for this request. Reusing its
   // settled record avoids spending a second timeout on agent.wait.
   let current = promptSettled;
+  // ISSUE-066：剛啟動的 Agent 派工時還沒有 session，處理完第一個 prompt 後才被 Herdr 登記。
+  // 允許 session「第一次出現」（其餘身份欄位都沒變時），並記住它；之後換成別的值或消失仍是身份改變。
+  let expectedSession = agent.agent_session;
   do {
     check();
     // atomic prompt 已回傳 settled record 時不再重複消耗另一個完整 wait timeout。
@@ -121,12 +128,22 @@ export async function runTeamTurn(
       current.pane_id !== agent.pane_id ||
       current.terminal_id !== agent.terminal_id ||
       current.workspace_id !== agent.workspace_id ||
-      current.agent !== agent.agent ||
-      !sameAgentSession(current.agent_session, agent.agent_session)
+      current.agent !== agent.agent
     )
       throw new Error(
         `Agent identity changed while waiting for ${agent.pane_id}`,
       );
+    if (!sameAgentSession(current.agent_session, expectedSession)) {
+      if (
+        !hasAgentSession(expectedSession) &&
+        hasAgentSession(current.agent_session)
+      )
+        expectedSession = current.agent_session;
+      else
+        throw new Error(
+          `Agent identity changed while waiting for ${agent.pane_id}`,
+        );
+    }
     lastStatus = current.agent_status;
     if (lastStatus === "blocked" && onBlocked) {
       await onBlocked(current);

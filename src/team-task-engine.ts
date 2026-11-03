@@ -783,6 +783,24 @@ export class TeamTaskEngine {
           continue;
         }
         if (!sameTaskSession(current, turn.agent)) {
+          // ISSUE-066：任務記錄的 Lead 當時還沒有 session（剛啟動的 Agent），之後 Herdr 才登記，
+          // 永遠對不上。pane／terminal／workspace／Agent 種類都相符且已 idle／done 時，這個 turn 已經結束，
+          // 不需要送任何訊號就能收尾（不送 Ctrl-C、只釋放保留）；working／blocked 且身份不明仍然不送訊號。
+          if (
+            !knownSession(turn.agent) &&
+            current.pane_id === turn.agent.pane_id &&
+            current.terminal_id === turn.agent.terminal_id &&
+            current.workspace_id === turn.agent.workspace_id &&
+            current.agent === turn.agent.agent &&
+            ["idle", "done"].includes(current.agent_status)
+          ) {
+            this.settleCancelledTurn(
+              id,
+              turn.agent.terminal_id,
+              "already settled; recorded session was empty so identity is unverifiable; no signal sent",
+            );
+            continue;
+          }
           remaining.push(
             `${turn.agent.pane_id}: session identity unknown; no signal sent`,
           );

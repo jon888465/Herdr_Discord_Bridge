@@ -172,6 +172,17 @@ export function rollingPreview(text: string): string {
   return text.length > tail.length ? `…\n${tail}` : tail;
 }
 
+/** Agent 已經登記了可辨識的 session（kind 為 id／path 且有值）。剛啟動的 Agent 在第一個 prompt 之前還沒有。 */
+export function hasAgentSession(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const session = value as { kind?: unknown; value?: unknown };
+  return (
+    (session.kind === "id" || session.kind === "path") &&
+    typeof session.value === "string" &&
+    session.value.length > 0
+  );
+}
+
 // Provider/source metadata can change without replacing the underlying session.
 export function sameAgentSession(left: unknown, right: unknown): boolean {
   if (left == null || right == null) return left == null && right == null;

@@ -649,3 +649,87 @@ test("Ctrl-C primitive opts out of transport retries after an uncertain acknowle
     ],
   ]);
 });
+
+/** ISSUE-066：任務記錄的 Lead 當時還沒有 session（剛啟動的 Agent），之後 Herdr 才登記。 */
+function seedLeadWithoutSession(f: ReturnType<typeof fixture>) {
+  f.store.create(input);
+  f.store.update(input.taskId, "fixture-lead-without-session", (t) => {
+    t.state = "blocked";
+    t.turns.push({
+      agent: { ...lead, agent_session: undefined },
+      phase: "planning",
+      state: "blocked",
+    });
+  });
+}
+
+test("cancel settles a turn whose recorded session was empty once the same pane is idle, and sends no signal", async () => {
+  for (const status of ["idle", "done"] as const) {
+    const f = fixture();
+    try {
+      seedLeadWithoutSession(f);
+      f.setLive([{ ...lead, agent_status: status }, worker]);
+      const result = await f.engine.cancel(input.taskId);
+      assert.equal(result.state, "cancelled", status);
+      assert.deepEqual(f.cancels, [], status);
+    } finally {
+      f.close();
+    }
+  }
+});
+
+test("cancel still refuses to signal an Agent that is working when the recorded session was empty", async () => {
+  const f = fixture();
+  try {
+    seedLeadWithoutSession(f);
+    f.setLive([{ ...lead, agent_status: "working" }, worker]);
+    const result = await f.engine.cancel(input.taskId);
+    assert.equal(result.state, "cancelling");
+    assert.match(String(result.detail), /session identity unknown/);
+    assert.deepEqual(f.cancels, []);
+  } finally {
+    f.close();
+  }
+});
+
+test("cancel does not settle on an idle pane whose terminal, workspace or Agent kind differs from the recorded turn", async () => {
+  for (const changed of [
+    { terminal_id: "other-terminal" },
+    { agent: "codex" },
+  ]) {
+    const f = fixture();
+    try {
+      seedLeadWithoutSession(f);
+      f.setLive([{ ...lead, ...changed, agent_status: "idle" }, worker]);
+      const result = await f.engine.cancel(input.taskId);
+      assert.equal(result.state, "cancelling", JSON.stringify(changed));
+      assert.deepEqual(f.cancels, [], JSON.stringify(changed));
+    } finally {
+      f.close();
+    }
+  }
+});
+
+test("a recorded session that is known keeps the old rules: a replaced session is not signalled and a matching one is", async () => {
+  const f = fixture();
+  try {
+    f.setLive([
+      {
+        ...lead,
+        agent_session: { kind: "id", value: "someone-else" },
+        agent_status: "working",
+      },
+      worker,
+    ]);
+    f.store.create(input);
+    f.store.update(input.taskId, "fixture-known-session", (t) => {
+      t.state = "blocked";
+      t.turns.push({ agent: lead, phase: "planning", state: "blocked" });
+    });
+    const result = await f.engine.cancel(input.taskId);
+    assert.equal(result.state, "cancelled");
+    assert.deepEqual(f.cancels, []);
+  } finally {
+    f.close();
+  }
+});
