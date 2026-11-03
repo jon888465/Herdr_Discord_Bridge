@@ -79,6 +79,8 @@ export class TeamTaskEngine {
     private readonly activeStreams: Set<string>,
     private readonly releaseProfiles: (owner: string) => void = () => {},
     private readonly allowedWorkspaces: string[] = [],
+    /** ISSUE-061：取消等待派送完成期間，多久檢查一次 Agent 是否已開始工作。 */
+    private readonly cancelPollMs = 1000,
   ) {}
   private authorize(task: DurableTeamTask): void {
     if (
@@ -754,7 +756,7 @@ export class TeamTaskEngine {
     const execution = this.executions.get(id);
     execution?.controller.abort(new Error("Team Task cancellation requested"));
     // Do not release reservations while a lazy acquisition or dispatch is still in flight.
-    await execution?.done;
+    await this.interruptUntilSettled(id, execution);
     await Promise.allSettled(
       [...this.replies.entries()]
         .filter(([key]) => key.startsWith(`${id}/`))
@@ -880,6 +882,63 @@ export class TeamTaskEngine {
     );
     if (result.state === "cancelled") this.release(id);
     return result;
+  }
+  /**
+   * ISSUE-061：Herdr 的 atomic agent.prompt(wait) 要等 Agent 自己停下才返回，所以只等 execution.done
+   * 會讓取消卡到 Agent 目前的長時間指令結束。等待期間定期檢查：本任務已記錄的 turn，其 Agent 身份相符
+   * 且已經在 working，就先送一次 Ctrl-C（每個 turn 至多一次；沒開始工作的不送，派送本身仍要先 settle
+   * 才釋放保留）。之後的收尾流程不變。
+   */
+  private async interruptUntilSettled(
+    id: string,
+    execution: { done: Promise<unknown> } | undefined,
+  ): Promise<void> {
+    if (!execution) return;
+    let finished = false;
+    const done = execution.done.then(
+      () => {
+        finished = true;
+      },
+      () => {
+        finished = true;
+      },
+    );
+    while (!finished) {
+      await Promise.race([
+        done,
+        new Promise((resolve) => setTimeout(resolve, this.cancelPollMs)),
+      ]);
+      if (finished) break;
+      try {
+        await this.interruptWorkingTurns(id);
+      } catch {
+        /* 收尾流程會重新檢查並如實回報；這裡不因單次失敗中斷等待。 */
+      }
+    }
+  }
+  private async interruptWorkingTurns(id: string): Promise<void> {
+    for (const turn of this.store.get(id).turns) {
+      if (turn.cancelAttempted || turn.recovered) continue;
+      const current = (await this.herdr.listAgentsWithWorkspaceNames()).find(
+        (a) =>
+          a.pane_id === turn.agent.pane_id &&
+          a.workspace_id === turn.agent.workspace_id,
+      );
+      if (!current || current.agent_status !== "working") continue;
+      // 與收尾流程同一套身份規則：記錄當時有 session 就必須是同一個；沒有 session（剛啟動的 Agent，
+      // ISSUE-066）則只看 pane／terminal／workspace／種類。
+      const sameIdentity = knownSession(turn.agent)
+        ? sameTaskSession(current, turn.agent)
+        : current.terminal_id === turn.agent.terminal_id &&
+          current.agent === turn.agent.agent;
+      if (!sameIdentity) continue;
+      this.store.update(id, "cancel_signal_intent", (t) => {
+        t.turns.find(
+          (v) => v.agent.terminal_id === current.terminal_id,
+        )!.cancelAttempted = true;
+      });
+      await this.herdr.cancelAgent(current.pane_id);
+    }
   }
   private settleCancelledTurn(
     id: string,

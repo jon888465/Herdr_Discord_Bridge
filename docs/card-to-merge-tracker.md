@@ -118,7 +118,7 @@
 | H1 | 遠端 worktree 與清理、殘留偵測（ISSUE-055）；遠端 `herdr --machine … worktree` 實測需使用者同意 | 待決定 |
 | H2 | 自動撿卡（`status: ready`） | 未開始 |
 | H3 | Tracker（Mantis／Notion／Trello）匯入或同步 | 未開始 |
-| H4 | **端到端自動化測試案例**：流程完成後，用 ISSUE-061（較小、較低風險，**先用這個驗證流程本身**）與 ISSUE-055（刪除檢出，風險較高，之後）各跑一次「建單 → 分配 → 開發 → review → test → PR → merge → 結單」。第一次以 L1（人 merge）進行，不直接用 L2。前提與目前缺口見 ISSUE-061、ISSUE-055 的「預定用途」 | 未開始（review、test、PR、merge 自動化尚未實作；建單、分配、結單同步已有） |
+| H4 | **端到端自動化測試案例**：流程完成後，用 ISSUE-061（較小、較低風險，**先用這個驗證流程本身**（2026-11-03 更新：ISSUE-061 已由 Agent 手動修正，**不能再當案例**，需另選））與 ISSUE-055（刪除檢出，風險較高，之後）各跑一次「建單 → 分配 → 開發 → review → test → PR → merge → 結單」。第一次以 L1（人 merge）進行，不直接用 L2。前提與目前缺口見 ISSUE-061、ISSUE-055 的「預定用途」 | 未開始（review、test、PR、merge 自動化尚未實作；建單、分配、結單同步已有） |
 
 ## I. 驗收債（獨立於階段，等使用者）
 
