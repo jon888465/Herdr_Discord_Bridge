@@ -12,6 +12,7 @@ import {
   isCardId,
 } from "./card.js";
 import type { CardAssignment } from "./card-assignments.js";
+import { recordCleanupOnCard } from "./card-cleanup.js";
 import { levelFor, type LoadedPolicy } from "./policy.js";
 import type { Card } from "./card.js";
 import type { CleanupResult, PreparedWorktree } from "./card-worktree-flow.js";
@@ -482,41 +483,13 @@ async function cleanupCard(
   if (!isCardId(id)) throw new Error(`${id} 不是合法的卡片 id`);
   const result = await deps.cleanupWorktree(id);
   const lines: string[] = [];
-  const store = openDirectory(deps);
-  const exists = store?.read(id).ok === true;
-  const safeWorkspace = result.workspaceId.replace(/[^A-Za-z0-9_-]/g, "-");
-  const logged = exists
-    ? store!.recordEvent(
-        id,
-        result.removed
-          ? {
-              event: "cleanup_done",
-              result: "removed",
-              time: deps.now(),
-              eventId: `${safeWorkspace}-cleanup-removed`,
-            }
-          : {
-              event: "cleanup_pending",
-              reason: result.reason,
-              time: deps.now(),
-              eventId: `${safeWorkspace}-cleanup-pending`,
-            },
-      )
-    : undefined;
-  // 卡片上的 `## 異動專案` 同步顯示 worktree 目前的狀況，讓人從卡片就看得到（保留中或已清理）。
-  const project = exists
-    ? store!.recordProject(
-        id,
-        {
-          machine: "local",
-          repoPath: result.repoPath,
-          branch: result.branch,
-          worktreePath: result.path,
-          worktreeState: result.removed ? "removed" : "kept_dirty",
-        },
-        deps.now().slice(0, 10),
-      )
-    : undefined;
+  // 記到卡片（流程紀錄與 `## 異動專案` 的 worktree 狀態）；與 PR merge 後的自動清理共用。
+  const recording = recordCleanupOnCard(
+    openDirectory(deps),
+    id,
+    result,
+    deps.now,
+  );
   if (result.removed) {
     lines.push(
       `已移除 worktree ${result.path}（workspace ${result.workspaceId}）。`,
@@ -529,10 +502,10 @@ async function cleanupCard(
       "請先在該 worktree 提交或處理修改，再重下 `card cleanup " + id + "`。",
     );
   }
-  if (!exists) lines.push("（卡片檔不存在，沒有寫入流程紀錄。）");
-  else if (logged && !logged.ok) lines.push(`⚠️ 紀錄失敗：${logged.error}`);
-  if (project && !project.ok)
-    lines.push(`⚠️ 卡片的 worktree 狀態更新失敗：${project.error}`);
+  if (!recording.exists) lines.push("（卡片檔不存在，沒有寫入流程紀錄。）");
+  else if (recording.logError) lines.push(`⚠️ 紀錄失敗：${recording.logError}`);
+  if (recording.projectError)
+    lines.push(`⚠️ 卡片的 worktree 狀態更新失敗：${recording.projectError}`);
   return lines.join("\n");
 }
 

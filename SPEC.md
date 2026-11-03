@@ -669,6 +669,13 @@ Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*
 - **記錄：** 成功後卡片 `## 異動專案` 記 `PR` 網址與 `head`，流程紀錄寫 `pr_opened`（事件 id `pr-<number>-opened`）；索引 `<stateDirectory>/card-prs.json`（0600）記下 PR 與當初的來源 thread。
 - **CI 與狀態輪詢：** bridge 每分鐘檢查索引中仍開著的 PR（`gh pr view`／`gh pr checks`）：
   - CI 全部完成（通過、失敗、取消、略過）→ 卡片寫 `ci_result`（事件 id `ci-<number>-<head 前 12 位>`）並在原 thread 通知（本機 console 的任務印在 console）；**每個 head sha 只回報一次**，push 新的 commit 後會對新的 head 再回報；還在進行中或沒有任何 check 就繼續等。
-  - PR 被 merge 或關閉 → 通知一次並停止輪詢。merge 的通知會提示 `card cleanup <id>`；**merge 後自動清理（E11）與 `merged` 事件尚未實作**（merge 方式需另行偵測）。
+  - PR 被**關閉**（沒有 merge）→ 通知一次並停止輪詢，**不會**自動清理。
+  - PR 被 **merge** → 見下一條（E11）。
   - 讀 GitHub 失敗只在 console 印出（內容改變時才再印），PR 維持追蹤中。通知送不出去時索引仍已更新、不會重送，訊息會印在 console。
 - **限制（誠實說明）：** 用的是使用者現有的 `gh`／ssh 登入，PR 會顯示是使用者開的；同一環境的 Agent 也能用同一份憑證。只支援本機、只支援 github.com；`card pr` 不會替 Agent commit（沒有 commit 就拒絕）；輪詢最多延遲約 60 秒；`gh` 需要已登入且有該 repo 的 Contents 與 Pull requests 讀寫權限。
+- **PR merge 後自動清理**（追蹤清單 E11，使用者 2026-11-03：「卡片 merge 了就應該清理」，**已實作、待 live 驗收**，ISSUE-065）：輪詢發現 PR 被 merge 時，bridge 依序：
+  1. **卡片寫 `merged`**（事件 id `pr-<number>-merged`），含 merge commit 前 12 位與 merge 方式。**merge 方式是推斷的，不是 GitHub 回報的事實**：merge commit 有兩個 parent → `merge`；一個 parent 且標題以 ` (#<PR 編號>)` 結尾 → `squash`；其餘 → `rebase`（自訂過 squash 標題的 repo 可能被誤判成 rebase）。取得失敗只回報問題、略過這筆事件。
+  2. **自動清理這張卡的 worktree**，與 `card cleanup` 同一套規則：**永不強制**；有未提交修改就保留（卡片 `worktree 狀態` 顯示「保留（有未提交修改）」、記 `cleanup_pending`）；成功則記 `cleanup_done`、`worktree 狀態` 變「已清理（分支保留）」並撤銷授權；**分支一律保留、來源 repo 的 workspace 不關閉**。沒有作用中的 worktree 就不動。
+  3. 在原 thread 通知「PR #N 已 merge（<方式>）」並附上清理結果；自動清理失敗（例如 Herdr 連不上）只在通知裡說明並提示手動 `card cleanup <id>`，**不會自動重試**。
+  - 只有 **merge** 會觸發；PR 被關閉不會。bridge 不會 `git pull` 或更新使用者本機 repo 的 `main`，也不刪遠端或本機分支。
+  - 限制：merge 方式是推斷；通知送不出去時索引仍已更新、不重送；merge 發生在 bridge 停止期間時，下次啟動後的第一輪輪詢會補上（索引中仍標為開著）。

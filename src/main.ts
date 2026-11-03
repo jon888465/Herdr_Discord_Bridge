@@ -27,6 +27,9 @@ import {
   cleanupCardWorktree,
   prepareCardWorktree,
 } from "./card-worktree-flow.js";
+import { CardStore } from "./card-store.js";
+import { LEDGER_MAX_FILE_BYTES } from "./card.js";
+import { recordCleanupOnCard } from "./card-cleanup.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { missingCardMessage, syncCards, taskSourceFrom } from "./card-sync.js";
@@ -37,7 +40,7 @@ import { openCardPullRequest } from "./card-pr-flow.js";
 import { syncPullRequests } from "./card-pr-sync.js";
 import { basename, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
-import { statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { randomBytes, randomUUID } from "node:crypto";
 import { splitFinalMarkdown } from "./final-format.js";
@@ -445,7 +448,11 @@ async function startBridge(
   restoreWorktreeAuthorization(config.allowedWorkspaceIds);
   reportProjectPolicy();
   const stopCardSync = startCardSync(tasks, discord);
-  const stopPullRequestSync = startPullRequestSync(discord);
+  const stopPullRequestSync = startPullRequestSync(
+    discord,
+    herdr,
+    config.allowedWorkspaceIds,
+  );
   const stopHooks = await startHookServer().catch((error) => {
     console.error(`Hook socket unavailable: ${safeError(error)}`);
     return () => undefined;
@@ -2073,8 +2080,39 @@ function lazyCardPullRequests() {
  * 每分鐘檢查 bridge 開出的 PR：CI 完成與 merge／關閉時通知原 thread（本機 console 的任務印在 console），
  * 並把 CI 結果寫進卡片。讀 GitHub 失敗只在內容改變時印一次。一次只跑一輪，避免輪詢疊在一起。
  */
-function startPullRequestSync(discord: DiscordAdapter): () => void {
+function startPullRequestSync(
+  discord: DiscordAdapter,
+  herdr: HerdrClient,
+  allowedWorkspaceIds: string[],
+): () => void {
   const rootDir = join(stateDirectory(), "cards");
+  // PR 被 merge 後自動清理 worktree（E11，使用者 2026-11-03 決定「卡片 merge 了就應該清理」）：
+  // 與 `card cleanup` 同一套邏輯——永不強制、有未提交修改就保留、不刪分支、不關來源 workspace。
+  const cleanupAfterMerge = async (pr: {
+    cardId: string;
+  }): Promise<string | undefined> => {
+    const worktrees = lazyCardWorktrees();
+    if (!worktrees.active(pr.cardId))
+      return "沒有作用中的 worktree，不需要清理。";
+    const result = await cleanupCardWorktree(
+      {
+        port: herdr,
+        worktrees,
+        deauthorize: (id) => revokeBridgeWorkspace(allowedWorkspaceIds, id),
+        now: nowSeconds,
+      },
+      pr.cardId,
+    );
+    const cards = existsSync(rootDir)
+      ? new CardStore(rootDir, { maxFileBytes: LEDGER_MAX_FILE_BYTES })
+      : undefined;
+    const recording = recordCleanupOnCard(cards, pr.cardId, result, nowSeconds);
+    const note = recording.logError ?? recording.projectError;
+    const suffix = note ? `\n⚠️ 卡片記錄失敗：${note}` : "";
+    return result.removed
+      ? `已自動清理 worktree ${result.path}（分支 ${result.branch} 保留；來源 repo 的 workspace 不會被關閉）。${suffix}`
+      : `worktree ${result.path} 有未提交的修改，已保留（bridge 永不強制移除）；處理後請 \`card cleanup ${pr.cardId}\`。${suffix}`;
+  };
   let running = false;
   let lastProblems = "";
   const failedNotices = new Set<string>();
@@ -2089,6 +2127,7 @@ function startPullRequestSync(discord: DiscordAdapter): () => void {
         prs,
         exec: defaultExec,
         now: nowSeconds,
+        onMerged: cleanupAfterMerge,
       });
       for (const report of result.reports) {
         try {

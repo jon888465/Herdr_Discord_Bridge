@@ -19,6 +19,9 @@ const origin = { guildId: "g", channelId: "c", threadId: "t" };
 function setup(
   state: { value: string; head: string; mergeSha?: string },
   checks: { rows: unknown; error?: Error },
+  merge: { commit?: unknown; error?: Error } = {
+    commit: { parents: 2, subject: "Merge pull request #42 from o/b" },
+  },
 ) {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "card-pr-sync-"));
   const rootDir = path.join(base, "cards");
@@ -51,18 +54,23 @@ function setup(
           ...(state.mergeSha ? { mergeCommit: { oid: state.mergeSha } } : {}),
         }),
       };
+    if (joined.startsWith("api repos/")) {
+      if (merge.error) throw merge.error;
+      return { stdout: JSON.stringify(merge.commit) };
+    }
     if (joined.startsWith("pr checks")) {
       if (checks.error) throw checks.error;
       return { stdout: JSON.stringify(checks.rows) };
     }
     throw new Error(`unexpected ${joined}`);
   };
-  const run = () =>
+  const run = (onMerged?: Parameters<typeof syncPullRequests>[0]["onMerged"]) =>
     syncPullRequests({
       rootDir,
       prs,
       exec,
       now: () => "2026-11-03T09:00:00Z",
+      ...(onMerged ? { onMerged } : {}),
     });
   return { rootDir, cards, prs, calls, run };
 }
@@ -196,4 +204,87 @@ test("with no open PRs nothing runs", async () => {
   const result = await s.run();
   assert.deepEqual(result, { reports: [], problems: [] });
   assert.deepEqual(s.calls, []);
+});
+
+test("a merged PR is logged on the card as merged, with the merge commit and the method GitHub used", async () => {
+  const merge = "c".repeat(40);
+  for (const [commit, method] of [
+    [{ parents: 2, subject: "Merge pull request #42 from o/b" }, "merge"],
+    [{ parents: 1, subject: "t (#42)" }, "squash"],
+    [{ parents: 1, subject: "t" }, "rebase"],
+  ] as const) {
+    const s = setup(
+      { value: "MERGED", head: HEAD1, mergeSha: merge },
+      { rows: [] },
+      { commit },
+    );
+    const result = await s.run();
+    assert.deepEqual(eventsOf(s.cards), [
+      ["merged", `已合併 ${"c".repeat(12)}（${method}）`, "pr-42-merged"],
+    ]);
+    assert.match(result.reports[0].text, new RegExp(`已 merge（${method}）`));
+  }
+});
+
+test("the cleanup hook's outcome is added to the merge report, and replaces the manual cleanup hint", async () => {
+  const s = setup(
+    { value: "MERGED", head: HEAD1, mergeSha: "c".repeat(40) },
+    { rows: [] },
+  );
+  const seen: string[] = [];
+  const result = await s.run(async (pr) => {
+    seen.push(`${pr.cardId}#${pr.number}`);
+    return "已自動清理 worktree（分支保留）。";
+  });
+  assert.deepEqual(seen, [`${ID}#42`]);
+  assert.match(result.reports[0].text, /已自動清理 worktree/);
+  assert.equal(result.reports[0].text.includes("card cleanup"), false);
+});
+
+test("a cleanup hook that fails does not lose the merge report, and tells the user to clean up by hand", async () => {
+  const s = setup(
+    { value: "MERGED", head: HEAD1, mergeSha: "c".repeat(40) },
+    { rows: [] },
+  );
+  const result = await s.run(async () => {
+    throw new Error("herdr unreachable");
+  });
+  assert.deepEqual(
+    result.reports.map((r) => r.kind),
+    ["merged"],
+  );
+  assert.match(result.reports[0].text, /自動清理失敗.*herdr unreachable/);
+  assert.match(result.reports[0].text, new RegExp(`card cleanup ${ID}`));
+  assert.deepEqual(s.prs.open(), []);
+});
+
+test("if the merge method cannot be determined the PR is still reported and ended, the event is skipped and the problem is reported", async () => {
+  const s = setup(
+    { value: "MERGED", head: HEAD1, mergeSha: "c".repeat(40) },
+    { rows: [] },
+    { error: Object.assign(new Error("x"), { stderr: "HTTP 502" }) },
+  );
+  const result = await s.run();
+  assert.deepEqual(
+    result.reports.map((r) => r.kind),
+    ["merged"],
+  );
+  assert.match(result.problems.join("\n"), /502/);
+  assert.deepEqual(eventsOf(s.cards), []);
+  assert.deepEqual(s.prs.open(), []);
+});
+
+test("a closed PR gets no merged event and no cleanup", async () => {
+  const s = setup({ value: "CLOSED", head: HEAD1 }, { rows: [] });
+  let hooked = 0;
+  const result = await s.run(async () => {
+    hooked += 1;
+    return "x";
+  });
+  assert.deepEqual(
+    result.reports.map((r) => r.kind),
+    ["closed"],
+  );
+  assert.equal(hooked, 0);
+  assert.deepEqual(eventsOf(s.cards), []);
 });

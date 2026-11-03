@@ -2497,3 +2497,28 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 - 與先前政策檔提醒一致：政策檔保留 L1 表示這個 repo 的任何 `done` 卡片現在都能用 `card pr` 開 PR。
 
 下一步：E11（merge 後清理，需偵測 merge 方式以寫 `merged` 事件）、E13（只關 bridge 自己開的來源 workspace）、ISSUE-061 診斷；L2 要用什麼身分尚未決定（見需求卡「L2 的身分選擇」；獨立身分 G2 是 Agent 的建議、不是前提）。
+
+## ISSUE-065：PR 被 merge 後記 `merged` 並自動清理 worktree（E11）
+
+更新日期：2026-11-03。狀態：已修正、待驗收（功能新增；原始碼與自動化測試完成，執行中的 bridge 尚未載入此版本，**尚未 live 驗收、沒有真實的 PR 被 merge 過**）。
+
+來源：追蹤清單 E11（使用者 2026-11-03：「如果卡片有 merge 了那就應該清理」）。接在 ISSUE-064（`card pr`）之後，補上「PR 被 merge」這條 live 尚未驗證的路徑。
+
+使用者可見行為：bridge 開出的 PR 被 merge 後（輪詢最多延遲約 60 秒），卡片寫入 `merged`、自動清理 worktree，並在原 thread 通知。見 SPEC「PR merge 後自動清理」。
+
+預期行為：只有 merge 觸發（關閉不清理）；`merged` 事件含 merge commit 與推斷的方式（merge／squash／rebase）；清理永不強制、髒檢出保留並寫 `cleanup_pending`、分支與來源 workspace 保留；清理失敗只說明並提示手動 `card cleanup`；merge 方式取得失敗只回報問題。
+
+根因／修正範圍：不適用（新功能）。新增 `mergeMethod`（`src/github.ts`）；`src/card-pr-sync.ts` 的 merge 處理與 `onMerged` 掛鉤；抽出 `src/card-cleanup.ts`（`card cleanup` 與自動清理共用的卡片記錄）；`src/main.ts` 的 `cleanupAfterMerge`。
+
+測試（2026-11-03，本機 macOS、Node v26.12.0，非 CI）：`test/github.test.ts`（+2：三種 merge 方式的推斷、參數驗證）、`test/card-pr-sync.test.ts`（+5：`merged` 事件與方式、清理掛鉤的結果併入通知、掛鉤失敗不丟通知、方式取得失敗仍回報並結束追蹤、關閉不觸發）、`test/card-cleanup.test.ts`（3）；全套 815 項，814 通過、0 失敗、1 略過（原 805 項）；`lint` 通過。`card cleanup` 抽出共用函式後既有測試全數通過（回歸依據）。**`main.ts` 的 `cleanupAfterMerge` 沒有自動化測試**；所有 `gh` 都是假的。
+
+未驗證（待使用者，需先 merge 並用 `scripts/run.sh -r` 重啟 bridge）：
+1. 讓一張卡走完 `card assign --worktree` → `card pr`，由使用者在 GitHub **merge** 那個 PR（**這會讓 PR 內容進入目標分支**；驗收目標需要使用者決定，見下）。
+2. 約 1 分鐘內：原 thread 收到「PR #N 已 merge（<方式>）…已自動清理 worktree」；`card show` 看到 `merged`、`cleanup_done`、`worktree 狀態：已清理（分支保留）`；worktree 與其 workspace 已移除、本機分支仍在。
+3. merge 方式推斷：用「merge commit」與「squash」各驗一次（rebase 若要驗再議）。
+4. 髒檢出：merge 前先在 worktree 放一個未追蹤檔，確認被保留、卡片顯示「保留（有未提交修改）」、通知說明。
+5. 已知限制：merge 方式是推斷；清理失敗不自動重試；不更新本機 `main`、不刪分支；通知送不出去時不重送。
+
+**驗收目標（使用者 2026-11-03 選定）：用 Herdr_Discord_Bridge 本身。** merge 會真的把變更帶進 `main`：驗收用的文件（例如 `docs/pr-accept-note.md`）會進入 `main` 與其 git 歷史，**之後要再開一個 PR 把它移除**（歷史裡仍會留下這兩次提交）。Agent 先前建議較乾淨的做法是私人 scratch repo，使用者選了前者。**merge 由使用者在 GitHub 網頁上按**，Agent 不會替使用者 merge。
+
+下一步：本 PR merge 並重啟 bridge 後，依上述步驟驗收；驗收後開一個 PR 移除驗收用文件；全部完成後改為「已驗收」。
