@@ -733,3 +733,64 @@ test("a recorded session that is known keeps the old rules: a replaced session i
     f.close();
   }
 });
+
+test("cancel while the atomic prompt is still pending interrupts a working Agent without waiting for it to finish (ISSUE-061)", { timeout: 3000 }, async () => {
+  const f = fixture();
+  try {
+    const entered = deferred<void>();
+    const delivered = deferred<AgentRecord>();
+    const port = {
+      ...f.port,
+      promptAgentAndWait: async (_target: string, _text: string) => {
+        entered.resolve();
+        return delivered.promise;
+      },
+      cancelAgent: async (target: string) => {
+        f.cancels.push(target);
+        f.setLive([{ ...lead, agent_status: "idle" }, worker]);
+        // Herdr's agent.prompt wait only returns once the Agent stops working.
+        delivered.resolve({ ...lead, agent_status: "idle" });
+      },
+    };
+    const engine = new TeamTaskEngine(f.store, port, f.streams, undefined, [], 10);
+    const running = engine.run(input);
+    await entered.promise;
+    f.setLive([{ ...lead, agent_status: "working" }, worker]);
+    const result = await engine.cancel(input.taskId);
+    assert.equal(result.state, "cancelled");
+    assert.deepEqual(f.cancels, [lead.pane_id]);
+    await running;
+  } finally {
+    f.close();
+  }
+});
+
+test("cancel while the atomic prompt is pending sends nothing to an Agent that has not started working and never signals twice (ISSUE-061)", { timeout: 3000 }, async () => {
+  const f = fixture();
+  try {
+    const entered = deferred<void>();
+    const delivered = deferred<AgentRecord>();
+    const port = {
+      ...f.port,
+      promptAgentAndWait: async (_target: string, _text: string) => {
+        entered.resolve();
+        return delivered.promise;
+      },
+    };
+    const engine = new TeamTaskEngine(f.store, port, f.streams, undefined, [], 10);
+    const running = engine.run(input);
+    await entered.promise;
+    const cancellation = engine.cancel(input.taskId);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.equal(f.cancels.length, 0);
+    f.setLive([{ ...lead, agent_status: "working" }, worker]);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.deepEqual(f.cancels, [lead.pane_id]);
+    delivered.resolve({ ...lead, agent_status: "idle" });
+    await cancellation;
+    await running;
+    assert.deepEqual(f.cancels, [lead.pane_id]);
+  } finally {
+    f.close();
+  }
+});

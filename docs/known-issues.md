@@ -2297,7 +2297,7 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 ## ISSUE-061：`team cancel` 要等到 Agent 目前的長時間指令結束才會生效
 
-更新日期：2026-11-02。狀態：待調查（既有行為，2c 補測時由使用者發現；根因尚未確認，未修正）。
+更新日期：2026-11-03。狀態：已修正、待驗收（根因已由程式碼與 2026-11-02 的任務 journal 確認；原始碼與自動化測試完成，執行中的 bridge 尚未載入修正，尚未 live 驗收）。**這次是 Agent 手動診斷與修正，沒有走「建單 → … → merge」的自動化流程**（該流程的 review、test、merge 自動化尚未實作），所以本 issue 已不能再當 H4 的端到端測試案例，見下方「預定用途」。
 
 使用者可見症狀：任務的 Lead 正在執行長時間的 shell 指令（驗收用的 `sleep 150`）時輸入 `team cancel <task-id>`，取消看起來被擋住，要等指令跑完才完成。使用者原話：「team cancel 會被 block 等到 120 秒後」。
 
@@ -2305,15 +2305,21 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 重現方式／環境（2026-11-02，本機 macOS，main `73117e4`）：用 `card assign` 指派一張描述為「先在 shell 執行 sleep 150，之後只回覆『完成』」的卡片（task `task-3be4f271-…`，Lead 是 Claude Code，Team 沒有 Worker），任務進入 `synthesizing` 後輸入 `team cancel`。任務 journal：`cancel_requested` 09:13:22Z，`cancel_turn_settled` 09:15:12Z（約 110 秒後），最終 `cancelled`。
 
-已確認：取消最終有生效（最終狀態 `cancelled`），延遲約等於 `sleep` 的剩餘時間。**未確認根因**：可能是取消只送出 Ctrl-C 且要等 Lead 回到可接收輸入（Claude Code 在執行 shell 指令時 Ctrl-C 的行為）、也可能是引擎等待「確認停止」才進入 `cancelled`（SPEC：取消只使用既有 Ctrl-C，確認停止後才 `cancelled`；不確定時保留 `cancelling`）。尚未調查，也不確定這是預期設計還是缺陷。
+已確認：取消最終有生效（最終狀態 `cancelled`），延遲約等於 `sleep` 的剩餘時間。
 
-修正範圍：無（未修正）。與 ISSUE-060 無關：卡片同步與刪除偵測在取消期間照常運作。
+根因（**已確認**，2026-11-03 診斷）：兩個證據。(1) 該任務 journal 的 `cancel_turn_settled` 詳情是「already settled; no completion inferred」，**不是**「cancel confirmed」——表示 **Ctrl-C 根本沒有送出**，取消只是等到 Agent 自己跑完 `sleep` 變 idle 才收尾。(2) 程式：`src/team-task-engine.ts` 的 `cancelTask` 先 `await execution?.done`（等進行中的任務執行結束），之後才進入「對 working 的 Agent 送 Ctrl-C」的迴圈；而執行端 `src/team-turn.ts` 用 Herdr 的 atomic `agent.prompt(wait: idle/done/blocked)`（`promptAgentAndWait`），這個 request 要等 Agent 自己停下才返回，而且**刻意不參與 abort 競速**（`abortable` 的註解：「派送必須先 settle，取消才清理」，以便確定 prompt 有沒有送達）。結果是 `execution.done` 要等到 Agent 的長時間指令結束，Ctrl-C 永遠在那之後。這是設計上的相互等待，不是 Claude Code 對 Ctrl-C 的行為。
 
-未驗證：Lead 不是長時間指令而是一般回覆中取消的延遲；其他 CLI（codex 等）的行為；取消期間使用者是否有看到進度訊息。
+使用者的驗收條件決定（2026-11-03）：**取消馬上送 Ctrl-C**（另兩個選項「只補進度訊息」「只在文件註明限制」未採用）；建議的 live 驗收：Agent 執行 `sleep` 時 `team cancel`，約 10 秒內進入 `cancelled`。
 
-下一步：調查 Ctrl-C 在 Claude Code 執行 shell 指令時的實際效果，以及引擎在 `cancelling` 狀態對使用者的回報；決定是縮短等待、補進度訊息，或只在文件註明限制。
+修正範圍（2026-11-03）：`src/team-task-engine.ts`：`cancelTask` 不再直接 `await execution?.done`，改為新方法 `interruptUntilSettled`：每 `cancelPollMs`（預設 1000 ms，建構子可注入）檢查一次本任務已記錄的 turn；其 Agent 在 working 且身份相符（記錄當時有 session 就必須是同一個；沒有 session 則只看 terminal 與種類，與 ISSUE-066 一致）、且該 turn 尚未 `cancelAttempted`、非 `recovered`，就先記 `cancel_signal_intent`、再送**一次**既有的 Ctrl-C（`cancelAgent`）；Agent 停下後 `agent.prompt` 返回、`execution.done` 結束，**之後的收尾流程與保留釋放完全不變**。沒開始工作（idle）的 turn 不送；派送本身仍然要先 settle 才釋放保留，所以「派送必須先 settle」的安全規則沒有被放寬。單次檢查失敗不中斷等待，由收尾流程重新檢查並如實回報。與 ISSUE-060 無關：卡片同步與刪除偵測在取消期間照常運作。
 
-預定用途（使用者，2026-11-02）：本 issue **保留起來，等「建單 → 分配任務 → 處理 → review → test → PR → merge → 結單」的自動化流程完成後，拿來當端到端的自動化測試案例**，實際跑一次整條流程。這是未來的計畫，目前不能自動跑。與 ISSUE-055 的用途並列（見追蹤清單 H4）：本 issue 範圍較小、風險較低，建議**先用它驗證流程本身**，再用 ISSUE-055（刪除檢出，風險較高）。
+測試（2026-11-03，本機 macOS、Node v26.12.0，非 CI）：`test/team-task-engine.test.ts` 新增 2 項（派送還在等待、Agent 已 working 時取消，會在不等 prompt 返回的情況下送一次 Ctrl-C 並進入 `cancelled`；Agent 還沒開始工作時不送、開始工作後只送一次、不重送）。修正前第一項因取消永遠等不到派送完成而逾時、第二項在「working 後應送」斷言失敗；修正後綠燈。既有的「cancel during pending atomic dispatch waits for dispatch…」等 25 項取消測試全部維持通過。全套 840 項，839 通過、0 失敗、1 略過（原 838 項）；`lint` 通過。**沒有**對真實 Herdr／Claude Code／agy 的測試。
+
+未驗證（待使用者，需先 merge 並重啟 bridge）：Claude Code、agy 在執行 `sleep` 等 shell 指令時，Ctrl-C 是否真的中止指令並讓 Herdr 回報 idle（這是 Agent 端的行為，**本修正只保證 bridge 會及時送出 Ctrl-C**，不保證 CLI 一定停下；停不下來時任務仍會停在 `cancelling` 並如實回報「cancel sent; stop not yet confirmed」）；Lead 不是長時間指令而是一般回覆中取消的行為；Worker 路徑（同一套 `cancelTask`）；其他 CLI（codex 等）。限制：1 秒輪詢，取消後最多約 1 秒才會送出 Ctrl-C。
+
+下一步：使用者驗收後改為「已驗收」。
+
+預定用途（使用者，2026-11-02；**2026-11-03 已失效：本 issue 已由 Agent 手動修正，不能再當端到端案例，H4 需另選案例**）：本 issue **保留起來，等「建單 → 分配任務 → 處理 → review → test → PR → merge → 結單」的自動化流程完成後，拿來當端到端的自動化測試案例**，實際跑一次整條流程。這是未來的計畫，目前不能自動跑。與 ISSUE-055 的用途並列（見追蹤清單 H4）：本 issue 範圍較小、風險較低，建議**先用它驗證流程本身**，再用 ISSUE-055（刪除檢出，風險較高）。
 
 目前各階段的具備情況（2026-11-02，Agent 整理）：
 
