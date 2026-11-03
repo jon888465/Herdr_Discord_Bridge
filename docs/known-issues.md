@@ -2539,7 +2539,7 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 ## ISSUE-066：剛啟動、還沒有 session 的 Agent 被誤判為「Agent identity changed」，且 `team cancel` 無法收尾
 
-更新日期：2026-11-03。狀態：待調查（**根因已由程式碼與任務 journal 確認，修正尚未開始**）。
+更新日期：2026-11-03。狀態：已修正、待驗收（根因已由程式碼與任務 journal 確認；原始碼與自動化測試完成，執行中的 bridge 尚未載入修正，尚未 live 驗收）。
 
 來源：ISSUE-065 的 live 驗收途中發現，不是 E11 的缺陷。
 
@@ -2551,13 +2551,17 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 根因（**已確認**）：`src/team-turn.ts` 在等 Agent 回應時比對 pane、terminal、workspace、Agent 種類與 session；session 用 `sameAgentSession(left, right)`（`src/response-stream.ts`），其第一行 `if (left == null || right == null) return left == null && right == null;`——派工時 session 是 `null`、回應時變成有值，就回傳 `false`，被判為身份改變。`team cancel` 因為任務記錄的 session 是 `null`、現在的 Agent 有 session，永遠無法確認身份而拒絕送 Ctrl-C。
 
-修正範圍：尚未修正。方向（待使用者同意）：在 `team-turn.ts` 記住「第一次看到的 session」，允許 session 從無到有（其他身份欄位都沒變時），之後換成別的值才算改變；取消路徑需另行處理「任務記錄的 session 是 null」的情況。風險：身份檢查是防止 Agent 在任務中途被替換的保護，放寬要窄。
+修正範圍（2026-11-03，使用者選定兩個決定：等待時「第一次出現」、cancel「pane 身份相符且 idle／done 就收尾」）：
+1. `src/team-turn.ts`：等待回應的迴圈改為記住「預期的 session」；派工時 Agent **完全沒有 session**、而目前這筆回應有可辨識的 session，且 pane／terminal／workspace／Agent 種類都沒變時，採用並記住第一次看到的 session；之後換成別的值或消失仍丟「Agent identity changed」。派工時就有 session 的 Agent 規則不變。新增 `hasAgentSession`（`src/response-stream.ts`）。
+2. `src/team-task-engine.ts` 的 `cancel`：任務記錄的 turn session 是空的，而 pane／terminal／workspace／Agent 種類都相符且目前 `idle`／`done` → **不送任何訊號**直接收尾並釋放保留；`working`／`blocked` 且身份不明、或其他欄位不符，仍照舊拒絕送訊號並保留 `cancelling`。
 
-測試：無（尚未修正）。
+測試（2026-11-03，本機 macOS、Node v26.12.0，非 CI）：新增 `test/team-turn.test.ts`（6 項：派工時沒有 session 可在回應中第一次出現、到結束仍沒有也可、第一次出現後換成別的 session 或消失都算身份改變、派工時有 session 就必須完全一致、pane／terminal／workspace／種類不符一律拒絕）與 `test/team-task-engine.test.ts` 的取消測試（4 項：idle／done 且記錄的 session 為空會收尾且不送訊號、working 仍拒絕送訊號、terminal 或 Agent 種類不符不收尾、記錄的 session 已知時舊規則不變）。修正前「第一次出現」與「idle 收尾」兩項測試為紅、修正後為綠。全套 831 項，830 通過、0 失敗、1 略過（原 821 項）；`lint` 通過。**沒有**對真實 Herdr 的測試。
 
-未驗證：其他種類的 Agent（codex 等）是否有相同的「第一個任務前沒有 session」行為；Worker 路徑是否同樣受影響；殘留的孤兒任務 `task-efb29d5c-…` 仍留在使用者的任務 journal（`cancelling`），其 pane 已不存在。
+未驗證（待使用者，需先 merge 並重啟 bridge）：用 `agy` 當 Lead 做一次 `card assign --worktree` 與指派，確認不再被判為身份改變；對剛啟動的 `agy` 在任務中 `team cancel` 能收尾；其他種類的 Agent（codex 等）是否有相同的「第一個任務前沒有 session」行為；Worker 路徑（同樣經過 `runTeamTurn`，已涵蓋但未實機驗證）。殘留的孤兒任務 `task-efb29d5c-…`（`cancelling`）：它的 pane 已不存在，現在的 cancel 規則會以「original session absent」收尾，但 `team cancel` 需要選到該任務所屬的 workspace，w17 已不存在，**可能無法從 console 或 Discord 觸及**，仍留在使用者的任務 journal。
 
-下一步：先寫測試重現（任務記錄 session 為 null、回應有 session），再修；一併檢查 cancel 路徑。
+已知限制：「第一次出現」的放寬只看 pane／terminal／workspace／種類沒變，**無法分辨「同一個 Agent 第一次登記 session」與「在這之間被換成另一個同種 Agent」**（兩者的 terminal 通常也會不同，但這是依 Herdr 欄位的假設）；對 working／blocked 且身份不明的 Agent，`team cancel` 仍不會送訊號，任務會停在 `cancelling`。
+
+下一步：使用者驗收後改為「已驗收」。
 
 
 ## ISSUE-067：`--worktree` 偶發失敗：`agent.start: agent_pane_busy … is not an available shell`
