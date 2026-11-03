@@ -2539,7 +2539,7 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 ## ISSUE-066：剛啟動、還沒有 session 的 Agent 被誤判為「Agent identity changed」，且 `team cancel` 無法收尾
 
-更新日期：2026-11-03。狀態：已修正、待驗收（根因已由程式碼與任務 journal 確認；原始碼與自動化測試完成，執行中的 bridge 尚未載入修正，尚未 live 驗收）。
+更新日期：2026-11-03。狀態：已驗收（使用者 2026-11-03 選定標已驗收；`working` 分支僅有單元測試、未實機驗證，見「驗收證據」）。
 
 來源：ISSUE-065 的 live 驗收途中發現，不是 E11 的缺陷。
 
@@ -2561,7 +2561,12 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 已知限制：「第一次出現」的放寬只看 pane／terminal／workspace／種類沒變，**無法分辨「同一個 Agent 第一次登記 session」與「在這之間被換成另一個同種 Agent」**（兩者的 terminal 通常也會不同，但這是依 Herdr 欄位的假設）；對 working／blocked 且身份不明的 Agent，`team cancel` 仍不會送訊號，任務會停在 `cancelling`。
 
-下一步：使用者驗收後改為「已驗收」。
+驗收證據（2026-11-03，本機 macOS，main `5d389c7` 載入修正後的 bridge，Herdr 0.9.1，`agy` 當 Lead，worktree workspace w1D）：
+- A：`card assign REQ-20261103-agy-accept --worktree` 後再指派，任務正常完成，沒有出現「Agent identity changed」。
+- B：任務 `task-fa640c3e-50ed-4f6f-b13d-6ab9e9033e20`：journal `turn_dispatched`（07:39:28Z，`agent_session` 為 `null`）→ `cancel_requested`（07:40:32.368Z，session 仍為 `null`、狀態 `idle`）→ `cancel_turn_settled`（07:40:32.922Z）→ `task_cancelled`，沒有停在 `cancelling`；Discord 回覆「All task turns settled; no CLI session was closed.」。規劃階段回應也沒有被誤判為身份改變。這走的是「記錄的 session 為空、pane 身份相符、idle／done → 不送訊號收尾」分支。
+- **未實機驗證：** 取消當下 `agy` 在 Herdr 裡是 `idle`（沒有被標成 `working`，原因不明），所以「`working`／`blocked` 且身份不明 → 拒絕送訊號、保持 `cancelling`」只有單元測試覆蓋。其他種類 Agent（codex 等）與 Worker 路徑也未實機驗證。
+
+下一步：無（上述未驗證項目若日後出現，再另開 issue 或重新開啟）。
 
 
 ## ISSUE-067：`--worktree` 偶發失敗：`agent.start: agent_pane_busy … is not an available shell`
@@ -2585,6 +2590,33 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 未驗證（待使用者，需先 merge 並用 `scripts/run.sh -r` 重啟 bridge）：之後的 `card assign --worktree` 不再因 `agent_pane_busy` 失敗（偶發，只能累積觀察；若再出現同樣的錯誤，表示重試視窗不夠或根因不是 shell 初始化）；其他 Herdr 錯誤碼是否也需要重試。
 
 下一步：觀察；若根因被證實不是 shell 初始化，重新開啟本 issue。
+
+
+## ISSUE-069：`card assign --worktree` 遇到 Agent 的 trust-folder 提示後，thread 路由變成 `active:null`
+
+更新日期：2026-11-03。狀態：待調查（**根因為推測**，尚未修正）。
+
+來源：ISSUE-066 的 live 驗收。
+
+使用者可見症狀：`agy`／`claude` 在新 worktree 第一次啟動會問「是否信任此資料夾」，bridge 不會自動確認，Agent 停在提示（blocked）。bridge 回報 Agent 未就緒後，該 thread 的路由 `routing.json` 的 `active` 為 `null`；使用者按信任後 Agent 進入但沒有事做，也無法直接 `card assign` 該任務，需要再 `use <pane>`。
+
+預期行為：回覆要明確告訴使用者「按信任後請 `use <pane>`」，或在 Agent 未就緒時保留／還原原本的路由。
+
+根因（**推測，未確認**）：`prepareCardWorktree` 在 Agent 未 idle（`agentReady` 為 false）時不切換路由；而切換前已清掉原本的 active。尚未逐步核對程式碼。
+
+修正範圍：尚未修正。下一步：先寫測試重現（blocked agent 之後 route 狀態），再決定提示文字或還原路由；不自動點信任提示。
+
+## ISSUE-070：`card cleanup` 在卡片的任務仍在執行時仍會移除 worktree
+
+更新日期：2026-11-03。狀態：待調查（**尚未修正**）。
+
+來源：ISSUE-066 的 live 驗收：上一輪 B 步驟在 `agy` 還在跑任務時下了 `card cleanup`，worktree 與 `agy` 的 pane 一起被移除，無法驗證取消分支。
+
+預期行為：卡片關聯的任務還沒到終態（running／cancelling 等）時，`card cleanup` 應拒絕並說明，直到任務完成或取消。
+
+根因（已確認）：`cleanupCard`（`src/card-command.ts`）只檢查 worktree 本身（未提交修改、branch 等），不查卡片的 task 狀態。
+
+修正範圍：尚未修正。建議：用 `taskInfo` 查卡片最新 task，非終態則拒絕。下一步：使用者同意後先寫測試再修。
 
 
 ## ISSUE-068：`card pr` 的 PR 內文列出卡住的舊 task id
