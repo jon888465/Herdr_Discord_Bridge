@@ -2819,7 +2819,7 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 ## ISSUE-078：`card review` 指令與接線（F5 階段 3d）
 
-更新日期：2026-11-04。狀態：已修正、待驗收（這是新功能；原始碼與自動化測試完成，**第一次接上真實的 Herdr，尚未 live 驗收，執行中的 bridge 尚未載入**）。
+更新日期：2026-11-04。狀態：已修正、部分驗收（機制已在真實 Herdr 驗證；但 review 本身兩輪都是 `inconclusive`，原因見 ISSUE-079，修正後要重跑，所以**尚未驗到真實 reviewer 回出合格 JSON 與 findings**）。
 
 來源：使用者 2026-11-04 決定 review 與 coding 的 Agent 一律新開 pane、用完關閉，第一版先做本機；並在 3d 開始前回答驗收時用 **codex** 當 reviewer（「用 codex 當 reviewer」）。
 
@@ -2829,8 +2829,35 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 測試（2026-11-04，本機 macOS、Node v26.12.0，非 CI）：新增 `test/worktree-fingerprint.test.ts` 5 項、`test/card-review-command.test.ts` 10 項、`test/card-review-wiring.test.ts` 7 項、`test/card-command.test.ts` 8 項（參數與卡片 id 驗證、成功時寫入 findings 與 verdict 並回覆 PR 網址、`--agent` 與輪次遞增、inconclusive 也記錄、沒開始的 review 不動卡片、前提拒絕透傳且卡片不動、同卡一次只一個 review、findings 寫不進時仍記 verdict 並說明）。先以桩跑：指紋 4 項、純函式 10 項、指令 8 項、接線 7 項為紅；實作後全綠。全套 974 項，973 通過、0 失敗、1 略過（原 944 項）；`lint` 通過（兩個測試標題含 any 字樣被 lint 擋下，已改標題；一個 help 文字的反引號沒跳脫造成編譯錯誤，已修正）。**全部使用假的 Herdr、假的 Agent、假的指紋與假的 GitHub，沒有對真實環境驗證。**
 
-未驗證（待 live 驗收，需先 merge 並重啟 bridge；每一步都需要使用者當下同意）：真實的 `pane.split` 回傳是否含 `terminal_id`、`pane.close` 的行為；真實 codex 能否照提示回出合格 JSON；`runTeamTurn` 對剛啟動、尚無 session 的 reviewer 的行為；codex 第一次進卡片 worktree 的信任提示（bridge 不會替人按，review 會停在 inconclusive）；工作樹指紋在真實 worktree 的行為；10 分鐘逾時；`fetchReviewMaterial` 對真實開著的 PR；`help` 的顯示。驗收需要一個會 push 的測試 PR（和 ISSUE-071 那次一樣，驗完關閉並刪遠端分支），每一項 push、開 PR、啟動 reviewer、按信任提示都要使用者當下明確同意。
+live 驗收證據（2026-11-04，本機 macOS，bridge 載入 main `f77c77e`，Herdr 0.9.1；使用者同意重啟、信任提示、push 與開測試 PR）：驗收卡 `REQ-20261104-rev-accept`，`--worktree` 啟動的 claude 在分支做一個 commit（`03caac3`，只新增 `docs/tmp-review-accept.md`），`card pr` 開出測試 PR #73（https://github.com/jon888465/Herdr_Discord_Bridge/pull/73，CI 兩項通過）。`card review REQ-20261104-rev-accept --agent codex` 兩次：**真實驗到的：** `pane.split` 的回傳含 `terminal_id`（不被拒絕）；分割出的新 pane 能啟動 codex、能被偵測狀態；**兩輪的 reviewer pane 都有被關閉**（核對時 `w1K` 只剩作者的 pane）；`## Review 發現` 的批次（第 1 輪、第 2 輪，整體、head `03caac306d19`、`inconclusive`）與 `review_verdict` 事件（`review-73-r1-03caac306d19`、`review-73-r2-03caac306d19`）都寫入卡片；worktree 兩輪之後都是乾淨的、HEAD 沒變；回覆含 PR 完整網址。**沒驗到的：** 兩輪都是 `inconclusive`：第 1 輪 codex 啟動時彈出「有新版本」的更新提示（`blocked`）；第 2 輪（更新提示已在 worktree 手動選「Skip until next version」處理掉，沒有執行 `brew upgrade`）codex 啟動後狀態是 `working`（初始化中），程式一看到不是 `idle` 就放棄。這是 ISSUE-079。
+
+未驗證（待 ISSUE-079 修正後重跑）：真實 codex 能否回出合格的 JSON 與 findings；`runTeamTurn` 對剛啟動、尚無 session 的 reviewer；工作樹指紋在 review 有改動時的行為；10 分鐘逾時；`card show` 對真實 findings 的顯示；以下為原先列的項目，其中 `pane.split` 與 `pane.close` 已驗到：真實的 `pane.split` 回傳是否含 `terminal_id`、`pane.close` 的行為；真實 codex 能否照提示回出合格 JSON；`runTeamTurn` 對剛啟動、尚無 session 的 reviewer 的行為；codex 第一次進卡片 worktree 的信任提示（bridge 不會替人按，review 會停在 inconclusive）；工作樹指紋在真實 worktree 的行為；10 分鐘逾時；`fetchReviewMaterial` 對真實開著的 PR；`help` 的顯示。驗收需要一個會 push 的測試 PR（和 ISSUE-071 那次一樣，驗完關閉並刪遠端分支），每一項 push、開 PR、啟動 reviewer、按信任提示都要使用者當下明確同意。
 
 限制：各條驗收條件的逐條結果只顯示在回覆裡、卡片沒有地方存；只支援本機（F9）；只審整個 PR（單一 commit 範圍尚未支援）；reviewer 唯讀是提示約束加工作樹指紋，不是作業系統層隔離，指紋抓不到只改了被 gitignore 的檔案；種類偏好順序（`claude`、`codex`、`agy`）預設選第一個與作者不同的，驗收用 `--agent codex` 指定；coding Agent 在任務完成後也關閉 pane 的部分（E13 擴大）尚未實作。
 
 下一步：merge、重啟 bridge 後 live 驗收；之後是每個 commit 審一次、loop 與總上限 5 次、quota 的 handoff（F7）、E13 的關閉 coding pane、跨機器（F9）、最後才是 merge 的實作。
+
+
+## ISSUE-079：reviewer 剛啟動時狀態是 `working` 就被判為沒就緒，且原因文字誤導
+
+更新日期：2026-11-04。狀態：已修正、待驗收（根因已由 live 驗收確認；原始碼與自動化測試完成，執行中的 bridge 尚未載入修正，尚未重跑 live 驗收）。
+
+來源：ISSUE-078 的 live 驗收。
+
+使用者可見症狀：`card review REQ-20261104-rev-accept --agent codex` 回「判定：inconclusive；inconclusive 的原因：reviewer 沒有就緒（狀態 working；常見原因：新資料夾的信任提示，bridge 不會替人確認）」。reviewer 其實只是還在初始化，並沒有任何信任提示；上一輪（第 1 輪）的 `blocked` 則是 codex 的更新提示，原因文字同樣說成信任提示。
+
+預期行為：Agent 啟動後短暫是 `working`（初始化中）要等它變成 `idle` 再送提示；真的 `blocked`（在等人，例如更新或信任提示）才立刻放棄；原因文字要依實際狀態說明，不要一律推測是信任提示。
+
+重現方式／環境（2026-11-04，本機 macOS，main `f77c77e`，codex-cli 0.165.0，Herdr 0.9.1）：`card review <id> --agent codex`；第 1 輪 codex 彈出更新提示（`blocked`），在 worktree 手動處理掉後第 2 輪重現「`working` 就放棄」。
+
+根因（**已確認**）：`src/card-review-flow.ts` 的 `reviewInPane` 在 `startAgent` 回來之後只檢查一次 `agent.agent_status !== "idle"`。`startAgentInPane` 只等狀態離開 `unknown`，codex 啟動後是 `working`，所以第一次檢查就失敗。
+
+修正範圍（2026-11-04）：`src/card-review-flow.ts` 新增 `waitUntilReady`：已經 `idle` 就直接用（不輪詢）；`blocked` 立刻放棄，原因改為「卡在啟動提示（blocked）。常見原因：Agent 自己的更新提示或新資料夾的信任提示；bridge 不會替人確認，請先在要用的種類上處理一次」；其他狀態（`working`、`unknown`…）每 `readyPollMs`（預設 1 秒）重讀 Agent 清單，直到 `idle`、`blocked`、pane 或 terminal 消失、讀取清單失敗或 `readyTimeoutMs`（預設 30 秒）逾時；逾時的原因文字寫出實際狀態與秒數，不再猜信任提示。所有放棄的情況仍是 `inconclusive`、pane 仍會關閉。`ReviewFlowDeps` 新增選填的 `readyTimeoutMs`、`readyPollMs`（測試用）。
+
+測試（2026-11-04，本機 macOS、Node v26.12.0，非 CI）：`test/card-review-flow.test.ts` 新增 7 項（`working` 等到 `idle` 後繼續並用新的紀錄、`unknown` 同樣等待、已經 `idle` 不輪詢、等待中變 `blocked` 立刻放棄並說明啟動提示、逾時並寫出實際狀態而不是信任提示、等待中 pane 消失、讀取清單失敗仍關閉 pane）。先寫測試：6 項為紅（「已經 idle 不輪詢」本來就通過）；修正後全綠。全套 981 項，980 通過、0 失敗、1 略過（原 974 項）；`lint` 通過。**沒有**對真實 codex 的測試。
+
+未驗證（待重跑 live 驗收，需先 merge 並重啟 bridge）：真實 codex 啟動後 `working` 到 `idle` 的實際時間（30 秒夠不夠）；Agent 自己的更新提示或信任提示仍會讓 review 停在 `inconclusive`（bridge 不會替人按，這是設計），所以**每種要當 reviewer 的 Agent 都要先在目標 worktree 的路徑處理過一次這些提示**；因為每張卡的 worktree 路徑都是新的，**新路徑的信任提示是否每次都會出現尚未確認**（這次 codex 在新 worktree 沒有出現信任提示，原因不明）。
+
+限制：等待上限 30 秒是暫定值；更新提示與信任提示只能由人處理。
+
+下一步：merge、重啟 bridge 後，用同一個測試 PR #73 重跑 `card review`（第 3 輪）。

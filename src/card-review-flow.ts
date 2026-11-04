@@ -46,6 +46,9 @@ export interface ReviewFlowDeps {
   fingerprint(cwd: string): Promise<string>;
   /** 等 reviewer 回覆的上限，預設 10 分鐘。 */
   timeoutMs?: number;
+  /** 啟動後等 reviewer 變成 idle 的上限（預設 30 秒）與輪詢間隔（預設 1 秒）。 */
+  readyTimeoutMs?: number;
+  readyPollMs?: number;
 }
 
 export interface ReviewFlowInput {
@@ -210,6 +213,61 @@ type Outcome =
       parsed: Extract<ReturnType<typeof parseReviewReply>, { ok: true }>;
     };
 
+const READY_TIMEOUT_MS = 30_000;
+const READY_POLL_MS = 1_000;
+
+const BLOCKED_AT_START =
+  "reviewer 卡在啟動提示（blocked）。常見原因：Agent 自己的更新提示或新資料夾的信任提示；bridge 不會替人確認，請先在要用的種類上處理一次";
+
+/**
+ * ISSUE-079：`agent.start` 回來時 Agent 常常還在初始化（實測：codex 啟動後先是 working），不能一看到不是 idle
+ * 就放棄。已經 idle 就直接用；blocked 立刻放棄（在等人，等也沒用）；其他狀態輪詢到 idle、blocked、
+ * pane 消失或逾時為止。
+ */
+async function waitUntilReady(
+  deps: ReviewFlowDeps,
+  pane: { paneId: string; terminalId: string },
+  started: AgentRecord,
+): Promise<{ ok: true; agent: AgentRecord } | { ok: false; reason: string }> {
+  let agent = started;
+  if (agent.agent_status === "idle") return { ok: true, agent };
+  if (agent.agent_status === "blocked")
+    return { ok: false, reason: BLOCKED_AT_START };
+  const timeout = deps.readyTimeoutMs ?? READY_TIMEOUT_MS;
+  const poll = deps.readyPollMs ?? READY_POLL_MS;
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    if (Date.now() >= deadline)
+      return {
+        ok: false,
+        reason: `reviewer 在 ${Math.round(timeout / 1000)} 秒內沒有就緒（狀態 ${agent.agent_status}）`,
+      };
+    await new Promise((resolve) => setTimeout(resolve, poll));
+    let listed: AgentRecord[];
+    try {
+      listed = await deps.panePort.listAgentsWithWorkspaceNames();
+    } catch (error) {
+      return {
+        ok: false,
+        reason: `等待 reviewer 就緒時讀取 Agent 清單失敗：${message(error)}`,
+      };
+    }
+    const current = listed.find(
+      (item) =>
+        item.pane_id === pane.paneId && item.terminal_id === pane.terminalId,
+    );
+    if (!current)
+      return {
+        ok: false,
+        reason: "等待 reviewer 就緒時，它的 pane 不見了（消失或被換掉）",
+      };
+    agent = current;
+    if (agent.agent_status === "idle") return { ok: true, agent };
+    if (agent.agent_status === "blocked")
+      return { ok: false, reason: BLOCKED_AT_START };
+  }
+}
+
 /** pane 已開之後的部分：啟動、送出、解析、指紋檢查。內部的預期失敗都轉成 Outcome，不丟錯誤。 */
 async function reviewInPane(
   deps: ReviewFlowDeps,
@@ -233,11 +291,9 @@ async function reviewInPane(
   } catch (error) {
     return { kind: "failed", error: message(error) };
   }
-  if (agent.agent_status !== "idle")
-    return {
-      kind: "inconclusive",
-      reason: `reviewer 沒有就緒（狀態 ${agent.agent_status}；常見原因：新資料夾的信任提示，bridge 不會替人確認）`,
-    };
+  const ready = await waitUntilReady(deps, run.pane, agent);
+  if (!ready.ok) return { kind: "inconclusive", reason: ready.reason };
+  agent = ready.agent;
 
   let outcome: Outcome;
   try {
