@@ -46,6 +46,25 @@ export interface MergeRun {
   method: MergeMethod;
 }
 
+/** 唯讀：這一刻這張卡開著的 PR 的 CI 結果（`card loop --merge` 等 CI 用）；沒有開著的 PR 就丟錯誤。 */
+export async function readCardChecks(
+  deps: Pick<MergeWiringDeps, "prs"> & {
+    github: Pick<MergeWiringDeps["github"], "checks">;
+  },
+  card: Card,
+): Promise<ChecksSummary> {
+  const tracked = deps.prs
+    .forCard(card.id)
+    .filter((item) => item.state === "OPEN")
+    .at(-1);
+  if (!tracked)
+    throw new Error(
+      `卡片 ${card.id} 沒有開著的 PR；請先 \`card pr ${card.id}\``,
+    );
+  const [owner, name] = tracked.repo.split("/");
+  return deps.github.checks({ owner, repo: name }, tracked.number);
+}
+
 export async function mergeCardPullRequest(
   deps: MergeWiringDeps,
   card: Card,

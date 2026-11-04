@@ -20,6 +20,7 @@ import type { PrOutcome } from "./card-pr-flow.js";
 import { parseFindings, summarizeFindings } from "./card-findings.js";
 import type { MergeRun } from "./card-merge-wiring.js";
 import { checkFixable, type OpenFinding } from "./card-fix.js";
+import type { CiWait } from "./card-ci-wait.js";
 import { runLoop, type LoopVerdict } from "./card-loop.js";
 import type { FixFlowResult } from "./card-fix-flow.js";
 import { formatFixReply } from "./card-fix-command.js";
@@ -97,6 +98,14 @@ export interface CardCommandDeps {
     card: Card,
     options: { method?: string },
   ) => Promise<MergeRun>;
+  /**
+   * `card loop --merge`：等這張卡 PR 的 CI 跑完（有逾時；`stopRequested` 為真時回 `cancelled`）。
+   * 只有 `success` 才會繼續往 merge。
+   */
+  waitForCi: (
+    card: Card,
+    control: { stopRequested: () => boolean },
+  ) => Promise<CiWait>;
   /** 長時間指令（`card loop`）的進度回報：每一步完成就送一則；失敗不影響指令。沒有提供就不回報。 */
   notify?: (text: string) => Promise<void>;
   /** `card pr`：push 卡片分支並開 PR（或更新已開著的 PR）；不符合前提要丟出說明原因的錯誤。 */
@@ -110,7 +119,7 @@ export interface CardCommandDeps {
 }
 
 const USAGE =
-  "usage: card list [status] | card show <id> | card import [--slug <名稱>] [<本機路徑，僅 console>]（Discord 請附上 .md 檔） | card assign <id> [--coding] [--worktree] | card cleanup <id> | card policy [專案] | card pr <id> | card review <id> [--agent <種類>] | card fix <id> [--agent <種類>] | card loop <id> [--agent <種類>] [--fix-agent <種類>] | card loop stop <id> | card merge <id> [--method squash|merge|rebase] | card recreate <id>（從任務紀錄重建被刪除的卡片）";
+  "usage: card list [status] | card show <id> | card import [--slug <名稱>] [<本機路徑，僅 console>]（Discord 請附上 .md 檔） | card assign <id> [--coding] [--worktree] | card cleanup <id> | card policy [專案] | card pr <id> | card review <id> [--agent <種類>] | card fix <id> [--agent <種類>] | card loop <id> [--agent <種類>] [--fix-agent <種類>] [--merge] | card loop stop <id> | card merge <id> [--method squash|merge|rebase] | card recreate <id>（從任務紀錄重建被刪除的卡片）";
 const MAX_LIST_LINES = 30;
 const MAX_LIST_ERRORS = 5;
 const TITLE_CHARS = 50;
@@ -742,7 +751,7 @@ async function loopCardCommand(
   deps: CardCommandDeps,
 ): Promise<string> {
   const usage =
-    "usage: card loop <id> [--agent <種類>] [--fix-agent <種類>] | card loop stop <id>";
+    "usage: card loop <id> [--agent <種類>] [--fix-agent <種類>] [--merge] | card loop stop <id>";
   if (args[0] === "stop") {
     if (args.length !== 2) throw new Error(usage);
     const target = args[1];
@@ -752,7 +761,11 @@ async function loopCardCommand(
     loopStops.add(target);
     return `已要求停止 ${target} 的 loop：進行中的步驟會先做完，之後不再往下。`;
   }
-  const [id, ...flags] = args;
+  // `--merge` 是不帶值的旗標，可放在任何位置、只能出現一次。
+  const mergeFlags = args.filter((arg) => arg === "--merge").length;
+  if (mergeFlags > 1) throw new Error(usage);
+  const merge = mergeFlags === 1;
+  const [id, ...flags] = args.filter((arg) => arg !== "--merge");
   if (!id) throw new Error(usage);
   if (!isCardId(id)) throw new Error(`${id} 不是合法的卡片 id`);
   let agent: string | undefined;
@@ -774,6 +787,7 @@ async function loopCardCommand(
   if (reviewing.has(id)) throw new Error(`卡片 ${id} 正在 review 或修正中`);
   reviewing.add(id);
   loopStops.delete(id);
+  let mergedText = "";
   try {
     const result = await runLoop(
       {
@@ -799,12 +813,35 @@ async function loopCardCommand(
         notify: async (text) => {
           await deps.notify?.(text);
         },
+        ...(merge
+          ? {
+              waitCi: () => {
+                const current = store.read(id);
+                if (!current.ok) throw new Error(current.error);
+                return deps.waitForCi(current.card, {
+                  stopRequested: () => loopStops.has(id),
+                });
+              },
+              merge: async () => {
+                const current = store.read(id);
+                if (!current.ok) throw new Error(current.error);
+                mergedText = await mergeStep(current.card, undefined, deps);
+                return { text: mergedText };
+              },
+            }
+          : {}),
       },
+      { merge },
     );
+    if (result.status === "passed" && result.merged)
+      return [
+        `loop 結束：${id} 的 review 已通過、CI 全綠，已 merge（共 ${result.steps} 個步驟）。`,
+        mergedText,
+      ].join("\n");
     if (result.status === "passed")
       return [
         `loop 結束：${id} 的 review 已通過（共 ${result.steps} 個步驟）。`,
-        "CI 的結果由 bridge 另行通知；merge 由你決定（bridge 不會自動 merge）。",
+        "CI 的結果由 bridge 另行通知；merge 由你決定（bridge 不會自動 merge；要自動 merge 請加 `--merge`）。",
       ].join("\n");
     return [
       `loop 停下來了：${id}（共 ${result.steps} 個步驟，停在 ${result.step}）。`,
@@ -845,18 +882,27 @@ async function mergeCardCommand(
   if (reviewing.has(id)) throw new Error(`卡片 ${id} 正在 review、修正或 merge 中`);
   reviewing.add(id);
   try {
-    const run = await deps.mergePullRequest(read.card, {
-      ...(method !== undefined ? { method } : {}),
-    });
-    return [
-      `已 merge：${id} · PR #${run.pr.number}（${run.method}，head ${run.pr.headSha.slice(0, 12)}）`,
-      run.pr.url,
-      "merge 前的條件都成立：專案政策 L2、最新一輪 review 通過且 head 與 PR 一致、CI 全綠、沒有動到敏感路徑。",
-      "bridge 約一分鐘內會偵測到這次 merge，在卡片記 `merged` 並清理這張卡的 worktree（分支保留）。bridge 不部署、不重啟、不刪遠端分支；merge 不等於「已驗收」。",
-    ].join("\n");
+    return await mergeStep(read.card, method, deps);
   } finally {
     reviewing.delete(id);
   }
+}
+
+/** 一次 merge（不含「同一張卡一次只一個」的保護，由呼叫端負責）：`card merge` 與 `card loop --merge` 共用。 */
+async function mergeStep(
+  card: Card,
+  method: string | undefined,
+  deps: CardCommandDeps,
+): Promise<string> {
+  const run = await deps.mergePullRequest(card, {
+    ...(method !== undefined ? { method } : {}),
+  });
+  return [
+    `已 merge：${card.id} · PR #${run.pr.number}（${run.method}，head ${run.pr.headSha.slice(0, 12)}）`,
+    run.pr.url,
+    "merge 前的條件都成立：專案政策 L2、最新一輪 review 通過且 head 與 PR 一致、CI 全綠、沒有動到敏感路徑。",
+    "bridge 約一分鐘內會偵測到這次 merge，在卡片記 `merged` 並清理這張卡的 worktree（分支保留）。bridge 不部署、不重啟、不刪遠端分支；merge 不等於「已驗收」。",
+  ].join("\n");
 }
 
 /** 唯讀：顯示專案政策（每個專案的自動化等級）。 */

@@ -2983,3 +2983,23 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 限制：只有手動指令；`card loop` 通過後不會自動 merge；只支援本機與 github.com；bridge 的檢查不等於人看過程式碼，review 是另一個 Agent 做的、獨立的只有 session；GitHub 的 branch protection 仍是最後一道防線；驗收的 merge 會直接進公開 repo 的 main。
 
 下一步：merge 本 PR、重啟 bridge；使用者把政策改成 L2；用一個無害的測試 PR 驗收（先驗各拒絕條件、最後驗一次真的 merge）；驗完把政策改回 L1。
+
+## ISSUE-084：`card loop --merge`（review 通過後等 CI、全綠自動 merge）
+
+更新日期：2026-11-04。狀態：已修正、待驗收（原始碼與自動化檢查完成；**尚未重啟 bridge、尚未實機驗收**，不可把單元測試通過當成端到端通過）。
+
+來源：使用者 2026-11-04 要求「做 card loop」，Agent 提案 `card loop --merge`，使用者回答：是做 `--merge`；等 CI 但有逾時；守門全交給 `card merge`（不新增條件）。
+
+使用者可見行為：`card loop <id> [--agent] [--fix-agent] [--merge]`（`--merge` 可放任何位置、只能出現一次）。沒有 `--merge` 時行為與以往完全相同（review 通過就結束，回覆提示可加 `--merge`）。有 `--merge`：review `pass` 之後每 30 秒讀一次 PR 的 CI，最多等 30 分鐘；全部 `success` 才呼叫與 `card merge` 相同的合併步驟（重新讀事實、列出所有不成立的條件、只合併剛檢查的 head）。成功回覆「review 已通過、CI 全綠，已 merge」加 PR 網址；其他情況停下並說明原因：CI 失敗／取消／全部略過、等 CI 逾時、讀 CI 連續 3 次出錯、`card merge` 拒絕（含所有原因，例如政策不是 L2、敏感路徑、落後 main）、`card loop stop`（等 CI 時也生效）。`help` 已補說明。
+
+預期行為與安全性：`--merge` 不新增也不繞過 `card merge` 的任何條件，所以政策仍必須是 L2（使用者手寫 `policy.yml`）、敏感路徑一律由人 merge；merge 是最後一步、只做一次；修正動到敏感路徑時仍不 push（loop 本身就停）。
+
+實作範圍（2026-11-04）：`src/card-ci-wait.ts`（`waitForChecks`：pending／none 繼續等、success／failure 結束、逾時、停止要求、容忍偶發讀取錯誤）；`src/card-loop.ts`（`runLoop` 的 `merge` 選項與 `waitCi`／`merge` 步驟，新停止點 `ci`、`merge`；缺步驟時拒絕啟動）；`src/card-merge-wiring.ts`（`readCardChecks`）；`src/card-command.ts`（`--merge` 旗標、`mergeStep` 與 `card merge` 共用、`waitForCi` 依賴）；`src/main.ts`（接線、help）。
+
+測試（2026-11-04，本機 macOS，非 CI）：新增 `test/card-ci-wait.test.ts` 7 項、`test/card-loop.test.ts` 10 項、`test/card-command.test.ts` 6 項、`test/card-merge-wiring.test.ts` 2 項。`npm run check` → 1123 tests、1122 pass、0 fail（其餘 1 項為既有的 skip）；`npm run lint` ok。`format:check` 本來就有 41 個既有檔案不符，本次不處理。
+
+未驗證：真實 PR 上的整條路徑（push 後 CI 的 `none`→`pending`→`success` 轉換、等 CI 的實際耗時、macOS runner 排隊時是否撐得過 30 分鐘、CI 紅時的停止、`--merge` 真的合併一次）；等 CI 期間 `card loop stop`；Discord thread 的進度回報；L1 下 `--merge` 被 `card merge` 拒絕的真實表現。
+
+限制：逾時 30 分鐘與間隔 30 秒寫死在 `main.ts`；CI 一直沒有登記（`none`）會等到逾時；只支援本機與 github.com；等 CI 期間 bridge 若重啟，loop 就中斷（沒有續跑），卡片維持在 review 通過的狀態，可手動 `card merge`。
+
+下一步：merge 本 PR、重啟 bridge；用無害的測試 PR 驗收（先 L1 看 `--merge` 被拒絕的表現與 CI 紅停止，再由使用者改 L2 驗一次真的 merge，驗完改回 L1）。

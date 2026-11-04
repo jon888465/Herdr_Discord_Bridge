@@ -239,3 +239,95 @@ test("a failure of the progress notice never stops the loop", async () => {
   const result = await runLoop(steps);
   assert.deepEqual(result, { status: "passed", steps: 1 });
 });
+
+type CiPlan = "success" | "failure" | "timeout" | "cancelled" | Error;
+
+/** 在 `setup` 的步驟上加上 `--merge` 要用的兩步：等 CI、merge。 */
+function withMerge(
+  base: ReturnType<typeof setup>,
+  ci: CiPlan,
+  mergeError?: Error,
+) {
+  base.steps.waitCi = async () => {
+    base.log.push("waitCi");
+    if (ci instanceof Error) throw ci;
+    return { state: ci, text: `ci: ${ci}` };
+  };
+  base.steps.merge = async () => {
+    base.log.push("merge");
+    if (mergeError) throw mergeError;
+    return { text: "merged" };
+  };
+  return base;
+}
+
+test("without the merge option a pass never waits for CI or merges", async () => {
+  const run = withMerge(setup(["pass"]), "success");
+  const result = await runLoop(run.steps);
+  assert.deepEqual(result, { status: "passed", steps: 1 });
+  assert.deepEqual(run.log, ["review"]);
+});
+
+test("with the merge option a pass waits for CI and then merges, once, last", async () => {
+  const run = withMerge(setup(["changes_requested", "pass"], [{ kind: "fixed" }]), "success");
+  const result = await runLoop(run.steps, { merge: true });
+  assert.deepEqual(result, { status: "passed", steps: 6, merged: true });
+  assert.deepEqual(run.log, ["review", "fix", "push", "review", "waitCi", "merge"]);
+  assert.deepEqual(run.notices.slice(-2), ["ci: success", "merged"]);
+});
+
+test("a red CI stops the loop before merging and says so", async () => {
+  const run = withMerge(setup(["pass"]), "failure");
+  const result = await runLoop(run.steps, { merge: true });
+  assert.equal(result.status === "stopped" && result.step, "ci");
+  assert.deepEqual(run.log, ["review", "waitCi"]);
+});
+
+test("a CI wait that times out stops the loop without merging", async () => {
+  const run = withMerge(setup(["pass"]), "timeout");
+  const result = await runLoop(run.steps, { merge: true });
+  assert.equal(result.status === "stopped" && result.step, "ci");
+  assert.deepEqual(run.log, ["review", "waitCi"]);
+});
+
+test("a stop request during the CI wait stops the loop without merging", async () => {
+  const run = withMerge(setup(["pass"]), "cancelled");
+  const result = await runLoop(run.steps, { merge: true });
+  assert.equal(result.status === "stopped" && result.step, "cancel");
+  assert.deepEqual(run.log, ["review", "waitCi"]);
+});
+
+test("an error while waiting for CI stops the loop without merging", async () => {
+  const run = withMerge(setup(["pass"]), new Error("gh down"));
+  const result = await runLoop(run.steps, { merge: true });
+  assert.equal(result.status === "stopped" && result.step, "ci");
+  assert.match(result.status === "stopped" ? result.reason : "", /gh down/);
+  assert.deepEqual(run.log, ["review", "waitCi"]);
+});
+
+test("a refused merge stops the loop and carries the reasons", async () => {
+  const run = withMerge(setup(["pass"]), "success", new Error("不 merge PR #9（1 項條件不成立）"));
+  const result = await runLoop(run.steps, { merge: true });
+  assert.equal(result.status === "stopped" && result.step, "merge");
+  assert.match(result.status === "stopped" ? result.reason : "", /不 merge PR #9/);
+});
+
+test("a stop request after the pass but before the CI wait never merges", async () => {
+  const run = withMerge(setup(["pass"], [], { stopAfter: 1 }), "success");
+  const result = await runLoop(run.steps, { merge: true });
+  assert.equal(result.status === "stopped" && result.step, "cancel");
+  assert.deepEqual(run.log, ["review"]);
+});
+
+test("a failed fix never reaches the CI wait", async () => {
+  const run = withMerge(setup(["changes_requested"], [{ kind: "failed" }]), "success");
+  const result = await runLoop(run.steps, { merge: true });
+  assert.equal(result.status === "stopped" && result.step, "fix");
+  assert.deepEqual(run.log, ["review", "fix"]);
+});
+
+test("the merge option without the two merge steps is refused up front", async () => {
+  const run = setup(["pass"]);
+  await assert.rejects(runLoop(run.steps, { merge: true }), /waitCi|merge/);
+  assert.deepEqual(run.log, []);
+});
