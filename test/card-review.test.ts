@@ -300,3 +300,22 @@ test("inconclusiveBatch is an empty inconclusive batch for the given round, scop
     findings: [],
   });
 });
+
+// ISSUE-080：剛啟動的 reviewer 沒有 transcript，回覆從終端畫面讀回，窄 pane 會把 JSON 字串折行（續行縮排兩格）。
+test("a reply whose long strings were wrapped by a narrow terminal (continuation rows indented by two spaces) is still accepted (ISSUE-080)", () => {
+  const wrapped =
+    '{"verdict":"changes_requested","criteria":[{"index":1,"status":"met"},{"index":2,"status":"met"},{"index":3,"status":"unmet","note":"第二行與驗收條件指\n  定的內容不符。"}],"findings":[{"severity":"medium","path":"src/export.ts","lineStart":2,"lineEnd":2,"summary":"第二行不符合驗收條件 3，\n  需改為指定文字。"}]}';
+  const result = parsed(wrapped);
+  assert.equal(result.batch.verdict, "changes_requested");
+  assert.equal(result.criteria[2].note, "第二行與驗收條件指定的內容不符。");
+  assert.equal(result.batch.findings[0].summary, "第二行不符合驗收條件 3，需改為指定文字。");
+});
+
+test("a valid reply is never altered by the unwrapping, and a newline inside a string without the continuation indent is still refused (ISSUE-080)", () => {
+  const ok = parsed(reply({ findings: [{ severity: "low", path: "src/export.ts", summary: "a  b" }] }));
+  assert.equal(ok.batch.findings[0].summary, "a  b");
+  const bad =
+    '{"verdict":"inconclusive","criteria":[{"index":1,"status":"met"},{"index":2,"status":"met"},{"index":3,"status":"met","note":"第一行\n第二行"}],"findings":[]}';
+  const result = parseReviewReply(bad, context);
+  assert.equal(result.ok, false);
+});
