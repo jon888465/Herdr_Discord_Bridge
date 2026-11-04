@@ -2922,3 +2922,24 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 限制：只支援本機（F9）；只處理整個 PR 的 findings；**沒有自動 loop**，每一圈都要人下指令；「每次審查最多 2 輪」沒有實作；inconclusive 的 review 也算一次，所以最多 3 次 review 的額度可能被 inconclusive 吃掉；作者的限制只靠提示與事後檢查（只修列出的 findings、一個 commit、乾淨的工作樹），不是作業系統層隔離；動到敏感路徑只警告、不阻擋；作者失敗留下未提交修改時，bridge 只回報、不清理，要人到 worktree 檢查。
 
 下一步：merge、重啟 bridge 後 live 驗收（用一個故意不符合驗收條件的測試 PR 走完整的一圈）；之後才是自動 loop、每個 commit 審一次、E13、F7、F9、merge 的實作。
+
+
+## ISSUE-082：`card loop`（review 的自動 loop）
+
+更新日期：2026-11-04。狀態：已修正、待驗收（這是新功能；原始碼與自動化測試完成，**第一次由 bridge 自己 push，尚未 live 驗收，執行中的 bridge 尚未載入**）。
+
+來源：使用者 2026-11-04 決定做自動 loop，並回答 Agent 的設計提案：「照建議，1.自動 2.對 3.只做手動 card loop」（push 自動；同一個 head 的 review 最多試 2 次；只做手動觸發）。
+
+使用者可見行為：`card loop <卡片 id> [--agent <種類>] [--fix-agent <種類>]`（Discord 與 console）。一個指令跑 review → fix → push → review，直到 `pass` 或需要人。每一步完成就回報一則，結束時回覆通過或停下的原因。`card loop stop <id>` 要求停止（步驟之間生效）。`help` 也補了說明。細節、停止條件與限制見 SPEC「`card loop`」。**push 是 bridge 自己做的**：只 push 這張卡的 `card/<id>` 分支到既有的 PR（沿用 `card pr`）；修正動到敏感路徑時不 push。
+
+實作範圍（2026-11-04）：新增 `src/card-loop.ts`（狀態機 `runLoop`：停止條件、同 head 的重試額度、push 之後一定先 review、停止要求、回報失敗不中斷、步驟數安全閥）；`src/card-command.ts` 把 `card pr`、`card review`、`card fix` 的核心拆成 `pushStep`、`reviewStep`、`fixStep`（原指令行為不變，既有測試全過）並新增 `loop` 子指令（一次只一個、讀卡片算輪次與判定、`--agent`／`--fix-agent`、`card loop stop`）；`CardCommandDeps` 新增選填的 `notify`；`src/main.ts`（把進度回報接到 Discord／console 的回覆、`help`）。
+
+測試（2026-11-04，本機 macOS、Node v26.12.0，非 CI）：新增 `test/card-loop.test.ts` 17 項（一次 pass、fix 與 push 後再 review、每一步都回報、到第 3 輪停止且不開第 4 輪、輪次上限可設且用完的卡片不再 review、inconclusive 重試一次後停止、重試額度以 head 計、已經 inconclusive 算第一次、已通過不用跑、已有 changes_requested 時從 fix 接著跑、push 後新 head 一定先 review、修正失敗不 push、敏感路徑不 push 並指出路徑、review／fix／push 的錯誤都停下並說明、停止要求在步驟之間生效、開始前就停止、回報失敗不中斷）與 `test/card-command.test.ts` 11 項（參數與卡片 id、一次 pass、完整的一圈與卡片更新、`--agent` 與 `--fix-agent` 的去向、到上限停下、兩次 inconclusive 停下、敏感路徑不 push、失敗的修正、步驟拒絕時停下並說明、停止與互斥、沒有在跑時 stop 的錯誤）。先寫測試、看到紅再實作。全套 1067 項，1066 通過、0 失敗、1 略過（原 1039 項）；`lint` 通過。**全部使用假的 Herdr、Agent、git 與 GitHub，沒有對真實環境驗證。**
+
+未驗證（待 merge、重啟 bridge 後 live 驗收；**每一步都需要使用者當下同意，包含 bridge 自己 push 與開測試 PR**）：真實環境完整跑一次 loop（`changes_requested` → fix → push → `pass`）；到第 3 輪停下；兩次 inconclusive 停下；修正動到敏感路徑時不 push；`card loop stop`；進度回報在 Discord thread 的樣子；loop 跑很久時 bridge 的其他指令是否受影響。
+
+與提案的偏離（已寫進需求卡）：**「CI 紅」沒有當成停止條件、loop 也不等 CI**；「使用者再下別的指令」只實作了 `card loop stop`。
+
+限制：只支援本機；只審整個 PR；不會自動 merge；停止要求只在步驟之間生效；`pass` 只代表 review 通過、不代表 CI 綠；停止要求只對 `card loop` 有效（對單獨的 `card review` 或 `card fix` 沒有效果，下次 loop 開始前會被清掉）；每次 `card review` 都算一次輪次，所以 inconclusive 會吃掉 3 次的額度。
+
+下一步：merge、重啟 bridge 後 live 驗收；之後是 CI 紅作為停止條件（需使用者決定）、每個 commit 審一次、E13、F7、F9、merge 的實作。

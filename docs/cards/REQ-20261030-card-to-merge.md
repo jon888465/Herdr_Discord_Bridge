@@ -180,3 +180,15 @@ external: { notion: null, github: null, mantis: null }
 3. 計數：每次審查最多 2 輪、整個 loop 總上限 **3**（由 5 改為 3）。Agent 的實作理解：總上限以「整體 review 的輪次」計，最新一輪整體 review 已是第 3 輪還沒通過就退回人工；inconclusive 的那幾輪也算（保守）。「每次審查最多 2 輪」目前**沒有**實作（手動版每次 `card review` 就是一輪），留給自動 loop 時決定。
 
 實作與限制見 SPEC「`card fix`」與 ISSUE-081。
+
+
+### 自動 loop `card loop`（2026-11-04，使用者決定）
+
+使用者對 Agent 的設計提案回答「照建議，1.自動 2.對 3.只做手動 card loop」：
+1. **push 自動**：loop 裡 bridge 自己 push 這張卡的 `card/<id>` 分支到既有的 PR。這是「真實 push 每次都要明確同意」那條規則的例外，使用者明確同意；範圍限於這張卡自己的分支與既有的 PR、不碰 main、不 merge。
+2. **「每次審查最多 2 輪」＝同一個 head 的 review 最多試 2 次**（例如第一次 inconclusive 時重審一次；連續 2 次 inconclusive 就停）。
+3. **只做手動觸發的 `card loop <id>`**；之後是否在 `card pr` 之後自動啟動，等手動版驗收後再說。
+
+Agent 在實作時對提案的偏離，需使用者知道：**提案中「CI 紅」與「PR 被關閉或 merge」是停止條件；實作上 PR 被關閉或 merge 會讓 review 或 push 丟錯誤而停下（有做），但「CI 紅」沒有做**（loop 不等 CI，CI 結果由既有的每分鐘輪詢另行通知）。要不要把 CI 紅也當成停止條件、並在 `pass` 之前等 CI，之後再決定。另，「使用者再下別的指令」只實作了 `card loop stop <id>`。
+
+實作與限制見 SPEC「`card loop`」與 ISSUE-082。
