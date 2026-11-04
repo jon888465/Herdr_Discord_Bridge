@@ -65,6 +65,9 @@ function setup(overrides: Partial<CardCommandDeps> = {}) {
     fixCard: async () => {
       throw new Error("fixCard was not expected");
     },
+    mergePullRequest: async () => {
+      throw new Error("mergePullRequest was not expected");
+    },
     startTask: async () => {
       throw new Error("startTask was not expected");
     },
@@ -1907,4 +1910,94 @@ test("a stop request ends the loop between steps, and only one loop, review or f
 test("stopping a card that has no loop running says so", async () => {
   const { run } = loopSetup([]);
   await assert.rejects(run("loop", "stop", "REQ-20261102-work"), /沒有在跑/);
+});
+
+// ---- card merge（L2，G7）----
+
+function mergeSetup(overrides: Partial<CardCommandDeps> = {}) {
+  const calls: Array<{ id: string; method?: string }> = [];
+  const s = setup({
+    mergePullRequest: async (card, options) => {
+      calls.push({ id: card.id, method: options.method });
+      return {
+        pr: {
+          number: 42,
+          url: "https://github.com/jon888465/Herdr_Discord_Bridge/pull/42",
+          headSha: REVIEW_HEAD,
+        },
+        method: (options.method ?? "squash") as "squash" | "merge" | "rebase",
+      };
+    },
+    ...overrides,
+  });
+  s.store.create(assignable("REQ-20261102-work", { status: "done" }));
+  return { ...s, calls };
+}
+
+test("card merge validates its arguments, the card id and the card", async () => {
+  const { run } = mergeSetup();
+  await assert.rejects(run("merge"), /usage/);
+  await assert.rejects(run("merge", "../x"), /不是合法的卡片 id/);
+  await assert.rejects(run("merge", "REQ-20261102-work", "--method"), /usage/);
+  await assert.rejects(run("merge", "REQ-20261102-work", "--bogus"), /usage/);
+  await assert.rejects(run("merge", "REQ-20261102-work", "extra"), /usage/);
+  await assert.rejects(run("merge", "REQ-20261102-work", "--method", "squash", "--method", "merge"), /usage/);
+  await assert.rejects(run("merge", "REQ-20261102-missing"), /找不到卡片/);
+});
+
+test("card merge reports the merged PR with its full URL, the method and the head, and says what the bridge does next", async () => {
+  const { run, calls } = mergeSetup();
+  const reply = await run("merge", "REQ-20261102-work");
+  assert.deepEqual(calls, [{ id: "REQ-20261102-work", method: undefined }]);
+  assert.match(reply, /https:\/\/github\.com\/jon888465\/Herdr_Discord_Bridge\/pull\/42/);
+  assert.match(reply, /#42/);
+  assert.match(reply, /squash/);
+  assert.match(reply, /0123456789ab/);
+  assert.match(reply, /merged/);
+  assert.match(reply, /worktree/);
+  assert.match(reply, /不部署|不重啟/);
+});
+
+test("card merge passes --method through", async () => {
+  const { run, calls } = mergeSetup();
+  const reply = await run("merge", "REQ-20261102-work", "--method", "rebase");
+  assert.equal(calls[0].method, "rebase");
+  assert.match(reply, /rebase/);
+});
+
+test("a refusal lists the reasons and the card is left exactly as it was", async () => {
+  const { store, run } = mergeSetup({
+    mergePullRequest: async () => {
+      throw new Error("不 merge PR #42（2 項條件不成立）：\n- 專案政策是 L1\n- CI 有檢查失敗");
+    },
+  });
+  const before = store.read("REQ-20261102-work");
+  await assert.rejects(run("merge", "REQ-20261102-work"), /2 項條件不成立.*L1.*CI/s);
+  const after = store.read("REQ-20261102-work");
+  assert.ok(before.ok && after.ok && before.hash === after.hash);
+  const log = store.readLog("REQ-20261102-work");
+  assert.deepEqual(log.ok && log.entries, []);
+});
+
+test("a merge never runs while a review, a fix or a loop of the same card is running, and not twice at once", async () => {
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const { run } = mergeSetup({
+    mergePullRequest: async () => {
+      await gate;
+      return {
+        pr: { number: 42, url: "https://github.com/jon888465/Herdr_Discord_Bridge/pull/42", headSha: REVIEW_HEAD },
+        method: "squash" as const,
+      };
+    },
+  });
+  const running = run("merge", "REQ-20261102-work");
+  await assert.rejects(run("merge", "REQ-20261102-work"), /正在 review、修正或 merge/);
+  await assert.rejects(run("review", "REQ-20261102-work"), /正在 review/);
+  await assert.rejects(run("loop", "REQ-20261102-work"), /正在 review/);
+  release();
+  await running;
+  await run("merge", "REQ-20261102-work");
 });

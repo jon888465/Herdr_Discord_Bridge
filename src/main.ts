@@ -35,7 +35,15 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { missingCardMessage, syncCards, taskSourceFrom } from "./card-sync.js";
 import { loadPolicy } from "./policy.js";
-import { defaultExec } from "./github.js";
+import {
+  allowedMergeMethods,
+  defaultExec,
+  mergePullRequest,
+  pullRequestChecks,
+  pullRequestFiles,
+  pullRequestMergeState,
+} from "./github.js";
+import { mergeCardPullRequest } from "./card-merge-wiring.js";
 import { sharedCardPullRequests } from "./card-prs.js";
 import { openCardPullRequest } from "./card-pr-flow.js";
 import { fetchReviewMaterial } from "./card-review-fetch.js";
@@ -629,6 +637,27 @@ export async function handleCommand(
         readLocalFile: readLocalCardFile,
         assignments: lazyCardAssignments(),
         policy: () => loadPolicy(join(configDirectory(), "policy.yml")),
+        mergePullRequest: (card, options) =>
+          mergeCardPullRequest(
+            {
+              worktrees: lazyCardWorktrees(),
+              prs: lazyCardPullRequests(),
+              policy: () => loadPolicy(join(configDirectory(), "policy.yml")),
+              github: {
+                mergeState: (repo, number) =>
+                  pullRequestMergeState(defaultExec, repo, number),
+                checks: (repo, number) =>
+                  pullRequestChecks(defaultExec, repo, number),
+                files: (repo, number) =>
+                  pullRequestFiles(defaultExec, repo, number),
+                allowedMethods: (repo) => allowedMergeMethods(defaultExec, repo),
+                merge: (repo, input) =>
+                  mergePullRequest(defaultExec, repo, input),
+              },
+            },
+            card,
+            options,
+          ),
         notify: async (text) => {
           await runtime.discord.reply(context.message, text);
         },
@@ -3556,7 +3585,7 @@ function helpText(prefix: string): string {
     `\`${prefix} team ask [--coding] <prompt>\` — 建立持久化任務，由 Lead 動態分工；--coding 才啟用本機 Git 驗收`,
     `\`${prefix} team questions <task-id>\` / \`${prefix} team reply <task-id> <question-id> <answer>\` — 指定問題回答`,
     `\`${prefix} team status [task-id]\` / \`${prefix} team cancel <task-id>\` — 查看／取消任務`,
-    `\`${prefix} card list [status]\` / \`${prefix} card show <id>\` — 查看營運卡片；\`card import\`（附上 .md 檔）匯入為 draft；\`card assign <id> [--coding]\` 把 ready 的卡片交給目前 workspace 的 Team（同 \`team ask\`）；任務還在跑卻刪了卡片時用 \`card recreate <id>\` 重建；\`card assign <id> --worktree\` 在隔離的 worktree 做，完成後 \`card cleanup <id>\` 清掉；\`card policy [專案]\` 查看專案政策（唯讀）；\`card pr <id>\` 把 done 卡片的分支 push 並開 PR（需專案政策 L1 以上）；\`card review <id> [--agent <種類>]\` 對開著的 PR 開新 pane 讓另一個 Agent 做獨立 review（結果寫進卡片，用完關閉 pane）；\`card fix <id> [--agent <種類>]\` 把 review 的 open findings 交給新開 pane 的新作者修一圈（不 push；總上限 3 次 review）；\`card loop <id> [--agent <種類>] [--fix-agent <種類>]\` 自動跑 review → fix → push → review 直到通過或需要人（bridge 自己 push 這張卡的分支到既有 PR），\`card loop stop <id>\` 要求停止`,
+    `\`${prefix} card list [status]\` / \`${prefix} card show <id>\` — 查看營運卡片；\`card import\`（附上 .md 檔）匯入為 draft；\`card assign <id> [--coding]\` 把 ready 的卡片交給目前 workspace 的 Team（同 \`team ask\`）；任務還在跑卻刪了卡片時用 \`card recreate <id>\` 重建；\`card assign <id> --worktree\` 在隔離的 worktree 做，完成後 \`card cleanup <id>\` 清掉；\`card policy [專案]\` 查看專案政策（唯讀）；\`card pr <id>\` 把 done 卡片的分支 push 並開 PR（需專案政策 L1 以上）；\`card review <id> [--agent <種類>]\` 對開著的 PR 開新 pane 讓另一個 Agent 做獨立 review（結果寫進卡片，用完關閉 pane）；\`card fix <id> [--agent <種類>]\` 把 review 的 open findings 交給新開 pane 的新作者修一圈（不 push；總上限 3 次 review）；\`card loop <id> [--agent <種類>] [--fix-agent <種類>]\` 自動跑 review → fix → push → review 直到通過或需要人（bridge 自己 push 這張卡的分支到既有 PR），\`card loop stop <id>\` 要求停止；\`card merge <id> [--method squash|merge|rebase]\` 合併卡片開著的 PR（只有專案政策 L2、review 通過且 head 一致、CI 全綠、沒有敏感路徑才會合併，不成立就列出原因）`,
     `\`${prefix} quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds]\` — 明確額度回報；quota status 查詢`,
     `\`${prefix} failover arm <source> <candidate1,candidate2> <goal>\` → \`failover run <id> confirm-source-stopped\` — 確認停止後自動選擇候選並驗證切換；status/cancel 可查詢／取消`,
     `\`${prefix} handoff checkpoint <source> <goal>\` → \`handoff verify <id> <destination> confirm-source-stopped\` → \`handoff accept <id>\` → \`handoff continue <id>\` — 持久化交接；status/packet/cancel 可查詢／釋放`,
@@ -3620,6 +3649,7 @@ function consoleHelpText(): string {
     "card review <id> [--agent <種類>] — 對卡片開著的 PR 開新 pane、啟動另一個 Agent 做獨立 review，結果寫進卡片的 Review 發現（用完關閉 pane；需專案政策 L1 以上）",
     "card fix <id> [--agent <種類>] — 把 review 的 open findings 交給新開 pane 的新作者（種類沿用最後一個作者）在 worktree 修一圈並 commit，finding 標為 fixed；不 push，之後 card pr 再 card review；總上限 3 次 review",
     "card loop <id> [--agent <種類>] [--fix-agent <種類>] — 自動 review → fix → push → review，直到通過或遇到需要人的情況（review 到第 3 輪還沒過、同一個 head 兩次 inconclusive、修正失敗或動到敏感路徑、PR 已關閉…）就停下退回人工；bridge 自己 push 這張卡的 card/<id> 分支到既有 PR，不 merge；card loop stop <id> 要求停止（步驟之間生效）",
+    "card merge <id> [--method squash|merge|rebase] — L2：合併卡片開著的 PR。只有專案政策 L2、卡片 done、最新 review 通過且 head 與 PR 一致、沒有 open finding、CI 全綠、PR 可合併且最新、沒有動到敏感路徑才會合併（bridge 第一次自己 merge）；不成立就列出所有原因、什麼都不做；預設 squash；合併之後約一分鐘內由既有輪詢記 merged 並清理 worktree；不部署、不重啟",
     "card policy [專案] — 查看專案政策（每個專案的自動化等級 L0／L1／L2；唯讀，政策檔在 plugin 設定目錄）",
     "card recreate <id> — 卡片被刪除但任務還在跑時，從任務紀錄重建卡片",
     "quota status [pane] / quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds] — 明確額度回報",

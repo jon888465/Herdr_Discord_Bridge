@@ -2951,3 +2951,22 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 限制：只支援本機；只審整個 PR；不會自動 merge；停止要求只在步驟之間生效；`pass` 只代表 review 通過、不代表 CI 綠；停止要求只對 `card loop` 有效（對單獨的 `card review` 或 `card fix` 沒有效果，下次 loop 開始前會被清掉）；每次 `card review` 都算一次輪次，所以 inconclusive 會吃掉 3 次的額度。
 
 下一步：merge、重啟 bridge 後 live 驗收；之後是 CI 紅作為停止條件（需使用者決定）、每個 commit 審一次、E13、F7、F9、merge 的實作。
+
+
+## ISSUE-083：`card merge`（L2 的手動 merge）
+
+更新日期：2026-11-04。狀態：已修正、待驗收（這是新功能；原始碼與自動化測試完成，**bridge 第一次自己合併進 main，尚未 live 驗收，執行中的 bridge 尚未載入**）。
+
+來源：使用者 2026-11-04 決定做 L2 的 merge，並回答 Agent 的設計提案：「照建議，先做手動 card merge」（先只做手動、預設 squash、驗收接受用公開 repo 的 main、政策由使用者自己改）。
+
+使用者可見行為：`card merge <卡片 id> [--method squash|merge|rebase]`（Discord 與 console）。前提全部成立才會合併卡片開著的 PR；不成立時回覆「不 merge PR #N（k 項條件不成立）」並列出**所有**原因，什麼都不做。成功時回覆 PR 完整網址、方式、合併的 head，並說明 bridge 約一分鐘內會偵測到、記 `merged` 並清理 worktree（沿用 E11），不部署、不重啟、不刪遠端分支。`help` 也補了說明。條件與限制見 SPEC「`card merge`」。**需要使用者先把政策檔裡這個專案改成 L2**（政策檔由人手寫，bridge 不改）。
+
+實作範圍（2026-11-04）：`src/github.ts` 新增 `pullRequestMergeState`、`allowedMergeMethods`、`mergePullRequest`（**唯一的寫入例外**：`gh pr merge … --match-head-commit <head>`，永不帶 `--admin`／`--auto`／`--delete-branch`；檔頭的白名單註解已更新）；`src/card-merge.ts`（`checkMergeable`：所有拒絕條件一次列出；`pickMergeMethod`）；`src/card-merge-wiring.ts`（前提檢查、重新讀取事實、合併永遠是最後一步且只做一次）；`src/card-command.ts`（`merge` 子指令、與 review／fix／loop 互斥）；`src/main.ts`（接線、`help`）。
+
+測試（2026-11-04，本機 macOS、Node v26.12.0，非 CI）：新增 `test/github.test.ts` 5 項（讀 PR 的合併狀態、拒絕不合預期的輸出、允許的合併方式、合併只帶指定的 head 與方式且永不帶 `--admin`／`--auto`／`--delete-branch`、輸入驗證與失敗包裝）、`test/card-merge.test.ts` 13 項（全部成立可合併、低於 L2、卡片未 done、沒有或沒通過的 review、review 通過的是舊 head、open finding、5 種 CI 狀態、PR 已 merge／關閉／草稿、衝突／落後／被擋住／計算中／UNSTABLE、敏感路徑與查不到、一次列出所有原因、合併方式的預設與限制）、`test/card-merge-wiring.test.ts` 8 項（合併一次、最後、用剛讀的 head 與 squash、不信索引的 head、指定方式、沒有 worktree 紀錄或沒有開著的 PR、10 種不成立的情況各自拒絕且不呼叫 merge、多項原因全部列出、不允許的方式在合併之前拒絕、GitHub 失敗的透傳）、`test/card-command.test.ts` 5 項（參數、回覆內容、`--method`、拒絕時卡片原封不動、與其他步驟互斥）。先寫測試、看到紅再實作。全套 1098 項，1097 通過、0 失敗、1 略過（原 1067 項）；`lint` 通過。**全部使用假的 GitHub，沒有對真實 repo 驗證。**
+
+未驗證（待 merge、重啟 bridge 後 live 驗收；**每一步都需要使用者當下同意，包含政策改成 L2 與一次真的 merge 進公開 repo 的 main**）：真實 PR 上 `gh pr merge --squash --match-head-commit` 的行為；`mergeStateStatus`／`mergeable` 在真實 PR 上的值（`CLEAN`、`BEHIND`、`BLOCKED`…是否如預期）；`protect-main` 的 branch protection 與我們的條件是否一致（例如 `strict` 要求同步 main）；合併之後既有輪詢偵測 merge、記 `merged`（squash 的方式推斷）並清理 worktree；各拒絕條件在真實環境的表現（政策 L1、review 的 head 與 PR 不一致、CI 紅、敏感路徑）；`card merge` 的 token 權限是否足夠（需要 Pull requests 寫入）。
+
+限制：只有手動指令；`card loop` 通過後不會自動 merge；只支援本機與 github.com；bridge 的檢查不等於人看過程式碼，review 是另一個 Agent 做的、獨立的只有 session；GitHub 的 branch protection 仍是最後一道防線；驗收的 merge 會直接進公開 repo 的 main。
+
+下一步：merge 本 PR、重啟 bridge；使用者把政策改成 L2；用一個無害的測試 PR 驗收（先驗各拒絕條件、最後驗一次真的 merge）；驗完把政策改回 L1。

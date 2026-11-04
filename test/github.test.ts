@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   GithubError,
+  allowedMergeMethods,
+  mergePullRequest,
+  pullRequestMergeState,
   branchFacts,
   createPullRequest,
   findPullRequests,
@@ -522,5 +525,81 @@ test("pullRequestDiff validates the PR number and wraps gh failures", async () =
   await assert.rejects(
     pullRequestDiff(fakeExec(() => failure("HTTP 404")), repo, 42),
     (error: unknown) => error instanceof GithubError && error.code === "gh_failed",
+  );
+});
+
+const MERGE_HEAD = "0123456789abcdef0123456789abcdef01234567";
+
+test("pullRequestMergeState reads the state, the head, the draft flag and GitHub's mergeability of one PR", async () => {
+  const exec = fakeExec(() =>
+    JSON.stringify({
+      state: "OPEN",
+      headRefOid: MERGE_HEAD,
+      isDraft: false,
+      mergeable: "MERGEABLE",
+      mergeStateStatus: "CLEAN",
+      baseRefName: "main",
+    }),
+  );
+  assert.deepEqual(await pullRequestMergeState(exec, repo, 42), {
+    state: "OPEN",
+    headSha: MERGE_HEAD,
+    isDraft: false,
+    mergeable: "MERGEABLE",
+    mergeStateStatus: "CLEAN",
+    base: "main",
+  });
+  const call = exec.calls[0];
+  assert.deepEqual(call.args.slice(0, 5), ["pr", "view", "42", "--repo", "jon888465/Herdr_Discord_Bridge"]);
+  assert.ok(call.args.some((arg) => arg.includes("mergeStateStatus")));
+});
+
+test("pullRequestMergeState refuses unexpected output and validates the number", async () => {
+  await assert.rejects(
+    pullRequestMergeState(fakeExec(() => JSON.stringify({ state: "WEIRD" })), repo, 42),
+    (error: unknown) => error instanceof GithubError && error.code === "unexpected",
+  );
+  await assert.rejects(pullRequestMergeState(fakeExec(() => "{}"), repo, 0), GithubError);
+  await assert.rejects(
+    pullRequestMergeState(fakeExec(() => failure("HTTP 404")), repo, 42),
+    (error: unknown) => error instanceof GithubError && error.code === "gh_failed",
+  );
+});
+
+test("allowedMergeMethods lists the merge methods the repository permits", async () => {
+  const exec = fakeExec(() =>
+    JSON.stringify({ mergeCommitAllowed: true, squashMergeAllowed: true, rebaseMergeAllowed: false }),
+  );
+  assert.deepEqual(await allowedMergeMethods(exec, repo), ["merge", "squash"]);
+  assert.deepEqual(exec.calls[0].args.slice(0, 3), ["repo", "view", "jon888465/Herdr_Discord_Bridge"]);
+  await assert.rejects(
+    allowedMergeMethods(fakeExec(() => JSON.stringify({ squashMergeAllowed: "yes" })), repo),
+    GithubError,
+  );
+});
+
+test("mergePullRequest merges only the reviewed head, with the chosen method, and never forces, auto-merges or deletes the branch", async () => {
+  for (const [method, flag] of [["squash", "--squash"], ["merge", "--merge"], ["rebase", "--rebase"]] as const) {
+    const exec = fakeExec(() => "");
+    await mergePullRequest(exec, repo, { number: 42, method, headSha: MERGE_HEAD });
+    const args = exec.calls[0].args;
+    assert.deepEqual(args.slice(0, 5), ["pr", "merge", "42", "--repo", "jon888465/Herdr_Discord_Bridge"], method);
+    assert.ok(args.includes(flag), method);
+    const at = args.indexOf("--match-head-commit");
+    assert.ok(at > 0 && args[at + 1] === MERGE_HEAD, method);
+    for (const forbidden of ["--admin", "--auto", "--delete-branch", "-d"])
+      assert.equal(args.includes(forbidden), false, `${method} ${forbidden}`);
+  }
+});
+
+test("mergePullRequest validates its input and wraps gh failures", async () => {
+  const exec = fakeExec(() => "");
+  await assert.rejects(mergePullRequest(exec, repo, { number: 0, method: "squash", headSha: MERGE_HEAD }), GithubError);
+  await assert.rejects(mergePullRequest(exec, repo, { number: 42, method: "squash", headSha: "abc" }), /sha/);
+  await assert.rejects(mergePullRequest(exec, repo, { number: 42, method: "force" as never, headSha: MERGE_HEAD }), /method/);
+  assert.equal(exec.calls.length, 0);
+  await assert.rejects(
+    mergePullRequest(fakeExec(() => failure("Head branch was modified")), repo, { number: 42, method: "squash", headSha: MERGE_HEAD }),
+    (error: unknown) => error instanceof GithubError && error.code === "gh_failed" && /modified/.test(error.message),
   );
 });
