@@ -2926,7 +2926,7 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 ## ISSUE-082：`card loop`（review 的自動 loop）
 
-更新日期：2026-11-04。狀態：已修正、待驗收（這是新功能；原始碼與自動化測試完成，**第一次由 bridge 自己 push，尚未 live 驗收，執行中的 bridge 尚未載入**）。
+更新日期：2026-11-04。狀態：已驗收（核心路徑，2026-11-04：bridge 自己 push 的完整自動一圈、`card loop stop`、從 fix 接著跑、修正動到敏感路徑時不 push，都在真實 claude 與 codex 上走完；review 到第 3 輪被拒絕、兩次 inconclusive 停下、失敗的修正、push 被拒、Discord thread 未實機驗證，見「驗收證據」）。
 
 來源：使用者 2026-11-04 決定做自動 loop，並回答 Agent 的設計提案：「照建議，1.自動 2.對 3.只做手動 card loop」（push 自動；同一個 head 的 review 最多試 2 次；只做手動觸發）。
 
@@ -2936,7 +2936,15 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 測試（2026-11-04，本機 macOS、Node v26.12.0，非 CI）：新增 `test/card-loop.test.ts` 17 項（一次 pass、fix 與 push 後再 review、每一步都回報、到第 3 輪停止且不開第 4 輪、輪次上限可設且用完的卡片不再 review、inconclusive 重試一次後停止、重試額度以 head 計、已經 inconclusive 算第一次、已通過不用跑、已有 changes_requested 時從 fix 接著跑、push 後新 head 一定先 review、修正失敗不 push、敏感路徑不 push 並指出路徑、review／fix／push 的錯誤都停下並說明、停止要求在步驟之間生效、開始前就停止、回報失敗不中斷）與 `test/card-command.test.ts` 11 項（參數與卡片 id、一次 pass、完整的一圈與卡片更新、`--agent` 與 `--fix-agent` 的去向、到上限停下、兩次 inconclusive 停下、敏感路徑不 push、失敗的修正、步驟拒絕時停下並說明、停止與互斥、沒有在跑時 stop 的錯誤）。先寫測試、看到紅再實作。全套 1067 項，1066 通過、0 失敗、1 略過（原 1039 項）；`lint` 通過。**全部使用假的 Herdr、Agent、git 與 GitHub，沒有對真實環境驗證。**
 
-未驗證（待 merge、重啟 bridge 後 live 驗收；**每一步都需要使用者當下同意，包含 bridge 自己 push 與開測試 PR**）：真實環境完整跑一次 loop（`changes_requested` → fix → push → `pass`）；到第 3 輪停下；兩次 inconclusive 停下；修正動到敏感路徑時不 push；`card loop stop`；進度回報在 Discord thread 的樣子；loop 跑很久時 bridge 的其他指令是否受影響。
+驗收證據（2026-11-04，本機 macOS，bridge 載入 main `8c5bc9d`，claude 當作者、codex-cli 0.165.0 當 reviewer，Herdr 0.9.1；使用者「都同意，重啟並開始」：重啟、信任提示、手動 push、**bridge 自己 push 這張卡的分支到測試 PR**、啟動 Agent、開兩個測試 PR）：
+**一、完整的自動一圈（驗收卡 `REQ-20261104-loop-ok`，測試 PR #83）：** 作者 claude 做一個故意把檔案第二行寫錯的 commit（`c888b55`），**手動** `card pr` 開 PR（遠端 head `c888b55`）。之後只下一次 `card loop REQ-20261104-loop-ok --agent codex`，bridge 自己跑完：review 第 1 輪 `changes_requested`（`F1 · medium · docs/tmp-loop-ok.md:2-2`）→ `card fix`（新 claude，新 commit `c888b55 → 5754920`，F1 標 fixed）→ **bridge 自己 push**（「這個分支已有 PR #83 … 已把新的 commit push 上去（head 57549204d490）」）→ review 第 2 輪 `pass`（四條驗收條件都 ✓，F1 自動 `resolved`）→「loop 結束：… review 已通過（共 4 個步驟）。CI 的結果由 bridge 另行通知；merge 由你決定」。每一步完成都即時出現一則回報。**核對 bridge 自己的 push：** 遠端 `card/REQ-20261104-loop-ok` 是 `5754920`，舊 head `c888b55` 是它的祖先（只前進了一個 fast-forward，沒有 force）；PR #83 共 2 個 commit（`c888b55`、`5754920`），CI 兩項通過；`main` 仍是 `8c5bc9d`，完全沒動；worktree 乾淨，`w1P` 只剩作者的 pane；卡片 F1 `resolved`，`review_verdict`／`fix_applied`／`review_verdict` 三筆事件順序正確。
+**二、`card loop stop`（驗收卡 `REQ-20261104-loop-sens`，測試 PR #84，第一個 commit 只改 `SPEC.md` 並故意寫錯一行，`card pr` 時回覆有敏感路徑警告）：** 下 `card loop … --agent codex` 後 6 秒在同一個 console 下 `card loop stop REQ-20261104-loop-sens`，回「已要求停止…進行中的步驟會先做完，之後不再往下」（console 同時處理了兩個指令）；第一個步驟（review，`changes_requested`、`F1 · medium · SPEC.md:694-694`）做完後 loop 停下：「共 1 個步驟，停在 cancel。原因：使用者要求停止（在步驟之間生效）」；遠端分支沒動（`ce7d465`）。
+**三、從 fix 接著跑與敏感路徑不 push（同一張卡）：** 再下 `card loop … --agent codex`：因為最新一輪是 `changes_requested` 且有 open finding，**直接從 fix 開始**（「共 1 個步驟」）；新 claude 修正並 commit（`ce7d465 → dfddce6`，只改 `SPEC.md`，F1 標 fixed），回覆「⚠️ 這次修正動到敏感路徑：SPEC.md。請特別審查」；loop 停下：「停在 sensitive。原因：修正動到敏感路徑：SPEC.md。新 commit 留在 worktree、沒有 push，請人檢查後再 `card pr`」。**核對：遠端分支仍是 `ce7d465`（沒有 push）**，修正 commit `dfddce6` 只在 worktree，工作樹乾淨，`main` 沒動。
+收尾（使用者同意）：關閉測試 PR #83 與 #84、`git push origin --delete` 刪兩個遠端分支、`card cleanup` 兩個 worktree、刪本機分支與驗收卡、路由切回 `w1`。
+
+驗收過程中的一個觀察（不是 loop 的缺陷，未另立 issue）：第二張卡的 `card assign --worktree` 一度失敗，「herdr worktree.create: linked_worktree_source New and open worktree actions start from the repo parent workspace」——因為上一張卡的 `--worktree` 把路由切到它的 worktree workspace，Herdr 不允許從 linked worktree 再建 worktree；先 `wk use w1` 再重試即可。連續建立多張 `--worktree` 卡片時要先把路由切回原 workspace。
+
+未驗證：review 輪次到第 3 輪被拒絕；同一個 head 連續兩次 `inconclusive` 停下；失敗的一圈（沒有新 commit、回覆不合格）與 push 被拒時 loop 的表現；PR 被關閉或 merge 時 loop 停下；Discord thread 的進度回報；loop 跑很久時 bridge 其他指令的影響（本次 console 同時處理了 `card loop stop`，其他指令沒有試）；其他種類的 Agent；跨機器。
 
 與提案的偏離（已寫進需求卡）：**「CI 紅」沒有當成停止條件、loop 也不等 CI**；「使用者再下別的指令」只實作了 `card loop stop`。
 
