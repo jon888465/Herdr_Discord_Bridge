@@ -38,6 +38,17 @@ const templates: Array<[CardEvent, string]> = [
     "review reviewer 第 2 輪：changes_requested",
   ],
   [
+    {
+      ...base,
+      event: "fix_applied",
+      round: 2,
+      fixed: 3,
+      skipped: 1,
+      headSha: "abcdef1234567890abcdef1234567890abcdef12",
+    },
+    "修正 第 2 圈：3 筆標為 fixed、1 筆略過，head abcdef123456",
+  ],
+  [
     { ...base, event: "verify_result", result: "pass", passed: 120, failed: 0 },
     "驗證 pass：通過 120／失敗 0",
   ],
@@ -171,6 +182,21 @@ test("fields that do not match their pattern are rejected, naming the field", ()
     { ...base, event: "review_verdict", role: "r", verdict: "maybe", round: 1 },
     /verdict/,
     "verdict",
+  );
+  reject(
+    { ...base, event: "fix_applied", round: 0, fixed: 1, skipped: 0, headSha: "abcdef1" },
+    /round/,
+    "fix round",
+  );
+  reject(
+    { ...base, event: "fix_applied", round: 1, fixed: -1, skipped: 0, headSha: "abcdef1" },
+    /fixed/,
+    "fix count",
+  );
+  reject(
+    { ...base, event: "fix_applied", round: 1, fixed: 1, skipped: 0, headSha: "xyz" },
+    /headSha/,
+    "fix head",
   );
   reject(
     { ...base, event: "review_verdict", role: "r", verdict: "pass", round: 0 },

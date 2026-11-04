@@ -2894,3 +2894,22 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 限制：只處理 Codex 風格的折行（續行縮排兩格）；其他種類的 Agent 若折行方式不同仍會判 inconclusive。**除錯上的不便（建議後續處理，未做）：** 回覆解析失敗時，bridge 沒有保留 reviewer 的原始回覆，這次是去翻 codex 的 transcript 才看到；建議之後在 inconclusive 的原因文字附上回覆的前一小段（先遮蔽、單行、限長）。
 
 下一步：merge、重啟 bridge 後重跑；之後清理測試 PR #76。
+
+
+## ISSUE-081：`card fix`（review 的 loop 手動版）
+
+更新日期：2026-11-04。狀態：已修正、待驗收（這是新功能；原始碼與自動化測試完成，**第一次讓作者 Agent 在 review 之後修改 worktree 並 commit，尚未 live 驗收，執行中的 bridge 尚未載入**）。
+
+來源：使用者 2026-11-04 決定開始 loop，並回答 Agent 的設計提案：「照建議，先做手動版 card fix。1. 照你建議每圈開新的，作者就看最後 pane 是誰 2. 好 3. 對的，總共先從 5 改 3」。
+
+使用者可見行為：`card fix <卡片 id> [--agent <種類>]`（Discord 與 console）。把卡片 open 的 findings 交給新開 pane 的新作者修一圈：作者在卡片的 worktree 修正並建立一個 commit；被修好的 finding 標為 `fixed`、記一筆 `fix_applied`；**不 push**。回覆列出 fixed 與略過的 finding、新舊 head、改動的檔案、敏感路徑警告與下一步（`card pr` 再 `card review`）。`card review` 通過時，先前標為 `fixed` 的 finding 自動標為 `resolved`。`help` 也補了說明。細節、前提與限制見 SPEC「`card fix`」。
+
+實作範圍（2026-11-04）：`src/card-fix.ts`（能不能修、提示、回覆解析；`MAX_LOOP_ROUNDS = 3`）；`src/card-fix-flow.ts`（一圈的流程）；`src/card-fix-wiring.ts`（前提檢查與組裝，作者取自最後一個任務的 Lead）；`src/card-fix-command.ts`（回覆文字）；`src/agent-ready.ts`（從 review 流程抽出的「等 Agent 就緒」，兩者共用，行為不變）；`src/worktree-fingerprint.ts`（新增 `worktreeState`、`changedFilesBetween`，只用唯讀 git）；`src/card-events.ts`（新事件 `fix_applied`）；`src/card-command.ts`（`fix` 子指令、review 與 fix 共用的「一次只一個」保護、review 通過時 `fixed` → `resolved`）；`src/main.ts`（接線）。
+
+測試（2026-11-04，本機 macOS、Node v26.12.0，非 CI）：新增 `test/card-fix.test.ts` 15 項、`test/card-fix-flow.test.ts` 13 項、`test/card-fix-wiring.test.ts` 4 項、`test/card-fix-command.test.ts` 8 項、`test/worktree-fingerprint.test.ts` 3 項、`test/card-command.test.ts` 12 項（參數與卡片 id、沒有可修的就拒絕且不呼叫流程、交出 open findings 並標 fixed 與記事件、`--agent`、部分修正只標修好的、失敗的一圈不動卡片、沒開始的修正不動卡片、前提拒絕透傳、第 3 輪後停止、與 review 互斥、review 通過把 fixed 標為 resolved、仍要求修改時不動 fixed）與 `test/card-events.test.ts`（`fix_applied` 的格式與 3 種拒絕）。先寫測試、看到紅再實作。全套 1039 項，1038 通過、0 失敗、1 略過（原 983 項）；`lint` 通過。**全部使用假的 Herdr、假的 Agent、假的 git 與假的 GitHub，沒有對真實環境驗證。**
+
+未驗證（待 merge、重啟 bridge 後 live 驗收；每一步都需要使用者當下同意，包含 push 與開測試 PR）：真實作者 Agent 能否照提示只修列出的 findings、建立一個 commit、回出合格的 JSON；新 pane 啟動的真實 Agent 在 worktree 裡的行為；`git status` 與 `git diff` 的真實輸出；作者動到 findings 以外的檔案時（bridge 只列出、不判斷）；完整的一圈流程（`card review` → `card fix` → `card pr` → `card review` 通過）；`fixed` → `resolved` 在真實卡片上的樣子。
+
+限制：只支援本機（F9）；只處理整個 PR 的 findings；**沒有自動 loop**，每一圈都要人下指令；「每次審查最多 2 輪」沒有實作；inconclusive 的 review 也算一次，所以最多 3 次 review 的額度可能被 inconclusive 吃掉；作者的限制只靠提示與事後檢查（只修列出的 findings、一個 commit、乾淨的工作樹），不是作業系統層隔離；動到敏感路徑只警告、不阻擋；作者失敗留下未提交修改時，bridge 只回報、不清理，要人到 worktree 檢查。
+
+下一步：merge、重啟 bridge 後 live 驗收（用一個故意不符合驗收條件的測試 PR 走完整的一圈）；之後才是自動 loop、每個 commit 審一次、E13、F7、F9、merge 的實作。

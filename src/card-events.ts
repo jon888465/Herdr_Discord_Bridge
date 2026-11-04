@@ -67,6 +67,14 @@ export type CardEvent = { time: string; eventId: string } & (
       round: number;
     }
   | {
+      /** `card fix`（F5 的 loop 手動版）：某一圈修正完成，幾筆 finding 標為 fixed、幾筆略過。 */
+      event: "fix_applied";
+      round: number;
+      fixed: number;
+      skipped: number;
+      headSha: string;
+    }
+  | {
       event: "verify_result";
       result: "pass" | "fail";
       passed: number;
@@ -149,6 +157,16 @@ function render(fields: Fields): { text: string; suspicious: boolean } {
       const round = integer(fields, "round", 1, 1_000_000);
       return {
         text: `review ${role} 第 ${round} 輪：${verdict}`,
+        suspicious: false,
+      };
+    }
+    case "fix_applied": {
+      const round = integer(fields, "round", 1, 1_000_000);
+      const fixed = integer(fields, "fixed", 0, 1_000_000);
+      const skipped = integer(fields, "skipped", 0, 1_000_000);
+      const head = sha12(fields, "headSha");
+      return {
+        text: `修正 第 ${round} 圈：${fixed} 筆標為 fixed、${skipped} 筆略過，head ${head}`,
         suspicious: false,
       };
     }

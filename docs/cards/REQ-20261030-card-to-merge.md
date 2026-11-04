@@ -143,7 +143,7 @@ external: { notion: null, github: null, mantis: null }
 2. **reviewer 看到什麼 — 決定：** repo 的唯讀權限，「與調整需求」。*使用者 2026-11-04 確認以下理解：* reviewer 能讀整個 repo（唯讀、不能改），並且可以**建議**調整需求（驗收條件），但不能自己改卡片；調整由作者／Lead 或人決定。卡片內容可能含機敏資訊而 repo 是公開的，所以給 reviewer 的卡片欄位仍限標題、描述、驗收條件（同 `card assign` 的規則）。
 3. **什麼算 `pass` — 決定：** 先試逐條對驗收條件回答。diff 太大代表 Lead 規劃功能時切得太大（問題在規劃，不是 review）；若是單一 commit，就針對單一 commit 審；**最後整個需求（可多個 commit）還要做一次整體 review**。*使用者 2026-11-04 確認以下理解：* 兩層 review——每個 commit 一次、整個 PR 一次；merge 的依據是**整體 review 的 pass 綁 head sha**。diff 太大時不是 `inconclusive` 了事，而是退回 Lead 要求重新切分。
 4. **輪數與誰修 — 決定：** 先設定審 **2 輪**，之後退給 Agent；Lead Agent 若判斷需要人為判斷才退回人工，否則**像 skill goal 一樣朝目標 loop 到結束**。quota 不夠時，要能**記錄並 handoff 給別的 Agent**。
-   - **與既有驗收的衝突，已由使用者定奪（2026-11-04）：** 需求卡與追蹤清單 F4 寫「任何失敗都退回人工並附證據，不無限重試」，與「loop 到結束」衝突。使用者的決定：**loop 保留總上限，先設 5 次**（之後可依要求調整）；超過一律退回人工並附證據。*Agent 的理解（待確認）：* 兩個數字分開——**每次審查最多 2 輪**，整個「審查→修正」loop **總共最多 5 次**；一次「審查→修正」算一次。F4「不無限重試」因此維持成立。
+   - **與既有驗收的衝突，已由使用者定奪（2026-11-04）：** 需求卡與追蹤清單 F4 寫「任何失敗都退回人工並附證據，不無限重試」，與「loop 到結束」衝突。使用者的決定：**loop 保留總上限，先設 5 次**（2026-11-04 使用者再改為 **3 次**；之後可依要求調整）；超過一律退回人工並附證據。*Agent 的理解（待確認）：* 兩個數字分開——**每次審查最多 2 輪**，整個「審查→修正」loop **總共最多 5 次**；一次「審查→修正」算一次。F4「不無限重試」因此維持成立。
    - handoff（quota 不夠時把進度交給別的 Agent）是新能力，追蹤為 F7，尚無設計；至少要記錄：做到哪、剩什麼、已審過的 commit、未處理的 findings，寫在卡片的流程紀錄。
 5. **敏感路徑清單 — 決定：** 同意暫定清單（`.github/`、`AGENTS.md`、`package.json` 與 `scripts/`、政策相關檔），並**加上** `SPEC.md`、`src/policy.ts`、`src/github.ts`；「之後仍可由使用者要求調整」。*Agent 的補充：* 清單本身要放在 bridge 端（程式或使用者的政策設定），不能放在 Agent 在 worktree 裡能改的檔案；放在程式裡時，**該檔案本身也要列入敏感路徑**，否則 Agent 可以先改清單再 merge。
 6. **findings 寫在哪 — 決定：** 寫在**卡片**，卡片**多一個專門放 findings 的欄位**；**不貼成 PR 留言**（PR 是公開的）。findings 是 reviewer 發現的問題清單（檔案、位置、說明、嚴重度）。*實作時才決定的形式：* 是 frontmatter 欄位或內文段落；Agent 的建議是內文段落（例如 `## Review 發現`），因為 frontmatter 的解析器是受限子集、findings 可能很長，而且段落可以保留每一輪、每個 commit 的紀錄。需新增卡片格式（ADR-0001／0002）與 `card show` 的顯示，尚無設計。
@@ -170,3 +170,13 @@ external: { notion: null, github: null, mantis: null }
 **第一版範圍（Agent 的建議，待使用者確認）：** 3c 先做**本機**的新 pane reviewer（含關閉），但介面不綁死本機（review 材料來自 PR、reviewer 的 checkout 來自 `origin`）；遠端機器另開階段（F9），先用最小的實驗確認 Herdr 的 `--machine` 對 pane／worktree／agent 的支援，再決定。
 
 **尚待使用者確認：** (a) 第一版先做本機、遠端另開階段；(b) 每台機器上這個 repo 的 clone 在哪裡、怎麼找（每台固定路徑，還是靠 Herdr 的 worktree 來源）；(c) coding 與 review 在不同機器時，卡片的哪些欄位要記錄是哪台機器做的。
+
+
+### loop 的第一步：手動版 `card fix`（2026-11-04，使用者決定）
+
+使用者對 Agent 的設計提案回答「照建議，先做手動版 card fix」：
+1. **每圈新開 pane、新 Agent；作者「就看最後 pane 是誰」**：種類沿用卡片最後一個任務的 Lead（它的 pane 還在才行），`--agent` 可指定。
+2. **先做手動版** `card fix <id>`，驗收後再串成自動 loop。
+3. 計數：每次審查最多 2 輪、整個 loop 總上限 **3**（由 5 改為 3）。Agent 的實作理解：總上限以「整體 review 的輪次」計，最新一輪整體 review 已是第 3 輪還沒通過就退回人工；inconclusive 的那幾輪也算（保守）。「每次審查最多 2 輪」目前**沒有**實作（手動版每次 `card review` 就是一輪），留給自動 loop 時決定。
+
+實作與限制見 SPEC「`card fix`」與 ISSUE-081。
