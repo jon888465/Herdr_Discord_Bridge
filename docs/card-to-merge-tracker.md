@@ -112,7 +112,7 @@
 | G1 | CODEOWNERS：政策檔、`.github/`、`AGENTS.md` 強制人工審查（需要第二個身分才有意義） | 未開始 |
 | G2 | Agent 專用 bot 帳號或 GitHub App | 未開始、**不做（使用者 2026-11-03 選 A：L2 用現有登入）**，之後想加強時再重新評估。**不是 L2 的前提**（2026-11-03 更正：先前這裡把「L2 前必須獨立身分」寫成使用者的決定，那其實是 Agent 的建議；使用者只決定了 L1 先用現有登入）。好處：憑證範圍可縮小、稽核與撤銷、CODEOWNERS 有第二個身分時才有意義 |
 | G3 | 打開 `strict_required_status_checks_policy` | **已完成**（使用者 2026-11-03 在 GitHub 開啟；Agent 同日以 `gh api repos/jon888465/Herdr_Discord_Bridge/rulesets/26191256` 唯讀確認：`strict_required_status_checks_policy` 為 `true`，必要檢查仍是 macOS 與 Ubuntu 兩項 `Full tests`）。影響：PR 要與最新 `main` 同步、CI 重跑通過才能 merge；同時有多個 PR 時，先 merge 一個後其餘需 `Update branch` 並等 CI |
-| G4 | 紅燈 PR 被擋的實測（直接 push 被拒已測） | 未開始（ISSUE-052 剩餘） |
+| G4 | 紅燈 PR 被擋的實測（直接 push 被拒已測） | **已實測 2026-11-04**（ISSUE-083 的補驗：測試 PR #89 的 CI 兩項紅燈，GitHub 回報 `mergeStateStatus: BLOCKED`、`card merge` 拒絕並列出原因；實際嘗試合併被 GitHub 拒絕沒有試，因為 bridge 在那之前就拒絕了）。ISSUE-052 其餘剩 Dependabot（G5） |
 | G5 | 啟用 Dependabot（action 已釘 SHA） | 未開始（ISSUE-052 剩餘） |
 | G6 | 公開 repo 的不可信輸入、fork PR 的 workflow 權限 | 未開始 |
 | G7 | L2 自動 merge，先拿 herdr bridge 自己試；首次試跑建議用 L1 | **手動版 `card merge` 已實作並驗收 2026-11-04**（真實 PR #87：拒絕路徑與一次真的 squash merge 進公開 repo 的 main；合併後輪詢記 `merged` 並自動清理 worktree；**需要 `gh` token 有 Contents 寫入權限，由使用者提高**）（ISSUE-083，使用者 2026-11-04 決定先做手動版、預設 squash、驗收接受用公開 repo 的 main、政策由使用者自己改成 L2 再改回）；**未做：** `card loop` 通過後自動 merge、CI 紅作為 loop 的停止條件、每個 commit 審一次、E13、F7、F9。身分 F2 與 G3 已決定／完成 |

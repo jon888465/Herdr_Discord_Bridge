@@ -2972,7 +2972,10 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 **重要發現：L2 的 `card merge` 需要 `gh` token 有合併 PR 的權限。** 使用者 2026-11-03 選「L2 用現有登入」，但現有的 fine-grained token 一開始沒有合併權限（Contents 寫入）。這是個有用的安全網：權限不足時 bridge 的判斷即使出錯也合併不了任何東西。要讓 `card merge` 能合併，**由使用者**在 GitHub 把這個 token 對 `Herdr_Discord_Bridge` 這一個 repo 提高到 Pull requests 與 Contents 讀寫；`protect-main`（要 PR、兩個 CI、`strict`、沒有 bypass）仍然擋住直接 push 到 main，所以這個權限只能經過 PR 合併。bridge 不會自己改憑證。
 
-未驗證：政策 L2 下各拒絕條件（CI 紅、敏感路徑、PR 落後 main、草稿、PR 已關閉）在真實環境的表現（只驗到政策 L1、head 不一致、CI 進行中、branch protection 擋住、review 未通過與 open finding）；`merge` 與 `rebase` 方式；`--method` 被 repo 禁止；`card loop` 通過後不會自動 merge 的行為（本來就沒做）；Discord thread；其他專案；跨機器。
+**補驗拒絕條件（2026-11-04，政策已由使用者改回 L1；`card merge` 不論政策都會一次列出所有不成立的條件，所以在 L1 下仍看得到其他條件，也不可能真的合併）：** 驗收卡 `REQ-20261104-merge-red`，測試 PR #89（作者新增一個必敗的測試 `test/tmp-red.test.ts` 並在 `SPEC.md` 最後加一行）。`card pr` 回覆有「⚠️ 這個 PR 動到敏感路徑：SPEC.md」；CI 兩項（ubuntu、macos）都 fail，bridge 通知「❌ PR #89 的 CI 失敗」。(a) 下 `card merge`：**一次列出 5 項原因**——政策是 L1、卡片還沒有 review 結果、CI 有檢查失敗、GitHub 回報被 branch protection 擋住（`mergeStateStatus` 為 `BLOCKED`，也就是 GitHub 自己也不會讓這個紅燈 PR 合併）、動到敏感路徑 `SPEC.md`；(b) 用 `gh pr ready --undo` 轉成草稿後再下：**6 項**，多了「這個 PR 是草稿（draft）」；(c) 關閉 PR 後立刻下：**5 項**，含「這個 PR 已經關閉」（`BLOCKED` 與草稿的原因隨之消失）。PR 全程 OPEN 或 CLOSED、`main` 沒動（`8ebb221`）。這驗到：CI 紅、敏感路徑、草稿、已關閉、branch protection 擋住、沒有 review 在真實環境都被正確判斷並拒絕，且原因一次列齊；也算是紅燈 PR 被擋的一次實測（追蹤清單 G4 的『紅燈 PR 被擋』，擋住的是 GitHub 的 `BLOCKED` 與 bridge 的拒絕，不是 bridge 去嘗試合併而被 GitHub 拒絕）。
+**仍待補驗：** PR 落後 main（`BEHIND`）——測試 PR #89 已重新打開並轉回 ready，等 `main` 前進（使用者 merge 下一個 PR）後再驗；`merge` 與 `rebase` 方式；`--method` 被 repo 禁止；Discord thread。
+
+未驗證（已補驗者見上）：政策 L2 下以上拒絕條件的表現（拒絕邏輯不依賴政策，只驗到 L1 與 L2 兩種下的部分）；`merge` 與 `rebase` 方式；`--method` 被 repo 禁止；`card loop` 通過後不會自動 merge 的行為（本來就沒做）；Discord thread；其他專案；跨機器。
 
 仍未驗證（原先列的其餘項目）：（已驗到者見上）：真實 PR 上 `gh pr merge --squash --match-head-commit` 的行為；`mergeStateStatus`／`mergeable` 在真實 PR 上的值（`CLEAN`、`BEHIND`、`BLOCKED`…是否如預期）；`protect-main` 的 branch protection 與我們的條件是否一致（例如 `strict` 要求同步 main）；合併之後既有輪詢偵測 merge、記 `merged`（squash 的方式推斷）並清理 worktree；各拒絕條件在真實環境的表現（政策 L1、review 的 head 與 PR 不一致、CI 紅、敏感路徑）；`card merge` 的 token 權限是否足夠（需要 Pull requests 寫入）。
 
