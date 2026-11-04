@@ -2743,3 +2743,22 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 限制：沒有呼叫者；findings 摘要是 reviewer 的文字，是決定 9／11 的有界例外，機敏檢查是黑名單式、不完整；reviewer 輸出是不可信資料，之後回傳給作者 Agent 時必須放進資料區（本階段不處理）；人手動改壞格式的行會被解析略過。
 
 下一步：使用者驗收後改為「已驗收」；階段 3（reviewer 派工與回覆解析，F5）。
+
+
+## ISSUE-074：reviewer 的提示組裝與回覆解析（F5 階段 3a）
+
+更新日期：2026-11-04。狀態：已修正、待驗收（這是新功能的第一步，不是缺陷；原始碼與自動化測試完成，**沒有任何呼叫者**，所以無法 live 驗收，要等 3d 的 `card review` 一起驗）。
+
+來源：使用者 2026-11-04 決定開始 review 閘的階段 3，第一版：手動觸發、reviewer 由使用者指定 pane、diff 上限 20 個檔案與約 60 KB、唯讀靠提示約束加工作樹指紋檢查（不是作業系統層隔離）。3a 是其中的純函式部分。
+
+行為（尚無使用者可見的入口）：`src/card-review.ts` 提供 `acceptanceCriteria`（讀 `## 驗收條件` 的條列）、`buildReviewPrompt`（組提示並檢查前提）、`parseReviewReply`（驗證並解析回覆）、`inconclusiveBatch`。細節見 SPEC「Review 提示與回覆解析」。
+
+實作重點（2026-11-04）：提示只含卡片的標題、描述、驗收條件（先遮蔽再截斷）與 PR 的檔案清單、diff，放進帶分隔線的資料區、分隔字樣被改寫；沒有驗收條件、條件超過 20 條、檔案超過 20 個、diff 超過 60,000 字元或為空、路徑含無法記錄的字元，都拒絕並說明該怎麼做。回覆必須是單一 JSON 物件，欄位逐一驗證（沿用 `card-findings` 的驗證），任何不合格就整份拒絕；`pass` 有證據才成立，否則降級並回報原因。
+
+測試（2026-11-04，本機 macOS、Node v26.12.0，非 CI）：新增 `test/card-review.test.ts` 18 項（條列讀取與機敏條目、提示內容與資料區、不含決議與專案段落、唯讀與資料聲明、分隔字樣無法提早結束資料區、卡片文字遮蔽、8 種拒絕前提、乾淨 pass、json 區塊、finding 帶入、17 種不合格回覆、pass 降級四種、只有 low 的 pass、changes_requested 無 finding、inconclusive、機敏摘要與備註、`inconclusiveBatch`）。先以「未實作」的桩跑，18 項全紅；實作後全綠。全套 905 項，904 通過、0 失敗、1 略過（原 887 項）；`lint` 通過。**沒有**對真實 reviewer 的測試。
+
+未驗證／尚未做：reviewer 真的能照提示回出合格的 JSON（要等 3d）；工作樹指紋檢查（唯讀的另一半，3c／3d）；3b 取得 PR diff 與檔案清單；3c 選 reviewer（獨立 session 檢查）；3d `card review` 指令與寫入卡片的 findings 與 `review_verdict`。**Agent 的取捨（使用者未明說，可調整）：** finding 的路徑必須在 PR 動到的檔案內，否則整份拒絕（防止憑空捏造路徑，但 reviewer 無法引用未改動的相關檔案）。
+
+限制：reviewer 輸出是不可信資料，分隔線、遮蔽與嚴格解析只是降低風險；各條件的判定結果目前只回傳給呼叫者、沒有地方存進卡片（卡片只有 findings 與 `review_verdict`）；路徑含英數與 `._/@+-` 以外字元的 PR 目前無法 review。
+
+下一步：3b（取得 PR 的 diff 與檔案清單，唯讀 `gh`，含大小上限）。
