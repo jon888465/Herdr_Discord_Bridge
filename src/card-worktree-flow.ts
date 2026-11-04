@@ -6,6 +6,7 @@
 // 路由最後才切，Agent 沒起來就不會把對話導到一個沒有 Agent 的 workspace。
 // 清理：永不強制；髒檢出保留；成功才改索引與授權。
 
+import { createHash } from "node:crypto";
 import {
   branchForCard,
   checkWorktreeSupport,
@@ -116,7 +117,7 @@ export async function prepareCardWorktree(
     agent = await deps.startAgent({
       paneId: created.rootPaneId,
       kind,
-      name: `card-${cardId.toLowerCase()}`.slice(0, 40),
+      name: agentNameForCard(cardId),
     });
   } catch (error) {
     throw new WorktreePartialError(
@@ -136,6 +137,24 @@ export async function prepareCardWorktree(
     agent,
     agentReady: agent.agent_status === "idle",
   };
+}
+
+/** Herdr 的 agent.start 只接受 1–32 字元的名稱（ISSUE-072）。 */
+const AGENT_NAME_MAX = 32;
+
+/**
+ * 由卡片 id 組出 worktree 裡 Agent 的名稱。夠短就維持可讀的 `card-<id>`；超過 32 字元時截成
+ * 27 字元（去掉結尾的 `-`／`_`）加 `-` 加 4 碼雜湊（取自完整的卡片 id），所以前綴相同的長 id 也不會撞名，
+ * 同一個 id 永遠得到同一個名稱。卡片 id 只含 `[a-z0-9-]`（與大寫的 REQ／TKT），轉小寫後符合 Herdr 的字元規則。
+ */
+export function agentNameForCard(cardId: string): string {
+  const name = `card-${cardId.toLowerCase()}`;
+  if (name.length <= AGENT_NAME_MAX) return name;
+  const hash = createHash("sha256").update(cardId).digest("hex").slice(0, 4);
+  const prefix = name
+    .slice(0, AGENT_NAME_MAX - 5)
+    .replace(/[-_]+$/, "");
+  return `${prefix}-${hash}`;
 }
 
 export interface CleanupDeps {

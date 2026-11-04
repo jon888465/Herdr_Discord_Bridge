@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { HerdrError } from "../src/herdr.js";
 import {
   WorktreePartialError,
+  agentNameForCard,
   cleanupCardWorktree,
   prepareCardWorktree,
   type CleanupDeps,
@@ -322,4 +323,63 @@ test("a started Agent that is blocked is reported as not ready, but the route st
   assert.equal(result.agent.agent_status, "blocked");
   assert.ok(log.includes("switch:w9:w9:p1"));
   assert.ok(log.includes("record"));
+});
+
+// Herdr 的 agent.start 只接受 1–32 字元、小寫字母開頭、只含小寫字母、數字、`-`、`_`（ISSUE-072）。
+const HERDR_AGENT_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
+
+test("a short card id keeps the readable name card-<id> unchanged (ISSUE-072)", () => {
+  assert.equal(agentNameForCard("REQ-20261103-one"), "card-req-20261103-one");
+  assert.equal(
+    agentNameForCard("REQ-20261103-agy-cancel"),
+    "card-req-20261103-agy-cancel",
+  );
+});
+
+test("a name that is exactly 32 characters is not shortened (ISSUE-072)", () => {
+  const id = "REQ-20261103-abcdefghijklmn"; // card-req-20261103-abcdefghijklmn = 32
+  const name = agentNameForCard(id);
+  assert.equal(name.length, 32);
+  assert.equal(name, `card-${id.toLowerCase()}`);
+});
+
+test("a long card id is shortened to 32 characters with a 4-character hash and stays valid for Herdr (ISSUE-072)", () => {
+  const name = agentNameForCard("REQ-20261104-sensitive-accept");
+  assert.equal(name.length, 32);
+  assert.match(name, HERDR_AGENT_NAME);
+  assert.match(name, /^card-req-20261104-sensitiv[a-z0-9-]*-[0-9a-f]{4}$/);
+});
+
+test("the longest possible card id still produces a valid name (ISSUE-072)", () => {
+  const id = `REQ-20261104-${"a".repeat(41)}`;
+  const name = agentNameForCard(id);
+  assert.ok(name.length <= 32, name);
+  assert.match(name, HERDR_AGENT_NAME);
+});
+
+test("two long ids sharing the same prefix get different names, and the same id always gets the same name (ISSUE-072)", () => {
+  const a = agentNameForCard("REQ-20261104-sensitive-accept-one");
+  const b = agentNameForCard("REQ-20261104-sensitive-accept-two");
+  assert.notEqual(a, b);
+  assert.equal(a, agentNameForCard("REQ-20261104-sensitive-accept-one"));
+});
+
+test("the prefix never ends with a dash right before the hash (ISSUE-072)", () => {
+  // card-req-20261104-abcd-efg- is 27 characters and ends with a dash.
+  const dashed = agentNameForCard("REQ-20261104-abcd-efg-hijklmnop");
+  assert.doesNotMatch(dashed, /--/);
+  assert.match(dashed, HERDR_AGENT_NAME);
+});
+
+test("prepare starts the Agent with a Herdr-valid name even for a long card id (ISSUE-072)", async () => {
+  const names: string[] = [];
+  const { deps } = setup({
+    startAgent: async (input) => {
+      names.push(input.name);
+      return started;
+    },
+  });
+  await prepareCardWorktree(deps, "REQ-20261104-sensitive-accept");
+  assert.equal(names.length, 1);
+  assert.match(names[0], HERDR_AGENT_NAME);
 });
