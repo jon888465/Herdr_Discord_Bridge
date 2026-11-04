@@ -19,6 +19,7 @@ import type { CleanupResult, PreparedWorktree } from "./card-worktree-flow.js";
 import type { PrOutcome } from "./card-pr-flow.js";
 import { parseFindings, summarizeFindings } from "./card-findings.js";
 import { checkFixable, type OpenFinding } from "./card-fix.js";
+import { runLoop, type LoopVerdict } from "./card-loop.js";
 import type { FixFlowResult } from "./card-fix-flow.js";
 import { formatFixReply } from "./card-fix-command.js";
 import {
@@ -87,6 +88,8 @@ export interface CardCommandDeps {
     card: Card,
     options: { agent?: string; round: number; findings: OpenFinding[] },
   ) => Promise<FixFlowResult>;
+  /** 長時間指令（`card loop`）的進度回報：每一步完成就送一則；失敗不影響指令。沒有提供就不回報。 */
+  notify?: (text: string) => Promise<void>;
   /** `card pr`：push 卡片分支並開 PR（或更新已開著的 PR）；不符合前提要丟出說明原因的錯誤。 */
   openPullRequest: (card: Card) => Promise<PrOutcome>;
   /** 專案政策（唯讀）：`<config dir>/policy.yml` 的載入結果。 */
@@ -98,7 +101,7 @@ export interface CardCommandDeps {
 }
 
 const USAGE =
-  "usage: card list [status] | card show <id> | card import [--slug <名稱>] [<本機路徑，僅 console>]（Discord 請附上 .md 檔） | card assign <id> [--coding] [--worktree] | card cleanup <id> | card policy [專案] | card pr <id> | card review <id> [--agent <種類>] | card fix <id> [--agent <種類>] | card recreate <id>（從任務紀錄重建被刪除的卡片）";
+  "usage: card list [status] | card show <id> | card import [--slug <名稱>] [<本機路徑，僅 console>]（Discord 請附上 .md 檔） | card assign <id> [--coding] [--worktree] | card cleanup <id> | card policy [專案] | card pr <id> | card review <id> [--agent <種類>] | card fix <id> [--agent <種類>] | card loop <id> [--agent <種類>] [--fix-agent <種類>] | card loop stop <id> | card recreate <id>（從任務紀錄重建被刪除的卡片）";
 const MAX_LIST_LINES = 30;
 const MAX_LIST_ERRORS = 5;
 const TITLE_CHARS = 50;
@@ -439,6 +442,14 @@ async function pullRequestForCard(
   if (args.length !== 1) throw new Error("usage: card pr <id>");
   const id = args[0];
   if (!isCardId(id)) throw new Error(`${id} 不是合法的卡片 id`);
+  return (await pushStep(id, deps)).text;
+}
+
+/** push 並開 PR（或把新 commit 推到既有的 PR）：`card pr` 與 `card loop` 共用。 */
+async function pushStep(
+  id: string,
+  deps: CardCommandDeps,
+): Promise<{ text: string; outcome: PrOutcome }> {
   const store = openDirectory(deps);
   const read = store?.read(id);
   if (!store || !read || (!read.ok && read.code === "not_found"))
@@ -492,7 +503,7 @@ async function pullRequestForCard(
       `⚠️ 這個 PR 動到敏感路徑：${outcome.sensitivePaths.join("、")}。目前 merge 本來就由你決定；將來即使政策是 L2，這類 PR 也一律由人 merge，請特別審查。`,
     );
   for (const warning of warnings) lines.push(`⚠️ 卡片更新失敗：${warning}`);
-  return lines.join("\n");
+  return { text: lines.join("\n"), outcome };
 }
 
 /** 同一張卡同時只能有一個 review 在跑（reviewer 會開新 pane，重複執行會開出多個）。 */
@@ -530,6 +541,24 @@ async function reviewCard(
   if (reviewing.has(id)) throw new Error(`卡片 ${id} 正在 review 或修正中`);
   reviewing.add(id);
   try {
+    return (await reviewStep(id, agent, deps)).text;
+  } finally {
+    reviewing.delete(id);
+  }
+}
+
+/** 一次 review（不含「同一張卡一次只一個」的保護，由呼叫端負責）：`card review` 與 `card loop` 共用。 */
+async function reviewStep(
+  id: string,
+  agent: string | undefined,
+  deps: CardCommandDeps,
+): Promise<{ text: string; verdict: LoopVerdict }> {
+  const store = openDirectory(deps);
+  const read = store?.read(id);
+  if (!store || !read || (!read.ok && read.code === "not_found"))
+    throw new Error(`找不到卡片 ${id}`);
+  if (!read.ok) throw new Error(read.error);
+  {
     const round = nextReviewRound(read.card.body);
     const run = await deps.reviewPullRequest(read.card, {
       ...(agent !== undefined ? { agent } : {}),
@@ -573,15 +602,16 @@ async function reviewCard(
         ? { ids: recorded.ids, omitted: recorded.omitted }
         : undefined,
     );
-    return [
-      text,
-      ...(resolved.length > 0
-        ? [`先前標為 fixed 的 finding 已確認：已標為 resolved：${resolved.join("、")}`]
-        : []),
-      ...warnings.map((warning) => `⚠️ 卡片更新失敗：${warning}`),
-    ].join("\n");
-  } finally {
-    reviewing.delete(id);
+    return {
+      text: [
+        text,
+        ...(resolved.length > 0
+          ? [`先前標為 fixed 的 finding 已確認：已標為 resolved：${resolved.join("、")}`]
+          : []),
+        ...warnings.map((warning) => `⚠️ 卡片更新失敗：${warning}`),
+      ].join("\n"),
+      verdict: run.result.batch.verdict,
+    };
   }
 }
 
@@ -615,6 +645,29 @@ async function fixCardCommand(
   if (reviewing.has(id)) throw new Error(`卡片 ${id} 正在 review 或修正中`);
   reviewing.add(id);
   try {
+    return (await fixStep(id, agent, deps)).text;
+  } finally {
+    reviewing.delete(id);
+  }
+}
+
+/** 一圈修正（不含「同一張卡一次只一個」的保護，由呼叫端負責）：`card fix` 與 `card loop` 共用。 */
+async function fixStep(
+  id: string,
+  agent: string | undefined,
+  deps: CardCommandDeps,
+): Promise<
+  | { kind: "fixed"; text: string; sensitivePaths: string[] }
+  | { kind: "failed"; text: string }
+> {
+  const store = openDirectory(deps);
+  const read = store?.read(id);
+  if (!store || !read || (!read.ok && read.code === "not_found"))
+    throw new Error(`找不到卡片 ${id}`);
+  if (!read.ok) throw new Error(read.error);
+  const check = checkFixable(read.card.body);
+  if (!check.ok) throw new Error(check.error);
+  {
     const result = await deps.fixCard(read.card, {
       ...(agent !== undefined ? { agent } : {}),
       round: check.reviewRound,
@@ -626,7 +679,10 @@ async function fixCardCommand(
       );
     const outcome = result.outcome;
     if (outcome.kind === "failed")
-      return formatFixReply(id, check.reviewRound, result, undefined);
+      return {
+        kind: "failed",
+        text: formatFixReply(id, check.reviewRound, result, undefined),
+      };
 
     const warnings: string[] = [];
     const today = deps.now().slice(0, 10);
@@ -652,11 +708,103 @@ async function fixCardCommand(
       result,
       marked.length > 0 ? marked : undefined,
     );
-    return [text, ...warnings.map((warning) => `⚠️ 卡片更新失敗：${warning}`)].join(
-      "\n",
+    return {
+      kind: "fixed",
+      text: [text, ...warnings.map((warning) => `⚠️ 卡片更新失敗：${warning}`)].join(
+        "\n",
+      ),
+      sensitivePaths: outcome.sensitivePaths,
+    };
+  }
+}
+
+/** 正在跑的 `card loop` 的停止要求（`card loop stop <id>`）；只在步驟之間生效。 */
+const loopStops = new Set<string>();
+
+/**
+ * `card loop <id> [--agent <種類>] [--fix-agent <種類>]`（F5-loop）：review → fix → push → review …，
+ * 直到 `pass`，或遇到任何需要人的情況就停下來退回人工（細節見 `card-loop.ts`）。**第一次由 bridge 自己 push**：
+ * 只 push 這張卡自己的 `card/<id>` 分支到既有的 PR（沿用 `card pr`），不碰 main、不 merge；修正動到敏感路徑時不 push。
+ * `--agent` 是 reviewer 的種類、`--fix-agent` 是作者的種類（預設沿用最後一個作者）。每一步完成就回報一則。
+ * `card loop stop <id>` 要求停止，在步驟之間生效。
+ */
+async function loopCardCommand(
+  args: string[],
+  deps: CardCommandDeps,
+): Promise<string> {
+  const usage =
+    "usage: card loop <id> [--agent <種類>] [--fix-agent <種類>] | card loop stop <id>";
+  if (args[0] === "stop") {
+    if (args.length !== 2) throw new Error(usage);
+    const target = args[1];
+    if (!isCardId(target)) throw new Error(`${target} 不是合法的卡片 id`);
+    if (!reviewing.has(target))
+      throw new Error(`卡片 ${target} 沒有在跑的 review、修正或 loop（沒有在跑）`);
+    loopStops.add(target);
+    return `已要求停止 ${target} 的 loop：進行中的步驟會先做完，之後不再往下。`;
+  }
+  const [id, ...flags] = args;
+  if (!id) throw new Error(usage);
+  if (!isCardId(id)) throw new Error(`${id} 不是合法的卡片 id`);
+  let agent: string | undefined;
+  let fixAgent: string | undefined;
+  for (let i = 0; i < flags.length; i++) {
+    const flag = flags[i];
+    const value = flags[i + 1];
+    if (flag === "--agent" && agent === undefined) agent = value;
+    else if (flag === "--fix-agent" && fixAgent === undefined) fixAgent = value;
+    else throw new Error(usage);
+    if (value === undefined || value.startsWith("-")) throw new Error(usage);
+    i++;
+  }
+  const store = openDirectory(deps);
+  const read = store?.read(id);
+  if (!store || !read || (!read.ok && read.code === "not_found"))
+    throw new Error(`找不到卡片 ${id}`);
+  if (!read.ok) throw new Error(read.error);
+  if (reviewing.has(id)) throw new Error(`卡片 ${id} 正在 review 或修正中`);
+  reviewing.add(id);
+  loopStops.delete(id);
+  try {
+    const result = await runLoop(
+      {
+        view: () => {
+          const current = store.read(id);
+          if (!current.ok) throw new Error(current.error);
+          const whole = parseFindings(current.card.body).filter(
+            (batch) => batch.scope === "whole",
+          );
+          const latest = whole.length
+            ? whole.reduce((a, b) => (b.round > a.round ? b : a))
+            : undefined;
+          return {
+            latestRound: latest?.round ?? 0,
+            ...(latest ? { latestVerdict: latest.verdict } : {}),
+            openFindings: summarizeFindings(current.card.body, 0).counts.open,
+          };
+        },
+        review: () => reviewStep(id, agent, deps),
+        fix: () => fixStep(id, fixAgent, deps),
+        push: async () => ({ text: (await pushStep(id, deps)).text }),
+        stopRequested: () => loopStops.has(id),
+        notify: async (text) => {
+          await deps.notify?.(text);
+        },
+      },
     );
+    if (result.status === "passed")
+      return [
+        `loop 結束：${id} 的 review 已通過（共 ${result.steps} 個步驟）。`,
+        "CI 的結果由 bridge 另行通知；merge 由你決定（bridge 不會自動 merge）。",
+      ].join("\n");
+    return [
+      `loop 停下來了：${id}（共 ${result.steps} 個步驟，停在 ${result.step}）。`,
+      `原因：${result.reason}`,
+      `卡片的狀態維持在這一步之後：可用 \`card show ${id}\` 查看 Review 發現與流程紀錄。`,
+    ].join("\n");
   } finally {
     reviewing.delete(id);
+    loopStops.delete(id);
   }
 }
 
@@ -902,6 +1050,9 @@ export async function runCardCommand(
       break;
     case "fix":
       text = await fixCardCommand(rest, deps);
+      break;
+    case "loop":
+      text = await loopCardCommand(rest, deps);
       break;
     case "policy":
       text = showPolicy(rest, deps);

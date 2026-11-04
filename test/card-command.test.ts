@@ -1721,3 +1721,190 @@ test("a review that still asks for changes leaves the fixed findings as they are
   const read = store.read("REQ-20261102-work");
   assert.ok(read.ok && read.card.body.includes("- F1 | high | fixed |"));
 });
+
+// ---- card loop（F5-loop：review → fix → push → review 的自動版）----
+
+type LoopPlan = "pass" | "changes_requested" | "inconclusive";
+
+function loopSetup(
+  reviews: LoopPlan[],
+  options: {
+    sensitive?: string[];
+    fixFails?: boolean;
+    gate?: Promise<void>;
+  } = {},
+) {
+  const notices: string[] = [];
+  const calls: string[] = [];
+  const reviewAgents: Array<string | undefined> = [];
+  const fixAgents: Array<string | undefined> = [];
+  const plans = [...reviews];
+  const s = setup({
+    notify: async (text) => {
+      notices.push(text);
+    },
+    reviewPullRequest: async (_card, opts) => {
+      calls.push("review");
+      reviewAgents.push(opts.agent);
+      if (options.gate && calls.filter((c) => c === "review").length === 1) await options.gate;
+      const verdict = plans.shift() ?? "pass";
+      const base = reviewOk({}, opts.round);
+      return {
+        ...base,
+        result: {
+          ...base.result,
+          batch: {
+            ...base.result.batch,
+            verdict,
+            findings:
+              verdict === "changes_requested"
+                ? [{ severity: "high" as const, path: "src/export.ts", summary: `問題 ${opts.round}` }]
+                : [],
+          },
+          criteria: [],
+        },
+      };
+    },
+    fixCard: async (_card, opts) => {
+      calls.push("fix");
+      fixAgents.push(opts.agent);
+      if (options.fixFails)
+        return {
+          ok: true as const,
+          fixerKind: "claude",
+          closed: true,
+          outcome: { kind: "failed" as const, reason: "沒有新的 commit", skipped: [] },
+        };
+      return {
+        ok: true as const,
+        fixerKind: "claude",
+        closed: true,
+        outcome: {
+          kind: "fixed" as const,
+          fixed: opts.findings.map((f) => f.id),
+          skipped: [],
+          headBefore: FIX_A,
+          headAfter: FIX_B,
+          files: ["src/export.ts"],
+          sensitivePaths: options.sensitive ?? [],
+        },
+      };
+    },
+    openPullRequest: async () => {
+      calls.push("push");
+      return { ...prOutcome, created: false, base: "" };
+    },
+  });
+  s.store.create(assignable("REQ-20261102-work", { status: "done" }));
+  return { ...s, notices, calls, reviewAgents, fixAgents };
+}
+
+test("card loop validates its arguments, the card id and the card", async () => {
+  const { run } = loopSetup([]);
+  await assert.rejects(run("loop"), /usage/);
+  await assert.rejects(run("loop", "../x"), /不是合法的卡片 id/);
+  await assert.rejects(run("loop", "REQ-20261102-work", "--agent"), /usage/);
+  await assert.rejects(run("loop", "REQ-20261102-work", "--fix-agent"), /usage/);
+  await assert.rejects(run("loop", "REQ-20261102-work", "--bogus"), /usage/);
+  await assert.rejects(run("loop", "REQ-20261102-work", "extra"), /usage/);
+  await assert.rejects(run("loop", "stop"), /usage/);
+  await assert.rejects(run("loop", "REQ-20261102-missing"), /找不到卡片/);
+});
+
+test("a first review that passes ends the loop with a summary, and nothing is fixed or pushed", async () => {
+  const { run, calls, notices } = loopSetup(["pass"]);
+  const reply = await run("loop", "REQ-20261102-work");
+  assert.deepEqual(calls, ["review"]);
+  assert.match(reply, /通過/);
+  assert.match(reply, /merge 由你決定/);
+  assert.equal(notices.length, 1);
+  assert.match(notices[0], /review 完成/);
+});
+
+test("changes requested is fixed, pushed to the existing PR and reviewed again, with every step reported and the card updated", async () => {
+  const { store, run, calls, notices } = loopSetup(["changes_requested", "pass"]);
+  const reply = await run("loop", "REQ-20261102-work");
+  assert.deepEqual(calls, ["review", "fix", "push", "review"]);
+  assert.match(reply, /通過/);
+  assert.equal(notices.length, 4);
+  assert.match(notices[0], /changes_requested/);
+  assert.match(notices[1], /修正完成/);
+  assert.match(notices[2], /已把新的 commit push 上去/);
+  assert.match(notices[3], /通過|pass/);
+  const read = store.read("REQ-20261102-work");
+  assert.ok(read.ok && read.card.body.includes("- F1 | high | resolved |"));
+  const log = store.readLog("REQ-20261102-work");
+  assert.deepEqual(log.ok && log.entries.map((e) => e.event), ["review_verdict", "fix_applied", "review_verdict"]);
+});
+
+test("--agent goes to every review and --fix-agent to every fix", async () => {
+  const { run, reviewAgents, fixAgents } = loopSetup(["changes_requested", "pass"]);
+  await run("loop", "REQ-20261102-work", "--agent", "codex", "--fix-agent", "claude");
+  assert.deepEqual(reviewAgents, ["codex", "codex"]);
+  assert.deepEqual(fixAgents, ["claude"]);
+});
+
+test("the loop stops at the review limit and hands the card back, saying so in the reply", async () => {
+  const { run, calls } = loopSetup(["changes_requested", "changes_requested", "changes_requested"]);
+  const reply = await run("loop", "REQ-20261102-work");
+  assert.deepEqual(calls, ["review", "fix", "push", "review", "fix", "push", "review"]);
+  assert.match(reply, /退回人工|停下/);
+  assert.match(reply, /總上限 3/);
+});
+
+test("two inconclusive reviews of the same head stop the loop", async () => {
+  const { run, calls } = loopSetup(["inconclusive", "inconclusive"]);
+  const reply = await run("loop", "REQ-20261102-work");
+  assert.deepEqual(calls, ["review", "review"]);
+  assert.match(reply, /inconclusive/);
+});
+
+test("a fix that touches sensitive paths is never pushed, and the reply names them", async () => {
+  const { run, calls } = loopSetup(["changes_requested"], { sensitive: ["SPEC.md"] });
+  const reply = await run("loop", "REQ-20261102-work");
+  assert.deepEqual(calls, ["review", "fix"]);
+  assert.match(reply, /敏感路徑.*SPEC\.md/s);
+  assert.match(reply, /沒有 push/);
+});
+
+test("a failed fix round stops the loop without pushing", async () => {
+  const { run, calls } = loopSetup(["changes_requested"], { fixFails: true });
+  const reply = await run("loop", "REQ-20261102-work");
+  assert.deepEqual(calls, ["review", "fix"]);
+  assert.match(reply, /沒有被採用/);
+});
+
+test("a refusal from a step stops the loop with its message", async () => {
+  const { store, run } = setup({
+    notify: async () => undefined,
+    reviewPullRequest: async () => {
+      throw new Error("卡片 REQ-20261102-work 沒有開著的 PR；請先 `card pr`");
+    },
+  });
+  store.create(assignable("REQ-20261102-work", { status: "done" }));
+  const reply = await run("loop", "REQ-20261102-work");
+  assert.match(reply, /沒有開著的 PR/);
+  assert.match(reply, /review/);
+});
+
+test("a stop request ends the loop between steps, and only one loop, review or fix runs per card", async () => {
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const { run, calls } = loopSetup(["changes_requested", "pass"], { gate });
+  const running = run("loop", "REQ-20261102-work");
+  await assert.rejects(run("loop", "REQ-20261102-work"), /正在 review 或修正/);
+  await assert.rejects(run("review", "REQ-20261102-work"), /正在 review 或修正/);
+  const stopped = await run("loop", "stop", "REQ-20261102-work");
+  assert.match(stopped, /停止/);
+  release();
+  const reply = await running;
+  assert.deepEqual(calls, ["review"]);
+  assert.match(reply, /使用者要求停止/);
+});
+
+test("stopping a card that has no loop running says so", async () => {
+  const { run } = loopSetup([]);
+  await assert.rejects(run("loop", "stop", "REQ-20261102-work"), /沒有在跑/);
+});
