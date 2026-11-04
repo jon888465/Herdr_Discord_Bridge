@@ -2781,3 +2781,20 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 限制：只支援整個 PR 的 diff；標頭含引號的路徑無法解析而被拒絕。
 
 下一步：3c（選 reviewer，含獨立 session 檢查）。
+
+
+## ISSUE-076：reviewer 新 pane 的開啟與關閉（F5 階段 3c-1）
+
+更新日期：2026-11-04。狀態：已修正、待驗收（這是新功能的第三步，不是缺陷；原始碼與自動化測試完成，**沒有任何呼叫者**，要等 3d 的 `card review` 一起 live 驗收）。
+
+來源：使用者 2026-11-04 決定 review 與 coding 的 Agent 一律新開 pane、用完關閉，第一版先做本機（跨機器是 F9）。3c 拆成兩步：3c-1（這個 issue）是 pane 的生命週期與種類選擇；3c-2 是用它們串起來的 review 流程。
+
+行為（尚無使用者可見的入口）：`src/review-pane.ts` 提供 `chooseReviewerKind`、`openReviewerPane`、`closeReviewerPane`。細節見 SPEC「reviewer 的新 pane」。
+
+測試（2026-11-04，本機 macOS、Node v26.12.0，非 CI）：新增 `test/review-pane.test.ts` 12 項（預設選與作者不同的種類、作者種類未知、指定種類照用並回報同種、不合法的種類、從作者 pane 分割且不搶焦點、不夠寬往下分割、太小就在分割之前拒絕、split 結果缺 terminal id 或在別的 workspace 就拒絕、關閉前核對 terminal 再關同一個 pane、terminal 不同不關、pane 已不在算已關閉、關閉永不丟錯誤、空的 id 不關）。先以桩跑：10 項為紅；實作後全綠。全套 931 項，930 通過、0 失敗、1 略過（原 919 項）；`lint` 通過。另外對真實 Herdr 只做了一個唯讀查詢：`herdr pane get w99:p99` 回 `pane_not_found`，與程式判斷「pane 已不在」的錯誤碼一致。
+
+未驗證（待 3d）：`pane.split` 的實際回傳是否含 `terminal_id`（程式在沒有時會拒絕，所以不會誤關，但會讓 review 無法進行）；`pane.close` 在真實 Herdr 的行為（關閉有 Agent 在跑的 pane 是否需要確認或會留下殘留）；從作者 pane 分割出來的新 pane 在作者的 workspace 裡的版面；種類偏好順序（`claude`、`codex`、`agy`）是否符合你的環境。
+
+限制：只處理本機（跨機器是 F9）；種類偏好順序是 Agent 的暫定值、寫死在程式裡，之後可改成設定；關閉失敗只回報、不重試，殘留的 pane 要使用者手動關。
+
+下一步：3c-2（review 流程：組提示、開 pane、啟動 Agent、送出、解析、工作樹指紋檢查、一定關閉），再接 3d（`card review` 指令與 live 驗收）。
