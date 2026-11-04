@@ -2785,7 +2785,7 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 ## ISSUE-076：reviewer 新 pane 的開啟與關閉（F5 階段 3c-1）
 
-更新日期：2026-11-04。狀態：已修正、待驗收（這是新功能的第三步，不是缺陷；原始碼與自動化測試完成，**沒有任何呼叫者**，要等 3d 的 `card review` 一起 live 驗收）。
+更新日期：2026-11-04。狀態：已驗收（2026-11-04，隨 ISSUE-078 的 live 驗收：`pane.split` 回傳含 `terminal_id`、新 pane 能啟動 codex、三輪 review 的 reviewer pane 都有被關閉；`pane.close` 對有 Agent 在跑的 pane 的行為由此驗到；關閉失敗的路徑與 terminal 被換掉的路徑只有單元測試）。
 
 來源：使用者 2026-11-04 決定 review 與 coding 的 Agent 一律新開 pane、用完關閉，第一版先做本機（跨機器是 F9）。3c 拆成兩步：3c-1（這個 issue）是 pane 的生命週期與種類選擇；3c-2 是用它們串起來的 review 流程。
 
@@ -2802,7 +2802,7 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 ## ISSUE-077：review 流程（F5 階段 3c-2）
 
-更新日期：2026-11-04。狀態：已修正、待驗收（這是新功能的第四步，不是缺陷；原始碼與自動化測試完成，**沒有任何呼叫者**，要等 3d 的 `card review` 一起 live 驗收）。
+更新日期：2026-11-04。狀態：已驗收（2026-11-04，隨 ISSUE-078 的 live 驗收：reviewer 啟動、等就緒、送出、解析、工作樹指紋前後一致、一定關閉 pane 都在真實環境走過，含 `blocked` 的 inconclusive 路徑與 `pass` 路徑；工作樹被改動、逾時、同種類 reviewer、讀取清單失敗等路徑只有單元測試）。
 
 來源：使用者 2026-11-04 決定開始 3c-2，並接受工作樹指紋用「`git rev-parse HEAD` 加 `git status --porcelain`」（限制：抓不到只改了被 gitignore 的檔案）。
 
@@ -2819,7 +2819,7 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 ## ISSUE-078：`card review` 指令與接線（F5 階段 3d）
 
-更新日期：2026-11-04。狀態：已修正、部分驗收（機制已在真實 Herdr 驗證；但 review 本身兩輪都是 `inconclusive`，原因見 ISSUE-079，修正後要重跑，所以**尚未驗到真實 reviewer 回出合格 JSON 與 findings**）。
+更新日期：2026-11-04。狀態：已驗收（核心路徑，2026-11-04：codex 當 reviewer 對真實 PR 回出合格 JSON，逐條驗收條件判定與 `pass` 都寫入卡片；`changes_requested` 與有 findings 的真實畫面、未達成條件的逐條顯示、工作樹被改動、逾時、Claude 當 reviewer、跨機器都未實機驗證，見「live 驗收證據」）。
 
 來源：使用者 2026-11-04 決定 review 與 coding 的 Agent 一律新開 pane、用完關閉，第一版先做本機；並在 3d 開始前回答驗收時用 **codex** 當 reviewer（「用 codex 當 reviewer」）。
 
@@ -2831,7 +2831,11 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 live 驗收證據（2026-11-04，本機 macOS，bridge 載入 main `f77c77e`，Herdr 0.9.1；使用者同意重啟、信任提示、push 與開測試 PR）：驗收卡 `REQ-20261104-rev-accept`，`--worktree` 啟動的 claude 在分支做一個 commit（`03caac3`，只新增 `docs/tmp-review-accept.md`），`card pr` 開出測試 PR #73（https://github.com/jon888465/Herdr_Discord_Bridge/pull/73，CI 兩項通過）。`card review REQ-20261104-rev-accept --agent codex` 兩次：**真實驗到的：** `pane.split` 的回傳含 `terminal_id`（不被拒絕）；分割出的新 pane 能啟動 codex、能被偵測狀態；**兩輪的 reviewer pane 都有被關閉**（核對時 `w1K` 只剩作者的 pane）；`## Review 發現` 的批次（第 1 輪、第 2 輪，整體、head `03caac306d19`、`inconclusive`）與 `review_verdict` 事件（`review-73-r1-03caac306d19`、`review-73-r2-03caac306d19`）都寫入卡片；worktree 兩輪之後都是乾淨的、HEAD 沒變；回覆含 PR 完整網址。**沒驗到的：** 兩輪都是 `inconclusive`：第 1 輪 codex 啟動時彈出「有新版本」的更新提示（`blocked`）；第 2 輪（更新提示已在 worktree 手動選「Skip until next version」處理掉，沒有執行 `brew upgrade`）codex 啟動後狀態是 `working`（初始化中），程式一看到不是 `idle` 就放棄。這是 ISSUE-079。
 
-未驗證（待 ISSUE-079 修正後重跑）：真實 codex 能否回出合格的 JSON 與 findings；`runTeamTurn` 對剛啟動、尚無 session 的 reviewer；工作樹指紋在 review 有改動時的行為；10 分鐘逾時；`card show` 對真實 findings 的顯示；以下為原先列的項目，其中 `pane.split` 與 `pane.close` 已驗到：真實的 `pane.split` 回傳是否含 `terminal_id`、`pane.close` 的行為；真實 codex 能否照提示回出合格 JSON；`runTeamTurn` 對剛啟動、尚無 session 的 reviewer 的行為；codex 第一次進卡片 worktree 的信任提示（bridge 不會替人按，review 會停在 inconclusive）；工作樹指紋在真實 worktree 的行為；10 分鐘逾時；`fetchReviewMaterial` 對真實開著的 PR；`help` 的顯示。驗收需要一個會 push 的測試 PR（和 ISSUE-071 那次一樣，驗完關閉並刪遠端分支），每一項 push、開 PR、啟動 reviewer、按信任提示都要使用者當下明確同意。
+live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 0.165.0，測試 PR #73）：ISSUE-079 修正合併並重啟後，同一個測試 PR #73 重跑 `card review REQ-20261104-rev-accept --agent codex`，回覆「判定：pass；reviewer：codex（與作者不同種類）」，三條驗收條件逐條為 ✓，reviewer 的 pane 已關閉；卡片新增「第 3 輪 · 整體 · head 03caac306d19 · pass」批次（沒有 findings）與事件 `review-73-r3-03caac306d19`（`review reviewer 第 3 輪：pass`），`card show` 的最近紀錄顯示三筆 `review_verdict`（inconclusive、inconclusive、pass）；worktree 乾淨、HEAD 仍是 `03caac3`；`w1K` 只剩作者的 pane。這驗到：真實 codex 能照提示回出合格的 JSON、`runTeamTurn` 對剛啟動的 reviewer 這條路徑可用（codex 啟動當下有沒有 session 沒有另外核對）、指紋前後一致。收尾（使用者同意）：關閉測試 PR #73、以 `git push origin --delete` 刪遠端分支 `card/REQ-20261104-rev-accept`、`card cleanup`、刪本機分支與驗收卡、路由切回 `w1`；codex 的更新提示是用 `herdr` 在 worktree 手動選「Skip until next version」處理的（沒有執行 `brew upgrade`）。
+
+**這次驗收的限制：** 測試 PR 只動一個新檔案、reviewer 判 `pass`，所以 `changes_requested`、有 findings 的真實輸出、未達成條件的逐條顯示、`card show` 對真實 findings 的顯示都沒有在真實環境看過；Claude 當 reviewer 沒測；信任提示沒有出現（codex 在新 worktree 沒有彈出，原因不明，所以信任提示是否每次都會出現仍未確認）。
+
+仍未驗證：真實 reviewer 回出 `changes_requested` 與 findings 時卡片與回覆的實際畫面；`runTeamTurn` 對剛啟動、尚無 session 的 reviewer；工作樹指紋在 review 有改動時的行為；10 分鐘逾時；`card show` 對真實 findings 的顯示；以下為原先列的項目，其中 `pane.split` 與 `pane.close` 已驗到：真實的 `pane.split` 回傳是否含 `terminal_id`、`pane.close` 的行為；真實 codex 能否照提示回出合格 JSON；`runTeamTurn` 對剛啟動、尚無 session 的 reviewer 的行為；codex 第一次進卡片 worktree 的信任提示（bridge 不會替人按，review 會停在 inconclusive）；工作樹指紋在真實 worktree 的行為；10 分鐘逾時；`fetchReviewMaterial` 對真實開著的 PR；`help` 的顯示。驗收需要一個會 push 的測試 PR（和 ISSUE-071 那次一樣，驗完關閉並刪遠端分支），每一項 push、開 PR、啟動 reviewer、按信任提示都要使用者當下明確同意。
 
 限制：各條驗收條件的逐條結果只顯示在回覆裡、卡片沒有地方存；只支援本機（F9）；只審整個 PR（單一 commit 範圍尚未支援）；reviewer 唯讀是提示約束加工作樹指紋，不是作業系統層隔離，指紋抓不到只改了被 gitignore 的檔案；種類偏好順序（`claude`、`codex`、`agy`）預設選第一個與作者不同的，驗收用 `--agent codex` 指定；coding Agent 在任務完成後也關閉 pane 的部分（E13 擴大）尚未實作。
 
@@ -2840,7 +2844,7 @@ live 驗收證據（2026-11-04，本機 macOS，bridge 載入 main `f77c77e`，H
 
 ## ISSUE-079：reviewer 剛啟動時狀態是 `working` 就被判為沒就緒，且原因文字誤導
 
-更新日期：2026-11-04。狀態：已修正、待驗收（根因已由 live 驗收確認；原始碼與自動化測試完成，執行中的 bridge 尚未載入修正，尚未重跑 live 驗收）。
+更新日期：2026-11-04。狀態：已驗收（2026-11-04，第 3 輪 review：codex 啟動後 `working` 等到 `idle`，review 正常進行並判 `pass`；`blocked` 立即放棄的路徑在第 1 輪真實驗到（當時原因文字仍是舊版）；逾時 30 秒、等待中 pane 消失、讀取清單失敗只有單元測試）。
 
 來源：ISSUE-078 的 live 驗收。
 
