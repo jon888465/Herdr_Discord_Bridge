@@ -17,7 +17,10 @@ import { levelFor, type LoadedPolicy } from "./policy.js";
 import type { Card } from "./card.js";
 import type { CleanupResult, PreparedWorktree } from "./card-worktree-flow.js";
 import type { PrOutcome } from "./card-pr-flow.js";
-import { summarizeFindings } from "./card-findings.js";
+import { parseFindings, summarizeFindings } from "./card-findings.js";
+import { checkFixable, type OpenFinding } from "./card-fix.js";
+import type { FixFlowResult } from "./card-fix-flow.js";
+import { formatFixReply } from "./card-fix-command.js";
 import {
   formatReviewReply,
   nextReviewRound,
@@ -76,6 +79,14 @@ export interface CardCommandDeps {
     card: Card,
     options: { agent?: string; round: number },
   ) => Promise<ReviewRun>;
+  /**
+   * `card fix`（F5 的 loop 手動版）：把 open 的 findings 交給新開 pane 的新作者修一圈（開新 pane、啟動 Agent、
+   * 修正並 commit、一定關閉 pane）。前提不符合要丟出說明原因的錯誤；流程本身的失敗以回傳值表示。
+   */
+  fixCard: (
+    card: Card,
+    options: { agent?: string; round: number; findings: OpenFinding[] },
+  ) => Promise<FixFlowResult>;
   /** `card pr`：push 卡片分支並開 PR（或更新已開著的 PR）；不符合前提要丟出說明原因的錯誤。 */
   openPullRequest: (card: Card) => Promise<PrOutcome>;
   /** 專案政策（唯讀）：`<config dir>/policy.yml` 的載入結果。 */
@@ -87,7 +98,7 @@ export interface CardCommandDeps {
 }
 
 const USAGE =
-  "usage: card list [status] | card show <id> | card import [--slug <名稱>] [<本機路徑，僅 console>]（Discord 請附上 .md 檔） | card assign <id> [--coding] [--worktree] | card cleanup <id> | card policy [專案] | card pr <id> | card review <id> [--agent <種類>] | card recreate <id>（從任務紀錄重建被刪除的卡片）";
+  "usage: card list [status] | card show <id> | card import [--slug <名稱>] [<本機路徑，僅 console>]（Discord 請附上 .md 檔） | card assign <id> [--coding] [--worktree] | card cleanup <id> | card policy [專案] | card pr <id> | card review <id> [--agent <種類>] | card fix <id> [--agent <種類>] | card recreate <id>（從任務紀錄重建被刪除的卡片）";
 const MAX_LIST_LINES = 30;
 const MAX_LIST_ERRORS = 5;
 const TITLE_CHARS = 50;
@@ -516,7 +527,7 @@ async function reviewCard(
   if (!store || !read || (!read.ok && read.code === "not_found"))
     throw new Error(`找不到卡片 ${id}`);
   if (!read.ok) throw new Error(read.error);
-  if (reviewing.has(id)) throw new Error(`卡片 ${id} 正在 review 中`);
+  if (reviewing.has(id)) throw new Error(`卡片 ${id} 正在 review 或修正中`);
   reviewing.add(id);
   try {
     const round = nextReviewRound(read.card.body);
@@ -542,12 +553,104 @@ async function reviewCard(
       eventId: `review-${run.pr.number}-r${run.result.batch.round}-${run.pr.headSha.slice(0, 12)}`,
     });
     if (!logged.ok) warnings.push(`紀錄 review_verdict：${logged.error}`);
+    // 通過時，先前作者標為 fixed 的 finding 就算確認了：標為 resolved（`card fix` 的 loop 才有意義）。
+    const resolved: string[] = [];
+    if (recorded.ok && run.result.batch.verdict === "pass") {
+      const latest = store.read(id);
+      if (latest.ok)
+        for (const batch of parseFindings(latest.card.body))
+          for (const item of batch.findings)
+            if (item.status === "fixed") {
+              const moved = store.setFindingStatus(id, item.id, "resolved", today);
+              if (moved.ok) resolved.push(item.id);
+              else warnings.push(`${item.id} 標為 resolved：${moved.error}`);
+            }
+    }
     const text = formatReviewReply(
       id,
       run,
       recorded.ok
         ? { ids: recorded.ids, omitted: recorded.omitted }
         : undefined,
+    );
+    return [
+      text,
+      ...(resolved.length > 0
+        ? [`先前標為 fixed 的 finding 已確認：已標為 resolved：${resolved.join("、")}`]
+        : []),
+      ...warnings.map((warning) => `⚠️ 卡片更新失敗：${warning}`),
+    ].join("\n");
+  } finally {
+    reviewing.delete(id);
+  }
+}
+
+/**
+ * `card fix <id> [--agent <種類>]`（F5 的 loop 手動版）：把 open 的 findings 交給新開 pane 的新作者修一圈。
+ * 種類預設沿用最後一個作者的種類。修正成功時：被修好的 finding 標為 `fixed`、記一筆 `fix_applied`；
+ * **不 push**——要由人下 `card pr` 把新 commit 推到既有的 PR，再 `card review` 審下一輪。
+ * 失敗的一圈與沒開始的修正都不改卡片。總上限 3 次 review（`MAX_LOOP_ROUNDS`），到了就退回人工。
+ */
+async function fixCardCommand(
+  args: string[],
+  deps: CardCommandDeps,
+): Promise<string> {
+  const usage = "usage: card fix <id> [--agent <種類>]";
+  const [id, ...flags] = args;
+  if (!id) throw new Error(usage);
+  if (!isCardId(id)) throw new Error(`${id} 不是合法的卡片 id`);
+  let agent: string | undefined;
+  for (let i = 0; i < flags.length; i++) {
+    if (flags[i] !== "--agent" || agent !== undefined) throw new Error(usage);
+    agent = flags[++i];
+    if (agent === undefined || agent.startsWith("-")) throw new Error(usage);
+  }
+  const store = openDirectory(deps);
+  const read = store?.read(id);
+  if (!store || !read || (!read.ok && read.code === "not_found"))
+    throw new Error(`找不到卡片 ${id}`);
+  if (!read.ok) throw new Error(read.error);
+  const check = checkFixable(read.card.body);
+  if (!check.ok) throw new Error(check.error);
+  if (reviewing.has(id)) throw new Error(`卡片 ${id} 正在 review 或修正中`);
+  reviewing.add(id);
+  try {
+    const result = await deps.fixCard(read.card, {
+      ...(agent !== undefined ? { agent } : {}),
+      round: check.reviewRound,
+      findings: check.findings,
+    });
+    if (!result.ok)
+      throw new Error(
+        `修正沒有進行（${result.stage}）：${result.error}${result.closeNote ? `（${result.closeNote}）` : ""}`,
+      );
+    const outcome = result.outcome;
+    if (outcome.kind === "failed")
+      return formatFixReply(id, check.reviewRound, result, undefined);
+
+    const warnings: string[] = [];
+    const today = deps.now().slice(0, 10);
+    const marked: string[] = [];
+    for (const findingId of outcome.fixed) {
+      const moved = store.setFindingStatus(id, findingId, "fixed", today);
+      if (moved.ok) marked.push(findingId);
+      else warnings.push(`${findingId} 標為 fixed：${moved.error}`);
+    }
+    const logged = store.recordEvent(id, {
+      event: "fix_applied",
+      round: check.reviewRound,
+      fixed: marked.length,
+      skipped: outcome.skipped.length,
+      headSha: outcome.headAfter,
+      time: deps.now(),
+      eventId: `fix-r${check.reviewRound}-${outcome.headAfter.slice(0, 12)}`,
+    });
+    if (!logged.ok) warnings.push(`紀錄 fix_applied：${logged.error}`);
+    const text = formatFixReply(
+      id,
+      check.reviewRound,
+      result,
+      marked.length > 0 ? marked : undefined,
     );
     return [text, ...warnings.map((warning) => `⚠️ 卡片更新失敗：${warning}`)].join(
       "\n",
@@ -796,6 +899,9 @@ export async function runCardCommand(
       break;
     case "review":
       text = await reviewCard(rest, deps);
+      break;
+    case "fix":
+      text = await fixCardCommand(rest, deps);
       break;
     case "policy":
       text = showPolicy(rest, deps);
