@@ -43,7 +43,8 @@ import {
   pullRequestFiles,
   pullRequestMergeState,
 } from "./github.js";
-import { mergeCardPullRequest } from "./card-merge-wiring.js";
+import { waitForChecks } from "./card-ci-wait.js";
+import { mergeCardPullRequest, readCardChecks } from "./card-merge-wiring.js";
 import { sharedCardPullRequests } from "./card-prs.js";
 import { openCardPullRequest } from "./card-pr-flow.js";
 import { fetchReviewMaterial } from "./card-review-fetch.js";
@@ -658,6 +659,26 @@ export async function handleCommand(
             card,
             options,
           ),
+        // `card loop --merge` 等 CI：每 30 秒讀一次，最多等 30 分鐘（macOS runner 偶爾排隊數分鐘）。
+        waitForCi: (card, control) =>
+          waitForChecks({
+            read: () =>
+              readCardChecks(
+                {
+                  prs: lazyCardPullRequests(),
+                  github: {
+                    checks: (repo, number) =>
+                      pullRequestChecks(defaultExec, repo, number),
+                  },
+                },
+                card,
+              ),
+            sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+            now: () => Date.now(),
+            intervalMs: 30_000,
+            timeoutMs: 30 * 60_000,
+            stopRequested: control.stopRequested,
+          }),
         notify: async (text) => {
           await runtime.discord.reply(context.message, text);
         },
@@ -3648,7 +3669,7 @@ function consoleHelpText(): string {
     "card pr <id> — 把 done 卡片的分支 push 並開 PR（專案政策要 L1 以上；之後每分鐘檢查 CI 與 merge）",
     "card review <id> [--agent <種類>] — 對卡片開著的 PR 開新 pane、啟動另一個 Agent 做獨立 review，結果寫進卡片的 Review 發現（用完關閉 pane；需專案政策 L1 以上）",
     "card fix <id> [--agent <種類>] — 把 review 的 open findings 交給新開 pane 的新作者（種類沿用最後一個作者）在 worktree 修一圈並 commit，finding 標為 fixed；不 push，之後 card pr 再 card review；總上限 3 次 review",
-    "card loop <id> [--agent <種類>] [--fix-agent <種類>] — 自動 review → fix → push → review，直到通過或遇到需要人的情況（review 到第 3 輪還沒過、同一個 head 兩次 inconclusive、修正失敗或動到敏感路徑、PR 已關閉…）就停下退回人工；bridge 自己 push 這張卡的 card/<id> 分支到既有 PR，不 merge；card loop stop <id> 要求停止（步驟之間生效）",
+    "card loop <id> [--agent <種類>] [--fix-agent <種類>] [--merge] — 自動 review → fix → push → review，直到通過或遇到需要人的情況（review 到第 3 輪還沒過、同一個 head 兩次 inconclusive、修正失敗或動到敏感路徑、PR 已關閉…）就停下退回人工；bridge 自己 push 這張卡的 card/<id> 分支到既有 PR；預設不 merge，加 --merge 才會在 review 通過後等 CI（最多 30 分鐘）、全綠再走 card merge 的所有檢查（L2 等）合併，CI 紅或 card merge 拒絕就停下；card loop stop <id> 要求停止（步驟之間生效）",
     "card merge <id> [--method squash|merge|rebase] — L2：合併卡片開著的 PR。只有專案政策 L2、卡片 done、最新 review 通過且 head 與 PR 一致、沒有 open finding、CI 全綠、PR 可合併且最新、沒有動到敏感路徑才會合併（bridge 第一次自己 merge）；不成立就列出所有原因、什麼都不做；預設 squash；合併之後約一分鐘內由既有輪詢記 merged 並清理 worktree；不部署、不重啟",
     "card policy [專案] — 查看專案政策（每個專案的自動化等級 L0／L1／L2；唯讀，政策檔在 plugin 設定目錄）",
     "card recreate <id> — 卡片被刪除但任務還在跑時，從任務紀錄重建卡片",

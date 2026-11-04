@@ -6,6 +6,7 @@ import type { CardPullRequest } from "../src/card-prs.js";
 import type { CardWorktree } from "../src/card-worktrees.js";
 import {
   mergeCardPullRequest,
+  readCardChecks,
   type MergeWiringDeps,
 } from "../src/card-merge-wiring.js";
 import type { LoadedPolicy } from "../src/policy.js";
@@ -116,6 +117,24 @@ function setup(overrides: Partial<MergeWiringDeps["github"]> = {}, rest: Partial
   };
   return { deps, log, merges };
 }
+
+test("the checks of a card's open PR are read live, and nothing is merged", async () => {
+  const { deps, log, merges } = setup({
+    checks: async () => {
+      log.push("checks");
+      return { conclusion: "pending" };
+    },
+  });
+  const result = await readCardChecks(deps, card());
+  assert.equal(result.conclusion, "pending");
+  assert.deepEqual(log, ["checks"]);
+  assert.deepEqual(merges, []);
+});
+
+test("reading the checks of a card without an open PR says so", async () => {
+  const { deps } = setup({}, { prs: { forCard: () => [pr({ state: "MERGED" })] } });
+  await assert.rejects(readCardChecks(deps, card()), /沒有開著的 PR/);
+});
 
 test("a card that satisfies every condition is merged once, last, at the head that was checked, by squash", async () => {
   const { deps, log, merges } = setup();

@@ -38,6 +38,16 @@ export interface LoopSteps {
   push(): Promise<{ text: string }>;
   stopRequested(): boolean;
   notify(text: string): Promise<void>;
+  /**
+   * `--merge` 才用：等這張卡 PR 的 CI 跑完（有逾時；等的過程中看到停止要求就回 `cancelled`）。
+   * 只有 `success` 會繼續往 merge；`failure`、`timeout` 都退回人工。
+   */
+  waitCi?(): Promise<{
+    state: "success" | "failure" | "timeout" | "cancelled";
+    text: string;
+  }>;
+  /** `--merge` 才用：呼叫 `card merge`（它自己重新檢查所有條件）；不成立以丟錯誤表示，錯誤訊息列出原因。 */
+  merge?(): Promise<{ text: string }>;
 }
 
 export type LoopStopStep =
@@ -47,10 +57,12 @@ export type LoopStopStep =
   | "inconclusive"
   | "fix"
   | "sensitive"
-  | "push";
+  | "push"
+  | "ci"
+  | "merge";
 
 export type LoopResult =
-  | { status: "passed"; steps: number }
+  | { status: "passed"; steps: number; merged?: true }
   | { status: "stopped"; step: LoopStopStep; reason: string; steps: number };
 
 function message(error: unknown): string {
@@ -59,8 +71,15 @@ function message(error: unknown): string {
 
 export async function runLoop(
   steps: LoopSteps,
-  options: { maxRounds?: number; maxAttemptsPerHead?: number } = {},
+  options: {
+    maxRounds?: number;
+    maxAttemptsPerHead?: number;
+    /** review 通過後等 CI、全綠再 merge（`card loop --merge`）。 */
+    merge?: boolean;
+  } = {},
 ): Promise<LoopResult> {
+  if (options.merge && (!steps.waitCi || !steps.merge))
+    throw new Error("--merge 需要 waitCi 與 merge 兩個步驟");
   const maxRounds = options.maxRounds ?? MAX_LOOP_ROUNDS;
   const maxAttempts = options.maxAttemptsPerHead ?? 2;
   let count = 0;
@@ -88,14 +107,44 @@ export async function runLoop(
     );
   const cancelled = (note = ""): LoopResult =>
     stop("cancel", `使用者要求停止（在步驟之間生效）${note}`);
+  // review 通過之後：沒有 `--merge` 就結束；有就等 CI、全綠才 merge（merge 是最後一步、只做一次）。
+  const passed = async (): Promise<LoopResult> => {
+    if (!options.merge) return { status: "passed", steps: count };
+    if (steps.stopRequested()) return cancelled("；review 已通過，沒有 merge");
+    let ci: Awaited<ReturnType<NonNullable<LoopSteps["waitCi"]>>>;
+    try {
+      ci = await steps.waitCi!();
+      count++;
+    } catch (error) {
+      return stop("ci", `等 CI 時出錯，沒有 merge：${message(error)}`);
+    }
+    await say(ci.text);
+    if (ci.state === "cancelled")
+      return cancelled("；review 已通過，沒有 merge");
+    if (ci.state !== "success")
+      return stop(
+        "ci",
+        ci.state === "failure"
+          ? "CI 沒有全部通過，沒有 merge；review 已通過，請人看 CI"
+          : "等 CI 逾時，沒有 merge；review 已通過，CI 好了之後可以手動 `card merge`",
+      );
+    if (steps.stopRequested()) return cancelled("；CI 已通過，沒有 merge");
+    try {
+      const merged = await steps.merge!();
+      count++;
+      await say(merged.text);
+    } catch (error) {
+      return stop("merge", `card merge 拒絕或失敗：${message(error)}`);
+    }
+    return { status: "passed", steps: count, merged: true };
+  };
 
   // 安全閥：即使狀態機有疏漏也不會無限執行。
   const safety = (maxRounds + 2) * 4 + maxAttempts;
   for (let turn = 0; turn < safety; turn++) {
     if (steps.stopRequested()) return cancelled();
     const view = steps.view();
-    if (!needsReview && view.latestVerdict === "pass")
-      return { status: "passed", steps: count };
+    if (!needsReview && view.latestVerdict === "pass") return passed();
 
     const fixNext =
       !needsReview &&
@@ -149,7 +198,7 @@ export async function runLoop(
     }
     await say(reviewed.text);
     needsReview = false;
-    if (reviewed.verdict === "pass") return { status: "passed", steps: count };
+    if (reviewed.verdict === "pass") return passed();
     if (reviewed.verdict === "inconclusive") {
       inconclusiveStreak++;
       if (inconclusiveStreak >= maxAttempts)

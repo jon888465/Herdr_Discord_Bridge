@@ -68,6 +68,9 @@ function setup(overrides: Partial<CardCommandDeps> = {}) {
     mergePullRequest: async () => {
       throw new Error("mergePullRequest was not expected");
     },
+    waitForCi: async () => {
+      throw new Error("waitForCi was not expected");
+    },
     startTask: async () => {
       throw new Error("startTask was not expected");
     },
@@ -1735,6 +1738,8 @@ function loopSetup(
     sensitive?: string[];
     fixFails?: boolean;
     gate?: Promise<void>;
+    /** 額外的依賴；拿到共用的時間線 `calls`，這樣 waitCi／merge 與 review／fix／push 排在同一條線上。 */
+    overrides?: (calls: string[]) => Partial<CardCommandDeps>;
   } = {},
 ) {
   const notices: string[] = [];
@@ -1797,6 +1802,7 @@ function loopSetup(
       calls.push("push");
       return { ...prOutcome, created: false, base: "" };
     },
+    ...options.overrides?.(calls),
   });
   s.store.create(assignable("REQ-20261102-work", { status: "done" }));
   return { ...s, notices, calls, reviewAgents, fixAgents };
@@ -1910,6 +1916,86 @@ test("a stop request ends the loop between steps, and only one loop, review or f
 test("stopping a card that has no loop running says so", async () => {
   const { run } = loopSetup([]);
   await assert.rejects(run("loop", "stop", "REQ-20261102-work"), /沒有在跑/);
+});
+
+// ---- card loop --merge（review 通過後等 CI、全綠再 merge）----
+
+function loopMergeSetup(
+  reviews: LoopPlan[],
+  options: {
+    ci?: "success" | "failure" | "timeout" | "cancelled";
+    mergeError?: string;
+  } = {},
+) {
+  return loopSetup(reviews, {
+    overrides: (calls) => ({
+      waitForCi: async () => {
+        calls.push("waitCi");
+        const state = options.ci ?? "success";
+        return { state, text: `ci ${state}` };
+      },
+      mergePullRequest: async (_card, opts) => {
+        calls.push("merge");
+        if (options.mergeError) throw new Error(options.mergeError);
+        return {
+          pr: {
+            number: 42,
+            url: "https://github.com/jon888465/Herdr_Discord_Bridge/pull/42",
+            headSha: REVIEW_HEAD,
+          },
+          method: (opts.method ?? "squash") as "squash" | "merge" | "rebase",
+        };
+      },
+    }),
+  });
+}
+
+test("card loop without --merge never waits for CI or merges", async () => {
+  const { run, calls } = loopMergeSetup(["pass"]);
+  const reply = await run("loop", "REQ-20261102-work");
+  assert.deepEqual(calls, ["review"]);
+  assert.match(reply, /merge 由你決定/);
+});
+
+test("card loop --merge reviews, waits for CI, merges last, and says it merged", async () => {
+  const { run, calls } = loopMergeSetup(["pass"]);
+  const reply = await run("loop", "REQ-20261102-work", "--merge");
+  assert.deepEqual(calls, ["review", "waitCi", "merge"]);
+  assert.match(reply, /已 merge/);
+  assert.match(reply, /pull\/42/);
+});
+
+test("card loop --merge accepts the other flags in either order", async () => {
+  const { run, calls } = loopMergeSetup(["pass"]);
+  await run("loop", "--merge", "REQ-20261102-work");
+  assert.deepEqual(calls, ["review", "waitCi", "merge"]);
+  const second = loopMergeSetup(["pass"]);
+  await second.run("loop", "REQ-20261102-work", "--merge", "--agent", "codex");
+  assert.deepEqual(second.calls, ["review", "waitCi", "merge"]);
+});
+
+test("card loop --merge with a red CI does not merge and tells the user why", async () => {
+  const { run, calls } = loopMergeSetup(["pass"], { ci: "failure" });
+  const reply = await run("loop", "REQ-20261102-work", "--merge");
+  assert.deepEqual(calls, ["review", "waitCi"]);
+  assert.match(reply, /停下來了/);
+  assert.match(reply, /CI/);
+  assert.doesNotMatch(reply, /已 merge/);
+});
+
+test("card loop --merge hands back the reasons when card merge refuses", async () => {
+  const { run, calls } = loopMergeSetup(["pass"], {
+    mergeError: "不 merge PR #42（1 項條件不成立）：\n- 專案政策是 L1",
+  });
+  const reply = await run("loop", "REQ-20261102-work", "--merge");
+  assert.deepEqual(calls, ["review", "waitCi", "merge"]);
+  assert.match(reply, /停下來了/);
+  assert.match(reply, /專案政策是 L1/);
+});
+
+test("card loop --merge cannot be combined with a repeated flag", async () => {
+  const { run } = loopMergeSetup([]);
+  await assert.rejects(run("loop", "REQ-20261102-work", "--merge", "--merge"), /usage/);
 });
 
 // ---- card merge（L2，G7）----
