@@ -10,6 +10,7 @@ import {
   mergeMethod,
   parseGithubRemote,
   pullRequestChecks,
+  pullRequestDiff,
   pullRequestFiles,
   pullRequestState,
   pushBranch,
@@ -503,6 +504,23 @@ test("pullRequestFiles validates the PR number and wraps gh failures", async () 
   await assert.rejects(pullRequestFiles(fakeExec(() => ""), repo, 0), GithubError);
   await assert.rejects(
     pullRequestFiles(fakeExec(() => failure("HTTP 404")), repo, 42),
+    (error: unknown) => error instanceof GithubError && error.code === "gh_failed",
+  );
+});
+
+test("pullRequestDiff reads the unified diff of one PR through gh, without colour and without writing", async () => {
+  const exec = fakeExec(() => "diff --git a/x b/x\n+1\n");
+  assert.equal(await pullRequestDiff(exec, repo, 42), "diff --git a/x b/x\n+1\n");
+  const call = exec.calls[0];
+  assert.equal(call.file, "gh");
+  assert.deepEqual(call.args.slice(0, 5), ["pr", "diff", "42", "--repo", "jon888465/Herdr_Discord_Bridge"]);
+  assert.ok(call.args.includes("--color=never"));
+});
+
+test("pullRequestDiff validates the PR number and wraps gh failures", async () => {
+  await assert.rejects(pullRequestDiff(fakeExec(() => ""), repo, -1), GithubError);
+  await assert.rejects(
+    pullRequestDiff(fakeExec(() => failure("HTTP 404")), repo, 42),
     (error: unknown) => error instanceof GithubError && error.code === "gh_failed",
   );
 });

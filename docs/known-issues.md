@@ -2762,3 +2762,22 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 限制：reviewer 輸出是不可信資料，分隔線、遮蔽與嚴格解析只是降低風險；各條件的判定結果目前只回傳給呼叫者、沒有地方存進卡片（卡片只有 findings 與 `review_verdict`）；路徑含英數與 `._/@+-` 以外字元的 PR 目前無法 review。
 
 下一步：3b（取得 PR 的 diff 與檔案清單，唯讀 `gh`，含大小上限）。
+
+
+## ISSUE-075：取得 review 用的 PR 材料（F5 階段 3b）
+
+更新日期：2026-11-04。狀態：已修正、待驗收（這是新功能的第二步，不是缺陷；原始碼、自動化測試與對真實 PR 的唯讀核對完成，**沒有任何呼叫者**，使用者可見的入口是 3d 的 `card review`）。
+
+來源：使用者 2026-11-04 決定開始階段 3 並同意 3b 的做法：唯讀 `gh`、檔案數上限 20、diff 上限約 60 KB、超過就拒絕並要求 Lead 重新切分。
+
+行為（尚無使用者可見的入口）：`fetchReviewMaterial` 回傳 `{ headSha, files, diff }`。保證：PR 開著；head 在讀取前後相同；diff 標頭的路徑與檔案清單完全一致；大小在上限內。任何一項不成立都丟 `GithubError("invalid", …)` 並說明原因與該怎麼做。細節見 SPEC「取得 review 用的 PR 材料」。`src/github.ts` 新增 `pullRequestDiff`（`gh pr diff <n> --repo <slug> --color=never`），並把檔頭的「只做哪些 gh 動作」註解更新。
+
+測試（2026-11-04，本機 macOS、Node v26.12.0，非 CI）：新增 `test/card-review-fetch.test.ts` 12 項（成功與讀取順序 view→files→diff→view、所有呼叫都只讀且針對同一個 PR、非開著的 PR、讀取期間 head 變動、檔案過多時在取 diff 之前就拒絕、diff 過大與 `maxBuffer`、空 diff 與無檔案、diff 與清單對不上並指出差異、改名新舊路徑、無法解析的標頭、gh 失敗、PR 編號驗證）與 `test/github.test.ts` 2 項（`pullRequestDiff` 的參數與錯誤）。先以桩跑：13 項為紅；另有一項我自己寫得太粗的「所有呼叫只讀」測試（把 `--json` 欄位裡的 `mergedAt` 當成 merge 指令）在實作後失敗，已改成檢查子指令與有無寫入旗標。全套 919 項，918 通過、0 失敗、1 略過（原 905 項）；`lint` 通過（一個測試標題含 any 字樣被 lint 擋下，已改標題）。
+
+**對真實 PR 的唯讀核對（2026-11-04，只讀取、沒有寫入）：** 對 PR #64、#63、#52、#66、#67、#61、#58、#54、#47、#43 執行同樣的 `pullRequestFiles` 與 `pullRequestDiff` 並比對標頭，全部：清單完整、無法解析的標頭為 0、diff 與檔案清單完全一致、沒有 ANSI 顏色。這些 PR 的大小：最大是 #66（9 個檔案、44,479 字元），其餘都在 33,942 字元與 13 個檔案以內，**都在上限內**。所以現行上限對這個專案常見的 PR 夠用；若需求卡包含大量 ADR／SPEC 文字，可能逼近 60,000 字元。
+
+未驗證：`fetchReviewMaterial` 本身沒有對真實開著的 PR 跑過（上面的核對是對已 merge 的 PR 直接呼叫底層函式，因為它只 review 開著的 PR）；含空白或引號的路徑、改名、二進位檔案在真實 `gh pr diff` 的輸出；超過 2 MiB 的真實 diff；單一 commit 範圍。
+
+限制：只支援整個 PR 的 diff；標頭含引號的路徑無法解析而被拒絕。
+
+下一步：3c（選 reviewer，含獨立 session 檢查）。
