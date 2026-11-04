@@ -147,3 +147,26 @@ external: { notion: null, github: null, mantis: null }
    - handoff（quota 不夠時把進度交給別的 Agent）是新能力，追蹤為 F7，尚無設計；至少要記錄：做到哪、剩什麼、已審過的 commit、未處理的 findings，寫在卡片的流程紀錄。
 5. **敏感路徑清單 — 決定：** 同意暫定清單（`.github/`、`AGENTS.md`、`package.json` 與 `scripts/`、政策相關檔），並**加上** `SPEC.md`、`src/policy.ts`、`src/github.ts`；「之後仍可由使用者要求調整」。*Agent 的補充：* 清單本身要放在 bridge 端（程式或使用者的政策設定），不能放在 Agent 在 worktree 裡能改的檔案；放在程式裡時，**該檔案本身也要列入敏感路徑**，否則 Agent 可以先改清單再 merge。
 6. **findings 寫在哪 — 決定：** 寫在**卡片**，卡片**多一個專門放 findings 的欄位**；**不貼成 PR 留言**（PR 是公開的）。findings 是 reviewer 發現的問題清單（檔案、位置、說明、嚴重度）。*實作時才決定的形式：* 是 frontmatter 欄位或內文段落；Agent 的建議是內文段落（例如 `## Review 發現`），因為 frontmatter 的解析器是受限子集、findings 可能很長，而且段落可以保留每一輪、每個 commit 的紀錄。需新增卡片格式（ADR-0001／0002）與 `card show` 的顯示，尚無設計。
+
+### 新開 pane 的 reviewer 與 coding Agent，以及跨機器（2026-11-04，使用者決定；**目前沒有任何程式**）
+
+這一節**取代**階段 3c 原本「由使用者指定一個現有 pane 當 reviewer」的設計。
+
+**使用者的決定：**
+1. **Lead 的 review 與 coding 一律用新開的 pane、新開的 Agent，用完就關閉。** 使用者原話：「還是都 lead 都以新開 pane, agent 來做 review, coding. 用完就關閉」。
+2. 使用者對 Agent 的整理（4 點）回「照建議」：
+   - **review 指令：** `card review <卡片 id> [--agent <種類>]`，不再帶 pane。bridge 在新 pane 啟動一個全新的 reviewer Agent，送出 review 提示，等回覆，寫入 findings 與 `review_verdict`，然後關閉這個 pane。
+   - **獨立性靠「新開」保證：** 新 pane、新 terminal、新 session，一定和作者不同；不再要求 session 事先已知（這解掉 `agy` 新開時沒有 session 的卡點，見 ISSUE-066／069）。種類預設選**和作者不同**，不行才用同種類；`--agent` 可指定。
+   - **coding：** `card assign --worktree` 開的 Agent 在任務完成後也由 bridge 關閉它的 pane；**worktree 本身保留**（之後還要 review、`card pr`、merge 後才清理）。這等於把追蹤清單 E13（關閉 bridge 自己開的 workspace）從「已決定、不做」改成要做，範圍改為「bridge 自己開的 pane」。
+   - **reviewer 在卡片的 worktree 裡啟動**（可以讀到 PR 的實際程式碼）。代價：不同種類的 Agent 第一次進這個目錄會遇到它自己的信任提示，**bridge 不會替人按**（沿用既有規則）。
+   - **關閉的安全規則：** 只關 bridge 自己開的 pane，關之前核對 terminal id 是同一個；reviewer 逾時或卡住（blocked，例如信任提示沒人按）時，記 `inconclusive` 然後**仍然關掉**。
+   - **種類啟動失敗（包含 quota 用完）時：** 回報「這個種類啟動失敗」並停下，**不自動換種類**；由使用者用 `--agent` 指定。
+3. **跨機器（使用者補充）：** coding 可能在 A pod、review 可能在 B pod，兩邊都從 **repo（遠端 git）拉回**同一個 feature branch。**設計限制（Agent 的整理）：**
+   - review 的材料必須來自 GitHub 的 PR（head sha、檔案清單、diff，階段 3b 已是這樣），**不能依賴 coding 那台機器的本機 worktree**。
+   - 所以 review 只在 feature branch **已 push 並開了 PR 之後**進行；reviewer 的工作目錄是它所在機器上、從 `origin` 取回 PR head 的**新 worktree**（review 用完連同 pane 一起清理，唯讀）。
+   - 每台機器都要有這個 repo 的 clone；Herdr 已支援 `--machine <label-or-id>`，卡片的 `## 異動專案` 已記錄機器 id（專案名稱 `<機器 id>:<repo>`）。
+   - 目前 bridge 的卡片功能**只支援本機**（worktree、`card pr`、清理都是）；遠端 pane／worktree 的實測需要使用者同意（不得未經同意在 `agy-pod` 上執行指令，追蹤清單 H1／ISSUE-055）。
+
+**第一版範圍（Agent 的建議，待使用者確認）：** 3c 先做**本機**的新 pane reviewer（含關閉），但介面不綁死本機（review 材料來自 PR、reviewer 的 checkout 來自 `origin`）；遠端機器另開階段（F9），先用最小的實驗確認 Herdr 的 `--machine` 對 pane／worktree／agent 的支援，再決定。
+
+**尚待使用者確認：** (a) 第一版先做本機、遠端另開階段；(b) 每台機器上這個 repo 的 clone 在哪裡、怎麼找（每台固定路徑，還是靠 Herdr 的 worktree 來源）；(c) coding 與 review 在不同機器時，卡片的哪些欄位要記錄是哪台機器做的。
