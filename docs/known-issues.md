@@ -2798,3 +2798,20 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 限制：只處理本機（跨機器是 F9）；種類偏好順序是 Agent 的暫定值、寫死在程式裡，之後可改成設定；關閉失敗只回報、不重試，殘留的 pane 要使用者手動關。
 
 下一步：3c-2（review 流程：組提示、開 pane、啟動 Agent、送出、解析、工作樹指紋檢查、一定關閉），再接 3d（`card review` 指令與 live 驗收）。
+
+
+## ISSUE-077：review 流程（F5 階段 3c-2）
+
+更新日期：2026-11-04。狀態：已修正、待驗收（這是新功能的第四步，不是缺陷；原始碼與自動化測試完成，**沒有任何呼叫者**，要等 3d 的 `card review` 一起 live 驗收）。
+
+來源：使用者 2026-11-04 決定開始 3c-2，並接受工作樹指紋用「`git rev-parse HEAD` 加 `git status --porcelain`」（限制：抓不到只改了被 gitignore 的檔案）。
+
+行為（尚無使用者可見的入口）：`runCardReview(deps, input)` 把 3a（提示與解析）、3b 取得的材料、3c-1（新 pane）串成一次 review，回傳批次、各條件判定、reviewer 種類與是否同種、關閉狀況、降級或 inconclusive 的原因；**不寫卡片**（3d 負責）。細節與分類見 SPEC「review 流程」。
+
+測試（2026-11-04，本機 macOS、Node v26.12.0，非 CI）：新增 `test/card-review-flow.test.ts` 13 項（乾淨的 review 的完整順序、Agent 名稱、指定種類與同種回報、提示組不出來時什麼都不開、種類不合法或指紋讀不到時在開 pane 之前停下、pane 開不起來、Agent 啟動失敗時關 pane 且不換種類、reviewer 沒就緒（blocked）、4 種回覆問題、工作樹被改動的 pass 變 inconclusive 且丟掉 findings、事後指紋讀不到、關閉失敗只回報、findings 與降級與各條件判定的帶入）。先以桩跑：13 項全紅；實作後全綠。全套 944 項，943 通過、0 失敗、1 略過（原 931 項）；`lint` 通過（一個測試標題含 any 字樣被 lint 擋下，已改標題）。**全部使用假的 Herdr、假的 Agent、假的指紋，沒有對真實的 Herdr、Agent 或 git 驗證。**
+
+未驗證（待 3d）：真實的 `pane.split` 回傳與 `pane.close` 行為（ISSUE-076 同一項）；真實 reviewer 能否照提示回出合格 JSON；`runTeamTurn` 對一個剛啟動、尚無 session 的 reviewer 的行為（ISSUE-066 已讓第一次出現的 session 被接受，但這條路徑沒有在 review 情境實測）；指紋實作（尚未寫，3d 提供）；逾時值 10 分鐘是否合適；reviewer 在卡片 worktree 啟動時，不同種類 Agent 第一次進該目錄會遇到信任提示，bridge 不會替人按，所以 review 會停在 `inconclusive`，要由人先按。
+
+限制：reviewer 唯讀不是作業系統層隔離；指紋抓不到只改了被 gitignore 的檔案；只處理本機（F9）；findings 與各條件的判定結果由呼叫端決定怎麼存（卡片目前沒有存各條件判定的地方）；單一 commit 範圍（每個 commit 審一次）尚未支援（3b 只取整個 PR 的 diff）。
+
+下一步：3d（`card review <id> [--agent <種類>]` 指令：取 PR 材料、呼叫 `runCardReview`、寫入 findings 與 `review_verdict`、指紋實作、接上 Herdr 與 `runTeamTurn`、live 驗收）。
