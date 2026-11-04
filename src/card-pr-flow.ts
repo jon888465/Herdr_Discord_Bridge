@@ -16,12 +16,14 @@ import {
   findPullRequests,
   getDefaultBranch,
   getRemoteRepo,
+  pullRequestFiles,
   pushBranch,
   GithubError,
   type Exec,
 } from "./github.js";
 import { levelFor, type LoadedPolicy } from "./policy.js";
 import { redactSecrets } from "./redact.js";
+import { sensitivePathsIn } from "./sensitive-paths.js";
 
 export interface PrFlowDeps {
   exec: Exec;
@@ -47,6 +49,7 @@ export interface PrOutcome {
   branch: string;
   repo: string;
   repoPath: string;
+  sensitivePaths: string[] | null;
 }
 
 function baseShaOf(card: Card): string | undefined {
@@ -72,6 +75,23 @@ function prBody(
     "",
     `由 Herdr Discord Bridge 依專案政策（${input.level}）開啟；review 與 merge 由人決定。`,
   ].join("\n");
+}
+
+/**
+ * F6：PR 動到哪些敏感路徑。PR 已經存在，所以查不到（網路、權限、檔案數超過 GitHub 上限）時
+ * 不讓 `card pr` 失敗，回傳 null＝無法確認；將來自動 merge 時 null 要當作敏感處理。
+ */
+async function checkSensitivePaths(
+  exec: Exec,
+  repo: { owner: string; repo: string },
+  number: number,
+): Promise<string[] | null> {
+  try {
+    const listed = await pullRequestFiles(exec, repo, number);
+    return listed.complete ? sensitivePathsIn(listed.files) : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function openCardPullRequest(
@@ -159,6 +179,7 @@ export async function openCardPullRequest(
       branch: worktree.branch,
       repo: slug,
       repoPath: worktree.repoPath,
+      sensitivePaths: await checkSensitivePaths(deps.exec, repo, open.number),
     };
   }
 
@@ -201,5 +222,6 @@ export async function openCardPullRequest(
     branch: worktree.branch,
     repo: slug,
     repoPath: worktree.repoPath,
+    sensitivePaths: await checkSensitivePaths(deps.exec, repo, created.number),
   };
 }

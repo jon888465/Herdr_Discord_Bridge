@@ -5,7 +5,7 @@
 // - 只做 gh 的 pr list／create／checks／view 與 repo view，不 merge、不改設定；
 // - 所有輸入送出前驗證；外部程式一律用參數陣列（不經 shell）；
 // - 錯誤訊息先遮蔽機敏資料再截斷。
-// 憑證用使用者現有的 `gh`／ssh 登入（使用者 2026-11-03 決定，L2 前必須改成獨立身分）。
+// 憑證用使用者現有的 `gh`／ssh 登入（使用者 2026-11-03 決定：L1 與 L2 都用現有登入）。
 
 import { execFile } from "node:child_process";
 import path from "node:path";
@@ -529,4 +529,36 @@ export async function mergeMethod(
   return data.subject.trimEnd().endsWith(` (#${input.number})`)
     ? "squash"
     : "rebase";
+}
+
+/** GitHub 的 PR 檔案清單最多 3000 筆，到頂就視為不完整。 */
+const PULL_FILES_CAP = 3000;
+
+/**
+ * PR 動到的所有路徑（F6 敏感路徑檢查用）。改名的檔案連「原本的路徑」一起列，
+ * 否則把敏感檔搬走不會被發現。清單到達 GitHub 的上限時 `complete` 為 false，呼叫端要當作無法確認。
+ */
+export async function pullRequestFiles(
+  exec: Exec,
+  repo: GithubRepo,
+  number: number,
+): Promise<{ files: string[]; complete: boolean }> {
+  assertNumber(number);
+  const output = await run(
+    exec,
+    "gh",
+    [
+      "api",
+      "--paginate",
+      `repos/${slug(repo)}/pulls/${number}/files`,
+      "--jq",
+      ".[] | .filename, (.previous_filename // empty)",
+    ],
+    "gh_failed",
+  );
+  const files = output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  return { files, complete: files.length < PULL_FILES_CAP };
 }

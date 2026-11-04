@@ -2672,3 +2672,24 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 未驗證（待使用者，需先 merge 並重啟 bridge）：下一次真實 `card pr` 開出的 PR 內文只有最新 task id。
 
 下一步：使用者驗收後改為「已驗收」。
+
+
+## ISSUE-071：`card pr` 回覆 PR 動到的敏感路徑（F6 階段 1）
+
+更新日期：2026-11-04。狀態：已修正、待驗收（這是新功能的第一階段，不是缺陷；原始碼與自動化測試完成，執行中的 bridge 尚未載入，尚未 live 驗收）。
+
+來源：使用者 2026-11-04 決定「敏感路徑一律不自動 merge」（追蹤清單 F6）並同意清單；實作順序的階段 1。
+
+使用者可見行為：`card pr <id>` 開出 PR 或對既有 PR 推新 commit 後，回覆多一行警告「⚠️ 這個 PR 動到敏感路徑：…」，列出命中的檔案；查不到時回報「⚠️ 無法確認這個 PR 動到哪些檔案」。沒有命中就不多說。**目前只是提醒，不阻擋任何事，也還沒有自動 merge。**
+
+預期行為：PR 動到 `.github/`、`AGENTS.md`、`package.json`、`scripts/`、`SPEC.md`、`src/policy.ts`、`src/github.ts`、`src/sensitive-paths.ts` 時，使用者能在開 PR 當下就看到；將來 L2 對這類 PR 一律退回人工。
+
+實作範圍（2026-11-04）：新增 `src/sensitive-paths.ts`（清單與 `sensitivePathsIn`，清單檔自己在清單內）；`src/github.ts` 新增 `pullRequestFiles`（`gh api --paginate …/pulls/<n>/files`，含改名的原路徑，3000 筆上限視為不完整）；`src/card-pr-flow.ts` 在 PR 存在後呼叫（失敗或不完整回傳 null，不讓 `card pr` 失敗）、`PrOutcome` 新增 `sensitivePaths: string[] | null`；`src/card-command.ts` 的回覆加警告。順手修正 `src/github.ts` 檔頭過時的註解（「L2 前必須改成獨立身分」，實際決定是 L1 與 L2 都用現有登入）。
+
+測試（2026-11-04，本機 macOS、Node v26.12.0，非 CI）：新增 `test/sensitive-paths.test.ts`（8 項：一般檔案不命中、每個受保護路徑與清單檔自己命中、不分大小寫與開頭 `./`、只認根目錄 `package.json` 與精確檔案不誤判相似名稱、`..` 視為敏感、去重保序、空清單）、`test/github.test.ts` 3 項（含改名原路徑、3000 筆上限、驗證編號與 gh 失敗）、`test/card-pr-flow.test.ts` 5 項（命中、沒命中、查不到為 null 且 PR 仍記錄、不完整為 null、既有 PR 推新 commit 也重查）、`test/card-command.test.ts` 4 項（警告列出路徑並說明目前不阻擋、沒命中不提、無法確認、既有 PR 也顯示）。以空桩先跑：會命中、會列出、查不到為 null 等 15 項為紅（`test/sensitive-paths.test.ts` 5 項、`test/github.test.ts` 3 項、`test/card-pr-flow.test.ts` 4 項與 `test/card-command.test.ts` 3 項），「不命中」類本來就通過；實作後全綠。全套 860 項，859 通過、0 失敗、1 略過（原 840 項）；`lint` 通過。**沒有**對真實 GitHub 的測試。
+
+未驗證（待使用者，需先 merge 並重啟 bridge）：下一次真實 `card pr` 的回覆是否正確列出（或不列出）敏感路徑；改名檔案的原路徑是否真的出現在 `gh api` 輸出；`--jq` 在真實 `gh` 上的輸出格式。
+
+限制：只認路徑，不看內容；檢查發生在開 PR／推 commit 當下，之後 PR 被改動不會重查，**將來 merge 前必須再查一次**；清單由使用者要求調整、經人工 merge（它本身在清單內，所以修改它的 PR 會被標為敏感）。
+
+下一步：使用者驗收後改為「已驗收」；階段 2（卡片 findings 欄位，F8）。

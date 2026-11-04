@@ -10,6 +10,7 @@ import {
   mergeMethod,
   parseGithubRemote,
   pullRequestChecks,
+  pullRequestFiles,
   pullRequestState,
   pushBranch,
   type Exec,
@@ -475,5 +476,33 @@ test("mergeMethod refuses a bad sha or number and an unexpected answer", async (
       { number: 45, mergeSha: "a".repeat(40) },
     ),
     /unexpected/,
+  );
+});
+
+test("pullRequestFiles lists every changed path of the PR, including where a renamed file used to live", async () => {
+  const exec = fakeExec(() => "src/main.ts\n.github/workflows/ci.yml\nSPEC.md\ndocs/old.md\n");
+  assert.deepEqual(await pullRequestFiles(exec, repo, 42), {
+    files: ["src/main.ts", ".github/workflows/ci.yml", "SPEC.md", "docs/old.md"],
+    complete: true,
+  });
+  const call = exec.calls[0];
+  assert.equal(call.file, "gh");
+  assert.deepEqual(call.args.slice(0, 2), ["api", "--paginate"]);
+  assert.ok(call.args.includes("repos/jon888465/Herdr_Discord_Bridge/pulls/42/files"));
+  assert.ok(call.args.some((arg) => arg.includes("previous_filename")));
+});
+
+test("pullRequestFiles says the list is incomplete when GitHub's 3000-file cap is reached", async () => {
+  const many = Array.from({ length: 3000 }, (_, i) => `f${i}.ts`).join("\n");
+  const result = await pullRequestFiles(fakeExec(() => many), repo, 42);
+  assert.equal(result.complete, false);
+  assert.equal(result.files.length, 3000);
+});
+
+test("pullRequestFiles validates the PR number and wraps gh failures", async () => {
+  await assert.rejects(pullRequestFiles(fakeExec(() => ""), repo, 0), GithubError);
+  await assert.rejects(
+    pullRequestFiles(fakeExec(() => failure("HTTP 404")), repo, 42),
+    (error: unknown) => error instanceof GithubError && error.code === "gh_failed",
   );
 });

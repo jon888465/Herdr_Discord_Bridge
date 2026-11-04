@@ -429,6 +429,15 @@ async function pullRequestForCard(
         `這個分支已有 PR #${outcome.number}：${outcome.url}`,
         `已把新的 commit push 上去（head ${outcome.headSha.slice(0, 12)}），沒有另外開新的 PR。`,
       ];
+  // F6：敏感路徑。現在還沒有自動 merge，這只是提醒；將來 L2 遇到這類 PR 一律退回人工。
+  if (outcome.sensitivePaths === null)
+    lines.push(
+      "⚠️ 無法確認這個 PR 動到哪些檔案；將來 L2 自動 merge 時會把它當作動到敏感路徑，一律由人 merge。",
+    );
+  else if (outcome.sensitivePaths.length > 0)
+    lines.push(
+      `⚠️ 這個 PR 動到敏感路徑：${outcome.sensitivePaths.join("、")}。目前 merge 本來就由你決定；將來即使政策是 L2，這類 PR 也一律由人 merge，請特別審查。`,
+    );
   for (const warning of warnings) lines.push(`⚠️ 卡片更新失敗：${warning}`);
   return lines.join("\n");
 }
