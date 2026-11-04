@@ -1,2 +1,2 @@
 # fix acceptance test
-This file must be kept forever.
+This file exists only to test card fix and is safe to delete.
