@@ -115,7 +115,7 @@
 | G4 | 紅燈 PR 被擋的實測（直接 push 被拒已測） | 未開始（ISSUE-052 剩餘） |
 | G5 | 啟用 Dependabot（action 已釘 SHA） | 未開始（ISSUE-052 剩餘） |
 | G6 | 公開 repo 的不可信輸入、fork PR 的 workflow 權限 | 未開始 |
-| G7 | L2 自動 merge，先拿 herdr bridge 自己試；首次試跑建議用 L1 | 未開始（前置：F4、F5、F6 與 merge 實作；身分 F2 與 G3 已決定／完成） |
+| G7 | L2 自動 merge，先拿 herdr bridge 自己試；首次試跑建議用 L1 | **手動版 `card merge` 已實作、待驗收**（ISSUE-083，使用者 2026-11-04 決定先做手動版、預設 squash、驗收接受用公開 repo 的 main、政策由使用者自己改成 L2 再改回）；**未做：** `card loop` 通過後自動 merge、CI 紅作為 loop 的停止條件、每個 commit 審一次、E13、F7、F9。身分 F2 與 G3 已決定／完成 |
 
 ## H. 延伸（階段 6）
 

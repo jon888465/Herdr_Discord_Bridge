@@ -192,3 +192,16 @@ external: { notion: null, github: null, mantis: null }
 Agent 在實作時對提案的偏離，需使用者知道：**提案中「CI 紅」與「PR 被關閉或 merge」是停止條件；實作上 PR 被關閉或 merge 會讓 review 或 push 丟錯誤而停下（有做），但「CI 紅」沒有做**（loop 不等 CI，CI 結果由既有的每分鐘輪詢另行通知）。要不要把 CI 紅也當成停止條件、並在 `pass` 之前等 CI，之後再決定。另，「使用者再下別的指令」只實作了 `card loop stop <id>`。
 
 實作與限制見 SPEC「`card loop`」與 ISSUE-082。
+
+
+### L2 的 merge：手動版 `card merge`（2026-11-04，使用者決定）
+
+使用者對 Agent 的設計提案回答「照建議，先做手動 card merge」，即：
+1. **先只做手動** `card merge <id>`，驗收後再考慮讓 `card loop` 通過後自動 merge。
+2. **合併方式預設 squash**，`--method` 可指定；必須是 repo 允許的（repo 目前允許 merge、squash、rebase 三種；使用者自己在網頁 merge 時用的是 merge commit）。
+3. **驗收接受用公開 repo 的 main**：會用一個會真的 merge 的測試 PR（內容是無害的文件）。
+4. **政策檔由使用者自己改**：驗收時把 `Herdr_Discord_Bridge` 暫時改成 L2、驗完改回 L1（Agent 不會自己改政策檔）。
+
+Agent 在實作時的決定（需使用者知道）：條件一次列出所有不成立的原因；review 通過的 head 必須等於 PR 現在的 head；CI 必須是明確的成功（沒有 CI 或全部略過都拒絕）；敏感路徑用 PR 當下的檔案清單重查；合併時帶 `--match-head-commit`、永不帶 `--admin`／`--auto`／`--delete-branch`；合併之後的 `merged` 事件與 worktree 清理沿用既有的 E11 輪詢，不在指令裡重做。
+
+實作與限制見 SPEC「`card merge`」與 ISSUE-083。

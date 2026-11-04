@@ -2,7 +2,9 @@
 //
 // 這是 bridge 第一次對外 push，所以刻意很窄：
 // - 只能 push `card/<…>` 分支到 `origin`，用明確的 refspec，**永不強制、不帶任何旗標**；
-// - 只做 gh 的 pr list／create／checks／view／diff、repo view，以及讀取 PR 檔案清單的 `gh api`（GET），不 merge、不改設定；
+// - 只做 gh 的 pr list／create／checks／view／diff、repo view，以及讀取 PR 檔案清單的 `gh api`（GET）；
+//   **唯一的寫入例外是 `mergePullRequest`（L2 的 `card merge`）**：只合併呼叫端指定的 head（`--match-head-commit`），
+//   永不帶 `--admin`／`--auto`／`--delete-branch`，不改任何設定；
 // - 所有輸入送出前驗證；外部程式一律用參數陣列（不經 shell）；
 // - 錯誤訊息先遮蔽機敏資料再截斷。
 // 憑證用使用者現有的 `gh`／ssh 登入（使用者 2026-11-03 決定：L1 與 L2 都用現有登入）。
@@ -574,6 +576,131 @@ export async function pullRequestDiff(
     exec,
     "gh",
     ["pr", "diff", String(number), "--repo", slug(repo), "--color=never"],
+    "gh_failed",
+  );
+}
+
+export interface PullRequestMergeState {
+  state: PullRequestInfo["state"];
+  headSha: string;
+  isDraft: boolean;
+  /** GitHub 對能否合併的判斷（`MERGEABLE`、`CONFLICTING`、`UNKNOWN`）。 */
+  mergeable: string;
+  /** `CLEAN`、`BEHIND`、`BLOCKED`、`DIRTY`、`UNSTABLE`… */
+  mergeStateStatus: string;
+  base: string;
+}
+
+/** 合併前要用的事實（唯讀）：PR 的狀態、head、是否草稿、GitHub 認為能不能合併。 */
+export async function pullRequestMergeState(
+  exec: Exec,
+  repo: GithubRepo,
+  number: number,
+): Promise<PullRequestMergeState> {
+  assertNumber(number);
+  const data = parseJson(
+    await run(
+      exec,
+      "gh",
+      [
+        "pr",
+        "view",
+        String(number),
+        "--repo",
+        slug(repo),
+        "--json",
+        "state,headRefOid,isDraft,mergeable,mergeStateStatus,baseRefName",
+      ],
+      "gh_failed",
+    ),
+  ) as Record<string, unknown>;
+  if (
+    !data ||
+    !isState(data.state) ||
+    typeof data.headRefOid !== "string" ||
+    !/^[0-9a-f]{40}$/.test(data.headRefOid) ||
+    typeof data.isDraft !== "boolean" ||
+    typeof data.mergeable !== "string" ||
+    typeof data.mergeStateStatus !== "string" ||
+    typeof data.baseRefName !== "string"
+  )
+    throw new GithubError("unexpected", "unexpected gh pr view output");
+  return {
+    state: data.state,
+    headSha: data.headRefOid,
+    isDraft: data.isDraft,
+    mergeable: data.mergeable,
+    mergeStateStatus: data.mergeStateStatus,
+    base: data.baseRefName,
+  };
+}
+
+/** repo 允許的合併方式（唯讀）。 */
+export async function allowedMergeMethods(
+  exec: Exec,
+  repo: GithubRepo,
+): Promise<MergeMethod[]> {
+  const data = parseJson(
+    await run(
+      exec,
+      "gh",
+      [
+        "repo",
+        "view",
+        slug(repo),
+        "--json",
+        "mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed",
+      ],
+      "gh_failed",
+    ),
+  ) as Record<string, unknown>;
+  if (
+    !data ||
+    typeof data.mergeCommitAllowed !== "boolean" ||
+    typeof data.squashMergeAllowed !== "boolean" ||
+    typeof data.rebaseMergeAllowed !== "boolean"
+  )
+    throw new GithubError("unexpected", "unexpected gh repo view output");
+  const methods: MergeMethod[] = [];
+  if (data.mergeCommitAllowed) methods.push("merge");
+  if (data.squashMergeAllowed) methods.push("squash");
+  if (data.rebaseMergeAllowed) methods.push("rebase");
+  return methods;
+}
+
+const MERGE_FLAG: Record<MergeMethod, string> = {
+  merge: "--merge",
+  squash: "--squash",
+  rebase: "--rebase",
+};
+
+/**
+ * 合併一個 PR（L2，使用者 2026-11-03 選現有登入）。**只合併 `headSha` 那個 head**（`--match-head-commit`：
+ * head 在檢查之後變了，GitHub 會拒絕）；永不帶 `--admin`（不繞過 branch protection）、`--auto`、`--delete-branch`。
+ */
+export async function mergePullRequest(
+  exec: Exec,
+  repo: GithubRepo,
+  input: { number: number; method: MergeMethod; headSha: string },
+): Promise<void> {
+  assertNumber(input.number);
+  if (!/^[0-9a-f]{40}$/.test(input.headSha))
+    throw new GithubError("invalid", "invalid head sha (need 40 hex characters)");
+  const flag = MERGE_FLAG[input.method];
+  if (!flag) throw new GithubError("invalid", "invalid merge method");
+  await run(
+    exec,
+    "gh",
+    [
+      "pr",
+      "merge",
+      String(input.number),
+      "--repo",
+      slug(repo),
+      flag,
+      "--match-head-commit",
+      input.headSha,
+    ],
     "gh_failed",
   );
 }
