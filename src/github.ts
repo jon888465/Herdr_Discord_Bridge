@@ -2,7 +2,7 @@
 //
 // 這是 bridge 第一次對外 push，所以刻意很窄：
 // - 只能 push `card/<…>` 分支到 `origin`，用明確的 refspec，**永不強制、不帶任何旗標**；
-// - 只做 gh 的 pr list／create／checks／view 與 repo view，不 merge、不改設定；
+// - 只做 gh 的 pr list／create／checks／view／diff、repo view，以及讀取 PR 檔案清單的 `gh api`（GET），不 merge、不改設定；
 // - 所有輸入送出前驗證；外部程式一律用參數陣列（不經 shell）；
 // - 錯誤訊息先遮蔽機敏資料再截斷。
 // 憑證用使用者現有的 `gh`／ssh 登入（使用者 2026-11-03 決定：L1 與 L2 都用現有登入）。
@@ -561,4 +561,19 @@ export async function pullRequestFiles(
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
   return { files, complete: files.length < PULL_FILES_CAP };
+}
+
+/** 一個 PR 的 unified diff（唯讀，不帶顏色）。輸出超過 exec 的緩衝上限時 gh 會失敗，由呼叫端當成「太大」。 */
+export async function pullRequestDiff(
+  exec: Exec,
+  repo: GithubRepo,
+  number: number,
+): Promise<string> {
+  assertNumber(number);
+  return run(
+    exec,
+    "gh",
+    ["pr", "diff", String(number), "--repo", slug(repo), "--color=never"],
+    "gh_failed",
+  );
 }
