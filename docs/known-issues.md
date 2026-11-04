@@ -2898,7 +2898,7 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 ## ISSUE-081：`card fix`（review 的 loop 手動版）
 
-更新日期：2026-11-04。狀態：已修正、待驗收（這是新功能；原始碼與自動化測試完成，**第一次讓作者 Agent 在 review 之後修改 worktree 並 commit，尚未 live 驗收，執行中的 bridge 尚未載入**）。
+更新日期：2026-11-04。狀態：已驗收（核心路徑，2026-11-04：完整的一圈 review → fix → pr → review 在真實的 claude 與 codex 上走完；部分修正、失敗的一圈、作者改到範圍外的檔案、第 3 輪上限、Discord thread、跨機器未實機驗證，見「驗收證據」）。
 
 來源：使用者 2026-11-04 決定開始 loop，並回答 Agent 的設計提案：「照建議，先做手動版 card fix。1. 照你建議每圈開新的，作者就看最後 pane 是誰 2. 好 3. 對的，總共先從 5 改 3」。
 
@@ -2908,7 +2908,16 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 測試（2026-11-04，本機 macOS、Node v26.12.0，非 CI）：新增 `test/card-fix.test.ts` 15 項、`test/card-fix-flow.test.ts` 13 項、`test/card-fix-wiring.test.ts` 4 項、`test/card-fix-command.test.ts` 8 項、`test/worktree-fingerprint.test.ts` 3 項、`test/card-command.test.ts` 12 項（參數與卡片 id、沒有可修的就拒絕且不呼叫流程、交出 open findings 並標 fixed 與記事件、`--agent`、部分修正只標修好的、失敗的一圈不動卡片、沒開始的修正不動卡片、前提拒絕透傳、第 3 輪後停止、與 review 互斥、review 通過把 fixed 標為 resolved、仍要求修改時不動 fixed）與 `test/card-events.test.ts`（`fix_applied` 的格式與 3 種拒絕）。先寫測試、看到紅再實作。全套 1039 項，1038 通過、0 失敗、1 略過（原 983 項）；`lint` 通過。**全部使用假的 Herdr、假的 Agent、假的 git 與假的 GitHub，沒有對真實環境驗證。**
 
-未驗證（待 merge、重啟 bridge 後 live 驗收；每一步都需要使用者當下同意，包含 push 與開測試 PR）：真實作者 Agent 能否照提示只修列出的 findings、建立一個 commit、回出合格的 JSON；新 pane 啟動的真實 Agent 在 worktree 裡的行為；`git status` 與 `git diff` 的真實輸出；作者動到 findings 以外的檔案時（bridge 只列出、不判斷）；完整的一圈流程（`card review` → `card fix` → `card pr` → `card review` 通過）；`fixed` → `resolved` 在真實卡片上的樣子。
+驗收證據（2026-11-04，本機 macOS，bridge 載入 main `d132fdb`，claude 當作者、codex-cli 0.165.0 當 reviewer，Herdr 0.9.1；使用者同意重啟、信任提示、三次 push 與開測試 PR、啟動 Agent 並修改 worktree）：驗收卡 `REQ-20261104-fix-accept`，`--worktree` 啟動的 claude 在分支做一個故意把檔案第二行寫錯的 commit（`0a968ac`，只新增 `docs/tmp-fix-accept.md`），`card pr` 開出測試 PR #80（https://github.com/jon888465/Herdr_Discord_Bridge/pull/80）。
+1. `card review … --agent codex`（第 1 輪）：`changes_requested`，第 3 條驗收條件 ✗，`F1 · medium · docs/tmp-fix-accept.md:2-2`；
+2. `card fix REQ-20261104-fix-accept`：回覆「修正完成 … 新作者（新開的 pane）：claude … 已標為 fixed：F1 … 新 commit：0a968ac4bc7b → e408bd46517c … 改動的檔案：docs/tmp-fix-accept.md … 作者的 pane 已關閉」。核對 worktree：恰好一個新 commit（`fix: REQ-20261104-fix-accept review round 1`，作者 `c <jon@cdexunijiqi.local>`），只改了 `docs/tmp-fix-accept.md`，第二行已改成驗收條件要求的文字，工作樹乾淨，`w1N` 只剩原本的作者 pane；卡片 `F1` 變 `fixed`、新增事件 `fix_applied`（`修正 第 1 圈：1 筆標為 fixed、0 筆略過，head e408bd46517c`）；
+3. `card pr`：「這個分支已有 PR #80 … 已把新的 commit push 上去（head e408bd46517c）」，PR 現有 2 個 commit，CI 兩項通過；
+4. `card review … --agent codex`（第 2 輪）：`pass`，四條驗收條件都 ✓，並回覆「先前標為 fixed 的 finding 已確認：已標為 resolved：F1」；卡片 F1 變 `resolved`，`review_verdict` 事件依序為 changes_requested（第 1 輪）、pass（第 2 輪），與 `fix_applied` 在紀錄裡順序正確。
+收尾（使用者同意）：關閉測試 PR #80、`git push origin --delete` 刪遠端分支、`card cleanup`、刪本機分支與驗收卡、路由切回 `w1`。這同時驗到：新開 pane 的新作者（種類沿用最後一個作者）、`fixed` → `resolved` 的狀態機在真實卡片上、review 與 fix 的 pane 都有關閉、`runTeamTurn` 對剛啟動的作者可用。
+
+未驗證：部分修正（有 skipped 的 finding）的真實畫面；失敗的一圈（沒有新 commit、回覆不合格、留下未提交修改）在真實 Agent 上的表現；作者改到 findings 以外的檔案或建立不只一個 commit 時的行為（bridge 目前只列出改動的檔案）；動到敏感路徑的警告在真實修正上的畫面；review 輪次到第 3 輪被拒絕；Discord thread 的顯示（本次在 console）；其他種類 Agent 當作者或 reviewer；跨機器。
+
+仍未驗證（原先列的其餘項目）：真實作者 Agent 能否照提示只修列出的 findings、建立一個 commit、回出合格的 JSON 已驗到；新 pane 啟動的真實 Agent 在 worktree 裡的行為；`git status` 與 `git diff` 的真實輸出；作者動到 findings 以外的檔案時（bridge 只列出、不判斷）；完整的一圈流程（`card review` → `card fix` → `card pr` → `card review` 通過）；`fixed` → `resolved` 在真實卡片上的樣子。
 
 限制：只支援本機（F9）；只處理整個 PR 的 findings；**沒有自動 loop**，每一圈都要人下指令；「每次審查最多 2 輪」沒有實作；inconclusive 的 review 也算一次，所以最多 3 次 review 的額度可能被 inconclusive 吃掉；作者的限制只靠提示與事後檢查（只修列出的 findings、一個 commit、乾淨的工作樹），不是作業系統層隔離；動到敏感路徑只警告、不阻擋；作者失敗留下未提交修改時，bridge 只回報、不清理，要人到 worktree 檢查。
 
