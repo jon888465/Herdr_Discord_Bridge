@@ -3005,24 +3005,31 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 驗收證據（2026-11-04，本機 macOS，bridge 載入 main `a1ec18d`，claude 當作者、codex 當 reviewer，Herdr 0.9.1；使用者同意重啟、開測試 PR、政策由使用者改成 L2 再改回）。驗收卡 `REQ-20261104-lm-ok`，測試 PR #93（只新增無害的 `docs/tmp-loop-merge-accept.md`）：
 **第一段（政策 L1）：** `card loop REQ-20261104-lm-ok --agent codex --merge`：codex 第 1 輪 review `pass`（3 條驗收條件都對上、reviewer pane 已關閉）→ 等 CI，兩項全綠，回報「CI 全部通過」→ 呼叫 `card merge`，被拒絕，**只有一條原因**「專案政策是 L1，只有 L2 才允許 bridge 自己 merge」；loop 停在 `merge`，PR 與 `main` 沒動。
 **第二段（政策由使用者改成 L2，`card policy` 確認）：** 再下同一個指令：review 已是 `pass`，直接等 CI（已全綠）→ `card merge` 的所有條件成立 → **第一次由 loop 真的合併進公開 repo 的 main**（squash，head `379a2858a8e6`，合併後 `main` 為 `7cff072`）；約一分鐘內既有輪詢記 `merged` 並自動清理 worktree（分支保留）。收尾：刪遠端與本機分支 `card/REQ-20261104-lm-ok`、刪驗收卡、測試文件由 revert 移除（本 PR）；政策由使用者改回 L1。
-**驗收過程的偏差與發現（與 `--merge` 本身無關）：** `card assign REQ-20261104-lm-ok --coding --worktree` 這次沒有做出 commit：Lead 規劃時沒有可用的 Worker，回了空計畫，task 失敗（「no passing review… no successful verification」）。根因**尚未調查**，先前的驗收卡沒有這個現象，是否為偶發、或與重啟後的狀態有關未知。處理：改成直接對卡片 pane 的 claude 下指令完成並 commit，再手動把卡片 `status` 改成 `done` 才能 `card pr`。若再次出現請開新 issue 調查。（第二次重現與後續追蹤見 ISSUE-085。）
+**驗收過程的偏差與發現（與 `--merge` 本身無關）：** `card assign REQ-20261104-lm-ok --coding --worktree` 這次沒有做出 commit：Lead 規劃時沒有可用的 Worker，回了空計畫，task 失敗（「no passing review… no successful verification」）。根因已在 ISSUE-085 查明：先前的驗收卡都是**不帶 `--coding`** 指派的，這兩張帶了 `--coding`，而 `--coding` 在沒有 Worker 時無解（不是偶發，也不是重啟造成）。處理：改成直接對卡片 pane 的 claude 下指令完成並 commit，再手動把卡片 `status` 改成 `done` 才能 `card pr`。若再次出現請開新 issue 調查。（見 ISSUE-085。）
 **CI 紅燈停止已補驗（2026-11-04，政策 L1，bridge 載入 main `a1ec18d`，codex 當 reviewer）：** 驗收卡 `REQ-20261104-lm-red`，測試 PR #95（只新增一個必定失敗的 `test/tmp-red.test.ts`）。`card loop REQ-20261104-lm-red --agent codex --merge`：codex 第 1 輪 review `pass`（3 條驗收條件都對上）→ 等 CI → 回報「CI 結果是 failure（不是全部通過）」→ loop 停在 `ci`，原因「CI 沒有全部通過，沒有 merge；review 已通過，請人看 CI」；**沒有呼叫 `card merge`**，PR 與 `main` 沒動。收尾（使用者同意）：關閉 PR #95、刪遠端與本機分支 `card/REQ-20261104-lm-red`、取消卡住的 team task、`card cleanup`、刪驗收卡、路由切回 `w1`；政策維持 L1。驗收期間 `--coding` 又出現空計畫（見 ISSUE-085）。
 **未驗證：** 等 CI 期間 `card loop stop`；等 CI 逾時（30 分鐘）；讀 CI 連續出錯；Discord thread 的進度回報；其他專案；跨機器。
 
 下一步：merge 本 PR；視需要在 L1 另開必敗的測試 PR 補驗 CI 紅燈停止；調查 `--coding` 規劃出空計畫的問題（再現時）。
 
-## ISSUE-085：`card assign --coding --worktree` 的 Lead 規劃出空計畫，task 卡在規劃或失敗
+## ISSUE-085：`card assign --coding` 在沒有 Worker 時 Lead 規劃出空計畫，task 失敗或卡在規劃
 
-更新日期：2026-11-04。狀態：待調查（2026-11-04 重現兩次，根因**未確認**，**尚未修正**）。
+更新日期：2026-11-04。狀態：已修正、待驗收（根因已確認；原始碼與自動化檢查完成；**尚未重啟 bridge、尚未實機驗收**，不可把單元測試通過當成端到端通過）。
 
-使用者可見症狀：`card assign <id> --coding --worktree` 之後，卡片 pane 裡的 claude 回覆「沒有列出任何 Worker target，不能自己動手實作」，回空計畫。第一次（`REQ-20261104-lm-ok`）：task 判 failed（「no passing review for the current version; no successful verification for the current version」），沒有任何 commit。第二次（`REQ-20261104-lm-red`）：task 停在 `planning`，沒有失敗也沒有完成，直到手動 `team cancel` 才結束；`card cleanup` 在此之前因「任務尚未結束」而拒絕（這個保護是對的）。
+使用者可見症狀：`card assign <id> --coding --worktree` 之後，卡片 pane 裡的 claude 回覆「沒有列出任何 Worker target，不能自己動手實作」，回空計畫。第一次（`REQ-20261104-lm-ok`，task `task-e66b125d`）：Lead 回了合格的空計畫 → `plan_validated`、`coding_assessed` → 統整後 task 判 failed（「no passing review for the current version; no successful verification for the current version」），沒有任何 commit。第二次（`REQ-20261104-lm-red`，task `task-f35daaf8`）：Lead 回的是沒有傳輸標記的說明文字，turn 一直沒 settle，task 停在 `planning` 約 6 分鐘直到手動 `team cancel`；`card cleanup` 在那之前因「任務尚未結束」而拒絕（這個保護是對的）。
 
-預期行為：`--coding` 的卡片由該卡的 Lead Agent 在 worktree 完成工作（先前的驗收卡能由作者 claude 做出 commit；當時的 plan 內容這次沒有重新核對）。
+預期行為：要不要用 `--coding` 由使用者決定；用了就必須有可用的 Worker，否則在**啟動前**就明確拒絕並說明怎麼辦，而不是讓 Lead 去猜。
 
-重現環境：本機 macOS，bridge 載入 main `a1ec18d`（含 PR #92 的 `card loop --merge`，但該功能與 team task 的規劃無關），claude（作者）在新 worktree 內，Herdr 0.9.1，政策 L1。第一次重啟 bridge 後第一次 `card assign --coding`、第二次是同一個 bridge 的第二張卡，所以不是「重啟後第一次」的偶發。
+**已確認根因（2026-11-04，查 team task journal 與 `src/team-orchestration.ts`）：**
+1. 先前所有成功的驗收卡（`merge-ok`、`loop-ok`、`fix-accept`…，task journal 的 `coding` 欄位是 `null`）都是**不帶 `--coding`** 指派的；只有這兩張失敗的帶了 `--coding`（`coding` 欄位有內容、`codingMode: true`）。所以這不是回歸，也不是重啟後的偶發，是我（Agent）驗收時多帶了旗標。
+2. `--coding` 的規劃提示同時要求「Lead 不可用空計畫自己實作」與「只能指派清單上的 Worker 目標、不可指派自己」（`planningInstruction`），SPEC 也規定 review 必須是與作者不同的 session。`--worktree` 會把路由切到新建的 workspace，那裡只有 Lead 一個 Agent、沒有勾選的 profile，所以 `Workers:` 清單是空的——這個組合**結構上無解**。
+3. 第二次卡在 `planning` 是同一個無解情境下的另一種 Lead 反應：回覆沒有傳輸標記，bridge 一直等標記，直到取消。「回覆沒有標記就無限等」是既有行為（不限於 `--coding`），**尚未調查是否該另設逾時**，本次不處理。
 
-已確認：兩次的 plan 提示中 `Workers:` 都是空的（`🧭 Team Task accepted … Workers:` 後面沒有東西）。**未確認：** 為什麼這次沒有 Worker 目標（`--coding` 預期把 Lead 自己或同 workspace 的 pane 列為 Worker？）、是否與近期合併的 ISSUE-061／069／072（中斷等待、首個 session 領養、agent 名稱截斷）有關、先前驗收成功時 Worker 清單長什麼樣。
+修正範圍（2026-11-04）：新增 `src/coding-roster.ts` 的 `assertCodingRoster`；`src/main.ts` 的 `startTeamTask` 在算出 Workers（同 workspace 的 Team pane ＋ 勾選的 profile）後、啟動前呼叫它：`--coding` 且 Worker 為 0 就丟錯誤，說明原因並建議不帶 `--coding` 指派。`card assign --worktree --coding` 因為 worktree 先於任務建立，錯誤走既有路徑（「worktree 已建立…任務沒有啟動，卡片仍是 ready」），可直接改用不帶 `--coding` 的 `card assign <id>` 重試。`team ask --coding` 沒有 Worker 時同樣直接拒絕。
 
-暫時繞過（驗收用，非修正）：直接對卡片 pane 的 claude 下指令完成並 commit，再手動把卡片 `status` 改成 `done`，才能 `card pr`；卡住的 task 用 `team cancel` 結束。這繞過了 bridge 的 task 流程，所以這兩張卡的「作者階段」不算 `--coding` 的驗收證據。
+測試（2026-11-04，本機 macOS，非 CI）：新增 `test/coding-roster.test.ts` 3 項（0 個 Worker 的 coding 任務被拒絕且訊息含原因與出路、有 Worker 或 profile 可通過、非 coding 任務不受影響）。`npm run check` → 1126 tests、1125 pass、0 fail、1 skip（既有）；`npm run lint` ok。
 
-未驗證／下一步：回頭看先前成功的 `--coding` task 的 plan 提示（task journal）與這次的差異；在 `a1ec18d` 之前的版本重現與否；確認後補測試並修正。
+未驗證：重啟新版 bridge 後，真實的 `card assign <id> --worktree --coding`／`team ask --coding` 在零 Worker 時的錯誤訊息；有 Worker 時 `--coding` 仍能正常啟動；`card assign --coding` 搭配 `--worktree` 在有 profile 時能不能用（結構上沒驗過）。「回覆沒有傳輸標記就無限等」另作評估。
+
+限制：只擋「完全沒有 Worker」；Worker 存在但都忙或不合用的情況由既有流程處理。
+
+下一步：merge 本 PR、重啟 bridge；用 L1 下的一張無害卡，`card assign <id> --worktree --coding` 確認被拒絕、訊息清楚、卡片仍是 ready。
