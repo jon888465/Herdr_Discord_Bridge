@@ -2676,7 +2676,7 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 ## ISSUE-071：`card pr` 回覆 PR 動到的敏感路徑（F6 階段 1）
 
-更新日期：2026-11-04。狀態：已修正、待驗收（這是新功能的第一階段，不是缺陷；原始碼與自動化測試完成，執行中的 bridge 尚未載入，尚未 live 驗收）。
+更新日期：2026-11-04。狀態：已驗收（核心路徑；改名原路徑、降級路徑未實機驗證，見「驗收證據」）。這是新功能的第一階段，不是缺陷。
 
 來源：使用者 2026-11-04 決定「敏感路徑一律不自動 merge」（追蹤清單 F6）並同意清單；實作順序的階段 1。
 
@@ -2688,8 +2688,33 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 測試（2026-11-04，本機 macOS、Node v26.12.0，非 CI）：新增 `test/sensitive-paths.test.ts`（8 項：一般檔案不命中、每個受保護路徑與清單檔自己命中、不分大小寫與開頭 `./`、只認根目錄 `package.json` 與精確檔案不誤判相似名稱、`..` 視為敏感、去重保序、空清單）、`test/github.test.ts` 3 項（含改名原路徑、3000 筆上限、驗證編號與 gh 失敗）、`test/card-pr-flow.test.ts` 5 項（命中、沒命中、查不到為 null 且 PR 仍記錄、不完整為 null、既有 PR 推新 commit 也重查）、`test/card-command.test.ts` 4 項（警告列出路徑並說明目前不阻擋、沒命中不提、無法確認、既有 PR 也顯示）。以空桩先跑：會命中、會列出、查不到為 null 等 15 項為紅（`test/sensitive-paths.test.ts` 5 項、`test/github.test.ts` 3 項、`test/card-pr-flow.test.ts` 4 項與 `test/card-command.test.ts` 3 項），「不命中」類本來就通過；實作後全綠。全套 860 項，859 通過、0 失敗、1 略過（原 840 項）；`lint` 通過。**沒有**對真實 GitHub 的測試。
 
-未驗證（待使用者，需先 merge 並重啟 bridge）：下一次真實 `card pr` 的回覆是否正確列出（或不列出）敏感路徑；改名檔案的原路徑是否真的出現在 `gh api` 輸出；`--jq` 在真實 `gh` 上的輸出格式。
+驗收證據（2026-11-04，本機 macOS，bridge 載入 main `f883956`，Herdr 0.9.1，`agy`，政策 L1；由 Agent 在 bridge console 操作，使用者明確同意信任提示、push 與開測試 PR）：驗收卡 `REQ-20261104-sens-accept`（`--worktree`，worktree `w1H`）讓 agy 在分支上做一個 commit（`594c24c`，只動 `SPEC.md` 與 `docs/tmp-sensitive-accept.md`），卡片 `done` 後 `card pr`，開出測試 PR #62（https://github.com/jon888465/Herdr_Discord_Bridge/pull/62）。回覆含「⚠️ 這個 PR 動到敏感路徑：SPEC.md」，**沒有**列出 `docs/tmp-sensitive-accept.md`。另以同一條 `gh api --paginate repos/jon888465/Herdr_Discord_Bridge/pulls/62/files --jq '.[] | .filename, (.previous_filename // empty)'` 直接核對，真實輸出為 `SPEC.md`、`docs/tmp-sensitive-accept.md` 兩行，`--jq` 格式正確。PR 內文只有卡片 id、分支、基準、head、task id 與政策等級 L1，沒有描述與驗收條件。
+
+收尾（使用者同意）：PR #62 以 `gh pr close` 關閉（沒有 merge）；`gh` 的 token 無法刪遠端分支（HTTP 403），改用 `git push origin --delete card/REQ-20261104-sens-accept`（單一分支、非強制）刪除；清掉 worktree、本機分支與驗收卡，路由切回 `w1`。順帶觀察：PR 被關閉時 bridge 在 console 回報「PR #62 已關閉、沒有 merge」（ISSUE-064 的關閉通知路徑）。
+
+未實機驗證：改名檔案的原路徑（`previous_filename`）是否出現（這個 PR 沒有改名）；查不到與到 3000 筆上限的降級路徑（只有單元測試）；Discord thread 的顯示（本次在 console）。遠端還留有 `card/REQ-20261103-merge-accept`（PR #47 時留下，非本次產生，未動）。
 
 限制：只認路徑，不看內容；檢查發生在開 PR／推 commit 當下，之後 PR 被改動不會重查，**將來 merge 前必須再查一次**；清單由使用者要求調整、經人工 merge（它本身在清單內，所以修改它的 PR 會被標為敏感）。
 
-下一步：使用者驗收後改為「已驗收」；階段 2（卡片 findings 欄位，F8）。
+下一步：無；階段 2（卡片 findings 欄位，F8）。
+
+
+## ISSUE-072：`card assign --worktree` 的 agent 名稱超過 Herdr 的 32 字元上限，卡片 id 較長時失敗
+
+更新日期：2026-11-04。狀態：待調查（**根因已確認，尚未修正**）。
+
+來源：ISSUE-071 的 live 驗收途中發現，不是 ISSUE-071 的缺陷。
+
+使用者可見症狀：`card assign REQ-20261104-sensitive-accept --worktree` 回覆「❌ worktree 已建立（workspace w1G，…）但 Agent 沒有啟動：herdr agent.start: invalid_agent_name agent name must start with a lowercase letter and contain only lowercase letters, digits, '-' or '_' (1-32 characters)。任務沒有啟動；可 `card cleanup …` 清掉」。
+
+預期行為：不論卡片 id 多長，worktree 的 Agent 都能啟動。
+
+重現方式／環境（2026-11-04，本機 macOS，main `f883956`，Herdr 0.9.1）：卡片 id `REQ-20261104-sensitive-accept` 會組成名稱 `card-req-20261104-sensitive-accept`（34 字元）。換成較短的 `REQ-20261104-sens-accept`（名稱 29 字元）就成功。先前驗收用的卡片 id 剛好都夠短（最長約 28 字元的名稱），所以沒踩到。**約略的界線：** `card-` 加小寫卡片 id 超過 32 字元就會失敗，也就是卡片 id 超過 27 字元。
+
+根因（**已確認**）：`src/card-worktree-flow.ts` 以 `` `card-${cardId.toLowerCase()}`.slice(0, 40) `` 組 Agent 名稱，截斷上限用 40，但 Herdr 的 `agent.start` 只接受 1 到 32 字元。卡片 id 本身最長可到多長沒有在這裡限制。
+
+修正範圍：尚未修正。方向（待使用者同意）：截斷到 32 字元，並確保結尾不是 `-`；截斷後可能與其他卡片同名（前綴相同），需要決定是否附加短雜湊；補測試（34 字元的 id 能啟動、截斷後仍符合 Herdr 的字元規則）。目前失敗時 worktree 已建立、`card cleanup` 可清掉，不會留下壞狀態（本次實測確認）。
+
+測試：無（尚未修正）。
+
+下一步：使用者同意後先寫測試再修。
