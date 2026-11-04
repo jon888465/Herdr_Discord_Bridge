@@ -96,6 +96,10 @@
 | F2 | GitHub 認證：bot 帳號或 App、階段二 token 權限（見 ISSUE-052 討論） | **已決定、未實作**（使用者 2026-11-03）：**L1 第一版先用你現有的 `gh`／ssh 登入**（`jon888465`），不新增帳號或憑證；**進 F3 前再做**。**L2 也用現有登入**（使用者 2026-11-03 選 A）；不新增 bot／App、也不要求先改用單一 repo 的 token。Agent 仍建議自動 merge 前打開 G3；token 縮權（B）與獨立身分（G2）之後想加強時再選，取捨見需求卡「L2 的身分選擇」。最小權限清單見同一節 |
 | F3 | 開 PR、等 CI、回報（L0 只在 worktree、L1 開 PR 由人 merge） | **已實作，主要路徑 live 驗收通過 2026-11-03**（ISSUE-064）。使用者 2026-11-03 決定：`card pr <id>` 要卡片 done、專案政策 L1 以上；第一版包含 CI 輪詢與回報；第一次 live 驗收用 Herdr_Discord_Bridge 本身的無害文件卡；PR 標題用卡片標題、內文只放卡片 id 與結構化事實；身分用現有 gh／ssh（F2）。`merged` 事件與 merge 後清理屬 E11，尚未做 |
 | F4 | 失敗處理：review 不過、測試失敗、CI 紅、衝突都退回人工並附證據，不無限重試 | 未開始 |
+| F5 | **L2 的 review 閘：PR 上的獨立 review** | **已決定、未實作**（使用者 2026-11-04）：PR 開出後，由**不同 session** 的另一個 Agent 審 PR 的 diff，判定連同 **head commit sha** 寫回卡片（`review_verdict`）；`pass`、head 沒變、CI 綠才允許 merge，之後有新 commit 就作廢重審。不採用「沿用 `--coding` 的 review」（它綁工作樹指紋、不是 PR head，review 後再 commit 的內容擋不住）與「第一版只看 CI」。子決定使用者 2026-11-04 已回答大部分（reviewer 盡量不同種類、repo 唯讀、逐條對驗收條件、每個 commit 審一次加最後整體 review、先審 2 輪後退給 Agent、quota 不夠要 handoff），「loop 到結束」與 F4 的衝突已定奪：**總上限先設 5 次**（可調整），每次審查最多 2 輪；findings **寫在卡片的新欄位、不貼 PR**（需擴充卡片格式，F8）；見需求卡「L2 的 review 閘」 |
+| F6 | **敏感路徑一律不自動 merge** | **已決定、未實作**（使用者 2026-11-04）：PR 動到敏感路徑（暫定 `.github/`、`AGENTS.md`、`package.json` 與 `scripts/`、政策相關檔）時，不論 review 結果，一律退回人工 merge。因為沒有第二個身分（G2 不做、CODEOWNERS 無法代勞），這是 bridge 端的替代保護。路徑清單使用者 2026-11-04 已同意並加上 `SPEC.md`、`src/policy.ts`、`src/github.ts`，之後可依要求調整；清單必須放在 Agent 改不到的地方，且清單檔本身也要列入敏感路徑 |
+| F8 | **卡片新增 findings 欄位**（reviewer 的問題清單，不貼 PR） | **已決定、尚無設計**（使用者 2026-11-04）；形式（frontmatter 欄位或內文段落）實作時決定，建議內文段落 |
+| F7 | **quota 不夠時的記錄與 handoff**：把進度（做到哪、剩什麼、已審過的 commit、未處理的 findings）記在卡片，交給別的 Agent 接續 | **已決定要做、尚無設計**（使用者 2026-11-04） |
 
 ## G. L2 與防護（階段 5）
 
@@ -109,7 +113,7 @@
 | G4 | 紅燈 PR 被擋的實測（直接 push 被拒已測） | 未開始（ISSUE-052 剩餘） |
 | G5 | 啟用 Dependabot（action 已釘 SHA） | 未開始（ISSUE-052 剩餘） |
 | G6 | 公開 repo 的不可信輸入、fork PR 的 workflow 權限 | 未開始 |
-| G7 | L2 自動 merge，先拿 herdr bridge 自己試；首次試跑建議用 L1 | 未開始 |
+| G7 | L2 自動 merge，先拿 herdr bridge 自己試；首次試跑建議用 L1 | 未開始（前置：F4、F5、F6 與 merge 實作；身分 F2 與 G3 已決定／完成） |
 
 ## H. 延伸（階段 6）
 

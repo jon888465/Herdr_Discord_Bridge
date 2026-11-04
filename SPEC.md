@@ -680,3 +680,4 @@ Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*
   3. 在原 thread 通知「PR #N 已 merge（<方式>）」並附上清理結果；自動清理失敗（例如 Herdr 連不上）只在通知裡說明並提示手動 `card cleanup <id>`，**不會自動重試**。
   - 只有 **merge** 會觸發；PR 被關閉不會。bridge 不會 `git pull` 或更新使用者本機 repo 的 `main`，也不刪遠端或本機分支。
   - 限制：merge 方式是推斷；通知送不出去時索引仍已更新、不重送；merge 發生在 bridge 停止期間時，下次啟動後的第一輪輪詢會補上（索引中仍標為開著）。
+- **L2 的 review 閘與敏感路徑（追蹤清單 F5／F6，使用者 2026-11-04 決定，已決定、未實作）：** L2 自動 merge 要求：PR 上由**不同 session** 的 Agent 審 diff，判定連同 head commit sha 記在卡片（`review_verdict`），`pass`、head 沒變、CI 全綠才 merge，新 commit 使判定作廢；PR 動到敏感路徑一律不自動 merge、退回人工。**目前沒有 merge 功能，L2 仍只是政策檔的設定值。** 使用者 2026-11-04 對子決定的回答（reviewer 盡量不同種類、repo 唯讀、逐條對驗收條件、每個 commit 審一次加最後整體 review、先審 2 輪後交 Lead 決定、quota 不夠要記錄並 handoff、敏感路徑清單加上 `SPEC.md`／`src/policy.ts`／`src/github.ts`）記在需求卡；使用者同日定奪：「審查→修正」loop **總上限先設 5 次**（可依要求調整，超過退回人工）、每次審查最多 2 輪；findings **寫在卡片的新欄位、不貼 PR 留言**（需擴充卡片格式，尚無設計）。限制：reviewer 與作者可能是同一家模型，獨立的只是 session，不是判斷能力。

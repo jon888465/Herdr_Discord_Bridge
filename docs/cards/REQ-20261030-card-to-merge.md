@@ -124,3 +124,26 @@ external: { notion: null, github: null, mantis: null }
 **使用者的決定（2026-11-03）：選 A，L2 用現有登入。** 三個選項是：A 現有登入；B 現有身分加單一 repo 的 fine-grained token（不用 ssh key）加 G3；C 獨立 bot 帳號或 GitHub App。選 A 的代價（已知）：Agent 在同一環境就能用同一份憑證（含 ssh key＝整個帳號的權限），自動 merge 只靠 `protect-main` 要求的 PR 與兩個 CI 檢查把關；沒有第二個身分，CODEOWNERS 無法要求獨立審查。
 
 **G3 已完成：** 使用者 2026-11-03 開啟 `strict_required_status_checks_policy`（Agent 以 `gh api` 唯讀確認為 `true`）。B、C 之後想加強時再選。
+
+### L2 的 review 閘（2026-11-04，使用者決定；**目前沒有任何程式**）
+
+**使用者的決定：**
+1. **review 閘第一版 = PR 上的獨立 review（追蹤清單 F5）。** PR 開出後，由**不同 session** 的另一個 Agent 審 PR 的 diff；判定（`pass`／`changes_requested`／`inconclusive`）連同 **head commit sha** 寫回卡片的 `review_verdict` 事件。只有 `pass`、head sha 與審過的一致、CI 全綠，才允許 merge；review 之後有新 commit 就作廢、重審。
+2. **敏感路徑一律不自動 merge（F6）。** 不論 review 結果，PR 動到敏感路徑就退回人工 merge。
+
+**為什麼不是另外兩個選項（Agent 的分析，使用者採納）：**
+- 「沿用 `--coding` 的 review」：現有的 review 綁**工作樹指紋**，不是 PR 的 head commit，而且 bridge 不替 Agent commit；review 之後再 commit 的內容不會被擋，要另外做「指紋對 commit」的對應，風險較高。
+- 「第一版只看 CI」：沒有任何程式碼審查，寫程式的 Agent 自己就是唯一把關者。
+
+**已知限制（誠實說明）：** reviewer 與作者很可能是同一家模型，**獨立的只是 session，不是判斷能力**；review 通過不等於沒有 bug，也擋不住 prompt injection 讓 reviewer 與作者同時出錯。這個閘降低風險，不取代人。
+
+**使用者對子決定的回答（2026-11-04；以下「決定」是使用者的原意，「我的理解」「衝突」是 Agent 的補充，待確認）：**
+
+1. **誰當 reviewer — 決定：** 盡量用不同種類的 Agent；沒有任何可用的、或 quota 用完時，用同種類也可以。注意：這時獨立的只剩 session，與 F5 的限制一致。
+2. **reviewer 看到什麼 — 決定：** repo 的唯讀權限，「與調整需求」。*使用者 2026-11-04 確認以下理解：* reviewer 能讀整個 repo（唯讀、不能改），並且可以**建議**調整需求（驗收條件），但不能自己改卡片；調整由作者／Lead 或人決定。卡片內容可能含機敏資訊而 repo 是公開的，所以給 reviewer 的卡片欄位仍限標題、描述、驗收條件（同 `card assign` 的規則）。
+3. **什麼算 `pass` — 決定：** 先試逐條對驗收條件回答。diff 太大代表 Lead 規劃功能時切得太大（問題在規劃，不是 review）；若是單一 commit，就針對單一 commit 審；**最後整個需求（可多個 commit）還要做一次整體 review**。*使用者 2026-11-04 確認以下理解：* 兩層 review——每個 commit 一次、整個 PR 一次；merge 的依據是**整體 review 的 pass 綁 head sha**。diff 太大時不是 `inconclusive` 了事，而是退回 Lead 要求重新切分。
+4. **輪數與誰修 — 決定：** 先設定審 **2 輪**，之後退給 Agent；Lead Agent 若判斷需要人為判斷才退回人工，否則**像 skill goal 一樣朝目標 loop 到結束**。quota 不夠時，要能**記錄並 handoff 給別的 Agent**。
+   - **與既有驗收的衝突，已由使用者定奪（2026-11-04）：** 需求卡與追蹤清單 F4 寫「任何失敗都退回人工並附證據，不無限重試」，與「loop 到結束」衝突。使用者的決定：**loop 保留總上限，先設 5 次**（之後可依要求調整）；超過一律退回人工並附證據。*Agent 的理解（待確認）：* 兩個數字分開——**每次審查最多 2 輪**，整個「審查→修正」loop **總共最多 5 次**；一次「審查→修正」算一次。F4「不無限重試」因此維持成立。
+   - handoff（quota 不夠時把進度交給別的 Agent）是新能力，追蹤為 F7，尚無設計；至少要記錄：做到哪、剩什麼、已審過的 commit、未處理的 findings，寫在卡片的流程紀錄。
+5. **敏感路徑清單 — 決定：** 同意暫定清單（`.github/`、`AGENTS.md`、`package.json` 與 `scripts/`、政策相關檔），並**加上** `SPEC.md`、`src/policy.ts`、`src/github.ts`；「之後仍可由使用者要求調整」。*Agent 的補充：* 清單本身要放在 bridge 端（程式或使用者的政策設定），不能放在 Agent 在 worktree 裡能改的檔案；放在程式裡時，**該檔案本身也要列入敏感路徑**，否則 Agent 可以先改清單再 merge。
+6. **findings 寫在哪 — 決定：** 寫在**卡片**，卡片**多一個專門放 findings 的欄位**；**不貼成 PR 留言**（PR 是公開的）。findings 是 reviewer 發現的問題清單（檔案、位置、說明、嚴重度）。*實作時才決定的形式：* 是 frontmatter 欄位或內文段落；Agent 的建議是內文段落（例如 `## Review 發現`），因為 frontmatter 的解析器是受限子集、findings 可能很長，而且段落可以保留每一輪、每個 commit 的紀錄。需新增卡片格式（ADR-0001／0002）與 `card show` 的顯示，尚無設計。
