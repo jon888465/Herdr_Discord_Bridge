@@ -2986,7 +2986,7 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 ## ISSUE-084：`card loop --merge`（review 通過後等 CI、全綠自動 merge）
 
-更新日期：2026-11-04。狀態：已修正、待驗收（原始碼與自動化檢查完成；**尚未重啟 bridge、尚未實機驗收**，不可把單元測試通過當成端到端通過）。
+更新日期：2026-11-04。狀態：已驗收（核心路徑，2026-11-04：L1 下 review → 等 CI → `card merge` 拒絕，與 L2 下一次真的 `--merge` 合併都在真實 PR 上走完；CI 紅燈停止、等 CI 時 `card loop stop`、Discord thread 未實機驗證，見「驗收證據」）。
 
 來源：使用者 2026-11-04 要求「做 card loop」，Agent 提案 `card loop --merge`，使用者回答：是做 `--merge`；等 CI 但有逾時；守門全交給 `card merge`（不新增條件）。
 
@@ -3002,4 +3002,10 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 限制：逾時 30 分鐘與間隔 30 秒寫死在 `main.ts`；CI 一直沒有登記（`none`）會等到逾時；只支援本機與 github.com；等 CI 期間 bridge 若重啟，loop 就中斷（沒有續跑），卡片維持在 review 通過的狀態，可手動 `card merge`。
 
-下一步：merge 本 PR、重啟 bridge；用無害的測試 PR 驗收（先 L1 看 `--merge` 被拒絕的表現與 CI 紅停止，再由使用者改 L2 驗一次真的 merge，驗完改回 L1）。
+驗收證據（2026-11-04，本機 macOS，bridge 載入 main `a1ec18d`，claude 當作者、codex 當 reviewer，Herdr 0.9.1；使用者同意重啟、開測試 PR、政策由使用者改成 L2 再改回）。驗收卡 `REQ-20261104-lm-ok`，測試 PR #93（只新增無害的 `docs/tmp-loop-merge-accept.md`）：
+**第一段（政策 L1）：** `card loop REQ-20261104-lm-ok --agent codex --merge`：codex 第 1 輪 review `pass`（3 條驗收條件都對上、reviewer pane 已關閉）→ 等 CI，兩項全綠，回報「CI 全部通過」→ 呼叫 `card merge`，被拒絕，**只有一條原因**「專案政策是 L1，只有 L2 才允許 bridge 自己 merge」；loop 停在 `merge`，PR 與 `main` 沒動。
+**第二段（政策由使用者改成 L2，`card policy` 確認）：** 再下同一個指令：review 已是 `pass`，直接等 CI（已全綠）→ `card merge` 的所有條件成立 → **第一次由 loop 真的合併進公開 repo 的 main**（squash，head `379a2858a8e6`，合併後 `main` 為 `7cff072`）；約一分鐘內既有輪詢記 `merged` 並自動清理 worktree（分支保留）。收尾：刪遠端與本機分支 `card/REQ-20261104-lm-ok`、刪驗收卡、測試文件由 revert 移除（本 PR）；政策由使用者改回 L1。
+**驗收過程的偏差與發現（與 `--merge` 本身無關）：** `card assign REQ-20261104-lm-ok --coding --worktree` 這次沒有做出 commit：Lead 規劃時沒有可用的 Worker，回了空計畫，task 失敗（「no passing review… no successful verification」）。根因**尚未調查**，先前的驗收卡沒有這個現象，是否為偶發、或與重啟後的狀態有關未知。處理：改成直接對卡片 pane 的 claude 下指令完成並 commit，再手動把卡片 `status` 改成 `done` 才能 `card pr`。若再次出現請開新 issue 調查。
+**未驗證：** CI 紅燈時 loop 停在 `ci`（只有單元測試）；等 CI 期間 `card loop stop`；等 CI 逾時（30 分鐘）；讀 CI 連續出錯；Discord thread 的進度回報；其他專案；跨機器。
+
+下一步：merge 本 PR；視需要在 L1 另開必敗的測試 PR 補驗 CI 紅燈停止；調查 `--coding` 規劃出空計畫的問題（再現時）。
