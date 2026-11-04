@@ -2815,3 +2815,22 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 限制：reviewer 唯讀不是作業系統層隔離；指紋抓不到只改了被 gitignore 的檔案；只處理本機（F9）；findings 與各條件的判定結果由呼叫端決定怎麼存（卡片目前沒有存各條件判定的地方）；單一 commit 範圍（每個 commit 審一次）尚未支援（3b 只取整個 PR 的 diff）。
 
 下一步：3d（`card review <id> [--agent <種類>]` 指令：取 PR 材料、呼叫 `runCardReview`、寫入 findings 與 `review_verdict`、指紋實作、接上 Herdr 與 `runTeamTurn`、live 驗收）。
+
+
+## ISSUE-078：`card review` 指令與接線（F5 階段 3d）
+
+更新日期：2026-11-04。狀態：已修正、待驗收（這是新功能；原始碼與自動化測試完成，**第一次接上真實的 Herdr，尚未 live 驗收，執行中的 bridge 尚未載入**）。
+
+來源：使用者 2026-11-04 決定 review 與 coding 的 Agent 一律新開 pane、用完關閉，第一版先做本機；並在 3d 開始前回答驗收時用 **codex** 當 reviewer（「用 codex 當 reviewer」）。
+
+使用者可見行為：`card review <卡片 id> [--agent <種類>]`（Discord 與 console）。對卡片開著的 PR 做一次獨立 review：新開 pane、新 Agent，唯讀審 PR，結果寫進卡片的 `## Review 發現` 與一筆 `review_verdict`，最後關閉 pane。細節、前提與限制見 SPEC「`card review`」。`help` 也補了說明。
+
+實作範圍（2026-11-04）：`src/worktree-fingerprint.ts`（`git rev-parse HEAD` 加 `git status --porcelain`）；`src/card-review-command.ts`（下一輪的輪次與回覆文字）；`src/card-review-wiring.ts`（前提檢查與組裝：worktree、政策、PR、作者、GitHub 材料，接 `runCardReview`）；`src/card-command.ts`（`review` 子指令、同卡一次只一個 review、寫入卡片）；`src/main.ts`（接上真實的 Herdr、`startAgentInPane`、`runTeamTurn`、`fetchReviewMaterial`、指紋）。
+
+測試（2026-11-04，本機 macOS、Node v26.12.0，非 CI）：新增 `test/worktree-fingerprint.test.ts` 5 項、`test/card-review-command.test.ts` 10 項、`test/card-review-wiring.test.ts` 7 項、`test/card-command.test.ts` 8 項（參數與卡片 id 驗證、成功時寫入 findings 與 verdict 並回覆 PR 網址、`--agent` 與輪次遞增、inconclusive 也記錄、沒開始的 review 不動卡片、前提拒絕透傳且卡片不動、同卡一次只一個 review、findings 寫不進時仍記 verdict 並說明）。先以桩跑：指紋 4 項、純函式 10 項、指令 8 項、接線 7 項為紅；實作後全綠。全套 974 項，973 通過、0 失敗、1 略過（原 944 項）；`lint` 通過（兩個測試標題含 any 字樣被 lint 擋下，已改標題；一個 help 文字的反引號沒跳脫造成編譯錯誤，已修正）。**全部使用假的 Herdr、假的 Agent、假的指紋與假的 GitHub，沒有對真實環境驗證。**
+
+未驗證（待 live 驗收，需先 merge 並重啟 bridge；每一步都需要使用者當下同意）：真實的 `pane.split` 回傳是否含 `terminal_id`、`pane.close` 的行為；真實 codex 能否照提示回出合格 JSON；`runTeamTurn` 對剛啟動、尚無 session 的 reviewer 的行為；codex 第一次進卡片 worktree 的信任提示（bridge 不會替人按，review 會停在 inconclusive）；工作樹指紋在真實 worktree 的行為；10 分鐘逾時；`fetchReviewMaterial` 對真實開著的 PR；`help` 的顯示。驗收需要一個會 push 的測試 PR（和 ISSUE-071 那次一樣，驗完關閉並刪遠端分支），每一項 push、開 PR、啟動 reviewer、按信任提示都要使用者當下明確同意。
+
+限制：各條驗收條件的逐條結果只顯示在回覆裡、卡片沒有地方存；只支援本機（F9）；只審整個 PR（單一 commit 範圍尚未支援）；reviewer 唯讀是提示約束加工作樹指紋，不是作業系統層隔離，指紋抓不到只改了被 gitignore 的檔案；種類偏好順序（`claude`、`codex`、`agy`）預設選第一個與作者不同的，驗收用 `--agent codex` 指定；coding Agent 在任務完成後也關閉 pane 的部分（E13 擴大）尚未實作。
+
+下一步：merge、重啟 bridge 後 live 驗收；之後是每個 commit 審一次、loop 與總上限 5 次、quota 的 handoff（F7）、E13 的關閉 coding pane、跨機器（F9）、最後才是 merge 的實作。
