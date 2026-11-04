@@ -2701,7 +2701,7 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 ## ISSUE-072：`card assign --worktree` 的 agent 名稱超過 Herdr 的 32 字元上限，卡片 id 較長時失敗
 
-更新日期：2026-11-04。狀態：待調查（**根因已確認，尚未修正**）。
+更新日期：2026-11-04。狀態：已修正、待驗收（根因已確認；原始碼與自動化測試完成，執行中的 bridge 尚未載入修正，尚未 live 驗收）。
 
 來源：ISSUE-071 的 live 驗收途中發現，不是 ISSUE-071 的缺陷。
 
@@ -2713,8 +2713,10 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 根因（**已確認**）：`src/card-worktree-flow.ts` 以 `` `card-${cardId.toLowerCase()}`.slice(0, 40) `` 組 Agent 名稱，截斷上限用 40，但 Herdr 的 `agent.start` 只接受 1 到 32 字元。卡片 id 本身最長可到多長沒有在這裡限制。
 
-修正範圍：尚未修正。方向（待使用者同意）：截斷到 32 字元，並確保結尾不是 `-`；截斷後可能與其他卡片同名（前綴相同），需要決定是否附加短雜湊；補測試（34 字元的 id 能啟動、截斷後仍符合 Herdr 的字元規則）。目前失敗時 worktree 已建立、`card cleanup` 可清掉，不會留下壞狀態（本次實測確認）。
+修正範圍（2026-11-04，使用者同意：截斷到 32 字元，並附加 4 碼雜湊）：`src/card-worktree-flow.ts` 新增並匯出 `agentNameForCard(cardId)`：`card-<小寫 id>` 不超過 32 字元就維持原樣（既有名稱不變）；超過時截成 27 字元、去掉結尾的 `-`／`_`，再接 `-` 與 4 碼雜湊（`sha256(完整卡片 id)` 的前 4 個十六進位字元），總長最多 32 字元。同一個 id 永遠得到同一個名稱、前綴相同的長 id 名稱不同。目前失敗時 worktree 已建立、`card cleanup` 可清掉，不會留下壞狀態（本次實測確認），這一點沒有改變。
 
-測試：無（尚未修正）。
+測試（2026-11-04，本機 macOS、Node v26.12.0，非 CI）：`test/card-worktree-flow.test.ts` 新增 7 項（短 id 名稱不變、剛好 32 字元不截斷、長 id 截成 32 字元且符合 Herdr 的字元規則、最長的合法卡片 id 仍有效、前綴相同的長 id 名稱不同且同 id 名稱固定、截斷處是 `-` 時不出現 `--`、`prepareCardWorktree` 對長 id 送出符合規則的名稱）。先以舊行為（`slice(0, 40)`）跑，長 id、最長 id、`-` 結尾與 `prepareCardWorktree` 共 4 項為紅，其餘本來就通過；實作後全綠。全套 867 項，866 通過、0 失敗、1 略過（原 860 項）；`lint` 通過。**沒有**對真實 Herdr 的測試。
 
-下一步：使用者同意後先寫測試再修。
+未驗證（待使用者，需先 merge 並重啟 bridge）：用卡片 id 超過 27 字元的卡片（例如 `REQ-20261104-sensitive-accept`）`card assign --worktree`，Herdr 接受截斷後的名稱、agent 啟動成功。其他欄位（worktree 目錄名、分支名 `card/<id>`）是否也有長度限制尚未查：本次失敗只出現在 agent 名稱，worktree 與分支都建立成功。
+
+下一步：使用者驗收後改為「已驗收」。
