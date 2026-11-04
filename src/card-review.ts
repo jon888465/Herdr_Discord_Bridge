@@ -23,6 +23,7 @@ import {
   type Verdict,
 } from "./card-findings.js";
 import { redactSecrets } from "./redact.js";
+import { unwrapCodexJson } from "./team-orchestration.js";
 
 export const MAX_REVIEW_FILES = 20;
 export const MAX_REVIEW_DIFF_CHARS = 60_000;
@@ -230,11 +231,18 @@ export function parseReviewReply(
     return fail("reviewer 的回覆是空的");
   if (text.length > MAX_REPLY_CHARS)
     return fail(`reviewer 的回覆超過 ${MAX_REPLY_CHARS} 字元`);
+  // ISSUE-080：剛啟動的 reviewer 沒有可接的 transcript，回覆是從終端畫面讀回的；窄 pane 會把 JSON 字串折行
+  // （續行縮排兩格）。嚴格解析失敗時才用與 Team 計畫相同的方式把字串內的折行接回去，合格的回覆不會被改動。
+  const body = stripFence(text);
   let data: unknown;
   try {
-    data = JSON.parse(stripFence(text));
+    data = JSON.parse(body);
   } catch {
-    return fail("reviewer 的回覆不是單一 JSON 物件");
+    try {
+      data = JSON.parse(unwrapCodexJson(body));
+    } catch {
+      return fail("reviewer 的回覆不是單一 JSON 物件");
+    }
   }
   if (!isObject(data)) return fail("reviewer 的回覆不是 JSON 物件");
   if (!(VERDICTS as readonly unknown[]).includes(data.verdict))

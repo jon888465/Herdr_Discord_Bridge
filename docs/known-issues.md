@@ -2865,3 +2865,28 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 限制：等待上限 30 秒是暫定值；更新提示與信任提示只能由人處理。
 
 下一步：merge、重啟 bridge 後，用同一個測試 PR #73 重跑 `card review`（第 3 輪）。
+
+
+## ISSUE-080：reviewer 回覆的 JSON 字串被窄 pane 折行，解析失敗而判 inconclusive
+
+更新日期：2026-11-04。狀態：已修正、待驗收（根因已由 live 驗收與 codex 的 transcript 確認；原始碼與自動化測試完成，執行中的 bridge 尚未載入修正，尚未重跑 live 驗收）。
+
+來源：補驗 `changes_requested` 與 findings 的 live 驗收（ISSUE-078 的後續，使用者 2026-11-04 決定「先做 1」）。
+
+使用者可見症狀：`card review REQ-20261104-rev-fail --agent codex`（測試 PR #76，作者故意把檔案第二行寫錯）回「判定：inconclusive；inconclusive 的原因：reviewer 的回覆不是單一 JSON 物件」，reviewer 的 pane 已關閉、卡片記了一個空的 inconclusive 批次。
+
+預期行為：reviewer 回出了合格的 `changes_requested`（第 3 條驗收條件 `unmet`，一筆 `medium` finding 指在 `docs/tmp-review-fail.md` 第 2 行）就要被採用。
+
+重現方式／環境（2026-11-04，本機 macOS，main `3fb7caf`，bridge 載入 `57a90d9`，codex-cli 0.165.0）：測試 PR #76。核對 codex 的 transcript（`~/.codex/sessions/2026/11/04/rollout-…01a1a51c…jsonl`）：回覆是 `BRIDGE_BEGIN_… {合格的 JSON，340 字元} BRIDGE_END_…`，內層 JSON 單獨 `JSON.parse` 成功；bridge console 的 `hook Stop … chars=430` 是含框線標記的全文。
+
+根因（**已確認**）：reviewer 是剛啟動的新 session，`runTeamTurn` 派送前沒有 transcript 可以接（transcript 在第一個 prompt 之後才存在），改從終端畫面讀回覆；reviewer 的 pane 是從作者 pane 分割出來的、很窄，較長的中文字串被終端自動換行，換行落在 JSON 字串裡面（Codex 的續行縮排兩格），`JSON.parse` 遇到字串裡的換行失敗。第 3 輪 `pass` 的回覆沒有備註、沒有 findings，字串都很短，剛好沒被折斷，所以前一次驗收沒遇到。Team 計畫的解析早就有處理同一個現象的 `unwrapCodexJson`，review 的解析沒有用上。
+
+修正範圍（2026-11-04）：`src/card-review.ts` 的 `parseReviewReply`：嚴格 `JSON.parse` 失敗時，才用 `src/team-orchestration.ts` 的 `unwrapCodexJson`（本次改成匯出，邏輯不變）把字串內的折行接回去再解析一次；合格的回覆不會被改動；字串內沒有續行縮排的換行仍然拒絕（不過度修復）；解析後的所有驗證（欄位、路徑須在 PR 檔案內、筆數、pass 降級規則）完全不變。
+
+測試（2026-11-04，本機 macOS、Node v26.12.0，非 CI）：`test/card-review.test.ts` 新增 2 項（折行的長字串回覆被接受，備註與 finding 摘要被接回；合格回覆不被改動、無續行縮排的字串內換行仍被拒絕）。先寫測試：第一項為紅（第二項是防護，本來就通過）；修正後全綠。全套 983 項，982 通過、0 失敗、1 略過（原 981 項）；`lint` 通過。**沒有**對真實 codex 的測試。
+
+未驗證（待 merge、重啟 bridge 後用測試 PR #76 重跑 `card review`）：真實的折行回覆被接回後 `changes_requested`、finding 與逐條判定的實際畫面（回覆與 `card show`）；Claude 當 reviewer 的終端畫面格式。
+
+限制：只處理 Codex 風格的折行（續行縮排兩格）；其他種類的 Agent 若折行方式不同仍會判 inconclusive。**除錯上的不便（建議後續處理，未做）：** 回覆解析失敗時，bridge 沒有保留 reviewer 的原始回覆，這次是去翻 codex 的 transcript 才看到；建議之後在 inconclusive 的原因文字附上回覆的前一小段（先遮蔽、單行、限長）。
+
+下一步：merge、重啟 bridge 後重跑；之後清理測試 PR #76。

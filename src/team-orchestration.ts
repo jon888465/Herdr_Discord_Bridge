@@ -750,7 +750,7 @@ function extractJsonObject(value: string): unknown {
 /** Codex indents wrapped response rows by two columns. Only join inside
  * JSON strings, where literal newlines are invalid; preserve escaped newlines,
  * original spaces before the wrap, and pretty-printed JSON outside strings. */
-function unwrapCodexJson(value: string): string {
+export function unwrapCodexJson(value: string): string {
   let quoted = false;
   let escaped = false;
   let result = "";
