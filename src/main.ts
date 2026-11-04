@@ -44,6 +44,7 @@ import {
   pullRequestMergeState,
 } from "./github.js";
 import { waitForChecks } from "./card-ci-wait.js";
+import { assertCodingRoster } from "./coding-roster.js";
 import { mergeCardPullRequest, readCardChecks } from "./card-merge-wiring.js";
 import { sharedCardPullRequests } from "./card-prs.js";
 import { openCardPullRequest } from "./card-pr-flow.js";
@@ -1682,6 +1683,7 @@ async function startTeamTask(
       return agent;
     });
   workers.push(...(runtime.pool?.roster(workspaceId) || []));
+  assertCodingRoster(coding, workers.length);
   assertAgentAvailable(lead, runtime);
 
   const taskId = `task-${randomUUID()}`;
