@@ -1223,3 +1223,67 @@ test("the sensitive-path warning also shows when an existing PR got new commits"
     /敏感路徑.*package\.json/s,
   );
 });
+
+const FINDING_HEAD = "0123456789abcdef0123456789abcdef01234567";
+const findingOf = (summary: string, severity: "high" | "medium" | "low" = "high") => ({
+  severity,
+  path: "src/foo.ts",
+  lineStart: 12,
+  lineEnd: 20,
+  summary,
+});
+
+test("card show lists the findings counts and the open findings in their own block, not inside the content (F8)", async () => {
+  const { store, run } = setup();
+  store.create(assignable("REQ-20261102-work", { status: "done" }));
+  const recorded = store.recordFindings(
+    "REQ-20261102-work",
+    {
+      round: 1,
+      scope: "whole",
+      headSha: FINDING_HEAD,
+      verdict: "changes_requested",
+      findings: [findingOf("缺少錯誤處理"), findingOf("命名不清楚", "low")],
+    },
+    "2026-11-04",
+  );
+  assert.ok(recorded.ok);
+  store.setFindingStatus("REQ-20261102-work", "F2", "resolved", "2026-11-04");
+  const reply = await run("show", "REQ-20261102-work");
+  assert.match(reply, /── Review 發現/);
+  assert.match(reply, /共 2 筆/);
+  assert.match(reply, /open 1/);
+  assert.match(reply, /resolved 1/);
+  assert.match(reply, /- F1 · high · src\/foo\.ts:12-20 · 缺少錯誤處理（第 1 輪）/);
+  assert.equal(reply.includes("命名不清楚"), false); // 已 resolved 的不列
+  const content = reply.slice(reply.indexOf("── 內容 ──"), reply.indexOf("── Review 發現"));
+  assert.equal(content.includes("F1 |"), false);
+  assert.equal(reply.split("F1 ·").length, 2);
+});
+
+test("card show caps the open findings it lists and says how many more there are", async () => {
+  const { store, run } = setup();
+  store.create(assignable("REQ-20261102-work", { status: "done" }));
+  store.recordFindings(
+    "REQ-20261102-work",
+    {
+      round: 1,
+      scope: "whole",
+      headSha: FINDING_HEAD,
+      verdict: "changes_requested",
+      findings: Array.from({ length: 13 }, (_, i) => findingOf(`問題 ${i + 1}`)),
+    },
+    "2026-11-04",
+  );
+  const reply = await run("show", "REQ-20261102-work");
+  assert.match(reply, /共 13 筆/);
+  assert.match(reply, /問題 10/);
+  assert.equal(reply.includes("問題 11"), false);
+  assert.match(reply, /還有 3 筆 open/);
+});
+
+test("card show without findings has no findings block", async () => {
+  const { store, run } = setup();
+  store.create(assignable("REQ-20261102-work", { status: "done" }));
+  assert.doesNotMatch(await run("show", "REQ-20261102-work"), /Review 發現/);
+});

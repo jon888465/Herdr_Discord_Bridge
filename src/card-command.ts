@@ -17,6 +17,7 @@ import { levelFor, type LoadedPolicy } from "./policy.js";
 import type { Card } from "./card.js";
 import type { CleanupResult, PreparedWorktree } from "./card-worktree-flow.js";
 import type { PrOutcome } from "./card-pr-flow.js";
+import { summarizeFindings } from "./card-findings.js";
 import {
   buildAssignmentPrompt,
   parseAssignmentPrompt,
@@ -79,6 +80,8 @@ const MAX_LIST_ERRORS = 5;
 const TITLE_CHARS = 50;
 const BODY_CHARS = 1200;
 const DECISION_CHARS = 1000;
+/** `card show` 最多列出幾筆 open 的 finding。 */
+const FINDINGS_SHOWN = 10;
 const RECENT_LOG = 5;
 
 function shorten(value: string, limit: number): string {
@@ -181,8 +184,11 @@ function showCard(args: string[], deps: CardCommandDeps): string {
   // bridge 不會改寫它，在下面單獨顯示。
   const logStart = card.body.search(/^## 流程紀錄[ \t]*$/m);
   const human = withoutSection(
-    logStart < 0 ? card.body : card.body.slice(0, logStart),
-    "決議",
+    withoutSection(
+      logStart < 0 ? card.body : card.body.slice(0, logStart),
+      "決議",
+    ),
+    "Review 發現",
   ).trim();
   const humanChars = Array.from(human);
   lines.push("", "── 內容 ──");
@@ -201,6 +207,29 @@ function showCard(args: string[], deps: CardCommandDeps): string {
         ? `${chars.slice(0, DECISION_CHARS).join("")}\n…（已截斷，共 ${chars.length} 字；完整內容請開卡片檔）`
         : decisions,
     );
+  }
+
+  // F8：reviewer 的 findings 由 bridge 寫在 `## Review 發現`，這裡只列各狀態的數量與尚未處理的幾筆。
+  const findings = summarizeFindings(card.body, FINDINGS_SHOWN);
+  if (findings.total > 0) {
+    const { counts } = findings;
+    lines.push(
+      "",
+      `── Review 發現（共 ${findings.total} 筆：open ${counts.open}、fixed ${counts.fixed}、resolved ${counts.resolved}、dismissed ${counts.dismissed}）──`,
+    );
+    for (const item of findings.open) {
+      const where =
+        item.lineStart === undefined
+          ? item.path
+          : item.lineEnd === undefined
+            ? `${item.path}:${item.lineStart}`
+            : `${item.path}:${item.lineStart}-${item.lineEnd}`;
+      lines.push(
+        `- ${item.id} · ${item.severity} · ${where} · ${item.summary}（第 ${item.round} 輪）`,
+      );
+    }
+    if (counts.open > findings.open.length)
+      lines.push(`…還有 ${counts.open - findings.open.length} 筆 open，完整內容請開卡片檔`);
   }
 
   lines.push("", `── 最近紀錄（最多 ${RECENT_LOG} 筆）──`);
