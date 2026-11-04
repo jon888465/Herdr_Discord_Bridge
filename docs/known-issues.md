@@ -2701,7 +2701,7 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 ## ISSUE-072：`card assign --worktree` 的 agent 名稱超過 Herdr 的 32 字元上限，卡片 id 較長時失敗
 
-更新日期：2026-11-04。狀態：已修正、待驗收（根因已確認；原始碼與自動化測試完成，執行中的 bridge 尚未載入修正，尚未 live 驗收）。
+更新日期：2026-11-04。狀態：已驗收（agy；worktree 目錄名與分支名的長度限制未另外驗證，見「驗收證據」）。
 
 來源：ISSUE-071 的 live 驗收途中發現，不是 ISSUE-071 的缺陷。
 
@@ -2717,6 +2717,8 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 測試（2026-11-04，本機 macOS、Node v26.12.0，非 CI）：`test/card-worktree-flow.test.ts` 新增 7 項（短 id 名稱不變、剛好 32 字元不截斷、長 id 截成 32 字元且符合 Herdr 的字元規則、最長的合法卡片 id 仍有效、前綴相同的長 id 名稱不同且同 id 名稱固定、截斷處是 `-` 時不出現 `--`、`prepareCardWorktree` 對長 id 送出符合規則的名稱）。先以舊行為（`slice(0, 40)`）跑，長 id、最長 id、`-` 結尾與 `prepareCardWorktree` 共 4 項為紅，其餘本來就通過；實作後全綠。全套 867 項，866 通過、0 失敗、1 略過（原 860 項）；`lint` 通過。**沒有**對真實 Herdr 的測試。
 
-未驗證（待使用者，需先 merge 並重啟 bridge）：用卡片 id 超過 27 字元的卡片（例如 `REQ-20261104-sensitive-accept`）`card assign --worktree`，Herdr 接受截斷後的名稱、agent 啟動成功。其他欄位（worktree 目錄名、分支名 `card/<id>`）是否也有長度限制尚未查：本次失敗只出現在 agent 名稱，worktree 與分支都建立成功。
+驗收證據（2026-11-04，本機 macOS，bridge 載入 main `ef2df66`，Herdr 0.9.1，`agy`；由 Agent 在 bridge console 操作，使用者同意信任提示）：用先前失敗的卡片 id `REQ-20261104-sensitive-accept`（29 字元）`card assign … --worktree`，這次沒有 `invalid_agent_name`，worktree `w1J` 建立、agy 啟動；`herdr agent list` 顯示名稱 `card-req-20261104-sensitive-72fe`（32 字元，即截斷前綴加 4 碼雜湊 `72fe`）。接著 `use w1J:p1` 與 `card assign`，任務 `task-485ff5de-64f5-4229-bd6d-57c560af1c84` 完成（agy 回報 `sleep 5` 已執行、未改檔），console 沒有「Console Agent」警告（也間接再確認 ISSUE-069 的修正在長 id 下仍正常），worktree 乾淨。事後 `card cleanup`、刪本機分支與驗收卡、路由切回 `w1`。
 
-下一步：使用者驗收後改為「已驗收」。
+未驗證：worktree 目錄名與分支名 `card/<id>` 在更長的 id（41 字元的 slug，卡片 id 的上限）下是否也被接受——本次 id 只有 29 字元，agent 名稱被截斷，但 worktree 與分支沒有遇到限制；最長 id 的情況只有單元測試（名稱有效、不超過 32 字元）。Claude Code 當 Lead 沒測。
+
+下一步：無。
