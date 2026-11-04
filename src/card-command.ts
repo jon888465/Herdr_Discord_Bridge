@@ -19,6 +19,11 @@ import type { CleanupResult, PreparedWorktree } from "./card-worktree-flow.js";
 import type { PrOutcome } from "./card-pr-flow.js";
 import { summarizeFindings } from "./card-findings.js";
 import {
+  formatReviewReply,
+  nextReviewRound,
+  type ReviewRun,
+} from "./card-review-command.js";
+import {
   buildAssignmentPrompt,
   parseAssignmentPrompt,
   section,
@@ -63,6 +68,14 @@ export interface CardCommandDeps {
         state: string;
       }
     | undefined;
+  /**
+   * `card review`（F5 階段 3d）：對卡片開著的 PR 做一次 review（取 PR 材料、開新 pane、啟動 reviewer、
+   * 解析回覆、一定關閉 pane）。前提不符合要丟出說明原因的錯誤；流程本身的失敗以 `result.ok === false` 回傳。
+   */
+  reviewPullRequest: (
+    card: Card,
+    options: { agent?: string; round: number },
+  ) => Promise<ReviewRun>;
   /** `card pr`：push 卡片分支並開 PR（或更新已開著的 PR）；不符合前提要丟出說明原因的錯誤。 */
   openPullRequest: (card: Card) => Promise<PrOutcome>;
   /** 專案政策（唯讀）：`<config dir>/policy.yml` 的載入結果。 */
@@ -74,7 +87,7 @@ export interface CardCommandDeps {
 }
 
 const USAGE =
-  "usage: card list [status] | card show <id> | card import [--slug <名稱>] [<本機路徑，僅 console>]（Discord 請附上 .md 檔） | card assign <id> [--coding] [--worktree] | card cleanup <id> | card policy [專案] | card pr <id> | card recreate <id>（從任務紀錄重建被刪除的卡片）";
+  "usage: card list [status] | card show <id> | card import [--slug <名稱>] [<本機路徑，僅 console>]（Discord 請附上 .md 檔） | card assign <id> [--coding] [--worktree] | card cleanup <id> | card policy [專案] | card pr <id> | card review <id> [--agent <種類>] | card recreate <id>（從任務紀錄重建被刪除的卡片）";
 const MAX_LIST_LINES = 30;
 const MAX_LIST_ERRORS = 5;
 const TITLE_CHARS = 50;
@@ -471,6 +484,79 @@ async function pullRequestForCard(
   return lines.join("\n");
 }
 
+/** 同一張卡同時只能有一個 review 在跑（reviewer 會開新 pane，重複執行會開出多個）。 */
+const reviewing = new Set<string>();
+
+function parseReviewArgs(args: string[]): { id: string; agent?: string } {
+  const usage = "usage: card review <id> [--agent <種類>]";
+  const [id, ...flags] = args;
+  if (!id) throw new Error(usage);
+  if (!isCardId(id)) throw new Error(`${id} 不是合法的卡片 id`);
+  let agent: string | undefined;
+  for (let i = 0; i < flags.length; i++) {
+    if (flags[i] !== "--agent" || agent !== undefined) throw new Error(usage);
+    agent = flags[++i];
+    if (agent === undefined || agent.startsWith("-")) throw new Error(usage);
+  }
+  return { id, ...(agent !== undefined ? { agent } : {}) };
+}
+
+/**
+ * `card review <id> [--agent <種類>]`（F5 階段 3d）：對卡片開著的 PR 做一次獨立 review。reviewer 是新開的
+ * pane 與新 Agent，用完由流程關閉。結果寫進卡片的 `## Review 發現` 與一筆 `review_verdict` 流程紀錄；
+ * 還沒開始就失敗的（前提不符、Agent 啟動失敗…）不動卡片。review 已經發生，之後的卡片寫入失敗只警告、不丟錯誤。
+ */
+async function reviewCard(
+  args: string[],
+  deps: CardCommandDeps,
+): Promise<string> {
+  const { id, agent } = parseReviewArgs(args);
+  const store = openDirectory(deps);
+  const read = store?.read(id);
+  if (!store || !read || (!read.ok && read.code === "not_found"))
+    throw new Error(`找不到卡片 ${id}`);
+  if (!read.ok) throw new Error(read.error);
+  if (reviewing.has(id)) throw new Error(`卡片 ${id} 正在 review 中`);
+  reviewing.add(id);
+  try {
+    const round = nextReviewRound(read.card.body);
+    const run = await deps.reviewPullRequest(read.card, {
+      ...(agent !== undefined ? { agent } : {}),
+      round,
+    });
+    if (!run.result.ok)
+      throw new Error(
+        `${formatReviewReply(id, run, undefined)}${run.result.closeNote ? `（${run.result.closeNote}）` : ""}`,
+      );
+
+    const warnings: string[] = [];
+    const today = deps.now().slice(0, 10);
+    const recorded = store.recordFindings(id, run.result.batch, today);
+    if (!recorded.ok) warnings.push(`Review 發現：${recorded.error}`);
+    const logged = store.recordEvent(id, {
+      event: "review_verdict",
+      role: "reviewer",
+      verdict: run.result.batch.verdict,
+      round: run.result.batch.round,
+      time: deps.now(),
+      eventId: `review-${run.pr.number}-r${run.result.batch.round}-${run.pr.headSha.slice(0, 12)}`,
+    });
+    if (!logged.ok) warnings.push(`紀錄 review_verdict：${logged.error}`);
+    const text = formatReviewReply(
+      id,
+      run,
+      recorded.ok
+        ? { ids: recorded.ids, omitted: recorded.omitted }
+        : undefined,
+    );
+    return [text, ...warnings.map((warning) => `⚠️ 卡片更新失敗：${warning}`)].join(
+      "\n",
+    );
+  } finally {
+    reviewing.delete(id);
+  }
+}
+
 /** 唯讀：顯示專案政策（每個專案的自動化等級）。 */
 function showPolicy(args: string[], deps: CardCommandDeps): string {
   if (args.length > 1)
@@ -707,6 +793,9 @@ export async function runCardCommand(
       break;
     case "pr":
       text = await pullRequestForCard(rest, deps);
+      break;
+    case "review":
+      text = await reviewCard(rest, deps);
       break;
     case "policy":
       text = showPolicy(rest, deps);

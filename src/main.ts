@@ -38,6 +38,9 @@ import { loadPolicy } from "./policy.js";
 import { defaultExec } from "./github.js";
 import { sharedCardPullRequests } from "./card-prs.js";
 import { openCardPullRequest } from "./card-pr-flow.js";
+import { fetchReviewMaterial } from "./card-review-fetch.js";
+import { reviewCardPullRequest } from "./card-review-wiring.js";
+import { worktreeFingerprint } from "./worktree-fingerprint.js";
 import { syncPullRequests } from "./card-pr-sync.js";
 import { basename, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
@@ -621,6 +624,42 @@ export async function handleCommand(
         readLocalFile: readLocalCardFile,
         assignments: lazyCardAssignments(),
         policy: () => loadPolicy(join(configDirectory(), "policy.yml")),
+        reviewPullRequest: (card, options) =>
+          reviewCardPullRequest(
+            {
+              worktrees: lazyCardWorktrees(),
+              prs: lazyCardPullRequests(),
+              assignments: lazyCardAssignments(),
+              taskLead: (taskId) => {
+                try {
+                  return runtime.tasks?.store.get(taskId).lead;
+                } catch {
+                  return undefined;
+                }
+              },
+              policy: () => loadPolicy(join(configDirectory(), "policy.yml")),
+              listAgents: () => runtime.herdr.listAgentsWithWorkspaceNames(),
+              fetchMaterial: (repo, number) =>
+                fetchReviewMaterial(defaultExec, repo, number),
+              flow: {
+                panePort: runtime.herdr,
+                startAgent: (input) => startAgentInPane(runtime.herdr, input),
+                runTurn: async (agent, prompt, timeoutMs) => {
+                  const turn = await runTeamTurn(
+                    agent,
+                    prompt,
+                    runtime.herdr,
+                    timeoutMs,
+                    runtime.config.outputLines,
+                  );
+                  return { state: turn.state, text: turn.text };
+                },
+                fingerprint: (cwd) => worktreeFingerprint(defaultExec, cwd),
+              },
+            },
+            card,
+            options,
+          ),
         openPullRequest: async (card) => {
           const entry = lazyCardWorktrees().latest(card.id);
           if (!entry)
@@ -3475,7 +3514,7 @@ function helpText(prefix: string): string {
     `\`${prefix} team ask [--coding] <prompt>\` — 建立持久化任務，由 Lead 動態分工；--coding 才啟用本機 Git 驗收`,
     `\`${prefix} team questions <task-id>\` / \`${prefix} team reply <task-id> <question-id> <answer>\` — 指定問題回答`,
     `\`${prefix} team status [task-id]\` / \`${prefix} team cancel <task-id>\` — 查看／取消任務`,
-    `\`${prefix} card list [status]\` / \`${prefix} card show <id>\` — 查看營運卡片；\`card import\`（附上 .md 檔）匯入為 draft；\`card assign <id> [--coding]\` 把 ready 的卡片交給目前 workspace 的 Team（同 \`team ask\`）；任務還在跑卻刪了卡片時用 \`card recreate <id>\` 重建；\`card assign <id> --worktree\` 在隔離的 worktree 做，完成後 \`card cleanup <id>\` 清掉；\`card policy [專案]\` 查看專案政策（唯讀）；\`card pr <id>\` 把 done 卡片的分支 push 並開 PR（需專案政策 L1 以上）`,
+    `\`${prefix} card list [status]\` / \`${prefix} card show <id>\` — 查看營運卡片；\`card import\`（附上 .md 檔）匯入為 draft；\`card assign <id> [--coding]\` 把 ready 的卡片交給目前 workspace 的 Team（同 \`team ask\`）；任務還在跑卻刪了卡片時用 \`card recreate <id>\` 重建；\`card assign <id> --worktree\` 在隔離的 worktree 做，完成後 \`card cleanup <id>\` 清掉；\`card policy [專案]\` 查看專案政策（唯讀）；\`card pr <id>\` 把 done 卡片的分支 push 並開 PR（需專案政策 L1 以上）；\`card review <id> [--agent <種類>]\` 對開著的 PR 開新 pane 讓另一個 Agent 做獨立 review（結果寫進卡片，用完關閉 pane）`,
     `\`${prefix} quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds]\` — 明確額度回報；quota status 查詢`,
     `\`${prefix} failover arm <source> <candidate1,candidate2> <goal>\` → \`failover run <id> confirm-source-stopped\` — 確認停止後自動選擇候選並驗證切換；status/cancel 可查詢／取消`,
     `\`${prefix} handoff checkpoint <source> <goal>\` → \`handoff verify <id> <destination> confirm-source-stopped\` → \`handoff accept <id>\` → \`handoff continue <id>\` — 持久化交接；status/packet/cancel 可查詢／釋放`,
@@ -3536,6 +3575,7 @@ function consoleHelpText(): string {
     "card assign <id> --worktree [--coding] — 先在目前 Agent 所在 repo 建立隔離 worktree（分支 card/<id>）並啟動同種 Agent，再指派",
     "card cleanup <id> — 移除卡片的 worktree（有未提交修改就保留；不刪分支、不強制）",
     "card pr <id> — 把 done 卡片的分支 push 並開 PR（專案政策要 L1 以上；之後每分鐘檢查 CI 與 merge）",
+    "card review <id> [--agent <種類>] — 對卡片開著的 PR 開新 pane、啟動另一個 Agent 做獨立 review，結果寫進卡片的 Review 發現（用完關閉 pane；需專案政策 L1 以上）",
     "card policy [專案] — 查看專案政策（每個專案的自動化等級 L0／L1／L2；唯讀，政策檔在 plugin 設定目錄）",
     "card recreate <id> — 卡片被刪除但任務還在跑時，從任務紀錄重建卡片",
     "quota status [pane] / quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds] — 明確額度回報",

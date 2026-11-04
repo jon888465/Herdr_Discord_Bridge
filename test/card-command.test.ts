@@ -59,6 +59,9 @@ function setup(overrides: Partial<CardCommandDeps> = {}) {
     cleanupWorktree: async () => {
       throw new Error("cleanupWorktree was not expected");
     },
+    reviewPullRequest: async () => {
+      throw new Error("reviewPullRequest was not expected");
+    },
     startTask: async () => {
       throw new Error("startTask was not expected");
     },
@@ -1286,4 +1289,179 @@ test("card show without findings has no findings block", async () => {
   const { store, run } = setup();
   store.create(assignable("REQ-20261102-work", { status: "done" }));
   assert.doesNotMatch(await run("show", "REQ-20261102-work"), /Review 發現/);
+});
+
+// ---- card review（F5 階段 3d）----
+
+const REVIEW_HEAD = "0123456789abcdef0123456789abcdef01234567";
+const reviewOk = (patch: Record<string, unknown> = {}, round = 1) => ({
+  pr: {
+    number: 42,
+    url: "https://github.com/jon888465/Herdr_Discord_Bridge/pull/42",
+    headSha: REVIEW_HEAD,
+  },
+  result: {
+    ok: true as const,
+    batch: {
+      round,
+      scope: "whole",
+      headSha: REVIEW_HEAD,
+      verdict: "changes_requested" as const,
+      findings: [
+        { severity: "high" as const, path: "src/export.ts", lineStart: 3, lineEnd: 9, summary: "缺少錯誤處理" },
+      ],
+    },
+    criteria: [{ index: 1, criterion: "可以下載", status: "unmet" as const }],
+    reviewerKind: "codex",
+    sameKind: false,
+    omitted: 0,
+    closed: true,
+    ...patch,
+  },
+});
+
+function reviewSetup(overrides: Partial<CardCommandDeps> = {}) {
+  const calls: Array<{ id: string; agent?: string; round: number }> = [];
+  const s = setup({
+    reviewPullRequest: async (card, options) => {
+      calls.push({ id: card.id, agent: options.agent, round: options.round });
+      return reviewOk({}, options.round);
+    },
+    ...overrides,
+  });
+  s.store.create(assignable("REQ-20261102-work", { status: "done" }));
+  return { ...s, calls };
+}
+
+test("card review validates its arguments and the card id", async () => {
+  const { run } = reviewSetup();
+  await assert.rejects(run("review"), /usage/);
+  await assert.rejects(run("review", "../x"), /不是合法的卡片 id/);
+  await assert.rejects(run("review", "REQ-20261102-work", "--agent"), /usage/);
+  await assert.rejects(run("review", "REQ-20261102-work", "--bogus"), /usage/);
+  await assert.rejects(run("review", "REQ-20261102-work", "extra"), /usage/);
+  await assert.rejects(run("review", "REQ-20261102-missing"), /找不到卡片/);
+});
+
+test("card review runs the review, writes the findings and a review_verdict event to the card, and replies with the PR URL", async () => {
+  const { store, run, calls } = reviewSetup();
+  const reply = await run("review", "REQ-20261102-work");
+  assert.deepEqual(calls, [{ id: "REQ-20261102-work", agent: undefined, round: 1 }]);
+  assert.match(reply, /https:\/\/github\.com\/jon888465\/Herdr_Discord_Bridge\/pull\/42/);
+  assert.match(reply, /F1 · high · src\/export\.ts:3-9 · 缺少錯誤處理/);
+  assert.match(reply, /已寫入卡片/);
+  const read = store.read("REQ-20261102-work");
+  assert.ok(read.ok && read.card.body.includes("## Review 發現"));
+  assert.ok(read.ok && read.card.body.includes("- F1 | high | open | src/export.ts:3-9 | 缺少錯誤處理"));
+  const log = store.readLog("REQ-20261102-work");
+  assert.deepEqual(log.ok && log.entries.map((e) => [e.event, e.text]), [
+    ["review_verdict", "review reviewer 第 1 輪：changes_requested"],
+  ]);
+});
+
+test("card review passes --agent through and counts rounds up on each run", async () => {
+  const { store, run, calls } = reviewSetup();
+  await run("review", "REQ-20261102-work", "--agent", "codex");
+  await run("review", "REQ-20261102-work");
+  assert.deepEqual(calls, [
+    { id: "REQ-20261102-work", agent: "codex", round: 1 },
+    { id: "REQ-20261102-work", agent: undefined, round: 2 },
+  ]);
+  const log = store.readLog("REQ-20261102-work");
+  assert.deepEqual(log.ok && log.entries.map((e) => e.text), [
+    "review reviewer 第 1 輪：changes_requested",
+    "review reviewer 第 2 輪：changes_requested",
+  ]);
+});
+
+test("an inconclusive review is recorded too, as an empty batch and a verdict event, with its reason in the reply", async () => {
+  const { store, run } = reviewSetup({
+    reviewPullRequest: async (_card, options) => {
+      const base = reviewOk({}, options.round);
+      return {
+        ...base,
+        result: {
+          ...base.result,
+          batch: { ...base.result.batch, verdict: "inconclusive" as const, findings: [] },
+          criteria: [],
+          inconclusiveReason: "reviewer 沒有就緒（狀態 blocked）",
+        },
+      };
+    },
+  });
+  const reply = await run("review", "REQ-20261102-work");
+  assert.match(reply, /inconclusive/);
+  assert.match(reply, /沒有就緒/);
+  const log = store.readLog("REQ-20261102-work");
+  assert.deepEqual(log.ok && log.entries.map((e) => e.text), ["review reviewer 第 1 輪：inconclusive"]);
+  const read = store.read("REQ-20261102-work");
+  assert.ok(read.ok && read.card.body.includes("### 第 1 輪 · 整體 · head 0123456789ab · inconclusive"));
+});
+
+test("a review that never started changes nothing on the card and says which stage stopped", async () => {
+  const { store, run } = reviewSetup({
+    reviewPullRequest: async () => ({
+      pr: reviewOk().pr,
+      result: { ok: false as const, stage: "start" as const, error: "agent.start: unsupported_agent_kind" },
+    }),
+  });
+  await assert.rejects(run("review", "REQ-20261102-work"), /start.*unsupported_agent_kind/s);
+  const read = store.read("REQ-20261102-work");
+  assert.ok(read.ok && !read.card.body.includes("Review 發現"));
+  const log = store.readLog("REQ-20261102-work");
+  assert.deepEqual(log.ok && log.entries, []);
+});
+
+test("a precondition refusal from the flow is passed through and the card is untouched", async () => {
+  const { store, run } = reviewSetup({
+    reviewPullRequest: async () => {
+      throw new Error("卡片 REQ-20261102-work 沒有開著的 PR（先 `card pr`）");
+    },
+  });
+  await assert.rejects(run("review", "REQ-20261102-work"), /沒有開著的 PR/);
+  const log = store.readLog("REQ-20261102-work");
+  assert.deepEqual(log.ok && log.entries, []);
+});
+
+test("only one review per card runs at a time, and the card can be reviewed again afterwards", async () => {
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let first = true;
+  const { run } = reviewSetup({
+    reviewPullRequest: async (_card, options) => {
+      if (first) {
+        first = false;
+        await gate;
+      }
+      return reviewOk({}, options.round);
+    },
+  });
+  const running = run("review", "REQ-20261102-work");
+  await assert.rejects(run("review", "REQ-20261102-work"), /正在 review/);
+  release();
+  await running;
+  await run("review", "REQ-20261102-work");
+});
+
+test("when the findings cannot be written the verdict is still logged, the reply says it was not written, and nothing is thrown", async () => {
+  const { store, run } = reviewSetup();
+  for (let round = 1; round <= 4; round++)
+    store.recordFindings(
+      "REQ-20261102-work",
+      {
+        round,
+        scope: "whole",
+        headSha: REVIEW_HEAD,
+        verdict: "changes_requested",
+        findings: Array.from({ length: 25 }, () => ({ severity: "low" as const, path: "src/a.ts", summary: "x" })),
+      },
+      "2026-11-04",
+    );
+  const reply = await run("review", "REQ-20261102-work");
+  assert.match(reply, /沒有寫入卡片/);
+  assert.match(reply, /100/);
+  const log = store.readLog("REQ-20261102-work");
+  assert.deepEqual(log.ok && log.entries.map((e) => e.event), ["review_verdict"]);
 });
