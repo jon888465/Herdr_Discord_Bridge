@@ -82,6 +82,8 @@ function setup(
     turn?: () => { state: "done" | "blocked"; text: string } | Error;
     split?: () => unknown;
     closeFails?: boolean;
+    /** 啟動後輪詢用的 Agent 清單（每次呼叫回傳一次；用完後重複最後一筆）。 */
+    listing?: Array<AgentRecord[]>;
   } = {},
 ): Setup {
   const log: string[] = [];
@@ -118,10 +120,17 @@ function setup(
       }
       throw new Error(`unexpected ${method}`);
     },
-    listAgentsWithWorkspaceNames: async () => [],
+    listAgentsWithWorkspaceNames: async () => {
+      log.push("listAgents");
+      const queue = options.listing;
+      if (!queue || queue.length === 0) return [];
+      return queue.length > 1 ? (queue.shift() as AgentRecord[]) : queue[0];
+    },
   };
   const deps: ReviewFlowDeps = {
     panePort,
+    readyTimeoutMs: 60,
+    readyPollMs: 5,
     startAgent: async (start) => {
       log.push(`startAgent:${start.kind}@${start.paneId}:${start.name}`);
       const result = options.start?.() ?? reviewer({ agent: start.kind });
@@ -309,4 +318,90 @@ test("findings, downgrades and the per-criterion results of a usable reply are c
   assert.equal(result.ok && result.batch.findings.length, 1);
   assert.equal(result.ok && result.criteria[0].status, "unmet");
   assert.equal(result.ok && result.inconclusiveReason, undefined);
+});
+
+const working = (status: string) => reviewer({ agent_status: status });
+
+test("an Agent that is still starting up (working) is waited for until it is idle, and then the review goes on with the fresh record", async () => {
+  const { deps, log } = setup({
+    start: () => working("working"),
+    listing: [[working("working")], [working("working")], [working("idle")]],
+  });
+  const result = await runCardReview(deps, input());
+  assert.ok(result.ok, result.ok ? "" : result.error);
+  assert.equal(result.ok && result.batch.verdict, "pass");
+  assert.ok(log.includes("runTurn"));
+  assert.equal(log.filter((entry) => entry === "listAgents").length >= 3, true);
+  assert.ok(log.includes("pane.close"));
+});
+
+test("an Agent whose status is still unknown right after start is waited for too", async () => {
+  const { deps, log } = setup({
+    start: () => working("unknown"),
+    listing: [[working("idle")]],
+  });
+  const result = await runCardReview(deps, input());
+  assert.equal(result.ok && result.batch.verdict, "pass");
+  assert.ok(log.includes("runTurn"));
+});
+
+test("an Agent that is already idle is not polled at all", async () => {
+  const { deps, log } = setup();
+  await runCardReview(deps, input());
+  assert.equal(log.includes("listAgents"), false);
+});
+
+test("an Agent that turns out to be blocked while starting stops the wait at once, naming start-up prompts as the usual cause", async () => {
+  const { deps, log } = setup({
+    start: () => working("working"),
+    listing: [[working("working")], [working("blocked")]],
+  });
+  const result = await runCardReview(deps, input());
+  assert.ok(result.ok);
+  assert.equal(result.ok && result.batch.verdict, "inconclusive");
+  const reason = result.ok ? (result.inconclusiveReason ?? "") : "";
+  assert.match(reason, /blocked/);
+  assert.match(reason, /更新|信任/);
+  assert.equal(log.includes("runTurn"), false);
+  assert.ok(log.includes("pane.close"));
+});
+
+test("an Agent that never becomes idle in time gives inconclusive with its last status, not a guess about trust prompts", async () => {
+  const { deps, log } = setup({
+    start: () => working("working"),
+    listing: [[working("working")]],
+  });
+  const result = await runCardReview(deps, input());
+  assert.ok(result.ok);
+  assert.equal(result.ok && result.batch.verdict, "inconclusive");
+  const reason = result.ok ? (result.inconclusiveReason ?? "") : "";
+  assert.match(reason, /working/);
+  assert.match(reason, /沒有就緒/);
+  assert.doesNotMatch(reason, /信任提示/);
+  assert.equal(log.includes("runTurn"), false);
+  assert.ok(log.includes("pane.close"));
+});
+
+test("a reviewer pane that disappears while it is being waited for is reported, and the close is still attempted", async () => {
+  const { deps, log } = setup({
+    start: () => working("working"),
+    listing: [[]],
+  });
+  const result = await runCardReview(deps, input());
+  assert.ok(result.ok);
+  assert.equal(result.ok && result.batch.verdict, "inconclusive");
+  assert.match(result.ok ? (result.inconclusiveReason ?? "") : "", /不見|消失|不在/);
+  assert.ok(log.includes("pane.close"));
+});
+
+test("a failing agent listing while waiting is inconclusive with the reason, and the pane is still closed", async () => {
+  const { deps, log } = setup({ start: () => working("working") });
+  deps.panePort.listAgentsWithWorkspaceNames = async () => {
+    throw new Error("socket closed");
+  };
+  const result = await runCardReview(deps, input());
+  assert.ok(result.ok);
+  assert.equal(result.ok && result.batch.verdict, "inconclusive");
+  assert.match(result.ok ? (result.inconclusiveReason ?? "") : "", /socket closed/);
+  assert.ok(log.includes("pane.close"));
 });
