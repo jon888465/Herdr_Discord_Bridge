@@ -2986,7 +2986,7 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 ## ISSUE-084：`card loop --merge`（review 通過後等 CI、全綠自動 merge）
 
-更新日期：2026-11-04。狀態：已驗收（核心路徑，2026-11-04：L1 下 review → 等 CI → `card merge` 拒絕，與 L2 下一次真的 `--merge` 合併都在真實 PR 上走完；CI 紅燈停止、等 CI 時 `card loop stop`、Discord thread 未實機驗證，見「驗收證據」）。
+更新日期：2026-11-04。狀態：已驗收（核心路徑，2026-11-04：L1 下 review → 等 CI → `card merge` 拒絕、L2 下一次真的 `--merge` 合併、CI 紅燈時停在 `ci` 都在真實 PR 上走完；等 CI 時 `card loop stop`、逾時、Discord thread 未實機驗證，見「驗收證據」）。
 
 來源：使用者 2026-11-04 要求「做 card loop」，Agent 提案 `card loop --merge`，使用者回答：是做 `--merge`；等 CI 但有逾時；守門全交給 `card merge`（不新增條件）。
 
@@ -3005,7 +3005,24 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 驗收證據（2026-11-04，本機 macOS，bridge 載入 main `a1ec18d`，claude 當作者、codex 當 reviewer，Herdr 0.9.1；使用者同意重啟、開測試 PR、政策由使用者改成 L2 再改回）。驗收卡 `REQ-20261104-lm-ok`，測試 PR #93（只新增無害的 `docs/tmp-loop-merge-accept.md`）：
 **第一段（政策 L1）：** `card loop REQ-20261104-lm-ok --agent codex --merge`：codex 第 1 輪 review `pass`（3 條驗收條件都對上、reviewer pane 已關閉）→ 等 CI，兩項全綠，回報「CI 全部通過」→ 呼叫 `card merge`，被拒絕，**只有一條原因**「專案政策是 L1，只有 L2 才允許 bridge 自己 merge」；loop 停在 `merge`，PR 與 `main` 沒動。
 **第二段（政策由使用者改成 L2，`card policy` 確認）：** 再下同一個指令：review 已是 `pass`，直接等 CI（已全綠）→ `card merge` 的所有條件成立 → **第一次由 loop 真的合併進公開 repo 的 main**（squash，head `379a2858a8e6`，合併後 `main` 為 `7cff072`）；約一分鐘內既有輪詢記 `merged` 並自動清理 worktree（分支保留）。收尾：刪遠端與本機分支 `card/REQ-20261104-lm-ok`、刪驗收卡、測試文件由 revert 移除（本 PR）；政策由使用者改回 L1。
-**驗收過程的偏差與發現（與 `--merge` 本身無關）：** `card assign REQ-20261104-lm-ok --coding --worktree` 這次沒有做出 commit：Lead 規劃時沒有可用的 Worker，回了空計畫，task 失敗（「no passing review… no successful verification」）。根因**尚未調查**，先前的驗收卡沒有這個現象，是否為偶發、或與重啟後的狀態有關未知。處理：改成直接對卡片 pane 的 claude 下指令完成並 commit，再手動把卡片 `status` 改成 `done` 才能 `card pr`。若再次出現請開新 issue 調查。
-**未驗證：** CI 紅燈時 loop 停在 `ci`（只有單元測試）；等 CI 期間 `card loop stop`；等 CI 逾時（30 分鐘）；讀 CI 連續出錯；Discord thread 的進度回報；其他專案；跨機器。
+**驗收過程的偏差與發現（與 `--merge` 本身無關）：** `card assign REQ-20261104-lm-ok --coding --worktree` 這次沒有做出 commit：Lead 規劃時沒有可用的 Worker，回了空計畫，task 失敗（「no passing review… no successful verification」）。根因**尚未調查**，先前的驗收卡沒有這個現象，是否為偶發、或與重啟後的狀態有關未知。處理：改成直接對卡片 pane 的 claude 下指令完成並 commit，再手動把卡片 `status` 改成 `done` 才能 `card pr`。若再次出現請開新 issue 調查。（第二次重現與後續追蹤見 ISSUE-085。）
+**CI 紅燈停止已補驗（2026-11-04，政策 L1，bridge 載入 main `a1ec18d`，codex 當 reviewer）：** 驗收卡 `REQ-20261104-lm-red`，測試 PR #95（只新增一個必定失敗的 `test/tmp-red.test.ts`）。`card loop REQ-20261104-lm-red --agent codex --merge`：codex 第 1 輪 review `pass`（3 條驗收條件都對上）→ 等 CI → 回報「CI 結果是 failure（不是全部通過）」→ loop 停在 `ci`，原因「CI 沒有全部通過，沒有 merge；review 已通過，請人看 CI」；**沒有呼叫 `card merge`**，PR 與 `main` 沒動。收尾（使用者同意）：關閉 PR #95、刪遠端與本機分支 `card/REQ-20261104-lm-red`、取消卡住的 team task、`card cleanup`、刪驗收卡、路由切回 `w1`；政策維持 L1。驗收期間 `--coding` 又出現空計畫（見 ISSUE-085）。
+**未驗證：** 等 CI 期間 `card loop stop`；等 CI 逾時（30 分鐘）；讀 CI 連續出錯；Discord thread 的進度回報；其他專案；跨機器。
 
 下一步：merge 本 PR；視需要在 L1 另開必敗的測試 PR 補驗 CI 紅燈停止；調查 `--coding` 規劃出空計畫的問題（再現時）。
+
+## ISSUE-085：`card assign --coding --worktree` 的 Lead 規劃出空計畫，task 卡在規劃或失敗
+
+更新日期：2026-11-04。狀態：待調查（2026-11-04 重現兩次，根因**未確認**，**尚未修正**）。
+
+使用者可見症狀：`card assign <id> --coding --worktree` 之後，卡片 pane 裡的 claude 回覆「沒有列出任何 Worker target，不能自己動手實作」，回空計畫。第一次（`REQ-20261104-lm-ok`）：task 判 failed（「no passing review for the current version; no successful verification for the current version」），沒有任何 commit。第二次（`REQ-20261104-lm-red`）：task 停在 `planning`，沒有失敗也沒有完成，直到手動 `team cancel` 才結束；`card cleanup` 在此之前因「任務尚未結束」而拒絕（這個保護是對的）。
+
+預期行為：`--coding` 的卡片由該卡的 Lead Agent 在 worktree 完成工作（先前的驗收卡能由作者 claude 做出 commit；當時的 plan 內容這次沒有重新核對）。
+
+重現環境：本機 macOS，bridge 載入 main `a1ec18d`（含 PR #92 的 `card loop --merge`，但該功能與 team task 的規劃無關），claude（作者）在新 worktree 內，Herdr 0.9.1，政策 L1。第一次重啟 bridge 後第一次 `card assign --coding`、第二次是同一個 bridge 的第二張卡，所以不是「重啟後第一次」的偶發。
+
+已確認：兩次的 plan 提示中 `Workers:` 都是空的（`🧭 Team Task accepted … Workers:` 後面沒有東西）。**未確認：** 為什麼這次沒有 Worker 目標（`--coding` 預期把 Lead 自己或同 workspace 的 pane 列為 Worker？）、是否與近期合併的 ISSUE-061／069／072（中斷等待、首個 session 領養、agent 名稱截斷）有關、先前驗收成功時 Worker 清單長什麼樣。
+
+暫時繞過（驗收用，非修正）：直接對卡片 pane 的 claude 下指令完成並 commit，再手動把卡片 `status` 改成 `done`，才能 `card pr`；卡住的 task 用 `team cancel` 結束。這繞過了 bridge 的 task 流程，所以這兩張卡的「作者階段」不算 `--coding` 的驗收證據。
+
+未驗證／下一步：回頭看先前成功的 `--coding` task 的 plan 提示（task journal）與這次的差異；在 `a1ec18d` 之前的版本重現與否；確認後補測試並修正。
