@@ -2726,7 +2726,7 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 ## ISSUE-073：卡片的 `## Review 發現` 段落（F8，階段 2）
 
-更新日期：2026-11-04。狀態：已修正、待驗收（這是新功能的第二階段，不是缺陷；原始碼與自動化測試完成，執行中的 bridge 尚未載入，尚未 live 驗收）。
+更新日期：2026-11-04。狀態：已驗收（2026-11-04，隨 `card review` 的 live 驗收：真實 reviewer 的 findings 寫入卡片的 `## Review 發現`，`card show` 顯示各狀態數量與 open 的 finding；`fixed`／`resolved`／`dismissed` 狀態轉換、超過 10 筆的上限顯示、機敏摘要省略只有單元測試，沒有呼叫者會改狀態，見 ISSUE-080 的驗收證據）。
 
 來源：使用者 2026-11-04 決定 review 閘的 findings 寫在卡片的新欄位、不貼 PR 留言，並同意設計（形式、狀態與嚴重度集合、200 字摘要加機敏整段省略、上限 100／30）。
 
@@ -2869,7 +2869,7 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 ## ISSUE-080：reviewer 回覆的 JSON 字串被窄 pane 折行，解析失敗而判 inconclusive
 
-更新日期：2026-11-04。狀態：已修正、待驗收（根因已由 live 驗收與 codex 的 transcript 確認；原始碼與自動化測試完成，執行中的 bridge 尚未載入修正，尚未重跑 live 驗收）。
+更新日期：2026-11-04。狀態：已驗收（2026-11-04，重跑後 `changes_requested` 與 findings 在真實 codex 上走完；Claude 當 reviewer 與其他種類的折行方式未驗證）。
 
 來源：補驗 `changes_requested` 與 findings 的 live 驗收（ISSUE-078 的後續，使用者 2026-11-04 決定「先做 1」）。
 
@@ -2885,7 +2885,11 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 測試（2026-11-04，本機 macOS、Node v26.12.0，非 CI）：`test/card-review.test.ts` 新增 2 項（折行的長字串回覆被接受，備註與 finding 摘要被接回；合格回覆不被改動、無續行縮排的字串內換行仍被拒絕）。先寫測試：第一項為紅（第二項是防護，本來就通過）；修正後全綠。全套 983 項，982 通過、0 失敗、1 略過（原 981 項）；`lint` 通過。**沒有**對真實 codex 的測試。
 
-未驗證（待 merge、重啟 bridge 後用測試 PR #76 重跑 `card review`）：真實的折行回覆被接回後 `changes_requested`、finding 與逐條判定的實際畫面（回覆與 `card show`）；Claude 當 reviewer 的終端畫面格式。
+驗收證據（2026-11-04，本機 macOS，ISSUE-080 修正合併並重啟後，bridge 載入 main `1fb56d5`，codex-cli 0.165.0，Herdr 0.9.1）：對同一個測試 PR #76 重跑 `card review REQ-20261104-rev-fail --agent codex`（第 2 輪），回覆「判定：changes_requested；reviewer：codex（與作者不同種類）」，四條驗收條件逐條顯示（第 1、2、4 條 ✓，第 3 條 ✗ 並附備註），「Findings（共 1 筆）：F1 · medium · docs/tmp-review-fail.md:2-2 · 第二行未使用驗收條件指定的文字…」，「已寫入卡片」，reviewer 的 pane 已關閉。卡片：新增「第 2 輪 · 整體 · head d8ed6be75501 · changes_requested」批次與 `- F1 | medium | open | docs/tmp-review-fail.md:2-2 | …`，事件 `review reviewer 第 2 輪：changes_requested`；`card show` 多出「── Review 發現（共 1 筆：open 1、fixed 0、resolved 0、dismissed 0）──」並列出 F1（第 2 輪），最近紀錄含兩筆 `review_verdict`（inconclusive、changes_requested）。worktree 乾淨、HEAD 沒變，只剩作者的 pane。這同時驗到 F8（卡片 `## Review 發現` 的寫入與 `card show` 顯示）在真實卡片上可用。收尾（使用者同意）：關閉測試 PR #76、`git push origin --delete` 刪遠端分支、`card cleanup`、刪本機分支與驗收卡、路由切回 `w1`。
+
+附帶觀察（未另立 issue，純外觀）：行號起訖相同時顯示成「:2-2」，不如「:2」；`card show` 與 `card review` 回覆都是這樣。
+
+未驗證：Claude 當 reviewer 的終端畫面格式；其他種類的 Agent 若折行方式不同仍會判 inconclusive；工作樹被改動、逾時等路徑仍只有單元測試。
 
 限制：只處理 Codex 風格的折行（續行縮排兩格）；其他種類的 Agent 若折行方式不同仍會判 inconclusive。**除錯上的不便（建議後續處理，未做）：** 回覆解析失敗時，bridge 沒有保留 reviewer 的原始回覆，這次是去翻 codex 的 transcript 才看到；建議之後在 inconclusive 的原因文字附上回覆的前一小段（先遮蔽、單行、限長）。
 
