@@ -17,6 +17,12 @@ import { importCard } from "./card-import.js";
 import { buildLogEntry, type CardEvent } from "./card-events.js";
 import { upsertProjectSection, type ProjectInfo } from "./card-projects.js";
 import {
+  recordFindingBatch,
+  setFindingStatus as setFindingStatusInBody,
+  type FindingBatch,
+  type FindingStatus,
+} from "./card-findings.js";
+import {
   appendLogEntries,
   logEntriesOf,
   logPointerLine,
@@ -103,6 +109,10 @@ export type RecordProjectResult =
       name: string;
       omitted: string[];
     }
+  | StoreFailure;
+
+export type RecordFindingsResult =
+  | { ok: true; card: Card; hash: string; ids: string[]; omitted: number }
   | StoreFailure;
 
 export type UpdateResult =
@@ -670,5 +680,54 @@ export class CardStore {
       };
     });
     return result.ok ? { ...result, name, omitted } : result;
+  }
+
+  /**
+   * bridge 專用：把一批 review findings 記進內文的 `## Review 發現`（F8，ADR-0002 決定 12）。
+   * 冪等：同一輪同一範圍的批次已經記過就不重寫檔案。輸入不合格整批拒絕、卡片不動。
+   */
+  recordFindings(
+    id: string,
+    input: FindingBatch,
+    today: string,
+  ): RecordFindingsResult {
+    if (!isCardDate(today))
+      return failure("invalid", "today must be a valid YYYY-MM-DD date");
+    let ids: string[] = [];
+    let omitted = 0;
+    const result = this.mutate(id, (card) => {
+      const recorded = recordFindingBatch(card.body, input);
+      if (!recorded.ok) return failure("invalid", recorded.error);
+      ids = recorded.ids;
+      omitted = recorded.omitted;
+      if (!recorded.changed) return card;
+      return {
+        ...card,
+        body: recorded.body,
+        updated: today > card.updated ? today : card.updated,
+      };
+    });
+    return result.ok ? { ...result, ids, omitted } : result;
+  }
+
+  /** bridge 專用：改一筆 finding 的狀態（只能往前：open → fixed → resolved，或 dismissed）。 */
+  setFindingStatus(
+    id: string,
+    findingId: string,
+    status: FindingStatus,
+    today: string,
+  ): UpdateResult {
+    if (!isCardDate(today))
+      return failure("invalid", "today must be a valid YYYY-MM-DD date");
+    return this.mutate(id, (card) => {
+      const changed = setFindingStatusInBody(card.body, findingId, status);
+      if (!changed.ok) return failure("invalid", changed.error);
+      if (!changed.changed) return card;
+      return {
+        ...card,
+        body: changed.body,
+        updated: today > card.updated ? today : card.updated,
+      };
+    });
   }
 }

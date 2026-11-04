@@ -2722,3 +2722,24 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 未驗證：worktree 目錄名與分支名 `card/<id>` 在更長的 id（41 字元的 slug，卡片 id 的上限）下是否也被接受——本次 id 只有 29 字元，agent 名稱被截斷，但 worktree 與分支沒有遇到限制；最長 id 的情況只有單元測試（名稱有效、不超過 32 字元）。Claude Code 當 Lead 沒測。
 
 下一步：無。
+
+
+## ISSUE-073：卡片的 `## Review 發現` 段落（F8，階段 2）
+
+更新日期：2026-11-04。狀態：已修正、待驗收（這是新功能的第二階段，不是缺陷；原始碼與自動化測試完成，執行中的 bridge 尚未載入，尚未 live 驗收）。
+
+來源：使用者 2026-11-04 決定 review 閘的 findings 寫在卡片的新欄位、不貼 PR 留言，並同意設計（形式、狀態與嚴重度集合、200 字摘要加機敏整段省略、上限 100／30）。
+
+使用者可見行為：`card show` 在卡片有 findings 時多一個區塊「── Review 發現（共 N 筆：open …、fixed …、resolved …、dismissed …）──」，列最多 10 筆 `open` 的 finding（編號、嚴重度、位置、摘要、第幾輪），超過時說明還有幾筆；內文的 `## Review 發現` 不再重複出現在「內容」區塊。**目前沒有任何程式會寫入 findings**（reviewer 派工與回覆解析屬 F5 的後續階段），要看到畫面只能手動在卡片檔寫入該段落。
+
+預期行為與格式：見 ADR-0002 決定 12。重點：只收結構化欄位加一行最多 200 字的摘要（疑似機敏整段改成固定訊息）；狀態只能往前；同一輪同一範圍冪等；每卡 100 筆、每批 30 筆，超過整批拒絕、不輪替；不收程式碼片段與長篇說明。
+
+實作範圍（2026-11-04）：新增 `src/card-findings.ts`（`recordFindingBatch`、`setFindingStatus`、`parseFindings`、`summarizeFindings`，純函式）；`src/card-store.ts` 新增 `recordFindings`、`setFindingStatus`（沿用 `mutate` 的雜湊比對與重試，內容沒變不重寫檔案）；`src/card-command.ts` 的 `card show` 加顯示並把該段落排除在「內容」之外。ADR-0002 新增決定 12 並補 bridge 區域表；SPEC、追蹤清單 F8 同步。
+
+測試（2026-11-04，本機 macOS、Node v26.12.0，非 CI）：新增 `test/card-findings.test.ts` 17 項（建立區塊與編號、區塊放在流程紀錄之前且其他內文不變、整體與單一 commit 範圍、編號跨批延續不重用、同批冪等、疑似機敏摘要整段省略、17 種不合格輸入整批拒絕、200 字邊界、總數上限、人加的行保留、狀態只能往前與終態、同狀態 no-op 與未知編號、解析、摘要統計、store 寫入與冪等不重寫、store 拒絕不動卡片）與 `test/card-command.test.ts` 3 項（`card show` 顯示統計與 open 清單且不在內容裡重複、超過 10 筆的上限與「還有 N 筆」、沒有 findings 就沒有區塊）。先以「未實作」的桩跑：`card-findings` 17 項、`card show` 2 項為紅（沒有 findings 的那項本來就通過）；實作後全綠。全套 887 項，886 通過、0 失敗、1 略過（原 867 項）；`lint` 通過。**沒有**對真實卡片檔與 bridge 的測試。
+
+未驗證（待使用者，需先 merge 並重啟 bridge）：手動在一張卡片檔寫入符合格式的 `## Review 發現` 後，`card show` 的實際畫面（Discord 與 console）；`card show` 輸出是否再經機敏遮蔽（沿用既有行為，未針對 findings 另外確認）。
+
+限制：沒有呼叫者；findings 摘要是 reviewer 的文字，是決定 9／11 的有界例外，機敏檢查是黑名單式、不完整；reviewer 輸出是不可信資料，之後回傳給作者 Agent 時必須放進資料區（本階段不處理）；人手動改壞格式的行會被解析略過。
+
+下一步：使用者驗收後改為「已驗收」；階段 3（reviewer 派工與回覆解析，F5）。
