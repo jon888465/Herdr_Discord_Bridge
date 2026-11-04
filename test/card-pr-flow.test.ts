@@ -80,6 +80,7 @@ function setup(
       if (joined.includes("rev-list")) return "2\n";
       if (joined.includes("status")) return "";
       if (joined.includes("pr list")) return "[]";
+      if (joined.includes("/files")) return "src/main.ts\ntest/main.test.ts\n";
       if (joined.includes("repo view")) return "main\n";
       if (joined.includes(" push ")) return "";
       if (joined.includes("pr create"))
@@ -127,6 +128,7 @@ test("a done card with commits on a policy-L1 project gets its branch pushed and
     branch: BRANCH,
     repo: "jon888465/Herdr_Discord_Bridge",
     repoPath: "/Users/jon/git_wk/repo",
+    sensitivePaths: [],
   });
   const push = log.findIndex((line) => line.includes(" push "));
   const create = log.findIndex((line) => line.includes("pr create"));
@@ -449,4 +451,88 @@ test("the PR body has no task line when the card has no task", async () => {
   await openCardPullRequest(deps, { card: card({ tasks: [] }), worktree });
   const create = log.find((line) => line.includes("pr create")) ?? "";
   assert.equal(create.includes("- task："), false);
+});
+
+const withFiles = (files: string | Error) =>
+  setup({
+    exec: (file, args) => {
+      const joined = args.join(" ");
+      if (joined.includes("/files")) return files;
+      if (joined.includes("remote get-url"))
+        return "git@github.com:jon888465/Herdr_Discord_Bridge.git\n";
+      if (joined.includes("rev-parse")) return `${HEAD}\n`;
+      if (joined.includes("rev-list")) return "2\n";
+      if (joined.includes("status")) return "";
+      if (joined.includes("pr list")) return "[]";
+      if (joined.includes("repo view")) return "main\n";
+      if (joined.includes(" push ")) return "";
+      if (joined.includes("pr create"))
+        return "https://github.com/jon888465/Herdr_Discord_Bridge/pull/42\n";
+      throw new Error(`unexpected ${file} ${joined}`);
+    },
+  });
+
+test("the outcome lists the sensitive paths the PR touches, after the PR exists (F6)", async () => {
+  const { deps, log } = withFiles(
+    "src/main.ts\n.github/workflows/ci.yml\nSPEC.md\n",
+  );
+  const result = await openCardPullRequest(deps, { card: card(), worktree });
+  assert.deepEqual(result.sensitivePaths, [
+    ".github/workflows/ci.yml",
+    "SPEC.md",
+  ]);
+  const create = log.findIndex((line) => line.includes("pr create"));
+  const files = log.findIndex((line) => line.includes("/files"));
+  assert.ok(create >= 0 && files > create, log.join("\n"));
+  assert.ok(log.some((line) => line.includes("pulls/42/files")));
+});
+
+test("a PR that only touches ordinary files reports an empty sensitive list", async () => {
+  const { deps } = withFiles("src/main.ts\ndocs/x.md\n");
+  const result = await openCardPullRequest(deps, { card: card(), worktree });
+  assert.deepEqual(result.sensitivePaths, []);
+});
+
+test("when the file list cannot be read the PR is still opened and recorded, and the sensitivity is unknown (null)", async () => {
+  const { deps, recorded } = withFiles(new Error("HTTP 502"));
+  const result = await openCardPullRequest(deps, { card: card(), worktree });
+  assert.equal(result.sensitivePaths, null);
+  assert.equal(result.number, 42);
+  assert.equal(recorded.length, 1);
+});
+
+test("an incomplete file list (GitHub's cap) is treated as unknown, not as clean", async () => {
+  const many = Array.from({ length: 3000 }, (_, i) => `f${i}.ts`).join("\n");
+  const { deps } = withFiles(many);
+  const result = await openCardPullRequest(deps, { card: card(), worktree });
+  assert.equal(result.sensitivePaths, null);
+});
+
+test("pushing more commits to an existing PR checks its files again", async () => {
+  const { deps, log } = setup({
+    exec: (file, args) => {
+      const joined = args.join(" ");
+      if (joined.includes("/files")) return "package.json\n";
+      if (joined.includes("remote get-url"))
+        return "git@github.com:jon888465/Herdr_Discord_Bridge.git\n";
+      if (joined.includes("rev-parse")) return `${HEAD}\n`;
+      if (joined.includes("rev-list")) return "2\n";
+      if (joined.includes("status")) return "";
+      if (joined.includes("pr list"))
+        return JSON.stringify([
+          {
+            number: 7,
+            url: "https://github.com/jon888465/Herdr_Discord_Bridge/pull/7",
+            state: "OPEN",
+            headRefOid: HEAD,
+          },
+        ]);
+      if (joined.includes(" push ")) return "";
+      throw new Error(`unexpected ${file} ${joined}`);
+    },
+  });
+  const result = await openCardPullRequest(deps, { card: card(), worktree });
+  assert.equal(result.created, false);
+  assert.deepEqual(result.sensitivePaths, ["package.json"]);
+  assert.ok(log.some((line) => line.includes("pulls/7/files")));
 });

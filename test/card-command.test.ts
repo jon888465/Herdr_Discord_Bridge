@@ -1041,6 +1041,7 @@ const prOutcome = {
   branch: "card/REQ-20261102-work",
   repo: "jon888465/Herdr_Discord_Bridge",
   repoPath: "/Users/jon/git_wk/Herdr_Discord_Bridge",
+  sensitivePaths: [] as string[] | null,
 };
 
 test("card pr opens the pull request, prints its full URL, and records it on the card", async () => {
@@ -1174,4 +1175,51 @@ test("cleanup proceeds once the latest task reached a terminal or blocked state"
     });
     assert.match(await run("cleanup", "REQ-20261102-work"), /已移除 worktree/);
   }
+});
+
+test("card pr warns when the PR touches sensitive paths, listing them, and says this changes nothing yet (F6)", async () => {
+  const { store, run } = setup({
+    openPullRequest: async () => ({
+      ...prOutcome,
+      sensitivePaths: [".github/workflows/ci.yml", "SPEC.md"],
+    }),
+  });
+  store.create(assignable("REQ-20261102-work", { status: "done" }));
+  const reply = await run("pr", "REQ-20261102-work");
+  assert.match(reply, /敏感路徑/);
+  assert.match(reply, /\.github\/workflows\/ci\.yml/);
+  assert.match(reply, /SPEC\.md/);
+  assert.match(reply, /L2/);
+});
+
+test("card pr says nothing about sensitive paths when there are none", async () => {
+  const { store, run } = setup({ openPullRequest: async () => prOutcome });
+  store.create(assignable("REQ-20261102-work", { status: "done" }));
+  assert.doesNotMatch(await run("pr", "REQ-20261102-work"), /敏感路徑/);
+});
+
+test("card pr says when it could not check the PR's files, and that this counts as sensitive later", async () => {
+  const { store, run } = setup({
+    openPullRequest: async () => ({ ...prOutcome, sensitivePaths: null }),
+  });
+  store.create(assignable("REQ-20261102-work", { status: "done" }));
+  const reply = await run("pr", "REQ-20261102-work");
+  assert.match(reply, /無法確認/);
+  assert.match(reply, /敏感/);
+});
+
+test("the sensitive-path warning also shows when an existing PR got new commits", async () => {
+  const { store, run } = setup({
+    openPullRequest: async () => ({
+      ...prOutcome,
+      created: false,
+      base: "",
+      sensitivePaths: ["package.json"],
+    }),
+  });
+  store.create(assignable("REQ-20261102-work", { status: "done" }));
+  assert.match(
+    await run("pr", "REQ-20261102-work"),
+    /敏感路徑.*package\.json/s,
+  );
 });
