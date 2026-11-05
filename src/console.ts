@@ -40,6 +40,8 @@ export function parseConsoleCommand(
 
 export function createConsoleContext(
   print: (text: string) => void,
+  /** 預設是互動 console 的身分；自動撿卡（ISSUE-096）用另一個 id，路由才不會互相影響。 */
+  userId = "local-console",
 ): CommandContext {
   const channel = {
     isThread: () => false,
@@ -49,7 +51,7 @@ export function createConsoleContext(
     },
   };
   const message = {
-    author: { id: "local-console", bot: false },
+    author: { id: userId, bot: false },
     attachments: new Map(),
     guildId: null,
     channelId: "local-console",
@@ -69,7 +71,7 @@ export function createConsoleContext(
     routing: {
       guildId: "local-console",
       channelId: "local-console",
-      userId: "local-console",
+      userId,
     },
   };
 }

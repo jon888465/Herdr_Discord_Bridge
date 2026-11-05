@@ -99,7 +99,13 @@ import {
   modelOptionsFor,
 } from "./cli-adapter.js";
 import { DiscordAdapter, type CommandContext } from "./discord.js";
-import { startConsole, routeConsoleCommand } from "./console.js";
+import {
+  startConsole,
+  routeConsoleCommand,
+  createConsoleContext,
+} from "./console.js";
+import { AUTOPICK_USER, createAutopickSteps } from "./autopick-wiring.js";
+import { createAutopicker, type AutopickReport } from "./autopick.js";
 import { ConsoleAgent } from "./console-agent.js";
 import {
   agentHeader,
@@ -482,6 +488,21 @@ async function startBridge(
   restoreWorktreeAuthorization(config.allowedWorkspaceIds);
   reportProjectPolicy();
   const stopCardSync = startCardSync(tasks, discord);
+  // H2 自動撿卡（ISSUE-096）：政策檔沒有 `autopick:` 時每次掃描都立刻返回，什麼都不做。
+  const stopAutopick = startAutopick({
+    config,
+    herdr,
+    routing,
+    discord,
+    activeStreams,
+    streamResume,
+    pool,
+    tasks,
+    handoffs,
+    failover,
+    // 自動撿卡不碰使用者自己的 console Agent。
+    consoleAgent: undefined,
+  });
   const stopPullRequestSync = startPullRequestSync(
     discord,
     herdr,
@@ -500,6 +521,7 @@ async function startBridge(
   installShutdown(() => {
     stopCleanup();
     stopCardSync();
+    stopAutopick();
     stopPullRequestSync();
     herdr.stopTunnels();
     stopSend();
@@ -2465,6 +2487,75 @@ function lazyCardAssignments() {
  * 定期把已結束的 Team 任務同步回營運卡片（完成 → done；失敗／取消只記事件）。
  * 啟動時先跑一次，之後每分鐘一次；同樣的問題只在內容改變時才印出，避免洗版。
  */
+const AUTOPICK_INTERVAL_MS = 60 * 1000;
+
+/**
+ * 自動撿卡的排程（ISSUE-096）：每分鐘看一次政策檔選用專案裡有沒有 ready 的卡，一次只做一張。
+ * 以另一個使用者 id（`autopick`）的本機 console 身分執行 `card …` 指令，不動到使用者自己的 console 路由。
+ */
+function startAutopick(runtime: Runtime): () => void {
+  const rootDir = join(stateDirectory(), "cards");
+  let output: string[] = [];
+  const context = createConsoleContext(
+    (text) => output.push(text),
+    AUTOPICK_USER,
+  );
+  const command = async (text: string): Promise<string> => {
+    const [name, ...args] = text.split(" ");
+    output = [];
+    await handleCommand(name, args, context, runtime);
+    return output.join("\n");
+  };
+  const readCard = (id: string) => {
+    const read = new CardStore(rootDir).read(id);
+    return read.ok ? read.card : undefined;
+  };
+  const report = (result: AutopickReport): void => {
+    const summary = `自動撿卡 ${result.cardId}（${result.project}，${result.level}）：${
+      result.outcome === "reached"
+        ? `完成到 ${result.lastStep}`
+        : `${result.outcome === "stopped" ? "停下來等人" : "失敗"}，停在 ${result.lastStep}：${result.reason ?? ""}`
+    }`;
+    console.log(summary);
+    if (result.outcome === "reached") return;
+    const logged = new CardStore(rootDir).recordEvent(result.cardId, {
+      event: "failed",
+      code: result.outcome === "stopped" ? "autopick_stopped" : "autopick_failed",
+      reason: `${result.lastStep}：${result.reason ?? ""}`.slice(0, 200),
+      time: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+      eventId: `autopick-${result.lastStep}-${Date.now()}`,
+    });
+    if (!logged.ok)
+      console.error(`自動撿卡：卡片紀錄失敗（${result.cardId}）：${logged.error}`);
+  };
+  const picker = createAutopicker({
+    policy: () => loadPolicy(join(configDirectory(), "policy.yml")),
+    readyCards: () => {
+      const listed = new CardStore(rootDir).list();
+      return listed.cards.map((item) => item.card);
+    },
+    steps: createAutopickSteps({
+      port: runtime.herdr,
+      command,
+      taskIdForCard: (cardId) =>
+        lazyCardAssignments().forCard(cardId).at(-1)?.taskId,
+      taskState: (taskId) => {
+        const task = runtime.tasks?.store.get(taskId);
+        return task ? { state: task.state, detail: task.detail } : undefined;
+      },
+      cardStatus: (cardId) => readCard(cardId)?.status,
+      allowedWorkspaceIds: runtime.config.allowedWorkspaceIds,
+      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      now: () => Date.now(),
+    }),
+    onReport: report,
+    onError: (error) => console.error(`自動撿卡失敗：${safeError(error)}`),
+  });
+  const timer = setInterval(() => void picker.tick(), AUTOPICK_INTERVAL_MS);
+  timer.unref();
+  return () => clearInterval(timer);
+}
+
 function startCardSync(
   tasks: TeamTaskEngine,
   discord: DiscordAdapter,

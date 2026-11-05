@@ -1,0 +1,190 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import os from "node:os";
+import {
+  createAutopickSteps,
+  type AutopickWiringDeps,
+} from "../src/autopick-wiring.js";
+import type { AutopickJob } from "../src/autopick.js";
+import type { Card } from "../src/card.js";
+import type { AgentRecord } from "../src/types.js";
+
+const job = (over: Partial<AutopickJob> = {}): AutopickJob => ({
+  card: { id: "REQ-20261105-x" } as Card,
+  project: "local:Herdr_Discord_Bridge",
+  repoPath: os.tmpdir(),
+  level: "L1",
+  lead: "claude",
+  ...over,
+});
+
+function harness(over: Partial<AutopickWiringDeps> = {}, leadStatus = "idle") {
+  const requests: Array<{ method: string; params?: Record<string, unknown> }> =
+    [];
+  const commands: string[] = [];
+  let clock = 0;
+  const deps: AutopickWiringDeps = {
+    port: {
+      request: async (method, params) => {
+        requests.push({ method, params });
+        if (method === "workspace.create")
+          return {
+            workspace: { workspace_id: "w9" },
+            root_pane: { pane_id: "w9:p1" },
+          };
+        return {};
+      },
+      listAgentsWithWorkspaceNames: async () =>
+        [
+          {
+            pane_id: "w9:p1",
+            terminal_id: "t",
+            workspace_id: "w9",
+            tab_id: "w9:t1",
+            agent: "claude",
+            agent_status: leadStatus,
+          },
+        ] as AgentRecord[],
+    },
+    command: async (text) => {
+      commands.push(text);
+      return "ok";
+    },
+    taskIdForCard: () => "task-1",
+    taskState: () => ({ state: "completed" }),
+    cardStatus: () => "done",
+    allowedWorkspaceIds: [],
+    sleep: async (ms) => {
+      clock += ms;
+    },
+    now: () => clock,
+    pollMs: 1000,
+    ...over,
+  };
+  return { steps: createAutopickSteps(deps), requests, commands };
+}
+
+test("the Lead gets its own workspace in the repo, is started there, and the autopick route points at it", async () => {
+  const { steps, requests, commands } = harness();
+  const lead = await steps.startLead(job());
+  const create = requests.find((r) => r.method === "workspace.create");
+  assert.equal(create?.params?.cwd, os.tmpdir());
+  assert.equal(create?.params?.focus, false);
+  const start = requests.find((r) => r.method === "agent.start");
+  assert.equal(start?.params?.pane_id, "w9:p1");
+  assert.equal(start?.params?.kind, "claude");
+  assert.deepEqual(commands, ["wk use w9", "agent use w9:p1"]);
+  assert.equal(
+    requests.some((r) => r.method === "workspace.close"),
+    false,
+  );
+  await lead.close();
+  assert.deepEqual(requests.at(-1), {
+    method: "workspace.close",
+    params: { workspace_id: "w9" },
+  });
+});
+
+test("a restricted workspace allowlist or a missing repo path is refused before anything is created", async () => {
+  const restricted = harness({ allowedWorkspaceIds: ["w1"] });
+  await assert.rejects(restricted.steps.startLead(job()), /白名單/);
+  assert.equal(restricted.requests.length, 0);
+
+  const missing = harness();
+  await assert.rejects(
+    missing.steps.startLead(job({ repoPath: "/no/such/repo" })),
+    /不存在/,
+  );
+  assert.equal(missing.requests.length, 0);
+
+  const file = harness();
+  await assert.rejects(
+    file.steps.startLead(job({ repoPath: import.meta.filename })),
+    /不是資料夾/,
+  );
+  assert.equal(file.requests.length, 0);
+});
+
+test("a Lead that is not ready (for example blocked on a prompt) leaves no empty workspace behind", async () => {
+  const { steps, requests, commands } = harness({}, "blocked");
+  await assert.rejects(steps.startLead(job()), /沒有就緒/);
+  assert.equal(requests.at(-1)?.method, "workspace.close");
+  assert.deepEqual(commands, []);
+});
+
+test("waitTask waits for a terminal state, but does not wait for a blocked task", async () => {
+  const states = ["planning", "running", "completed"];
+  const polled = harness({
+    taskState: () => ({ state: states.shift() ?? "completed" }),
+  });
+  assert.deepEqual(await polled.steps.waitTask("c"), {
+    completed: true,
+    detail: "completed",
+  });
+
+  const blocked = harness({ taskState: () => ({ state: "blocked" }) });
+  const result = await blocked.steps.waitTask("c");
+  assert.equal(result.completed, false);
+  assert.match(result.detail, /blocked/);
+
+  const failed = harness({
+    taskState: () => ({
+      state: "failed",
+      detail: "no successful verification",
+    }),
+  });
+  const failure = await failed.steps.waitTask("c");
+  assert.equal(failure.completed, false);
+  assert.match(failure.detail, /no successful verification/);
+});
+
+test("waitTask gives up with the last state on timeout, and reports a missing task", async () => {
+  const slow = harness({
+    taskState: () => ({ state: "running" }),
+    taskTimeoutMs: 5000,
+  });
+  const result = await slow.steps.waitTask("c");
+  assert.equal(result.completed, false);
+  assert.match(result.detail, /逾時.*running/);
+
+  const none = harness({ taskIdForCard: () => undefined });
+  assert.match((await none.steps.waitTask("c")).detail, /找不到/);
+});
+
+test("waitCardDone waits through the 60-second card sync, and gives up on timeout", async () => {
+  const statuses = ["in_progress", "in_progress", "done"];
+  const ok = harness({ cardStatus: () => statuses.shift() ?? "done" });
+  assert.equal(await ok.steps.waitCardDone("c"), true);
+
+  const never = harness({
+    cardStatus: () => "in_progress",
+    cardDoneTimeoutMs: 4000,
+  });
+  assert.equal(await never.steps.waitCardDone("c"), false);
+});
+
+test("loop only counts as merged when the reply says the PR was merged", async () => {
+  const merged = harness({
+    command: async () =>
+      "loop 結束：REQ-20261105-x 的 review 已通過、CI 全綠，已 merge（共 3 個步驟）。",
+  });
+  assert.equal(
+    (await merged.steps.loop("REQ-20261105-x", "codex")).merged,
+    true,
+  );
+
+  const stopped = harness({
+    command: async () =>
+      "loop 停下來了：REQ-20261105-x（共 1 個步驟，停在 ci）。",
+  });
+  assert.equal(
+    (await stopped.steps.loop("REQ-20261105-x", "codex")).merged,
+    false,
+  );
+
+  const sent = harness();
+  await sent.steps.loop("REQ-20261105-x", "codex");
+  assert.deepEqual(sent.commands, [
+    "card loop REQ-20261105-x --agent codex --merge",
+  ]);
+});
