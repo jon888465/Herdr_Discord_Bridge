@@ -229,6 +229,8 @@ function harness(options: {
   omitReviewerSession?: boolean;
   /** ISSUE-088：Herdr 對 codex pane 不提供 agent_session，身分只能從 rollout 得知。 */
   hidePaneSessions?: boolean;
+  /** ISSUE-089：模擬 codex 在終端依 pane 寬度把 JSON 字串硬換行（換行後縮排兩格）。 */
+  wrapCodexReports?: boolean;
   script:
     | "happy"
     | "stale"
@@ -397,14 +399,16 @@ function harness(options: {
                 : [],
           },
         });
-      } else if (prompt.includes("Coding role: verify"))
+      } else if (prompt.includes("Coding role: verify")) {
         body = JSON.stringify({
           codingResult: {
             kind: "verify",
             commands: [{ command: "node --test", exitCode: 0 }],
           },
         });
-      else if (
+        if (options.wrapCodexReports)
+          body = body.replace("node --test", "node --\n  test");
+      } else if (
         prompt.includes("Synthesize") ||
         prompt.includes("acceptance gate")
       ) {
@@ -886,6 +890,34 @@ test("ISSUE-088: codex panes without a Herdr agent_session still get an independ
       (item) => item.role === "implement",
     );
     assert.equal(implement?.authorSession?.value, uuidFor("author-session"));
+    assert.equal(task.state, "completed");
+  } finally {
+    h.close();
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("ISSUE-089: a codex report whose JSON string was hard-wrapped by the terminal still counts as verification", async () => {
+  const { repo } = repoWithBaseline();
+  const h = harness({ repo, script: "happy", wrapCodexReports: true });
+  try {
+    const task = await h.engine.run({
+      taskId: "task-wrapped-report",
+      prompt: "ship the local change",
+      lead: h.lead,
+      workers: [h.author, h.reviewer],
+      replan: true,
+      coding: true,
+      timeoutMs: 500,
+    });
+    const verify = task.coding?.artifacts.find(
+      (item) => item.role === "verify",
+    );
+    assert.equal(verify?.evidence, "recorded");
+    assert.equal(verify?.verificationPassed, true);
+    assert.deepEqual(verify?.commands, [
+      { command: "node --test", exitCode: 0 },
+    ]);
     assert.equal(task.state, "completed");
   } finally {
     h.close();
