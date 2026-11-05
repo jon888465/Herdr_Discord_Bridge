@@ -3389,3 +3389,21 @@ H2 自動撿卡 L2 目前進度：第一次嘗試停在 coding 階段的 verify�
 
 H2 自動撿卡 L2 進度（2026-11-05）：第一次嘗試停在 verify（ISSUE-097，已修）；第二次嘗試停在 Worker 啟動（本 issue）；`card loop --merge` 在自動流程裡仍沒走到。每次失敗都是不同的環節，也都被守門擋在 merge 之前，公開 `main` 沒有被動到。測試殘留：卡片 `REQ-20261105-auto3`（in_progress）與其 worktree、workspace，修正 merge 後清掉並用新卡重跑。
 
+## ISSUE-099：codex 開了子 agent，rollout 辨識遇到多個符合而判「不明」，reviewer 的回覆永遠讀不到（H2 自動撿卡 L2 第三次嘗試的斷點）
+
+更新日期：2026-11-05。狀態：已修正、待驗收（根因已確認並用真實的 rollout 驗證；原始碼與自動化檢查完成；**尚未 merge、尚未重啟 bridge、尚未實機重跑 L2**）。
+
+使用者可見症狀：H2 自動撿卡 L2 第三次嘗試（卡 `REQ-20261105-auto4`，政策 L2，bridge 載入含 ISSUE-097／098 修正的 main `17aab15`）：撿卡、coding、獨立 review、commit、PR #125、CI 通過（09:21:37）都順利；接著 `card loop --merge` 的 reviewer（codex）在 09:21:11 已經回覆，但 loop 沒有往下走：卡片沒有 `review_verdict`、PR 還是 1 個 commit、reviewer 的 pane（`w2V:p4`，6 列高、idle）沒有被關閉，過了 3 分多鐘仍沒動。console 沒有任何錯誤。reviewer 的判定其實是 `changes_requested`（兩條驗收條件 `met`，另有一個 medium finding）。
+
+預期行為：reviewer 回覆後 loop 讀到它、寫入卡片、繼續（修正或 merge）。
+
+已確認根因：reviewer 的 codex 在審的過程中自己開了兩個**子 agent**（rollout 的 `session_meta` 標 `thread_source: "subagent"`，`agent_path` 為 `/root/standards`、`/root/spec`，父 session 是 reviewer 自己）。子 agent 的 rollout 引用了父 agent 的 prompt，所以本回合的 nonce 同時出現在**三個** rollout（父 5 次、兩個子各 1 次）。ISSUE-088／089 的 `findCodexRolloutByNonce` 規則是「恰好一個符合才算，多個視為不明」，於是回傳不明；reviewer 的 pane 只有 6 列高，終端畫面讀不到完整回覆，bridge 只能等到逾時。實測驗證：同一個 nonce 在修正前會因多個符合而不明，修正後辨識為父 session `01a1ab01-e175-73e2-9d0b-709affe32534`。
+
+修正範圍（2026-11-05）：`src/response-stream.ts` 的 `findCodexRolloutByNonce` 先排除第一行 `session_meta` 標示為子 agent（`thread_source: "subagent"` 或 `source.subagent`）的檔案，剩下恰好一個才算；零個、多個真正的 session、或只有子 agent 符合，仍然是「不明」（fail closed）。第一行讀不到或不是 `session_meta` 時不當作子 agent（最壞結果是候選變多而回傳不明，不會認錯）。
+
+測試（2026-11-05，本機 macOS，非 CI）：`test/response-stream.test.ts` 新增 2 項——父 session 加兩個引用 nonce 的子 agent 時辨識為父 session；兩個真正的 session 都含 nonce、或只有子 agent 含 nonce，仍回傳不明。修正前兩項皆**失敗**（紅）。`node --test --test-timeout=60000 dist/test/*.test.js` → 1191 tests、1190 pass、0 fail、1 skip（既有）；`npm run lint` ok。
+
+未驗證：實機重跑 L2；reviewer 之後的 `card fix`（因 `changes_requested`）→ push → 再 review → merge 的自動流程（H4 只走過 review pass 的路徑，手動版 `card fix` 與 `card loop` 在 2026-11-04 驗收過）；子 agent 的 rollout 若沒有 `session_meta` 標記（舊版 codex）的情況。
+
+H2 自動撿卡 L2 進度（2026-11-05）：三次嘗試各停在不同環節——verify（ISSUE-097）、Worker 啟動（ISSUE-098）、reviewer 回覆辨識（本 issue），都被守門擋在 merge 之前，公開 `main` 沒有被動到；撿卡、開 Lead、assign、coding、獨立 review、commit、PR、CI 都已在自動流程裡走過。測試殘留：卡片 `REQ-20261105-auto4`、PR #125（開著，內容與預期相同、CI 通過）、worktree 與 workspace，修正 merge 後清掉（PR #125 不合併，直接關閉）並用新卡重跑。
+

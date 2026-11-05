@@ -320,7 +320,48 @@ export async function findCodexRolloutByNonce(
     }
   }
   await scan(root, 0);
-  if (found.size !== 1) return undefined;
-  const [value, where] = [...found][0]!;
+  // ISSUE-099：codex 自己開的子 agent 也有 rollout，而且引用父 agent 的 prompt（含 nonce）。
+  // 子 agent 不是這個 pane 的 session，先排除；剩下恰好一個才算。
+  const real = new Map(
+    await Promise.all(
+      [...found].map(
+        async ([id, where]) =>
+          [id, where, await isSubagentRollout(where.path)] as const,
+      ),
+    ).then((rows) =>
+      rows.filter((row) => !row[2]).map((row) => [row[0], row[1]] as const),
+    ),
+  );
+  if (real.size !== 1) return undefined;
+  const [value, where] = [...real][0]!;
   return { kind: "id", value, ...where };
+}
+
+/** rollout 第一行的 session_meta 標示這是子 agent（`thread_source: "subagent"` 或 `source.subagent`）。 */
+async function isSubagentRollout(path: string): Promise<boolean> {
+  try {
+    const file = await open(path, "r");
+    try {
+      const buffer = Buffer.alloc(64 * 1024);
+      const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+      const end = buffer.subarray(0, bytesRead).indexOf(10);
+      const first = JSON.parse(
+        buffer.subarray(0, end < 0 ? bytesRead : end).toString("utf8"),
+      ) as {
+        payload?: { thread_source?: unknown; source?: { subagent?: unknown } };
+      };
+      return (
+        first.payload?.thread_source === "subagent" ||
+        (typeof first.payload?.source === "object" &&
+          first.payload.source !== null &&
+          "subagent" in first.payload.source)
+      );
+    } finally {
+      await file.close();
+    }
+  } catch {
+    // 第一行讀不到或不是 session_meta：不當作子 agent。若它其實是子 agent，最壞結果是候選變多而
+    // 回傳「不明」（呼叫端 fail closed），不會認錯 session。
+    return false;
+  }
 }
