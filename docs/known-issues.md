@@ -3013,7 +3013,7 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 ## ISSUE-085：`card assign --coding` 在沒有 Worker 時 Lead 規劃出空計畫，task 失敗或卡在規劃
 
-更新日期：2026-11-05。狀態：已修正、待驗收（根因已確認；原始碼與自動化檢查完成；PR #97 已 merge（`ad5d30c`），bridge 已於 2026-11-05 用 `./scripts/run.sh -r` 重啟並載入該版本（`dist` 內有 `assertCodingRoster`）；零 Worker 拒絕已於 2026-11-05 實機驗收通過（見下），有 Worker 時 `--coding` 的**啟動**已於 2026-11-05 驗到（任務被接受、不再被零 Worker 檢查擋下），但該次任務在規劃階段失敗，見 ISSUE-086，所以「`--coding` 完整跑完」仍未驗；不可把單元測試通過當成端到端通過）。
+更新日期：2026-11-05。狀態：已驗收（零 Worker 拒絕、有 Worker 啟動、`--coding` 完整跑完三項都有實機證據；PR #97 已 merge；根因已確認；限制見下，完整流程只在 claude Lead＋兩個 claude Worker 驗到，codex Worker 見 ISSUE-088）。
 
 **2026-11-05 實機嘗試（未得到有效結果）：** 重啟後在 bridge console 於 workspace `w1` 執行 `team ask --coding …`，得到「Team Worker pane w1:p8 is stale or unavailable」——`w1` 的 Team 名單殘留一個失效的 Worker（`w1:p8`），根本沒走到零 Worker 的檢查，所以**不能算驗收**。須改在確實沒有 Worker 的 workspace（例如 `card assign --worktree` 新建的）重試。
 
@@ -3022,6 +3022,10 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 **2026-11-05 有 Worker 時的啟動實機驗收（本機 macOS，政策 L1，bridge 載入 main `ad5d30c`）：** 手動建 worktree workspace `w1X`（claude 當 Lead、codex 當 Worker，`team add w1X:p2`），驗收卡 `REQ-20261105-roster-worker`（只要求新增一個暫存檔、不 commit／push），`card assign REQ-20261105-roster-worker --coding`。結果：回覆「Team Task accepted · Lead: claude · Workers: codex」，沒有被零 Worker 檢查擋下 → **有 Worker 時 `--coding` 可啟動，ISSUE-085 的修正沒有誤擋**。但 task 約 5 秒後失敗：「Lead did not return a JSON Assignment plan」，見 ISSUE-086。收尾：關 workspace `w1X`、移除手動 worktree、刪分支與驗收卡，路由切回 `w1`/`w1:p1`。
 
 **2026-11-05 `--coding` 完整跑完的驗收嘗試（未完成，見 ISSUE-087）：** 建 workspace `w1Z`（claude Lead `w1Z:p1`、codex `w1Z:p2`／`w1Z:p3` 兩個 Worker，`team add` 兩個），驗收卡 `REQ-20261105-full`（新增 `tmp-full-ok.txt`、驗證用 `test -f … && grep -qx ok …`），`card assign REQ-20261105-full --coding`。Lead 在 5 秒內回了合格的三步計畫（`impl-1` 寫入 → `review-1` 依賴 `impl-1` → `verify-1` 依賴 `review-1`），bridge 驗證後判失敗：「read-only coding assignments in a writer round must depend on that writer」，task 在派工前結束，沒有任何 Worker 動作。收尾：關 workspace、移除 worktree、刪分支與驗收卡、路由切回 `w1:p1`。**`--coding` 完整流程（實作 → 獨立 review → 驗證 → 統整）仍未驗到。**
+
+**2026-11-05 `--coding` 完整跑完實機驗收通過（本機 macOS，政策 L1，bridge 載入 main `50daa86`，含 ISSUE-086／087 修正）：** workspace `w21`（新 worktree，claude Lead `w21:p1`＋兩個 claude Worker `w21:p2`／`w21:p3`，`team add`），驗收卡 `REQ-20261105-full3`（新增 `tmp-full-ok.txt`、驗證用 `test -f … && grep -qx ok …`、不跑 npm），`card assign REQ-20261105-full3 --coding`。結果：Lead 規劃 `impl`→`review`→`verify` 通過驗證；`impl`（`w21:p2`）建出檔案、`review`（`w21:p3`）判 pass 且無 finding、`verify`（`w21:p3`）結束碼 0；Lead 第二輪規劃後進入統整；coding evidence 三個 artifact 的版本指紋相同（`fd71017f…`），階段 `ready-to-integrate`；task journal 最後事件 `coding_assessed` → `task_completed`，console「Team Task completed」。這是 `--coding` 第一次實機完整跑完。收尾：關 workspace、刪暫存檔、移除 worktree、刪分支與驗收卡、路由切回 `w1:p1`；沒有 commit／push。
+
+**同一天的前一次嘗試（codex Worker）：** 用 claude Lead＋兩個 codex Worker（`w10`），計畫通過、實作完成，但 `review` 被擋：「unknown reviewer identity is not an independent review」，`verify` 因此沒執行，task 失敗。原因是這些 codex pane 沒有 `agent_session`，見 ISSUE-088。
 
 另發現：Team 名單裡的失效 Worker 會讓任務在啟動前就失敗，屬既有行為，未另開 issue。
 
@@ -3079,7 +3083,7 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 ## ISSUE-087：`--coding` 規劃驗證要求每個唯讀指派「直接」依賴 writer，Lead 的合理鏈狀計畫被判失敗，且提示沒說明這條規則
 
-更新日期：2026-11-05。狀態：已修正、待驗收（直接原因已確認；採用候選 (1)；原始碼與自動化檢查完成；**尚未重啟 bridge、尚未實機驗收**，也還沒驗到 `--coding` 完整跑完）。
+更新日期：2026-11-05。狀態：已驗收（PR #103 已 merge，bridge 於 2026-11-05 重啟載入 `50daa86`；實機驗收 task `task-d429e276…` 的計畫通過驗證，見 ISSUE-085）。
 
 使用者可見症狀：`card assign <id> --coding`，有 Lead 與兩個 Worker 時，約 5 秒後「Team Task failed：read-only coding assignments in a writer round must depend on that writer」，task 在派工前結束，Worker 完全沒動。
 
@@ -3098,3 +3102,23 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 未驗證：Lead 是否會照新提示列出 writer（模型行為，只有實機能驗）；Lead 換成其他 Agent 時是否也會這樣排；修正後 `--coding` 能否真的跑完 review／verify／統整（這部分連 ISSUE-085 的「完整跑完」都還沒驗到）。
 
 下一步：merge 後重啟 bridge；重做 `REQ-20261105-full` 型驗收（claude Lead + 兩個 codex Worker），確認 task 走到 `ready-to-integrate` 與最終統整。
+
+## ISSUE-088：新開的 codex pane 沒有 `agent_session`，`--coding` 的獨立 review 被擋（unknown reviewer identity）
+
+更新日期：2026-11-05。狀態：待調查（現象已重現一次；根因未確認；尚未修正）。
+
+使用者可見症狀：`card assign <id> --coding`，Worker 是新開的 codex pane 時，實作完成後 `review` 失敗：「unknown reviewer identity is not an independent review」，`verify` 因依賴 review 沒有執行，task 失敗（`task-2e9a15a0-73ff-4e14-8fcd-dbf8f31069d9`）。
+
+預期行為：能確認 author／reviewer 是不同 session 時，獨立 review 通過；codex 與 claude 一樣能被識別。
+
+重現方式／環境：2026-11-05 本機 macOS，codex v0.166.0，bridge 載入 main `50daa86`。workspace `w10`（新建 worktree `~/.herdr/worktrees/Herdr_Discord_Bridge/full2`），`herdr pane run <pane> codex` 啟動兩個 codex。`herdr pane get` 這兩個 pane **都沒有 `agent_session` 欄位**（`w10:p2` 甚至在完成一個回合之後仍沒有）；同機的 claude pane 啟動後立即有 `agent_session`（`source: herdr:claude`）。使用者自己的 `w3:p3` codex 也沒有，而 `w4:p1` codex 有（`source: herdr:codex`）。
+
+已確認：bridge 的 `assertIndependentReview`（`src/coding-workflow.ts`）要求 reviewer 與 author 都有可辨識的 session，缺任何一個就拒絕——這是設計（不能只靠不同 pane 當作獨立）。`~/.codex/hooks.json` 有 `herdr-agent-state.sh session` 與 `herdr-discord-hook`。**未確認根因：** 為何有些 codex pane 沒登記 session（猜測：新工作目錄的 hook 需要信任、或 session 只在特定條件登記），尚未驗證。
+
+修正範圍：無。
+
+未驗證：codex 的 session 何時、在什麼條件下才會出現；新開 codex 先手動送一個 prompt 後是否會登記；codex 作為 author、claude 作為 reviewer 的混合配置是否可行（author 沒有 session 也會被擋）。
+
+暫行做法：驗收 `--coding` 時 Worker 用 claude（有 session）。
+
+下一步：查 Herdr 的 codex session 登記條件（`herdr integration`、hook 信任），決定是修環境設定還是讓 bridge 對 codex 提供替代的身分來源。
