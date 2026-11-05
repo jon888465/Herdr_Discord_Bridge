@@ -23,6 +23,10 @@ export class HerdrError extends Error {
   }
 }
 
+/** shell 還沒就緒（`agent_pane_busy`）時最多重試這麼久，每次間隔固定（與 `agent-start.ts` 相同）。 */
+const PROFILE_BUSY_RETRY_MS = 15_000;
+const PROFILE_BUSY_INTERVAL_MS = 500;
+
 export function resolveSocketPath(): string {
   if (process.env.HERDR_SOCKET_PATH) return process.env.HERDR_SOCKET_PATH;
   if (process.env.HERDR_SESSION) {
@@ -258,20 +262,37 @@ export class HerdrClient {
     if (!pane?.pane_id || pane.workspace_id !== lead.workspace_id)
       throw new Error("pane split returned unexpected workspace/identity");
     onPane(pane.pane_id);
-    await this.request(
-      "agent.start",
-      {
-        pane_id: pane.pane_id,
-        name,
-        kind: profile.kind,
-        args: [
-          ...(profile.args || []),
-          ...(profile.model ? [profile.modelFlag!, profile.model] : []),
-        ],
-        timeout_ms: 30000,
-      },
-      { retries: 0, timeoutMs: 35000 },
-    );
+    // ISSUE-098：剛分割出來的 pane，shell 可能還沒初始化完，Herdr 會以 agent_pane_busy 拒絕
+    // （「target pane … is not an available shell」，與 ISSUE-067 同一個錯誤）。這個錯誤代表什麼都還沒
+    // 啟動，所以只對它短暫重試（有上限）；其他任何錯誤都立刻失敗，不重試。
+    const retryDeadline = Date.now() + PROFILE_BUSY_RETRY_MS;
+    for (;;) {
+      try {
+        await this.request(
+          "agent.start",
+          {
+            pane_id: pane.pane_id,
+            name,
+            kind: profile.kind,
+            args: [
+              ...(profile.args || []),
+              ...(profile.model ? [profile.modelFlag!, profile.model] : []),
+            ],
+            timeout_ms: 30000,
+          },
+          { retries: 0, timeoutMs: 35000 },
+        );
+        break;
+      } catch (error) {
+        const busy =
+          error instanceof HerdrError && error.code === "agent_pane_busy";
+        if (!busy || Date.now() + PROFILE_BUSY_INTERVAL_MS > retryDeadline)
+          throw error;
+        await new Promise((resolve) =>
+          setTimeout(resolve, PROFILE_BUSY_INTERVAL_MS),
+        );
+      }
+    }
     const agent = (await this.listAgentsWithWorkspaceNames()).find(
       (a) => a.pane_id === pane.pane_id,
     );

@@ -3370,3 +3370,22 @@ H4 脈絡：這是自動串接最小的摩擦；若要做成單一觸發，（1�
 未驗證：實機重跑 L2——merge 並重啟 bridge 後以新卡重做；模型是否真的遵守新提示（只有實機能驗）；Worker 仍列出非 0 指令時，Lead 是否能靠 evidence 的指令與 exit code 改正。
 
 H2 自動撿卡 L2 目前進度：第一次嘗試停在 coding 階段的 verify（本 issue）；撿卡、開 Lead、assign、coding、獨立 review 都已實機走過（L1 驗收見 ISSUE-096）；L2 的 `card loop --merge` 在自動流程裡還沒走到。測試殘留：卡片 `REQ-20261105-auto2`（in_progress）、其 worktree 與 workspace，修正 merge 後清掉並用新卡重跑。
+
+## ISSUE-098：Worker profile 啟動時新 pane 的 shell 還沒就緒，`agent.start` 被拒絕，整個任務失敗（H2 自動撿卡 L2 第二次嘗試的斷點）
+
+更新日期：2026-11-05。狀態：已修正、待驗收（根因已確認；原始碼與自動化檢查完成；**尚未 merge、尚未重啟 bridge、尚未實機重跑 L2**）。
+
+使用者可見症狀：H2 自動撿卡 L2 第二次嘗試（卡 `REQ-20261105-auto3`，task `task-35ce9dce-b492-4965-b38d-01376d0564d4`，ISSUE-097 修正已載入）：`impl`（`profile:helper`）完成後，`verify`（`profile:reviewer`）在啟動 Worker 時失敗：「herdr agent.start: agent_pane_busy agent target pane w2S:p3 is not an available shell」；task failed（「one or more Assignments failed…no passing review…no successful verification」），自動撿卡停在 `task`，卡片記 `failed`／`autopick_stopped`。公開 `main` 未被動到。
+
+預期行為：新 pane 的 shell 初始化好之後再啟動 Agent。
+
+已確認根因：與 ISSUE-067 是同一個 Herdr 錯誤（剛分割出來的 pane，shell 還沒初始化完時 `agent.start` 回 `agent_pane_busy`）。ISSUE-067 只修了 `card assign --worktree` 的 `startAgentInPane`（對這個錯誤短暫重試）；Worker profile 的啟動路徑 `Herdr.startProfile`（`src/herdr.ts`）直接呼叫 `agent.start`、沒有重試，所以這是競爭條件：shell 夠快初始化的時候沒事（先前十幾次實機 profile 啟動都沒遇到），慢一點就整個任務失敗。另外一個 assignment 失敗就會結束規劃（`reports.some(state !== done)` → break），沒有補救機會（既有行為，未改）。
+
+修正範圍（2026-11-05）：`startProfile` 對 `agent.start` 的 `agent_pane_busy` 每 0.5 秒重試、最多 15 秒（與 `agent-start.ts` 相同的常數與規則）；這個錯誤代表什麼都還沒啟動，重試是安全的；任何其他錯誤立刻失敗、不重試。
+
+測試（2026-11-05，本機 macOS，非 CI）：`test/profile-start.test.ts` 新增 2 項——前兩次 `agent.start` 回 `agent_pane_busy`、第三次成功時 profile 啟動成功（共 3 次呼叫、間隔至少約 1 秒）；`agent_not_supported` 之類的其他錯誤只呼叫一次就失敗。修正前第一項**失敗**（紅），修正後通過。`node --test --test-timeout=60000 dist/test/*.test.js` → 1189 tests、1188 pass、0 fail、1 skip（既有）；`npm run lint` ok。
+
+未驗證：實機重跑 L2 全程；shell 超過 15 秒仍未就緒時的行為（仍是原錯誤，任務失敗）；是否該讓「基礎設施性」的 assignment 失敗允許 Lead 重排一次（目前不改）。
+
+H2 自動撿卡 L2 進度（2026-11-05）：第一次嘗試停在 verify（ISSUE-097，已修）；第二次嘗試停在 Worker 啟動（本 issue）；`card loop --merge` 在自動流程裡仍沒走到。每次失敗都是不同的環節，也都被守門擋在 merge 之前，公開 `main` 沒有被動到。測試殘留：卡片 `REQ-20261105-auto3`（in_progress）與其 worktree、workspace，修正 merge 後清掉並用新卡重跑。
+
