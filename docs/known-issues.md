@@ -3268,3 +3268,23 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 下一步：merge 後重啟 bridge，用真的卡跑 H4：`card assign --worktree --coding` → `card commit` → `card pr` → `card loop --merge`（merge 需要使用者把政策暫時設成 L2）。
 
+## ISSUE-093：Lead 漏排 verify 就回空計畫，驗收閘門失敗且沒有補救機會（H4 端到端的第二個斷點）
+
+更新日期：2026-11-05。狀態：已修正、待驗收（根因已確認；原始碼與自動化檢查完成；**尚未 merge、尚未重啟 bridge、尚未實機驗收**）。
+
+使用者可見症狀：H4 端到端案例 `REQ-20261105-h4`（`card assign … --worktree --coding`，task `task-0342e935-5be0-42af-93b6-d2df82fd55f3`，workspace `w2E`）：Lead 只排了 `write-h4-file`（implement，`helper`）與審查（`reviewer`，pass、findings 為空、與作者是不同 session），沒有排 verify 就回了空計畫；bridge 的閘門判「no successful verification for the current version」，整個 task failed。實作與獨立 review 都是好的（兩份 artifact 同一個指紋）。先前 7 次實機 coding 任務 Lead 都自己排了 verify，只有這次漏掉，屬模型行為的變異；流程卻因此沒有補救機會。
+
+預期行為：閘門還缺什麼時，Lead 有機會補排，而不是直接失敗。
+
+已確認根因（程式閱讀，`src/team-orchestration.ts`）：規劃迴圈在 Lead 回空計畫時直接 `break` 進入統整；閘門只在統整前後評估一次，原因只放在統整提示（那時已經不能再派工）。規劃提示只帶 `evidenceSummary()`（階段、artifact），不告訴 Lead 閘門缺什麼。
+
+修正範圍（2026-11-05）：規劃迴圈在 coding 任務收到空計畫、且 `assess()` 仍有未滿足的原因時，不 `break`，改把原因附在下一輪規劃提示（「The bridge acceptance gate is authoritative and is not satisfied yet: …，請排新的指派，例如在目前版本上的唯讀 verify」），最多兩次；兩次之後 Lead 仍回空計畫就維持原本的結案方式（以閘門原因 failed）。**閘門本身不放寬**：仍然要有通過的獨立 review 與成功的 verify。
+
+測試（2026-11-05，本機 macOS，非 CI）：`test/coding-workflow.test.ts` 新增 2 項——Lead 漏排 verify 就回空計畫，bridge 回饋一次原因後補排 verify，task 完成、階段 ready-to-integrate、只送出一次回饋；Lead 一直回空計畫時只被詢問兩次，之後仍 failed 且原因是 no successful verification。暫時把上限改成 0 時兩項都**失敗**（紅），恢復後通過。`node --test --test-timeout=60000 dist/test/*.test.js` → 1155 tests、1154 pass、0 fail、1 skip（既有）；`npm run lint` ok。
+
+未驗證：實機（真的 Lead 收到閘門原因後補排 verify）；閘門原因是 Lead 無法解決的（例如 changes outside the writer scope）時，兩次詢問只是多花兩輪；回饋是否讓 Lead 改成排錯的東西（例如再寫一次）——閘門仍會擋下。
+
+H4 端到端進度：第一次嘗試在此停住（`card commit` 與 `card pr` 都還沒跑到）。測試殘留：workspace `w2D`／`w2E`、worktree `card-req-20261105-h4`（含一個未提交的 `docs/h4-e2e-trace.md`）、分支 `card/REQ-20261105-h4`、卡片 `REQ-20261105-h4`（in_progress）；下一次用新卡重跑。
+
+下一步：merge 後重啟 bridge，用新卡重跑 H4：`card assign --worktree --coding` → `card commit` → `card pr` → `card loop --merge`。
+
