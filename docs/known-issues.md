@@ -3067,7 +3067,7 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 **2026-11-05 窄 pane 實機驗收通過（本機 macOS，政策 L1，bridge 載入 main `e0ffc57`）：** 手動建 workspace `w1Y`（claude Lead `w1Y:p1`、codex Worker `w1Y:p2` 左右對分，與先前失敗的 `w1X` 相同配置，`team add w1Y:p2`），驗收卡 `REQ-20261105-narrow`（新增暫存檔、不 commit／push），`card assign REQ-20261105-narrow --coding`。結果：console 出現 `hook Stop … pane=w1Y:p1 chars=456`，Lead 的計畫被接受，Assignment `a1` 在 `w1Y:p2` 開始並完成，Worker 實際建出 `tmp-roster-ok.txt`（內容 `ok`），task 進入 coding stage `review`——**先前失敗的「規劃」這一步已通過**。之後我取消任務（`team cancel`）並收尾：關 workspace、刪暫存檔、移除 worktree、刪分支與驗收卡、路由切回 `w1:p1`。
 
-**這次驗收沒有涵蓋：** coding 任務的 review／verification 階段與最終 synthesis（取消前停在 review）；Codex／agy／pi 作為 Lead 時的 hook 訊息；hook 事件晚於 1.5 秒寬限時的退回行為。另觀察到 console 有一筆 `hook Stop session=01a1a968 pane=w4:p1`，在 Worker 完成時出現，pane 不是 `w1Y:p2`（可能是 codex 的 hook 帶了別的 pane；**未調查**，不確定是否影響派工配對）。
+**這次驗收沒有涵蓋：** coding 任務的 review／verification 階段與最終 synthesis（取消前停在 review）；Codex／agy／pi 作為 Lead 時的 hook 訊息；hook 事件晚於 1.5 秒寬限時的退回行為。另觀察到 console 有一筆 `hook Stop session=01a1a968 pane=w4:p1`，在 Worker 完成時出現，pane 不是 `w1Y:p2`（2026-11-05 已查：`session=01a1a968` 與 `w4:p1` 現在的 codex session id `01a1a968-634f-79f3-a23b-79382b2b7d4a` 完全相符，`w4` 是使用者另一個 workspace `python_test` 裡自己的 codex，工作目錄 `/Users/jon/git_wk/python_test`，與驗收無關；它剛好在同一時間結束一個回合。不是 hook 帶錯 pane，也不是派工配對錯誤。限制：驗收用的 Worker pane `w1Y:p2` 已關閉，無法再比對它自己的 session，所以「Worker 本身有沒有送 hook」沒有證據；它的 Assignment 仍正常完成，因為 Codex 另有 transcript 與畫面讀取）。
 
 修正範圍：無。測試：無新增。
 
