@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -11,6 +11,25 @@ import {
   startHookServer,
 } from "../src/hook-events.js";
 import { streamAgent } from "../src/main.js";
+
+// ISSUE-090：codex 的 hook 訊息只在 session 的 rollout 工作目錄等於 pane 的工作目錄時才採用。
+const codexHome = mkdtempSync(join(tmpdir(), "hook-codex-home-"));
+process.env.CODEX_HOME = codexHome;
+const rolloutDay = join(codexHome, "sessions", "2026", "11", "05");
+mkdirSync(rolloutDay, { recursive: true });
+function codexRollout(id: string, cwd: string): void {
+  writeFileSync(
+    join(rolloutDay, `rollout-2026-11-05T10-00-00-${id}.jsonl`),
+    JSON.stringify({ type: "session_meta", payload: { id, cwd } }) + "\n",
+  );
+}
+for (const id of Object.values([
+  "01a1a9f0-0000-7000-8000-00000000c001",
+  "01a1a9f0-0000-7000-8000-00000000c002",
+  "01a1a9f0-0000-7000-8000-00000000c003",
+  "01a1a9f0-0000-7000-8000-00000000c004",
+]))
+  codexRollout(id, "/work/p");
 
 test("parseHookEvent accepts Stop and rejects malformed input (ISSUE-045)", () => {
   assert.deepEqual(
@@ -186,7 +205,11 @@ test("Codex Stop hook also completes the stream (ISSUE-045)", async (t) => {
     tab_id: "w2:t1",
     agent: "codex",
     agent_status: "working",
-    agent_session: { kind: "id", value: "sess-codex" },
+    cwd: "/work/p",
+    agent_session: {
+      kind: "id",
+      value: "01a1a9f0-0000-7000-8000-00000000c001",
+    },
   };
   const sent: string[] = [];
   let reads = 0;
@@ -215,7 +238,7 @@ test("Codex Stop hook also completes the stream (ISSUE-045)", async (t) => {
   );
   hookEvents.record({
     event: "Stop",
-    sessionId: "sess-codex",
+    sessionId: "01a1a9f0-0000-7000-8000-00000000c001",
     message: "codex hook final",
   });
   t.mock.timers.tick(2000);
@@ -233,7 +256,11 @@ test("working Codex reads only visible output before Stop arrives (ISSUE-050)", 
     tab_id: "w2:t1",
     agent: "codex",
     agent_status: "working",
-    agent_session: { kind: "id", value: "sess-visible" },
+    cwd: "/work/p",
+    agent_session: {
+      kind: "id",
+      value: "01a1a9f0-0000-7000-8000-00000000c002",
+    },
   };
   const sent: string[] = [];
   let reads = 0;
@@ -246,7 +273,7 @@ test("working Codex reads only visible output before Stop arrives (ISSUE-050)", 
         assert.equal(source, "visible");
         hookEvents.record({
           event: "Stop",
-          sessionId: "sess-visible",
+          sessionId: "01a1a9f0-0000-7000-8000-00000000c002",
           message: "codex hook final",
         });
         return "› question\n• partial";
@@ -281,7 +308,11 @@ test("idle Codex fallback may read history when no final exists (ISSUE-050)", as
     tab_id: "w2:t1",
     agent: "codex",
     agent_status: "idle",
-    agent_session: { kind: "id", value: "sess-idle-visible" },
+    cwd: "/work/p",
+    agent_session: {
+      kind: "id",
+      value: "01a1a9f0-0000-7000-8000-00000000c003",
+    },
   };
   const sent: string[] = [];
   let reads = 0;
@@ -295,7 +326,7 @@ test("idle Codex fallback may read history when no final exists (ISSUE-050)", as
         sources.push(source);
         hookEvents.record({
           event: "Stop",
-          sessionId: "sess-idle-visible",
+          sessionId: "01a1a9f0-0000-7000-8000-00000000c003",
           message: "codex hook final",
         });
         return "› question\n• partial";
@@ -506,7 +537,11 @@ test("approval follow-up posts the hook Stop message once when no stream exists 
   const agent = {
     terminal_id: "t-follow",
     agent: "codex",
-    agent_session: { kind: "id", value: "sess-follow" },
+    cwd: "/work/p",
+    agent_session: {
+      kind: "id",
+      value: "01a1a9f0-0000-7000-8000-00000000c004",
+    },
   } as never;
   const followups = new Map([
     ["t-follow", { approval: { id: "a" } as never, since: Date.now() - 1000 }],
@@ -522,7 +557,7 @@ test("approval follow-up posts the hook Stop message once when no stream exists 
   assert.equal(followups.size, 1);
   hookEvents.record({
     event: "Stop",
-    sessionId: "sess-follow",
+    sessionId: "01a1a9f0-0000-7000-8000-00000000c004",
     message: " done! ",
   });
   assert.equal(
@@ -549,4 +584,57 @@ test("agents without agent_session match Stop events by pane id (remote machines
   assert.equal(store.stopForPane("agy-pod:w2:p1", at + 1), undefined);
   assert.equal(store.stopForPane("w2:p1", at - 1), undefined);
   assert.equal(store.stopForPane(undefined, 0), undefined);
+});
+
+test("ISSUE-090: a codex hook reply from a session of another cwd is not posted to this pane", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const foreign = "01a1a9f0-0000-7000-8000-00000000c0ff";
+  codexRollout(foreign, "/work/another");
+  const agent = {
+    terminal_id: "term",
+    pane_id: "w4:p1",
+    workspace_id: "w4",
+    tab_id: "w4:t1",
+    agent: "codex",
+    agent_status: "idle",
+    cwd: "/work/p",
+    agent_session: { kind: "id", value: foreign },
+  };
+  const sent: string[] = [];
+  const runtime = {
+    config: { streamIntervalMs: 2000, outputLines: 40 },
+    herdr: {
+      listAgentsWithWorkspaceNames: async () => [agent],
+      readAgent: async () => "› question\n• parser reply\n",
+    },
+    discord: {
+      editProgress: async () => {},
+      postOutput: async (_m: unknown, text: string) => {
+        sent.push(text);
+      },
+    },
+  } as unknown as Parameters<typeof streamAgent>[2];
+  const task = streamAgent(
+    agent as never,
+    {} as Parameters<typeof streamAgent>[1],
+    runtime,
+    "question",
+    "",
+  );
+  hookEvents.record({
+    event: "Stop",
+    sessionId: foreign,
+    message: "reply that belongs to another codex",
+  });
+  for (let i = 0; i < 10; i++) {
+    t.mock.timers.tick(2000);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  // 這個 pane 的回合不會因為別人的 hook 訊息而結束（畫面 parser 沒有穩定結果，所以不 await）；
+  // 只要確認別人的回覆沒有被貼出來。
+  void task;
+  assert.ok(
+    !sent.some((text) => text.includes("another codex")),
+    `posted: ${JSON.stringify(sent)}`,
+  );
 });
