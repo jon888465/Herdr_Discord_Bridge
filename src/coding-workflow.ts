@@ -275,6 +275,7 @@ export function codingPlanningAddendum(): string {
     "Write scope is checked against the captured diff after the fact. It is not an operating-system lock and prompt text does not isolate writers.",
     "Return an empty assignments array only to request the acceptance gate. An empty plan does not authorize you to edit the repository. The bridge, not this prompt, decides completion.",
     "Review execution can succeed while its verdict asks for changes. Refer to earlier findings and artifacts by findingRefs and artifactRefs. Dependencies still refer only to this round.",
+    "When a round contains a writer (access write), every other assignment in that round (diagnose, review, verify) must list the writer's assignment id directly in its own dependsOn. A dependency that reaches the writer only through another assignment, such as verify depending on review which depends on the writer, is rejected. Extra dependencies, for example verify also depending on review, are fine.",
   ].join("\n");
 }
 
