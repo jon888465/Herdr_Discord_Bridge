@@ -3218,3 +3218,25 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 下一步：無（已驗收）；根本原因（daemon 環境）仍在 Herdr／Codex，可考慮回報。
 
+## ISSUE-091：profile 啟動的 Worker 一律被判「未就緒」，Lead 自行分派的 `--coding` 任務在派工前失敗
+
+更新日期：2026-11-05。狀態：已修正、待驗收（根因已確認並在 live Herdr 重現；原始碼與自動化檢查完成；**尚未 merge、尚未重啟 bridge、尚未實機重跑 `--coding`**）。
+
+使用者可見症狀：在 `w29`（只有 claude Lead）用 `team select` 勾選 `helper`、`reviewer`、`claude` 三個 profile 後，`card assign … --coding`。Lead 的計畫沒有問題（`impl`→`helper`、`review`→`reviewer`、`verify`→`claude`），但 `impl` 立刻失敗：「started Agent does not match requested profile/workspace or is not ready」，`review`、`verify` 因依賴失敗而沒執行，task `task-8fa522c1-e078-461d-8cae-7de1cfa8c003` 失敗。同時 pane `w29:p2` 其實已經正常啟動了 codex 並進入 idle。
+
+預期行為：profile 啟動完成、CLI 就緒後才派工。
+
+重現方式／環境：2026-11-05 本機 macOS，Herdr 當前版本，bridge 載入 main `2e729fb`。重現迴圈（約 10 秒，可重跑；腳本在 scratchpad `start091.mjs`）：對 live 的 Lead pane 直接呼叫 `HerdrClient.startProfile(lead, { kind: "codex" })` 並印出剛回傳那一刻的 Agent：**0.7 秒就回傳**，回傳的記錄沒有 `agent` 欄位、`agent_status` 是 `unknown`；之後 +1 秒仍 `unknown`、+3 秒 `working`、+8 秒 `idle`。
+
+已確認根因：Herdr 的 `agent.start` 在約 1 秒內回傳，這時新 pane 還沒被偵測成該 CLI（需要約 2 到 8 秒，與追蹤清單 E9 記的「Agent 約 2–4 秒才被偵測到」一致）。`AgentPool.acquire`（`src/agent-pool.ts`）卻在 `startProfile` 回傳後立刻檢查 `agent.agent === kind` 且狀態 idle／done，所以一定失敗。這條路徑（Lead 自行啟動 profile 當 Worker）先前的 `--coding` 實機驗收都沒走過——那些 Worker 都是手動開好、用 `team add` 加進去的 pane。
+
+修正範圍（2026-11-05）：`src/agent-pool.ts` 新增 `waitUntilReady`，`acquire` 在 `startProfile` 之後持續（每 0.3 秒）重讀同一個 pane，最多 `readyTimeoutMs`（預設 30 秒），直到偵測到預期的 CLI 且 idle／done；偵測成別的 CLI 時立刻失敗（不等）；逾時回傳最後狀態，由原本的檢查丟出原本的錯誤。
+
+測試（2026-11-05，本機 macOS，非 CI）：`test/agent-pool.test.ts` 新增 3 項（啟動後 0.6 秒才被偵測成 codex、1.2 秒才 idle 時會等到就緒；一直不就緒仍以原錯誤失敗；偵測成別的 CLI 立刻失敗、不到 2 秒）。暫時拿掉等待時第一項**失敗**（紅），恢復後通過。`node --test --test-timeout=60000 dist/test/*.test.js` → 1142 tests、1141 pass、0 fail、1 skip（既有）；`npm run lint` ok。
+
+未驗證：重啟 bridge 後在 live 重跑上述 `w29` 型的任務（勾選 profile、Lead 自己分派），確認 Lead 啟動 helper／reviewer 並走到 `ready-to-integrate`；claude profile 當 Worker 的身分辨識與「信任這個資料夾」提示（E9）仍未驗；agy、pi 當 Worker 未驗。
+
+後續（E14，2026-11-05，使用者決定先用 claude、codex 把自動流程串起來）：同一個 PR 也實作了「`--coding` 沒有指定任何 Worker 時自動啟用 claude／codex profile」（`src/coding-roster.ts` 的 `autoEnableCodingProfiles`，`src/main.ts` 的 `startTeamTask` 呼叫；agy、pi 先排除；有指定一律照指定）。測試（2026-11-05，本機）：`test/coding-roster.test.ts` 新增 2 項（沒指定時啟用 helper／reviewer／claude 且排除 agy、pi；可用 profile 少於兩個時什麼都不啟用、仍被拒絕）。`node --test --test-timeout=60000 dist/test/*.test.js` → 1144 tests、1143 pass、0 fail、1 skip（既有）；`npm run lint` ok。詳見追蹤清單 E14。**未實機驗收**——需 merge 後重啟 bridge，用 `card assign … --worktree --coding` 實跑。
+
+下一步：merge 後重啟 bridge，重做 `w29` 型驗收，再用 `card assign --worktree --coding` 驗 E14，通過後進 H4 端到端案例。
+
