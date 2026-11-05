@@ -1,3 +1,4 @@
+import { commitVerifiedVersion } from "./card-commit.js";
 import { hookReplyTrusted } from "./codex-session.js";
 import { hookModeFor, hookStatusText } from "./hook-status.js";
 import { boundedHandoffSummary } from "./handoff-summary.js";
@@ -798,6 +799,20 @@ export async function handleCommand(
                 : {}),
             },
           );
+        },
+        commitVerified: async (card) => {
+          const entry = lazyCardWorktrees().latest(card.id);
+          if (!entry || entry.removedAt)
+            throw new Error(
+              `卡片 ${card.id} 沒有可用的 worktree（用 \`card assign ${card.id} --worktree --coding\` 建立）`,
+            );
+          const taskId = lazyCardAssignments().forCard(card.id).at(-1)?.taskId;
+          return commitVerifiedVersion({
+            card,
+            branch: entry.branch,
+            worktreePath: entry.path,
+            task: taskId ? runtime.tasks?.store.get(taskId) : undefined,
+          });
         },
         prepareWorktree: async (card) => {
           const { workspaceId, lead } = await activeLeadFor(context, runtime);
@@ -3703,6 +3718,7 @@ function consoleHelpText(): string {
     "card assign <id> [--coding] — 把 ready 的卡片交給目前 workspace 的 Team（同 team ask）",
     "card assign <id> --worktree [--coding] — 先在目前 Agent 所在 repo 建立隔離 worktree（分支 card/<id>）並啟動同種 Agent，再指派",
     "card cleanup <id> — 移除卡片的 worktree（有未提交修改就保留；不刪分支、不強制）",
+    "card commit <id> — `--coding` 任務 ready-to-integrate 後，把通過 review 與驗證的版本 commit 到卡片的分支（只提交已驗證的檔案、驗證後被改動就拒絕；不 push）",
     "card pr <id> — 把 done 卡片的分支 push 並開 PR（專案政策要 L1 以上；之後每分鐘檢查 CI 與 merge）",
     "card review <id> [--agent <種類>] — 對卡片開著的 PR 開新 pane、啟動另一個 Agent 做獨立 review，結果寫進卡片的 Review 發現（用完關閉 pane；需專案政策 L1 以上）",
     "card fix <id> [--agent <種類>] — 把 review 的 open findings 交給新開 pane 的新作者（種類沿用最後一個作者）在 worktree 修一圈並 commit，finding 標為 fixed；不 push，之後 card pr 再 card review；總上限 3 次 review",

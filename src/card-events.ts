@@ -67,6 +67,13 @@ export type CardEvent = { time: string; eventId: string } & (
       round: number;
     }
   | {
+      /** `card commit`：bridge 把通過 review 與驗證的版本 commit 到卡片的分支（不 push）。 */
+      event: "committed";
+      taskId: string;
+      branch: string;
+      headSha: string;
+    }
+  | {
       /** `card fix`（F5 的 loop 手動版）：某一圈修正完成，幾筆 finding 標為 fixed、幾筆略過。 */
       event: "fix_applied";
       round: number;
@@ -157,6 +164,19 @@ function render(fields: Fields): { text: string; suspicious: boolean } {
       const round = integer(fields, "round", 1, 1_000_000);
       return {
         text: `review ${role} 第 ${round} 輪：${verdict}`,
+        suspicious: false,
+      };
+    }
+    case "committed": {
+      const branch = text(
+        fields,
+        "branch",
+        BRANCH,
+        "letters, digits, . _ / -, at most 80",
+      );
+      const head = sha12(fields, "headSha");
+      return {
+        text: `commit 分支 ${branch}，head ${head}（task ${text(fields, "taskId", TASK_ID, "task id")}）`,
         suspicious: false,
       };
     }
