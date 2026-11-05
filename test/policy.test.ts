@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   DEFAULT_POLICY,
+  autopickFor,
   levelFor,
   loadPolicy,
   parsePolicy,
@@ -210,4 +211,67 @@ test("a file that is not valid UTF-8 is refused", () => {
   fs.writeFileSync(file, Buffer.from([0x76, 0xff, 0xfe]), { mode: 0o600 });
   void dir;
   assert.equal(loadPolicy(file).status, "invalid");
+});
+
+// H2 自動撿卡（使用者 2026-11-05 決定）：政策檔明確選用，每個專案指定 repo 路徑；Lead 種類全域一個。
+const withAutopick = [
+  "version: 1",
+  "default: L0",
+  "autopick_lead: codex",
+  "projects:",
+  "  local:Herdr_Discord_Bridge: L2",
+  "  local:Other: L1",
+  "autopick:",
+  "  local:Herdr_Discord_Bridge: /Users/jon/git_wk/Herdr_Discord_Bridge",
+  "",
+].join("\n");
+
+test("autopick lists the projects to pick cards for, with each repo path and one Lead kind", () => {
+  const result = parsePolicy(withAutopick);
+  assert.ok(result.ok);
+  assert.deepEqual(result.policy.autopick, {
+    "local:Herdr_Discord_Bridge": "/Users/jon/git_wk/Herdr_Discord_Bridge",
+  });
+  assert.equal(result.policy.autopickLead, "codex");
+  assert.equal(autopickFor(result.policy, "local:Herdr_Discord_Bridge")?.level, "L2");
+  assert.equal(autopickFor(result.policy, "local:Other"), undefined);
+});
+
+test("without an autopick block nothing is picked, and the parsed policy keeps its old shape", () => {
+  const result = parsePolicy(valid);
+  assert.ok(result.ok);
+  assert.equal("autopick" in result.policy, false);
+  assert.equal(autopickFor(result.policy, "local:Herdr_Discord_Bridge"), undefined);
+});
+
+test("the Lead kind defaults to claude and only claude or codex are accepted", () => {
+  const result = parsePolicy(
+    "version: 1\nprojects:\n  local:A: L1\nautopick:\n  local:A: /repo/a\n",
+  );
+  assert.ok(result.ok);
+  assert.equal(autopickFor(result.policy, "local:A")?.lead, "claude");
+  assert.equal(
+    parsePolicy("version: 1\nautopick_lead: agy\n").ok,
+    false,
+  );
+});
+
+test("autopick is refused for a project that has no explicit level, so a permissive default can never start work by itself", () => {
+  const result = parsePolicy(
+    "version: 1\ndefault: L2\nautopick:\n  local:A: /repo/a\n",
+  );
+  assert.equal(result.ok, false);
+  assert.match(!result.ok ? result.error : "", /projects/);
+});
+
+test("autopick paths must be absolute, free of .. and control characters, and projects unique", () => {
+  const base = "version: 1\nprojects:\n  local:A: L1\nautopick:\n";
+  for (const bad of [
+    "  local:A: relative/path",
+    "  local:A: /repo/../etc",
+    "  local:A: /repo/a b\u0001",
+    "  local:A: ",
+    "  local:A: /repo/a\n  local:A: /repo/b",
+  ])
+    assert.equal(parsePolicy(base + bad + "\n").ok, false, bad);
 });
