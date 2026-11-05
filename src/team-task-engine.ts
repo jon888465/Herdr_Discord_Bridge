@@ -354,6 +354,16 @@ export class TeamTaskEngine {
             startVersionFingerprint: artifact.startVersionFingerprint,
             endVersionFingerprint: artifact.endVersionFingerprint,
             driftReason: artifact.driftReason,
+            // ISSUE-097：verify 失敗時 Lead 要看得到是哪個指令的 exit code 不是 0。
+            ...(artifact.role === "verify"
+              ? {
+                  verificationPassed: artifact.verificationPassed,
+                  commands: artifact.commands.slice(0, 10).map((item) => ({
+                    command: item.command.slice(0, 160),
+                    exitCode: item.exitCode,
+                  })),
+                }
+              : {}),
           })),
           findings: (coding?.findings ?? []).map((finding) => ({
             id: finding.id,

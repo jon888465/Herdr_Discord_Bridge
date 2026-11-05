@@ -278,6 +278,7 @@ export function codingPlanningAddendum(): string {
     "Return an empty assignments array only to request the acceptance gate. An empty plan does not authorize you to edit the repository. The bridge, not this prompt, decides completion.",
     "Review execution can succeed while its verdict asks for changes. Refer to earlier findings and artifacts by findingRefs and artifactRefs. Dependencies still refer only to this round.",
     "When a round contains a writer (access write), every other assignment in that round (diagnose, review, verify) must list the writer's assignment id directly in its own dependsOn. A dependency that reaches the writer only through another assignment, such as verify depending on review which depends on the writer, is rejected. Extra dependencies, for example verify also depending on review, are fine.",
+    "A verification counts as failed if one of the commands the verifier reports exits non-zero. When you instruct a verifier, ask it to report only checks that must pass with exit 0 and to write absence checks as `! grep -q \'text\' file`; the commands and exit codes of earlier verifications are in the coding evidence.",
   ].join("\n");
 }
 
@@ -288,6 +289,7 @@ export function codingWorkerAddendum(coding: AssignmentCoding): string {
     "Access is a bridge check, not an OS write lock. Do not commit, merge, push, or use GitHub.",
     'End the report with one JSON object. implement: {"codingResult":{"kind":"implement","files":[]}}. review: {"codingResult":{"kind":"review","verdict":"pass|changes_requested|inconclusive","findings":[{"id":"f1","summary":"..."}]}}. verify: {"codingResult":{"kind":"verify","commands":[{"command":"npm test","exitCode":0}]}}. diagnose: {"codingResult":{"kind":"diagnose","findings":[]}}.',
     "Use a new finding id when you can. A raw id that is already stored stays on the original finding; the bridge stores the later one as <assignmentId>:<id>. Later findingRefs must use that stored id.",
+    "For a verify report, the bridge counts the verification as failed if ANY command listed in codingResult.commands has a non-zero exitCode. List only checks that must pass with exit 0. To check that something is absent, run it negated, for example `! grep -q 'text' file`, and report that negated command with its exit code (0 means it is absent); never list a plain grep that is expected to exit 1. Do not list exploratory commands whose failure does not matter.",
     "A changes_requested verdict is a successful review report, not an execution failure. The bridge binds read-only evidence to the start version and checks the tree again at the end. A change during review or verify makes that report inconclusive for both versions. The bridge does not re-run reported test commands.",
   ].join("\n");
 }
