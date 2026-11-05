@@ -3250,3 +3250,21 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 下一步：無（已驗收）；進追蹤清單 H4 端到端案例。
 
+## ISSUE-092：`--coding` 任務通過後沒有人 commit，`card pr` 無法接續（H4 端到端的第一個斷點）
+
+更新日期：2026-11-05。狀態：已修正、待驗收（原始碼與自動化檢查完成；**尚未 merge、尚未重啟 bridge、尚未實機驗收**）。
+
+使用者可見症狀（由程式閱讀確認，H4 端到端案例的準備階段）：`card assign --worktree --coding` 走到 `ready-to-integrate`（ISSUE-091／E14 已驗收）之後，驗證過的版本只是 worktree 裡的**未提交修改**。`--coding` 的規則禁止 Worker commit、push，bridge 本身也不 commit（SPEC）；但 `card pr` 要求分支上有比基準多的 commit 且 worktree 乾淨，否則拒絕：「worktree 有未提交的修改，請先 commit 或處理」。所以自動流程在這裡斷開，先前的驗收都是我或使用者手動補 commit。
+
+預期行為：通過 review 與驗證的版本可以由 bridge 在嚴格條件下 commit 到卡片的分支（不 push），再接 `card pr`。
+
+使用者決定（2026-11-05，AskUserQuestion）：選「bridge 新增 `card commit`」，而不是放寬 `--coding` 讓 writer commit，或維持手動。
+
+修正範圍：新增 `src/card-commit.ts`（`commitVerifiedVersion`）、指令 `card commit <id>`（`src/card-command.ts`，`src/main.ts` 接線）、卡片事件 `committed`（`src/card-events.ts`）。條件與行為見 SPEC 的 `card commit` 段落。這是 bridge 第一次自己 commit，SPEC 中「Bridge 不執行 commit」的句子已改為列出這個例外。**沒有自動觸發**：第一版只能手動下，串成單一觸發留給後續。
+
+測試（2026-11-05，本機 macOS，非 CI）：`test/card-commit.test.ts` 新增 6 項（真的 git repo：只提交已驗證的檔案、原本就存在的未追蹤檔不被帶進去且保留；task 未完成／階段不對／不是 --coding／沒有 task 都拒絕；驗證後內容被改就拒絕；分支或工作目錄不符就拒絕；暫存區原本就有東西就拒絕；已 commit 不重複）；`test/card-command.test.ts` 新增 3 項（成功時記 `committed` 並指向 `card pr`、不 push；失敗時顯示原因且不記錄；參數與卡片檢查）。
+
+未驗證：實機（真的 `--coding` 任務之後 `card commit` → `card pr`）；git hook（pre-commit）失敗時的回報；repo 沒有設定 git 使用者時的錯誤訊息；`card loop` 自動呼叫（沒做）。
+
+下一步：merge 後重啟 bridge，用真的卡跑 H4：`card assign --worktree --coding` → `card commit` → `card pr` → `card loop --merge`（merge 需要使用者把政策暫時設成 L2）。
+

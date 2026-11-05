@@ -15,6 +15,7 @@ import type { CardAssignment } from "./card-assignments.js";
 import { recordCleanupOnCard } from "./card-cleanup.js";
 import { levelFor, type LoadedPolicy } from "./policy.js";
 import type { Card } from "./card.js";
+import type { CommitOutcome } from "./card-commit.js";
 import type { CleanupResult, PreparedWorktree } from "./card-worktree-flow.js";
 import type { PrOutcome } from "./card-pr-flow.js";
 import { parseFindings, summarizeFindings } from "./card-findings.js";
@@ -110,6 +111,8 @@ export interface CardCommandDeps {
   notify?: (text: string) => Promise<void>;
   /** `card pr`：push 卡片分支並開 PR（或更新已開著的 PR）；不符合前提要丟出說明原因的錯誤。 */
   openPullRequest: (card: Card) => Promise<PrOutcome>;
+  /** `card commit`：把通過 review 與驗證的版本 commit 到卡片的分支（不 push）；不符合前提要丟出說明原因的錯誤。 */
+  commitVerified?: (card: Card) => Promise<CommitOutcome>;
   /** 專案政策（唯讀）：`<config dir>/policy.yml` 的載入結果。 */
   policy: () => LoadedPolicy;
   /** `card assign --worktree`：建立 worktree、啟動同種 Agent、切換路由；失敗要丟出說明原因的錯誤。 */
@@ -119,7 +122,7 @@ export interface CardCommandDeps {
 }
 
 const USAGE =
-  "usage: card list [status] | card show <id> | card import [--slug <名稱>] [<本機路徑，僅 console>]（Discord 請附上 .md 檔） | card assign <id> [--coding] [--worktree] | card cleanup <id> | card policy [專案] | card pr <id> | card review <id> [--agent <種類>] | card fix <id> [--agent <種類>] | card loop <id> [--agent <種類>] [--fix-agent <種類>] [--merge] | card loop stop <id> | card merge <id> [--method squash|merge|rebase] | card recreate <id>（從任務紀錄重建被刪除的卡片）";
+  "usage: card list [status] | card show <id> | card import [--slug <名稱>] [<本機路徑，僅 console>]（Discord 請附上 .md 檔） | card assign <id> [--coding] [--worktree] | card commit <id> | card cleanup <id> | card policy [專案] | card pr <id> | card review <id> [--agent <種類>] | card fix <id> [--agent <種類>] | card loop <id> [--agent <種類>] [--fix-agent <種類>] [--merge] | card loop stop <id> | card merge <id> [--method squash|merge|rebase] | card recreate <id>（從任務紀錄重建被刪除的卡片）";
 const MAX_LIST_LINES = 30;
 const MAX_LIST_ERRORS = 5;
 const TITLE_CHARS = 50;
@@ -453,6 +456,41 @@ function recordWorktreeOnCard(
 }
 
 /** `card pr <id>`：把卡片的分支 push 並開 PR，記錄到卡片（追蹤清單 F3，L1）。 */
+/**
+ * `card commit <id>`：`--coding` 任務通過 review 與驗證後，bridge 替卡片的分支做一次 commit（不 push），
+ * 這樣 `card pr` 才有東西可以推。前提與檢查見 `src/card-commit.ts`。
+ */
+async function commitCard(
+  args: string[],
+  deps: CardCommandDeps,
+): Promise<string> {
+  if (args.length !== 1) throw new Error("usage: card commit <id>");
+  const id = args[0];
+  if (!isCardId(id)) throw new Error(`${id} 不是合法的卡片 id`);
+  if (!deps.commitVerified) throw new Error("card commit 目前無法使用");
+  const store = openDirectory(deps);
+  const read = store?.read(id);
+  if (!store || !read || (!read.ok && read.code === "not_found"))
+    throw new Error(`找不到卡片 ${id}`);
+  if (!read.ok) throw new Error(read.error);
+  const outcome = await deps.commitVerified(read.card);
+  const lines = [
+    `已 commit 到分支 ${outcome.branch}（${outcome.sha.slice(0, 12)}）：${outcome.files.join("、")}`,
+    `這是 task ${outcome.taskId} 通過 review 與驗證的版本（指紋 ${outcome.fingerprint.slice(0, 12)}）；沒有 push。下一步：card pr ${id}`,
+  ];
+  const logged = store.recordEvent(id, {
+    event: "committed",
+    taskId: outcome.taskId,
+    branch: outcome.branch,
+    headSha: outcome.sha,
+    time: deps.now(),
+    eventId: `commit-${outcome.sha.slice(0, 12)}`,
+  });
+  if (!logged.ok)
+    lines.push(`⚠️ 卡片更新失敗：紀錄 committed：${logged.error}`);
+  return lines.join("\n");
+}
+
 async function pullRequestForCard(
   args: string[],
   deps: CardCommandDeps,
@@ -1138,6 +1176,9 @@ export async function runCardCommand(
       break;
     case "show":
       text = showCard(rest, deps);
+      break;
+    case "commit":
+      text = await commitCard(rest, deps);
       break;
     case "pr":
       text = await pullRequestForCard(rest, deps);

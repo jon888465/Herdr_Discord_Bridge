@@ -2087,3 +2087,55 @@ test("a merge never runs while a review, a fix or a loop of the same card is run
   await running;
   await run("merge", "REQ-20261102-work");
 });
+
+const commitOutcome = {
+  sha: "0123456789abcdef0123456789abcdef01234567",
+  branch: "card/REQ-20261102-work",
+  files: ["docs/note.md"],
+  fingerprint: "f".repeat(64),
+  taskId: "task-9",
+};
+
+test("card commit records the commit on the card and points to the next step, without pushing", async () => {
+  const seen: string[] = [];
+  const { store, run } = setup({
+    commitVerified: async (card) => {
+      seen.push(card.id);
+      return commitOutcome;
+    },
+  });
+  store.create(assignable("REQ-20261102-work", { status: "done" }));
+  const reply = await run("commit", "REQ-20261102-work");
+  assert.deepEqual(seen, ["REQ-20261102-work"]);
+  assert.match(reply, /0123456789ab/);
+  assert.match(reply, /docs\/note\.md/);
+  assert.match(reply, /沒有 push/);
+  assert.match(reply, /card pr REQ-20261102-work/);
+  const log = store.readLog("REQ-20261102-work");
+  assert.deepEqual(log.ok && log.entries.map((e) => [e.event, e.eventId]), [
+    ["committed", "commit-0123456789ab"],
+  ]);
+  assert.match(
+    (log.ok && log.entries[0].text) || "",
+    /^commit 分支 card\/REQ-20261102-work，head 0123456789ab（task task-9）/,
+  );
+});
+
+test("card commit surfaces the reason when the version cannot be committed, and records nothing", async () => {
+  const { store, run } = setup({
+    commitVerified: async () => {
+      throw new Error("worktree 的內容和通過驗證的版本不同（驗證之後被改動過）");
+    },
+  });
+  store.create(assignable("REQ-20261102-work", { status: "done" }));
+  await assert.rejects(run("commit", "REQ-20261102-work"), /驗證之後被改動/);
+  const log = store.readLog("REQ-20261102-work");
+  assert.deepEqual(log.ok && log.entries, []);
+});
+
+test("card commit validates its arguments and the card", async () => {
+  const { run } = setup({ commitVerified: async () => commitOutcome });
+  await assert.rejects(run("commit"), /usage: card commit <id>/);
+  await assert.rejects(run("commit", "nope"), /不是合法的卡片 id/);
+  await assert.rejects(run("commit", "REQ-20261102-missing"), /找不到卡片/);
+});
