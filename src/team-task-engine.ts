@@ -25,6 +25,7 @@ import {
   type OrchestrationEvent,
   type OrchestrationPort,
   type TeamTaskInput,
+  unwrapCodexJson,
 } from "./team-orchestration.js";
 import {
   TeamTaskStore,
@@ -422,7 +423,13 @@ export class TeamTaskEngine {
           }
         }
         const version = current();
-        const parsed = parseCodingResult(report);
+        // ISSUE-089：找不到 rollout 而退回終端畫面時，codex 會依 pane 寬度把 JSON 字串硬換行，
+        // 先照原文解析，失敗才用 codex 的 TUI 解析（unwrapCodexJson）接回換行再試一次。
+        const parsed =
+          parseCodingResult(report) ??
+          (isCodex(worker)
+            ? parseCodingResult(unwrapCodexJson(report))
+            : undefined);
         const result =
           parsed?.kind === assignment.coding.role ? parsed : undefined;
         const coding = this.store.get(taskId).coding!;

@@ -3105,7 +3105,7 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 ## ISSUE-088：新開的 codex pane 沒有 `agent_session`，`--coding` 的獨立 review 被擋（unknown reviewer identity）
 
-更新日期：2026-11-05。狀態：已驗收（身分判定部分）。PR #106 已 merge，bridge 於 2026-11-05 用 `./scripts/run.sh -r` 重啟載入 `bbd05c8`；用兩個新開的 codex Worker 實機驗到 author／reviewer 身分由 rollout 辨識、獨立 review 通過（見下）。**`--coding` 用 codex Worker 完整跑完仍未成功**：verify 階段另有問題，見 ISSUE-089。
+更新日期：2026-11-05。狀態：已驗收（身分判定部分在 2026-11-05 先驗收；codex Worker 完整跑完在 ISSUE-089 修好後也已驗收，task `task-f201a376…`）。PR #106 已 merge，bridge 於 2026-11-05 用 `./scripts/run.sh -r` 重啟載入 `bbd05c8`；用兩個新開的 codex Worker 實機驗到 author／reviewer 身分由 rollout 辨識、獨立 review 通過（見下）。**`--coding` 用 codex Worker 完整跑完仍未成功**：verify 階段另有問題，見 ISSUE-089。
 
 使用者可見症狀：`card assign <id> --coding`，Worker 是新開的 codex pane 時，實作完成後 `review` 失敗：「unknown reviewer identity is not an independent review」，`verify` 因依賴 review 沒有執行，task 失敗（`task-2e9a15a0-73ff-4e14-8fcd-dbf8f31069d9`）。
 
@@ -3146,7 +3146,7 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 ## ISSUE-089：codex Worker 的回合（review、verify）要等滿 timeout 才結算，verify 最後逾時失敗
 
-更新日期：2026-11-05。狀態：已修正、待驗收（根因已確認並在真實 codex pane 重現；原始碼與自動化檢查完成；**尚未 merge、尚未重啟 bridge、尚未用 codex Worker 重跑 `--coding` 完整流程**）。
+更新日期：2026-11-05。狀態：已驗收（PR #108 已 merge，bridge 於 2026-11-05 用 `./scripts/run.sh -r` 重啟載入 `fbc2fee`；用 claude Lead＋兩個新開的 codex Worker 在原本失敗的窄 pane 配置下 `--coding` 完整跑完，見下）。
 
 使用者可見症狀：claude Lead＋兩個新開的 codex Worker 跑 `card assign … --coding`，`impl` 約 20 秒完成，但 `review` 從派工到結算整整 300 秒（`turn_dispatched 03:32:12` → `turn_settled 03:37:12`），`verify` 派工後約 10 分鐘才失敗：「Timed out waiting for current response from w23:p3 (last state: done); no verified completion」，task 因「no successful verification for the current version」失敗。Worker 實際早就做完：pane 上有完整的 `BRIDGE_BEGIN … BRIDGE_END` 回覆，codex 顯示 `Worked for 12s`，pane 狀態也是 `done`。
 
@@ -3163,7 +3163,9 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 測試（2026-11-05，本機 macOS，非 CI）：真實 codex pane 迴圈——修正前 97.3 秒逾時，修正後同一個 13 列 pane、同一個 30 行回覆 **6.7 秒**完成、30 行完整、`terminal=false`、session 由 rollout 取得。新增單元測試 1 項（終端只剩輸入框、框已捲出時從 rollout 取得 41 行完整內容與 session）。`npm run check` → 1135 tests、1134 pass、0 fail、1 skip（既有）；`npm run lint` ok。
 
-未驗證：重啟 bridge 後用 claude Lead＋兩個新開的 codex Worker 重跑 `--coding` 完整流程（verify 階段）；`parseCodingResult` 對沒有 rollout 時（例如找不到唯一 rollout）的硬換行 JSON 仍未處理；rollout 檔很大時的耗時（單檔上限 64 MiB）；Lead 為 codex 時的規劃回合（走同一條路徑但未實測）。
+**2026-11-05 實機驗收通過（本機 macOS，政策 L1，bridge 載入 main `fbc2fee`）：** workspace `w25`（claude Lead `w25:p1`＋兩個新開的 codex Worker `w25:p2`／`w25:p3`，pane 高度 14／13 列，與先前失敗的 `w23` 同配置），驗收卡 `REQ-20261105-full5`，`card assign REQ-20261105-full5 --coding`（task `task-f201a376-b1fd-4b89-9d34-412477ea4eed`）。結果：每個回合只花 3～30 秒，整個 task 從 05:20:01 到 `task_completed` 05:21:29 共 **88 秒**（先前同配置：review 等滿 300 秒、verify 逾時失敗）；artifact 記錄 `implement` 的 author session `…b642`（`04398e37…`）、`review` 的 reviewer session `…bb65`（`042f2d53…`，不同）、`independentReview: true`、`verdict: pass`、`verify` 的 `verificationPassed: true`、`evidence: recorded`；階段 `ready-to-integrate`，journal 最後事件 `task_completed`。**這是 `--coding` 第一次用 codex Worker 完整跑完，ISSUE-085／088／089 的整條路徑都通過。** 收尾：關 workspace、刪暫存檔、移除 worktree、刪分支與驗收卡、路由切回 `w1:p1`；沒有 commit／push。
+
+未驗證（驗收未涵蓋）：（`parseCodingResult` 對硬換行 JSON 的缺口已補，見下方「後續補強」）；rollout 檔很大時的耗時（單檔上限 64 MiB）；Lead 為 codex 時的規劃回合（走同一條路徑但未實測）。
 
 舊的觀察與推測（保留供對照）：
 - 時序：`review` 剛好 300 秒、`verify` 約兩個 300 秒，與 `promptAgentAndWait` 的 timeout（`src/herdr.ts`，預設 300000ms）吻合——推測 Herdr 的 `agent.prompt(wait=…)` 沒有回報這次 prompt 的 settled lifecycle，於是被當成 `agent_prompt_stalled`，bridge 之後再多等一輪 deadline 才讀畫面或放棄。這是依時間推測，**尚未驗證**。
@@ -3174,4 +3176,6 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 未驗證：Herdr `agent.prompt(wait)` 對這些 codex pane 的行為（是否與 codex 狀態偵測有關，因為 codex 的狀態 hook 同樣被 daemon 環境影響，見 ISSUE-088）；逾時後為何讀不到畫面框；`parseCodingResult` 對硬換行 JSON 的實際行為。
 
-下一步：merge 後重啟 bridge，重做 claude Lead＋兩個 codex Worker 的 `--coding` 完整驗收；視需要為 `parseCodingResult` 加 codex 硬換行 JSON 的還原。
+**後續補強（2026-11-05，使用者指示「最後 fallback 用 TUI parser」，已修正、待實機驗收）：** 找不到唯一 rollout 而退回終端畫面時，codex 的 `codingResult` JSON 可能被 pane 寬度硬換行切斷。`src/team-task-engine.ts` 的 `onAssignmentDone` 對 codex 先照原文 `parseCodingResult`，失敗才用 `unwrapCodexJson`（codex 的 TUI 解析，只接回 JSON 字串內「換行＋兩格縮排」）再解析一次。測試（2026-11-05，本機）：`test/coding-workflow.test.ts` 新增 1 項（verify 回報的 command 字串被硬換行時仍記為 `evidence: recorded`、`verificationPassed: true`、task 完成）；暫時關掉修正時該測試**失敗**（紅），恢復後通過。`npm run check` → 1136 tests、1135 pass、0 fail、1 skip（既有）；`npm run lint` ok。**未實機驗收：**要找不到 rollout 又遇到硬換行的情境，實機不易刻意製造；只有單元測試證據。
+
+下一步：無（主路徑已驗收）；後續補強合併後如日後在實機遇到 rollout 找不到的情況再確認。
