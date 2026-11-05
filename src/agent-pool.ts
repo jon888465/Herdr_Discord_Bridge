@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import type { AgentRecord } from "./types.js";
 import type { HerdrClient } from "./herdr.js";
 import { sameAgentSession } from "./response-stream.js";
@@ -98,6 +99,8 @@ export class AgentPool {
     profiles: AgentProfile[],
     private readonly herdr: Port,
     private readonly allowed: string[],
+    /** ISSUE-091：`agent.start` 回傳後 Agent 還要幾秒才被偵測到並就緒，最多等多久。 */
+    private readonly readyTimeoutMs = 30000,
   ) {
     this.profiles = validateProfiles(profiles);
     if (fs.existsSync(file)) {
@@ -291,7 +294,7 @@ export class AgentPool {
         () => undefined,
         () => undefined,
       );
-      const agent = await launch;
+      const agent = await this.waitUntilReady(await launch, p.kind);
       if (
         agent.workspace_id !== workspace ||
         agent.agent !== p.kind ||
@@ -311,6 +314,33 @@ export class AgentPool {
       return { agent, continuity: "new-session" };
     } finally {
       this.pending.delete(key);
+    }
+  }
+  /**
+   * ISSUE-091：Herdr 的 `agent.start` 在約 1 秒內就回傳，這時新 pane 還沒被偵測成這個 CLI
+   * （沒有 agent 欄位、狀態 unknown），要約 2 到 8 秒後才變成 idle。在這段期間內持續重讀同一個 pane，
+   * 直到偵測到預期的 CLI 且 idle／done；逾時就回傳最後一次看到的狀態，讓原本的檢查丟出錯誤。
+   * 偵測成別的 CLI 時不再等（身分不符是真正的錯誤）。
+   */
+  private async waitUntilReady(
+    started: AgentRecord,
+    kind: string,
+  ): Promise<AgentRecord> {
+    const deadline = Date.now() + this.readyTimeoutMs;
+    let current = started;
+    for (;;) {
+      if (current.agent && current.agent !== kind) return current;
+      if (
+        current.agent === kind &&
+        ["idle", "done"].includes(current.agent_status)
+      )
+        return current;
+      if (Date.now() >= deadline) return current;
+      await delay(300);
+      const found = (await this.herdr.listAgentsWithWorkspaceNames()).find(
+        (a) => a.pane_id === started.pane_id,
+      );
+      if (found) current = found;
     }
   }
   release(owner: string): void {
