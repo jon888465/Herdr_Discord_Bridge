@@ -1,5 +1,6 @@
 import net from "node:net";
 import type { AgentProfile } from "./agent-pool.js";
+import { chooseSplitTarget } from "./pane-split.js";
 import os from "node:os";
 import path from "node:path";
 import type {
@@ -230,26 +231,22 @@ export class HerdrClient {
         }>;
       };
     }>("pane.layout", { pane_id: liveLead.pane_id });
-    const rect = layout.layout?.panes.find(
-      (p) => p.pane_id === liveLead.pane_id,
-    )?.rect;
-    if (!rect) throw new Error("Lead pane geometry unavailable");
-    const direction =
-      rect.width >= 120 && rect.width >= rect.height * 2 ? "right" : "down";
-    if (
-      (direction === "right" && rect.width < 80) ||
-      (direction === "down" && rect.height < 16)
-    )
+    if (!layout.layout?.panes.some((p) => p.pane_id === liveLead.pane_id))
+      throw new Error("Lead pane geometry unavailable");
+    // ISSUE-094：Lead pane 被前面的 profile Worker 一路切小時，改從同一個版面裡夠大的 pane 分割。
+    const split = chooseSplitTarget(layout.layout.panes, liveLead.pane_id);
+    if (!split)
       throw new Error(
         "Lead pane is too small to split; arrange the workspace or bind an existing session",
       );
+    const direction = split.direction;
     onStarting?.();
     const result = await this.request<{
       pane: { pane_id: string; workspace_id: string };
     }>(
       "pane.split",
       {
-        target_pane_id: liveLead.pane_id,
+        target_pane_id: split.paneId,
         workspace_id: liveLead.workspace_id,
         direction,
         cwd,
