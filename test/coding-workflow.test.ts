@@ -25,6 +25,7 @@ import {
 import {
   assertIndependentReview,
   codingPlanningAddendum,
+  codingWorkerAddendum,
   parseCodingResult,
 } from "../src/coding-workflow.js";
 import {
@@ -239,6 +240,7 @@ function harness(options: {
     | "unknown"
     | "no-verify"
     | "gate-feedback"
+    | "verify-retry"
     | "empty"
     | "general"
     | "review-drift"
@@ -280,6 +282,7 @@ function harness(options: {
   const cancels: string[] = [];
   let plans = 0;
   let reviews = 0;
+  let verifies = 0;
   let entered: (() => void) | undefined;
   const enteredPromise = new Promise<void>((resolve) => {
     entered = resolve;
@@ -299,6 +302,7 @@ function harness(options: {
       }
       if (text.includes("Do not modify files while planning")) plans += 1;
       if (text.includes("Coding role: review")) reviews += 1;
+      if (text.includes("Coding role: verify")) verifies += 1;
       if (
         (options.script === "review-drift" ||
           options.script === "prior-cover") &&
@@ -404,7 +408,13 @@ function harness(options: {
         body = JSON.stringify({
           codingResult: {
             kind: "verify",
-            commands: [{ command: "node --test", exitCode: 0 }],
+            commands: [
+              { command: "node --test", exitCode: 0 },
+              // ISSUE-097：第一次 verify 另外列了一個「確認舊文字不存在」的 grep，沒找到所以 exit 1。
+              ...(options.script === "verify-retry" && verifies === 1
+                ? [{ command: "grep -cF 'old text' notes.txt", exitCode: 1 }]
+                : []),
+            ],
           },
         });
         if (options.wrapCodexReports)
@@ -524,6 +534,12 @@ function planFor(
   if (script === "gate-feedback") {
     // Lead 漏排 verify 就回空計畫；bridge 把閘門缺的東西回給它之後，它才補排 verify。
     const rounds = [[implement], [review("rev1")], [], [verify], []];
+    return { assignments: rounds[round - 1] ?? [] };
+  }
+  if (script === "verify-retry") {
+    // 第一次 verify 因為多列了一個 exit 1 的指令而失敗；Lead 看到指令與 exit code 後補排第二次 verify。
+    const verify2 = { ...verify, id: "ver2" };
+    const rounds = [[implement], [review("rev1")], [verify], [verify2], []];
     return { assignments: rounds[round - 1] ?? [] };
   }
   if (script === "no-verify") {
@@ -960,6 +976,56 @@ test("ISSUE-093: an empty plan with an unsatisfied gate sends the reasons back t
     h.close();
     rmSync(repo, { recursive: true, force: true });
   }
+});
+
+test("ISSUE-097: a verify that lists a command expected to exit non-zero fails, and the Lead sees which command and exit code before planning the next verify", async () => {
+  const { repo } = repoWithBaseline();
+  const h = harness({ repo, script: "verify-retry" });
+  try {
+    const task = await h.engine.run({
+      taskId: "task-verify-retry",
+      prompt: "ship the local change",
+      lead: h.lead,
+      workers: [h.author, h.reviewer],
+      replan: true,
+      coding: true,
+      timeoutMs: 500,
+    });
+    const verifies = (task.coding?.artifacts ?? []).filter(
+      (item) => item.role === "verify",
+    );
+    assert.deepEqual(
+      verifies.map((item) => item.verificationPassed),
+      [false, true],
+    );
+    assert.equal(task.state, "completed", task.detail);
+    // 第一次 verify 之後的規劃提示看得到失敗的指令與 exit code，以及怎麼寫「不存在」的檢查。
+    const planning = h.prompts.filter((item) =>
+      item.text.includes("Do not modify files while planning"),
+    );
+    const afterFirst = planning.find((item) =>
+      item.text.includes("grep -cF 'old text' notes.txt"),
+    );
+    assert.ok(afterFirst, "the failed command must appear in the planning prompt");
+    assert.match(afterFirst!.text, /"exitCode":1/);
+    assert.match(afterFirst!.text, /! grep -q/);
+  } finally {
+    h.close();
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("ISSUE-097: the worker instructions say that every command listed in a verify report must exit 0 and how to write an absence check", () => {
+  const text = codingWorkerAddendum({
+    role: "verify",
+    access: "read",
+    writeScope: [],
+    artifactRefs: [],
+    findingRefs: [],
+  });
+  assert.match(text, /ANY command listed in codingResult\.commands has a non-zero exitCode/);
+  assert.match(text, /! grep -q/);
+  assert.match(text, /never list a plain grep that is expected to exit 1/);
 });
 
 test("ISSUE-093: a Lead that keeps returning an empty plan is asked at most twice, then the task fails as before", async () => {

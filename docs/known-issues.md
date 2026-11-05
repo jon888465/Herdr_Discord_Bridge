@@ -3272,7 +3272,7 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 ## ISSUE-093：Lead 漏排 verify 就回空計畫，驗收閘門失敗且沒有補救機會（H4 端到端的第二個斷點）
 
-更新日期：2026-11-05。狀態：已修正、待驗收（根因已確認；原始碼與自動化檢查完成；**尚未 merge、尚未重啟 bridge、尚未實機驗收**）。
+更新日期：2026-11-05。狀態：已驗收（H2 自動撿卡 L2 第一次嘗試的 task journal 顯示閘門回饋確實觸發，見下；PR #115 已 merge，bridge 於 2026-11-05 重啟載入）。
 
 使用者可見症狀：H4 端到端案例 `REQ-20261105-h4`（`card assign … --worktree --coding`，task `task-0342e935-5be0-42af-93b6-d2df82fd55f3`，workspace `w2E`）：Lead 只排了 `write-h4-file`（implement，`helper`）與審查（`reviewer`，pass、findings 為空、與作者是不同 session），沒有排 verify 就回了空計畫；bridge 的閘門判「no successful verification for the current version」，整個 task failed。實作與獨立 review 都是好的（兩份 artifact 同一個指紋）。先前 7 次實機 coding 任務 Lead 都自己排了 verify，只有這次漏掉，屬模型行為的變異；流程卻因此沒有補救機會。
 
@@ -3292,6 +3292,8 @@ H4 端到端進度：第一次嘗試在此停住（`card commit` 與 `card pr` �
 
 
 **H4 兩輪的觀察（2026-11-05）：** 兩輪實機 coding 任務 Lead 都自己排了 verify，所以閘門回饋**沒有被觸發**，這個修正仍只有單元測試證據，狀態維持「已修正、待驗收」。
+
+**實機驗收（2026-11-05，task `task-cbc8ddf3-7de8-4e08-b9ae-38b185674efc`，bridge 載入含 #115 的版本）：**journal 顯示 Lead 在 review 之後回空計畫（seq 20）→ `coding_assessed`（閘門未滿足，seq 21）→ 再一次 `plan_requested`（seq 22，閘門回饋）→ Lead 補排 verify（`assignment_started`，seq 26）；同樣的循環在 verify 之後又發生一次（seq 35 → 40）。也就是 Lead 漏排／需要補排時，bridge 確實把閘門原因送回、Lead 確實補排了 verify。該 task 後來仍因 ISSUE-097（verify 的指令 exit code）失敗，與回饋機制無關。
 ## ISSUE-094：Lead 的 pane 被 profile Worker 一路切小，之後 `card review`／`card loop` 開不出 reviewer 的 pane（H4 端到端的第三個斷點）
 
 更新日期：2026-11-05。狀態：已驗收（PR #117 已 merge，bridge 於 2026-11-05 重啟載入 `dfac751`；H4 第二輪 `card loop` 的 reviewer pane 開得出來，見下）。
@@ -3351,3 +3353,20 @@ H4 脈絡：這是自動串接最小的摩擦；若要做成單一觸發，（1�
 **實機驗收計畫：**使用者已把 `policy.yml` 設成 `Herdr_Discord_Bridge: L1` 並加 `autopick:`（bridge 解析器驗證為 loaded）。merge 並重啟 bridge 後，匯入一張宣告 `project: local:Herdr_Discord_Bridge` 的無害卡並設成 ready，**不下任何指令**，等待 bridge 自己撿卡、做到 PR 為止（L1）；驗證完成後由使用者決定是否升到 L2 再驗 merge。重啟前確認卡片目錄沒有其他 ready 的卡（2026-11-05 查過是空的）。
 
 **未驗證：**真的定期掃描與撿卡；Lead 開在新 workspace 的版面與 Claude 的信任提示（repo 在已信任的 `git_wk` 底下）；`autopick` 使用者 id 的路由與 console 路由確實互不影響；失敗時卡片 `failed` 事件的內容；長時間（45 分鐘）等待期間 bridge 重啟的處理（不接續）；Discord 通知（目前只有 console 輸出）。
+## ISSUE-097：verify 的 Worker 回報了一個預期 exit 1 的指令，整個驗證被判失敗（H2 自動撿卡 L2 第一次嘗試的斷點）
+
+更新日期：2026-11-05。狀態：已修正、待驗收（根因已確認；原始碼與自動化檢查完成；**尚未 merge、尚未重啟 bridge、尚未實機重跑 L2**）。
+
+使用者可見症狀：H2 自動撿卡 L2 第一次嘗試（卡 `REQ-20261105-auto2`，task `task-cbc8ddf3-7de8-4e08-b9ae-38b185674efc`）：bridge 自己撿卡、coding 完成、獨立 review pass，但兩次 verify 都被記成 `verificationPassed: false`，task failed「no successful verification for the current version」，自動撿卡停在 `task`（console：「停下來等人，停在 task」，卡片記 `failed`／`autopick_stopped`）。Worker 的文字報告兩次都寫「驗證通過」。
+
+預期行為：Worker 實際驗證通過時，bridge 也判通過；失敗時 Lead 看得出是哪個指令。
+
+已確認根因（task 的 verify 報告原文）：兩個 verify Worker 都在 `codingResult.commands` 另外列了 `grep -cF '<舊文字>' docs/card-to-merge-tracker.md`，用來確認舊文字已經不存在——找不到時 `grep` 本來就 exit 1，回報成 `exitCode: 1`。bridge 的規則是「回報的 `commands` 至少一個且全部 exit 0 才算 `verificationPassed`」（`src/team-task-engine.ts`），所以被判失敗。閘門回饋（ISSUE-093）生效、Lead 也補排了第二次 verify，但回饋只說「沒有成功的驗證」，Lead 看不出是哪個指令，第二個 verifier 做了同樣的事。卡片的驗收條件寫成「舊文字已不存在」也讓 verifier 很自然去檢查不存在——但這是很常見的驗收寫法，不是卡片的錯。
+
+修正範圍（2026-11-05；**驗證規則本身不放寬**）：（1）Worker 提示（`codingWorkerAddendum`）與 Lead 的規劃提示（`codingPlanningAddendum`）明說：verify 回報的指令只要有一個 exit 非 0 就算失敗；只列必須 exit 0 的檢查；確認不存在要寫成 `! grep -q 'text' file` 並回報該指令的 exit code；不要列預期 exit 1 的 grep、不要列失敗無關緊要的探索指令。（2）Lead 看到的 coding evidence（`evidenceSummary`）對 verify artifact 多帶 `verificationPassed` 與 `commands`（最多 10 個、每個指令最多 160 字元，含 `exitCode`），失敗時才知道是哪個指令。（3）閘門回饋的訊息補一句：verify 失敗時請看 evidence 的指令與 exit code，並告訴下一個 verifier 只回報必須通過的檢查、不存在的檢查寫成 `! grep -q …`。
+
+測試（2026-11-05，本機 macOS，非 CI）：`test/coding-workflow.test.ts` 新增 2 項——第一次 verify 另外列了一個 exit 1 的 grep 而失敗（`verificationPassed` 為 false、true），之後的規劃提示帶有那個指令、`"exitCode":1` 與 `! grep -q` 的說明，第二次 verify 通過後 task 完成；Worker 提示含有「任何一個指令 exit 非 0 就算失敗」「`! grep -q`」「不要列預期 exit 1 的 grep」。暫時關掉 evidence 的指令資訊時第一項**失敗**（紅），恢復後通過。`node --test --test-timeout=60000 dist/test/*.test.js` → 1187 tests、1186 pass、0 fail、1 skip（既有）；`npm run lint` ok（lint 規則禁止出現小寫的 `any` 一字，所以提示文字用 one of…）。
+
+未驗證：實機重跑 L2——merge 並重啟 bridge 後以新卡重做；模型是否真的遵守新提示（只有實機能驗）；Worker 仍列出非 0 指令時，Lead 是否能靠 evidence 的指令與 exit code 改正。
+
+H2 自動撿卡 L2 目前進度：第一次嘗試停在 coding 階段的 verify（本 issue）；撿卡、開 Lead、assign、coding、獨立 review 都已實機走過（L1 驗收見 ISSUE-096）；L2 的 `card loop --merge` 在自動流程裡還沒走到。測試殘留：卡片 `REQ-20261105-auto2`（in_progress）、其 worktree 與 workspace，修正 merge 後清掉並用新卡重跑。
