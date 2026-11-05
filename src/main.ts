@@ -1,3 +1,4 @@
+import { hookReplyTrusted } from "./codex-session.js";
 import { hookModeFor, hookStatusText } from "./hook-status.js";
 import { boundedHandoffSummary } from "./handoff-summary.js";
 import {
@@ -2971,6 +2972,11 @@ export async function relayApprovalFollowup(
     (!session.value || !["id", "path"].includes(session.kind ?? ""))
   )
     return false;
+  // ISSUE-090：codex 的 session／pane 對應不可信時，hook 訊息可能是別的 codex 的回覆，不補貼。
+  if (!(await hookReplyTrusted(agent))) {
+    followups.delete(agent.terminal_id);
+    return false;
+  }
   for (let i = 0; i < attempts; i++) {
     const message = (
       session
@@ -3145,17 +3151,22 @@ export async function streamAgent(
     const current = candidate;
     const hookSession = current.agent_session as
       { kind?: string; value?: string } | undefined;
+    // ISSUE-090：codex 的 hook 事件記在 daemon 啟動時的 pane（見 ISSUE-088），驗證 session
+    // 的 rollout 工作目錄等於這個 pane 才採用；否則走畫面 parser，不會貼錯別人的回覆。
+    const hookTrusted = await hookReplyTrusted(current);
     const readHookFinal = () =>
-      hookModeFor(runtime.config.hookTransport, current.agent) === "auto" &&
-      (hookSession?.kind === "id" || hookSession?.kind === "path")
-        ? (
-            hookEvents.stopSince(hookSession.value, started)?.message ?? ""
-          ).trim()
-        : !hookSession
+      !hookTrusted
+        ? ""
+        : hookModeFor(runtime.config.hookTransport, current.agent) === "auto" &&
+            (hookSession?.kind === "id" || hookSession?.kind === "path")
           ? (
-              hookEvents.stopForPane(current.pane_id, started)?.message ?? ""
+              hookEvents.stopSince(hookSession.value, started)?.message ?? ""
             ).trim()
-          : "";
+          : !hookSession
+            ? (
+                hookEvents.stopForPane(current.pane_id, started)?.message ?? ""
+              ).trim()
+            : "";
     let readOk = false;
     let changed = false;
     try {

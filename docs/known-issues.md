@@ -3165,7 +3165,7 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 **2026-11-05 實機驗收通過（本機 macOS，政策 L1，bridge 載入 main `fbc2fee`）：** workspace `w25`（claude Lead `w25:p1`＋兩個新開的 codex Worker `w25:p2`／`w25:p3`，pane 高度 14／13 列，與先前失敗的 `w23` 同配置），驗收卡 `REQ-20261105-full5`，`card assign REQ-20261105-full5 --coding`（task `task-f201a376-b1fd-4b89-9d34-412477ea4eed`）。結果：每個回合只花 3～30 秒，整個 task 從 05:20:01 到 `task_completed` 05:21:29 共 **88 秒**（先前同配置：review 等滿 300 秒、verify 逾時失敗）；artifact 記錄 `implement` 的 author session `…b642`（`04398e37…`）、`review` 的 reviewer session `…bb65`（`042f2d53…`，不同）、`independentReview: true`、`verdict: pass`、`verify` 的 `verificationPassed: true`、`evidence: recorded`；階段 `ready-to-integrate`，journal 最後事件 `task_completed`。**這是 `--coding` 第一次用 codex Worker 完整跑完，ISSUE-085／088／089 的整條路徑都通過。** 收尾：關 workspace、刪暫存檔、移除 worktree、刪分支與驗收卡、路由切回 `w1:p1`；沒有 commit／push。
 
-未驗證（驗收未涵蓋）：（`parseCodingResult` 對硬換行 JSON 的缺口已補，見下方「後續補強」）；rollout 檔很大時的耗時（單檔上限 64 MiB）；Lead 為 codex 時的規劃回合（走同一條路徑但未實測）。
+未驗證（驗收未涵蓋）：（`parseCodingResult` 對硬換行 JSON 的缺口已補，見下方「後續補強」）；（rollout 很大時的耗時與 codex 當 Lead 的規劃回合已在 2026-11-05 補驗，見下方「補驗」。）
 
 舊的觀察與推測（保留供對照）：
 - 時序：`review` 剛好 300 秒、`verify` 約兩個 300 秒，與 `promptAgentAndWait` 的 timeout（`src/herdr.ts`，預設 300000ms）吻合——推測 Herdr 的 `agent.prompt(wait=…)` 沒有回報這次 prompt 的 settled lifecycle，於是被當成 `agent_prompt_stalled`，bridge 之後再多等一輪 deadline 才讀畫面或放棄。這是依時間推測，**尚未驗證**。
@@ -3178,4 +3178,31 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 **後續補強（2026-11-05，使用者指示「最後 fallback 用 TUI parser」，已修正、待實機驗收）：** 找不到唯一 rollout 而退回終端畫面時，codex 的 `codingResult` JSON 可能被 pane 寬度硬換行切斷。`src/team-task-engine.ts` 的 `onAssignmentDone` 對 codex 先照原文 `parseCodingResult`，失敗才用 `unwrapCodexJson`（codex 的 TUI 解析，只接回 JSON 字串內「換行＋兩格縮排」）再解析一次。測試（2026-11-05，本機）：`test/coding-workflow.test.ts` 新增 1 項（verify 回報的 command 字串被硬換行時仍記為 `evidence: recorded`、`verificationPassed: true`、task 完成）；暫時關掉修正時該測試**失敗**（紅），恢復後通過。`npm run check` → 1136 tests、1135 pass、0 fail、1 skip（既有）；`npm run lint` ok。**未實機驗收：**要找不到 rollout 又遇到硬換行的情境，實機不易刻意製造；只有單元測試證據。
 
+**補驗（2026-11-05，本機 macOS，bridge 載入 main `bb41af8`）：**
+- **codex 當 Lead：** workspace `w26`（codex Lead `w26:p1`＋兩個新開的 claude Worker），驗收卡 `REQ-20261105-full6`，`card assign … --coding`（task `task-952bb4db-0b45-4b3a-9306-64f4bdaa300d`）。Lead 的規劃回合走 rollout 路徑取得計畫，`implement-fixture`→`review-fixture`→`verify-fixture` 依序完成，`independentReview: true`、`verdict: pass`、`verificationPassed: true`，階段 `ready-to-integrate`，約 118 秒 `task_completed`。收尾：關 workspace、刪暫存檔與驗收卡、路由切回 `w1:p1`。
+- **rollout 掃描耗時（`findCodexRolloutByNonce`，nonce 在檔尾的最壞情況）：** 真實資料 37 個 rollout、最大 2.9 MB：3 MiB 檔 2 ms；5 個 10 MiB 檔 14 ms；1 個 63 MiB 檔 80 ms；3 個 63 MiB 檔 103 ms。掃描一次最多整檔讀入記憶體（單檔上限 64 MiB），且每秒最多一次，可接受。
+
 下一步：無（主路徑已驗收）；後續補強合併後如日後在實機遇到 rollout 找不到的情況再確認。
+
+## ISSUE-090：codex 的 hook 訊息可能被貼到錯的 pane（`w4:p1`），Discord 串流與核准補貼沒有檢查
+
+更新日期：2026-11-05。狀態：已修正、待驗收（原始碼與自動化檢查完成；**尚未 merge、尚未重啟 bridge、未用真的 codex pane 實機驗收**；隱患本身只有程式閱讀與測試推論，沒有在實機重現過）。
+
+使用者可見症狀（推論，**未實機重現**）：使用者透過 Discord 對 `w4:p1`（codex）送問題時，若另一個 codex session 在同一時間結束回合，bridge 可能把那個 session 的回覆貼成 `w4:p1` 的答案。
+
+預期行為：每個 pane 只貼自己的回覆；對不上就退回畫面 parser。
+
+根因（由 ISSUE-088 的調查延伸）：codex 的 hook 由長駐 `codex app-server` daemon 執行，環境是 `HERDR_PANE_ID=w4:p1`，所以：（1）Herdr 把每個新 codex session 都記到 `w4:p1`，使該 pane 的 `agent_session` 變成「最後啟動的 codex」；（2）bridge 的 Stop hook 事件也都帶 `paneId = w4:p1`。`streamAgent` 與 `relayApprovalFollowup` 用 `stopSince(agent_session)` 或 `stopForPane(pane)` 取 hook 訊息，兩條路對 `w4:p1` 都可能取到別的 codex 的回覆。Team 任務的 `runTeamTurn` 不受影響（訊息必須含本回合 nonce 才算）。另一個副作用（**未處理**）：`w4:p1` 的 `agent_session` 隨別的 codex 啟動而變動，`streamAgent` 會以「session changed」停止擷取，屬 fail-safe。
+
+修正範圍（2026-11-05）：新增 `src/codex-session.ts`：`hookReplyTrusted(agent)`——非 codex 一律放行；codex 必須有 id 型 session，且該 session 的 rollout（`~/.codex/sessions/…/rollout-…-<id>.jsonl` 第一行 `session_meta`）的 `cwd` 等於 pane 的 `cwd` 或 `foreground_cwd`，否則視為不可信。`src/main.ts` 的 `streamAgent`（hook 最終訊息，含 `stopForPane`）與 `relayApprovalFollowup`（核准後補貼）在不可信時改走畫面 parser／不補貼。查不到 rollout 時一律不採用 hook（fail closed，結果是較慢、不是貼錯）。
+
+測試（2026-11-05，本機 macOS，非 CI）：新增 3 項——`test/codex-session.test.ts` 2 項（rollout cwd 對得上才信任；別人的 session、沒有 session、查不到 rollout、cwd 不同都不信任；claude／agy／pi 不受影響）；`test/hook-events.test.ts` 1 項（別的工作目錄的 codex 回覆不會貼到這個 pane；暫時讓檢查一律放行時該測試**失敗**，恢復後通過）。既有 4 個 codex hook 測試改用真正的 UUID session 與 rollout。`node --test --test-timeout=60000 dist/test/*.test.js` → 1139 tests、1138 pass、0 fail、1 skip（既有）；`npm run lint` ok。
+
+意外發現（記錄）：第一次修改後，既有的「Codex Stop hook also completes the stream」測試因假 session id 被判不可信而永遠等不到完成，`npm run check` 卡了約 19 分鐘；這是預期的行為變化（codex 的 hook 不再無條件信任），測試已更新。之後以 `--test-timeout` 跑，避免再卡住。
+
+未驗證：用真的 `w4:p1` 或其他 codex pane 經 Discord 發問，確認 hook 被正確採用或退回 parser；同一工作目錄開兩個 codex 時 cwd 仍無法區分（hook 訊息仍可能對錯 session，此時 `session` 本身通常也錯，風險較低但未量化）；legit codex 在 session 中途 `cd` 後 cwd 對不上會退回 parser（較慢但安全）。
+
+限制：這只是減輕風險；根本原因（daemon 環境）仍在 Herdr／Codex，見 ISSUE-088 的修法候選（3）。
+
+下一步：merge 後重啟 bridge，用 `w4:p1` 以外的 codex pane 與 Discord 發問驗證 hook 仍被採用；考慮回報 Herdr／Codex 的 daemon 環境問題。
+
