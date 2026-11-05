@@ -3397,6 +3397,8 @@ H2 自動撿卡 L2 進度（2026-11-05）：第一次嘗試停在 verify（ISSUE
 
 預期行為：reviewer 回覆後 loop 讀到它、寫入卡片、繼續（修正或 merge）。
 
+**事後補充（2026-11-05，同一個 task 後續的實際結果）：**loop 並不是永遠卡住——第 1 輪 review 從 09:19:49 拖到 09:31:12（約 11.4 分鐘）才逾時，被記成 `inconclusive`，之後 loop 自動開了第 2 輪，約 1 分鐘就 `pass`（`review-125-r2`）。所以上面「等不到回覆」的結果是「白等一個逾時」，不是永遠不會恢復；第 1 輪慢、第 2 輪快，與「第 1 輪 reviewer 開了子 agent 而 nonce 辨識不明」一致（第 2 輪沒有開子 agent）。我在上一則回覆曾說「不會自己恢復」，那一句不正確，這裡更正。第 2 輪 `pass` 之後 `card merge` 拒絕合併是另外的原因，見 ISSUE-100。
+
 已確認根因：reviewer 的 codex 在審的過程中自己開了兩個**子 agent**（rollout 的 `session_meta` 標 `thread_source: "subagent"`，`agent_path` 為 `/root/standards`、`/root/spec`，父 session 是 reviewer 自己）。子 agent 的 rollout 引用了父 agent 的 prompt，所以本回合的 nonce 同時出現在**三個** rollout（父 5 次、兩個子各 1 次）。ISSUE-088／089 的 `findCodexRolloutByNonce` 規則是「恰好一個符合才算，多個視為不明」，於是回傳不明；reviewer 的 pane 只有 6 列高，終端畫面讀不到完整回覆，bridge 只能等到逾時。實測驗證：同一個 nonce 在修正前會因多個符合而不明，修正後辨識為父 session `01a1ab01-e175-73e2-9d0b-709affe32534`。
 
 修正範圍（2026-11-05）：`src/response-stream.ts` 的 `findCodexRolloutByNonce` 先排除第一行 `session_meta` 標示為子 agent（`thread_source: "subagent"` 或 `source.subagent`）的檔案，剩下恰好一個才算；零個、多個真正的 session、或只有子 agent 符合，仍然是「不明」（fail closed）。第一行讀不到或不是 `session_meta` 時不當作子 agent（最壞結果是候選變多而回傳不明，不會認錯）。
