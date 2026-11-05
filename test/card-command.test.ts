@@ -1031,6 +1031,22 @@ test("card policy lists the loaded default and projects, and one project's effec
   await assert.rejects(run("policy", "local:Foo", "extra"), /usage/);
 });
 
+test("card policy shows which projects are opted in to auto-pick, with the repo, the Lead kind and the level", async () => {
+  const policy = {
+    default: "L0" as const,
+    projects: { "local:Foo": "L2" as const },
+    autopick: { "local:Foo": "/Users/jon/git_wk/Foo" },
+    autopickLead: "codex" as const,
+  };
+  const { run } = setup({ policy: () => loadedPolicy("loaded", policy) });
+  const text = await run("policy");
+  assert.match(text, /自動撿卡（Lead：codex；一次一張/);
+  assert.match(text, /- local:Foo → \/Users\/jon\/git_wk\/Foo（L2）/);
+
+  const plain = setup({ policy: () => loadedPolicy("loaded") });
+  assert.doesNotMatch(await plain.run("policy"), /自動撿卡/);
+});
+
 test("card policy reports an invalid or unsafe file and that the safe default is in use", async () => {
   for (const status of ["invalid", "unsafe"] as const) {
     const { run } = setup({

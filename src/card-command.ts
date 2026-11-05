@@ -976,6 +976,14 @@ function showPolicy(args: string[], deps: CardCommandDeps): string {
     for (const name of names)
       lines.push(`- ${name} → ${loaded.policy.projects[name]}`);
   }
+  const picks = Object.entries(loaded.policy.autopick ?? {});
+  if (picks.length) {
+    lines.push(
+      `自動撿卡（Lead：${loaded.policy.autopickLead ?? "claude"}；一次一張；做到哪一步由專案等級決定）：`,
+    );
+    for (const [name, repoPath] of picks)
+      lines.push(`- ${name} → ${repoPath}（${loaded.policy.projects[name]}）`);
+  }
   lines.push(
     "等級：L0 只在 worktree／分支工作、不 push；L1 push 分支並開 PR、由人 merge；L2 review、測試與 CI 都過後自動 merge。",
     "目前只有載入與查詢：尚未有任何動作依政策行為（還沒有 push／PR 功能）。政策檔只放在 plugin 設定目錄、由你手寫，bridge 不會寫它。",

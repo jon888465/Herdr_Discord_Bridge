@@ -3330,7 +3330,7 @@ H4 脈絡：這是自動串接最小的摩擦；若要做成單一觸發，（1�
 
 ## ISSUE-096：自動撿卡（H2）——政策選用的專案裡 `ready` 的卡片由 bridge 自己開始並依等級走到 merge
 
-更新日期：2026-11-05。狀態：修正中（第一部分已實作、待驗收：政策解析與執行器，**沒有任何呼叫端，所以目前不會自動發生任何事**；第二部分——接線、Lead 的開啟、實機驗收——尚未開始）。
+更新日期：2026-11-05。狀態：已修正、待驗收（第一部分＝政策解析與執行器 PR #120 已 merge；第二部分＝接線已實作；**尚未 merge、尚未重啟 bridge、尚未實機驗收**，不可把單元測試通過當成端到端通過）。
 
 這是新功能，不是缺陷。使用者 2026-11-05 的決定（AskUserQuestion）：（1）自動做到哪一步：**一路到 merge**，由專案等級決定實際停在哪（L0 commit、L1 PR、L2 merge）；（2）哪些卡：**政策檔選用＋`ready`**（Agent 不能改政策檔，也不改變 `ready` 目前的意思）；（3）誰當 Lead：**bridge 自己開**，專案底下設定 repo 路徑與 Lead 種類；（4）並行：**一次一張**。
 
@@ -3344,3 +3344,10 @@ H4 脈絡：這是自動串接最小的摩擦；若要做成單一觸發，（1�
 
 下一步：第二部分——接線與實機驗收；先在 L1 專案用無害卡驗證到 PR，再驗 L2。
 
+**第二部分（接線，2026-11-05）：**`src/autopick-wiring.ts` 的 `createAutopickSteps`：`startLead`（`workspace.create` 在 repo 路徑開 workspace、`agent.start` 啟動 Lead、狀態不是 idle／done 就失敗並關掉剛開的 workspace、再以 `wk use`／`agent use` 指定路由）、`waitTask`（輪詢 task；`blocked` 不等；預設 45 分鐘）、`waitCardDone`（預設 150 秒，ISSUE-095）、`loop`（以回覆是否為「loop 結束：…已 merge」判定）。`src/main.ts` 的 `startAutopick`：每分鐘 `tick`，以本機 console 使用者 id `autopick`（`createConsoleContext(print, userId)`）經 `handleCommand` 執行 `card …` 指令——守門全部沿用，且不動到使用者自己的 console 路由與 console Agent；停下或失敗時 console 輸出並在卡片寫一筆 `failed`（code `autopick_stopped`／`autopick_failed`）。`card policy` 列出自動撿卡設定。`allowedWorkspaceIds` 非空時不支援。
+
+測試（2026-11-05，本機 macOS，非 CI）：`test/autopick-wiring.test.ts` 新增 7 項（Lead 的 workspace／agent／路由；白名單與路徑不合法時不建立任何東西；Lead 沒就緒時不留下空 workspace；waitTask 的終止、blocked、逾時與找不到；waitCardDone 的輪詢與逾時；loop 只在回覆確認 merge 時才算）；`test/card-command.test.ts` 新增 1 項（`card policy` 的自動撿卡顯示）。`node --test --test-timeout=60000 dist/test/*.test.js` → 1185 tests、1184 pass、0 fail、1 skip（既有）；`npm run lint` ok。
+
+**實機驗收計畫：**使用者已把 `policy.yml` 設成 `Herdr_Discord_Bridge: L1` 並加 `autopick:`（bridge 解析器驗證為 loaded）。merge 並重啟 bridge 後，匯入一張宣告 `project: local:Herdr_Discord_Bridge` 的無害卡並設成 ready，**不下任何指令**，等待 bridge 自己撿卡、做到 PR 為止（L1）；驗證完成後由使用者決定是否升到 L2 再驗 merge。重啟前確認卡片目錄沒有其他 ready 的卡（2026-11-05 查過是空的）。
+
+**未驗證：**真的定期掃描與撿卡；Lead 開在新 workspace 的版面與 Claude 的信任提示（repo 在已信任的 `git_wk` 底下）；`autopick` 使用者 id 的路由與 console 路由確實互不影響；失敗時卡片 `failed` 事件的內容；長時間（45 分鐘）等待期間 bridge 重啟的處理（不接續）；Discord 通知（目前只有 console 輸出）。
