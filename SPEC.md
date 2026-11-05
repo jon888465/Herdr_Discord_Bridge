@@ -419,7 +419,7 @@ Discord 或非互動情境使用 `team select <profile> on|off`。`team add/remo
 Team profile 授權及 session identity 原子寫入 state directory 的 agent-pool.json；與 routing.json 的 live mapping 分開。
 
 Lead 仍由已選取的 live Agent 擔任。可不委派而直接完成工作；不固定 planner/coder/reviewer/tester 角色。
-規劃的 workerPaneId 相容既有 pane ID，亦接受 roster 中的 profile:<id>。只有選中的 profile 才 acquire。Profile 啟動後（ISSUE-091，2026-11-05，已修正、待實機驗收）bridge 會持續重讀該 pane，最多 30 秒，直到偵測到預期的 CLI 且狀態為 idle／done 才算就緒（Herdr 的 `agent.start` 約 1 秒就回傳，這時新 pane 還沒被偵測成該 CLI、狀態是 unknown，約 2 到 8 秒後才 idle）；偵測成別的 CLI 時立刻失敗，逾時則維持原本的「not ready」錯誤。
+規劃的 workerPaneId 相容既有 pane ID，亦接受 roster 中的 profile:<id>。只有選中的 profile 才 acquire。新 pane（profile Worker 與 reviewer／修正者）預設從 Lead／作者的 pane 分割；該 pane 被連續分割而太小（寬的往右至少 80 欄，否則往下至少 16 列）時，改從同一個版面裡面積最大且夠大的 pane 分割，都不夠大才拒絕（ISSUE-094，2026-11-05，已實作、待實機驗收）；新 pane 是獨立的 terminal，關閉時只關它自己，不受從哪個 pane 分割影響。Profile 啟動後（ISSUE-091，2026-11-05，已修正、待實機驗收）bridge 會持續重讀該 pane，最多 30 秒，直到偵測到預期的 CLI 且狀態為 idle／done 才算就緒（Herdr 的 `agent.start` 約 1 秒就回傳，這時新 pane 還沒被偵測成該 CLI、狀態是 unknown，約 2 到 8 秒後才 idle）；偵測成別的 CLI 時立刻失敗，逾時則維持原本的「not ready」錯誤。
 沒有綁定 session 時 split Lead pane（同 workspace/cwd、focus=false），使用官方 agent.start 啟動長駐 CLI。
 不以 one-shot exec 取代 session，不任意接管未綁定 pane。release 只釋放任務租用，不關閉 pane 或 CLI。
 連線失敗時 split/start 不重試；啟動前先記錄 uncertain，需人工檢查並 bind，避免重啟後重複建立。

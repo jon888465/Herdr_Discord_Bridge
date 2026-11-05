@@ -3288,3 +3288,23 @@ H4 端到端進度：第一次嘗試在此停住（`card commit` 與 `card pr` �
 
 下一步：merge 後重啟 bridge，用新卡重跑 H4：`card assign --worktree --coding` → `card commit` → `card pr` → `card loop --merge`。
 
+## ISSUE-094：Lead 的 pane 被 profile Worker 一路切小，之後 `card review`／`card loop` 開不出 reviewer 的 pane（H4 端到端的第三個斷點）
+
+更新日期：2026-11-05。狀態：已修正、待驗收（根因已確認；原始碼與自動化檢查完成；**尚未 merge、尚未重啟 bridge、尚未實機驗收**）。
+
+使用者可見症狀：H4 端到端案例的第二次嘗試 `REQ-20261105-h4b`：`card assign --worktree --coding` 成功（Lead 自動啟用 helper／reviewer／claude 三個 profile，約 2 分 25 秒到 `ready-to-integrate`）、`card commit` 成功（commit `c65cd47`，worktree 乾淨、沒有 push）、`card pr` 成功（PR #116）。接著 `card loop REQ-20261105-h4b --agent codex --merge`：「loop 停下來了…停在 review。原因：review 沒有進行：基底 pane 太小，無法分割出 reviewer 的 pane（too small to split）」。
+
+預期行為：reviewer 的新 pane 開得出來。
+
+已確認根因：profile Worker 與 reviewer 的新 pane 都是從「基底 pane」（Lead 或作者）分割（`Herdr.startProfile`、`openReviewerPane`）。coding 任務連續啟動三個 profile Worker，每個都從 Lead 的 pane 分割出去，Lead 的 pane 只剩 6 列高（同 workspace 四個 pane 的高度是 6、29、13、6）；`card review` 之後再從這個 pane 分割時，低於門檻（往下切至少 16 列）就被拒絕。同一個版面裡其實還有 29 列高的 pane 可用。
+
+修正範圍（2026-11-05）：新增 `src/pane-split.ts` 的 `chooseSplitTarget`：基底夠大照舊；太小就改選同一個版面裡面積最大且夠大的 pane 當分割對象；都不夠大才拒絕。`src/review-pane.ts` 的 `openReviewerPane` 與 `src/herdr.ts` 的 `startProfile` 都改用它。門檻（寬的往右至少 80 欄、否則往下至少 16 列）不變；新 pane 是獨立 terminal，關閉時只關它自己（既有安全規則不變）。
+
+測試（2026-11-05，本機 macOS，非 CI）：`test/pane-split.test.ts` 新增 6 項（門檻不變；基底夠大照舊；基底太小時選最大且夠大的 pane；都不夠大或基底不在版面時不選；`openReviewerPane` 在作者 pane 太小時改從另一個 pane 分割、`workspace_id` 不變；都不夠大時仍拒絕且不建立 pane）。暫時拿掉備援時兩項**失敗**（紅），恢復後通過。`node --test --test-timeout=60000 dist/test/*.test.js` → 1161 tests、1160 pass、0 fail、1 skip（既有）；`npm run lint` ok。
+
+未驗證：實機重跑 `card loop REQ-20261105-h4b --agent codex --merge`；分割對象不是 Lead／作者的 pane 時，Herdr 的版面是否合理（只是排版，不影響功能）；多次 review 後版面越來越擠（reviewer 用完會關閉，但 profile Worker 的 pane 仍保留以便重用 session）。
+
+H4 目前進度（2026-11-05）：`REQ-20261105-h4b` 已走完 `card assign`→`card commit`→`card pr`（PR #116 開著，head `c65cd47`，CI 由 bridge 每分鐘輪詢），停在 `card loop` 的 review。另外觀察到：task 完成（07:39:47）之後，卡片狀態從 `in_progress` 變成 `done` 有延遲，我下的第一次 `card pr` 被拒絕「只有 done 的卡片可以開 PR」，幾秒到一分鐘後重下就成功（同步稍後出現「Card sync updated」）；**未調查**，屬小問題，會讓自動串接需要等待或重試。
+
+下一步：merge 後重啟 bridge，重下 `card loop REQ-20261105-h4b --agent codex --merge`，走完 review → 等 CI → merge；merge 後另開 PR 刪除 `docs/h4-e2e-trace.md`，並清掉 H4 殘留（workspace `w2F`／`w2G`、worktree、卡片）。
+

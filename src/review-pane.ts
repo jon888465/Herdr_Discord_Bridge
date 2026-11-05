@@ -10,6 +10,7 @@
 
 import { HerdrError } from "./herdr.js";
 import type { AgentStartPort } from "./agent-start.js";
+import { chooseSplitTarget } from "./pane-split.js";
 
 /** 沒有指定種類時的偏好順序；預設選第一個「和作者不同」的。 */
 export const REVIEWER_KINDS: readonly string[] = ["claude", "codex", "agy"];
@@ -43,20 +44,6 @@ export function chooseReviewerKind(input: {
   return { ok: true, kind, sameKind: kind === input.authorKind };
 }
 
-/** 與 `Herdr.startProfile` 相同的門檻：太小就不分割。 */
-function splitDirection(rect: { width: number; height: number }): "right" | "down" {
-  const direction =
-    rect.width >= 120 && rect.width >= rect.height * 2 ? "right" : "down";
-  if (
-    (direction === "right" && rect.width < 80) ||
-    (direction === "down" && rect.height < 16)
-  )
-    throw new Error(
-      "基底 pane 太小，無法分割出 reviewer 的 pane（too small to split）",
-    );
-  return direction;
-}
-
 /** 從 `basePaneId`（作者的 pane）分割出一個新 pane，工作目錄設為 `cwd`，不搶焦點。 */
 export async function openReviewerPane(
   port: AgentStartPort,
@@ -72,16 +59,21 @@ export async function openReviewerPane(
       }>;
     };
   };
-  const rect = layout.layout?.panes?.find(
-    (pane) => pane.pane_id === input.basePaneId,
-  )?.rect;
-  if (!rect) throw new Error("基底 pane 的版面資訊不可用");
-  const direction = splitDirection(rect);
+  const panes = layout.layout?.panes ?? [];
+  if (!panes.some((pane) => pane.pane_id === input.basePaneId))
+    throw new Error("基底 pane 的版面資訊不可用");
+  // ISSUE-094：基底 pane 被 profile Worker 一路切小時，改從同一個版面裡夠大的 pane 分割。
+  const target = chooseSplitTarget(panes, input.basePaneId);
+  if (!target)
+    throw new Error(
+      "基底 pane 太小，無法分割出 reviewer 的 pane（too small to split）；同一個版面裡也沒有夠大的 pane",
+    );
+  const direction = target.direction;
 
   const result = (await port.request(
     "pane.split",
     {
-      target_pane_id: input.basePaneId,
+      target_pane_id: target.paneId,
       workspace_id: input.workspaceId,
       direction,
       cwd: input.cwd,
