@@ -3013,7 +3013,13 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 ## ISSUE-085：`card assign --coding` 在沒有 Worker 時 Lead 規劃出空計畫，task 失敗或卡在規劃
 
-更新日期：2026-11-04。狀態：已修正、待驗收（根因已確認；原始碼與自動化檢查完成；**尚未重啟 bridge、尚未實機驗收**，不可把單元測試通過當成端到端通過）。
+更新日期：2026-11-05。狀態：已修正、待驗收（根因已確認；原始碼與自動化檢查完成；PR #97 已 merge（`ad5d30c`），bridge 已於 2026-11-05 用 `./scripts/run.sh -r` 重啟並載入該版本（`dist` 內有 `assertCodingRoster`）；零 Worker 拒絕已於 2026-11-05 實機驗收通過（見下），**有 Worker 時 `--coding` 正常啟動尚未驗**，不可把單元測試通過當成端到端通過）。
+
+**2026-11-05 實機嘗試（未得到有效結果）：** 重啟後在 bridge console 於 workspace `w1` 執行 `team ask --coding …`，得到「Team Worker pane w1:p8 is stale or unavailable」——`w1` 的 Team 名單殘留一個失效的 Worker（`w1:p8`），根本沒走到零 Worker 的檢查，所以**不能算驗收**。須改在確實沒有 Worker 的 workspace（例如 `card assign --worktree` 新建的）重試。
+
+**2026-11-05 零 Worker 拒絕實機驗收通過（本機 macOS，政策 L1，bridge 載入 main `ad5d30c`，由 bridge console 操作）：** 匯入驗收卡 `REQ-20261105-roster-ok` 並設為 `ready`，執行 `card assign REQ-20261105-roster-ok --worktree --coding`。結果：worktree 已建立（workspace `w1W`），任務**沒有啟動**，回覆「--coding 任務需要至少一個 Worker…目前沒有任何 Worker。若只是要讓卡片的 Agent 自己做完，請不帶 --coding」，原因與出路都清楚；卡片 `status` 仍是 `ready`。收尾：`card cleanup` 移除 worktree、刪本機分支與驗收卡檔（分支未曾 push）；workspace `w1W` 已不存在。副作用：console 顯示「selected Agent exited」，需重新 `agent use`。**仍未驗：** 有 Worker（同 workspace 其他 Agent pane 或 `team select` 的 profile）時 `--coding` 能正常啟動。
+
+另發現：Team 名單裡的失效 Worker 會讓任務在啟動前就失敗，屬既有行為，未另開 issue。
 
 使用者可見症狀：`card assign <id> --coding --worktree` 之後，卡片 pane 裡的 claude 回覆「沒有列出任何 Worker target，不能自己動手實作」，回空計畫。第一次（`REQ-20261104-lm-ok`，task `task-e66b125d`）：Lead 回了合格的空計畫 → `plan_validated`、`coding_assessed` → 統整後 task 判 failed（「no passing review for the current version; no successful verification for the current version」），沒有任何 commit。第二次（`REQ-20261104-lm-red`，task `task-f35daaf8`）：Lead 回的是沒有傳輸標記的說明文字，turn 一直沒 settle，task 停在 `planning` 約 6 分鐘直到手動 `team cancel`；`card cleanup` 在那之前因「任務尚未結束」而拒絕（這個保護是對的）。
 
