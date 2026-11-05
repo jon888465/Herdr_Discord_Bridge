@@ -218,3 +218,95 @@ test("profile validation rejects ambiguous IDs and unsupported model flags", () 
   );
   assert.equal(validateProfiles([profile])[0].modelFlag, "-m");
 });
+
+// ISSUE-091：agent.start 回傳時 Agent 還沒被偵測到（沒有 agent 欄位、狀態 unknown），之後才變 idle。
+test("a profile Agent that is still being detected right after start is waited for", async () => {
+  const f = fixture();
+  try {
+    f.pool.select("w1", "helper", true);
+    const observed: string[] = [];
+    f.port.startProfile = async (_lead, _p, _name, onPane) => {
+      onPane("w1:p2");
+      const starting = {
+        pane_id: "w1:p2",
+        terminal_id: "worker-1",
+        workspace_id: "w1",
+        tab_id: "w1:t1",
+        agent_status: "unknown",
+      } as AgentRecord;
+      f.agents().push(starting);
+      // 約 0.6 秒後才被偵測成 codex，再過一下才 idle
+      setTimeout(() => {
+        Object.assign(starting, { agent: "codex", agent_status: "working" });
+        observed.push("working");
+      }, 600);
+      setTimeout(() => {
+        Object.assign(starting, { agent_status: "idle" });
+        observed.push("idle");
+      }, 1200);
+      return { ...starting };
+    };
+    const got = await f.pool.acquire("w1", "helper", lead, "a");
+    assert.equal(got.agent.agent, "codex");
+    assert.equal(got.agent.agent_status, "idle");
+    assert.deepEqual(observed, ["working", "idle"]);
+    assert.equal(got.continuity, "new-session");
+  } finally {
+    f.close();
+  }
+});
+
+test("a profile Agent that never becomes ready still fails with the original error", async () => {
+  const f = fixture();
+  const pool = new AgentPool(f.file, [profile], f.port, ["w1"], 700);
+  try {
+    pool.select("w1", "helper", true);
+    f.port.startProfile = async (_lead, _p, _name, onPane) => {
+      onPane("w1:p2");
+      const stuck = {
+        pane_id: "w1:p2",
+        terminal_id: "worker-1",
+        workspace_id: "w1",
+        tab_id: "w1:t1",
+        agent_status: "unknown",
+      } as AgentRecord;
+      f.agents().push(stuck);
+      return { ...stuck };
+    };
+    await assert.rejects(
+      pool.acquire("w1", "helper", lead, "a"),
+      /does not match requested profile\/workspace or is not ready/,
+    );
+  } finally {
+    f.close();
+  }
+});
+
+test("a profile started as a different CLI fails immediately instead of waiting", async () => {
+  const f = fixture();
+  const pool = new AgentPool(f.file, [profile], f.port, ["w1"], 20000);
+  try {
+    pool.select("w1", "helper", true);
+    f.port.startProfile = async (_lead, _p, _name, onPane) => {
+      onPane("w1:p2");
+      const other = {
+        pane_id: "w1:p2",
+        terminal_id: "worker-1",
+        workspace_id: "w1",
+        tab_id: "w1:t1",
+        agent: "claude",
+        agent_status: "idle",
+      } as AgentRecord;
+      f.agents().push(other);
+      return { ...other };
+    };
+    const startedAt = Date.now();
+    await assert.rejects(
+      pool.acquire("w1", "helper", lead, "a"),
+      /does not match requested profile/,
+    );
+    assert.ok(Date.now() - startedAt < 2000);
+  } finally {
+    f.close();
+  }
+});

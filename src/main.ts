@@ -45,7 +45,10 @@ import {
   pullRequestMergeState,
 } from "./github.js";
 import { waitForChecks } from "./card-ci-wait.js";
-import { assertCodingRoster } from "./coding-roster.js";
+import {
+  assertCodingRoster,
+  autoEnableCodingProfiles,
+} from "./coding-roster.js";
 import { mergeCardPullRequest, readCardChecks } from "./card-merge-wiring.js";
 import { sharedCardPullRequests } from "./card-prs.js";
 import { openCardPullRequest } from "./card-pr-flow.js";
@@ -1695,6 +1698,16 @@ async function startTeamTask(
       return agent;
     });
   workers.push(...(runtime.pool?.roster(workspaceId) || []));
+  // E14：--coding 沒有指定任何 Worker 時，自動啟用 claude／codex profile 當候選，誰寫誰審交給 Lead。
+  if (coding && workers.length === 0 && runtime.pool) {
+    const enabled = autoEnableCodingProfiles(workspaceId, runtime.pool);
+    if (enabled.length) {
+      console.log(
+        `--coding 沒有指定 Worker；workspace ${workspaceId} 自動啟用 profile：${enabled.join(", ")}`,
+      );
+      workers.push(...runtime.pool.roster(workspaceId));
+    }
+  }
   assertCodingRoster(coding, workers.length);
   assertAgentAvailable(lead, runtime);
 
