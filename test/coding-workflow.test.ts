@@ -24,6 +24,7 @@ import {
 } from "../src/team-orchestration.js";
 import {
   assertIndependentReview,
+  codingPlanningAddendum,
   parseCodingResult,
 } from "../src/coding-workflow.js";
 import {
@@ -948,10 +949,7 @@ test("artifact reads stay inside the task directory and reject escapes", () => {
     // 目標必須真實存在：/etc/hostname 在 macOS 不存在，會變成 ENOENT 而不是逃逸（ISSUE-035）。
     const outside = join(dir, "outside.json");
     writeFileSync(outside, "{}");
-    symlinkSync(
-      outside,
-      join(dir, "artifacts", "task-a", "a-link.json"),
-    );
+    symlinkSync(outside, join(dir, "artifacts", "task-a", "a-link.json"));
     assert.throws(
       () => readCodingArtifact(dir, "task-a", "a-link"),
       /escapes|read limit/,
@@ -1044,6 +1042,60 @@ test("team ask --coding is opt-in and does not reinterpret the original prompt",
     rmSync(dir, { recursive: true, force: true });
     rmSync(repo, { recursive: true, force: true });
   }
+});
+
+test("ISSUE-087: the planning prompt states that read-only assignments must list the writer directly, and the validator still enforces it", () => {
+  assert.match(
+    codingPlanningAddendum(),
+    /every other assignment in that round.*list the writer's assignment id directly.*through another assignment.*rejected/s,
+  );
+  const lead = agent("w1:p1", "lead", "/tmp");
+  const author = agent("w1:p2", "author", "/tmp");
+  const reviewer = agent("w1:p3", "reviewer", "/tmp");
+  const chain = (verifyDeps: string[]) =>
+    parseAssignmentPlan(
+      JSON.stringify({
+        assignments: [
+          {
+            id: "impl",
+            workerPaneId: author.pane_id,
+            instruction: "write",
+            role: "implement",
+            access: "write",
+            writeScope: ["a.txt"],
+          },
+          {
+            id: "review",
+            workerPaneId: reviewer.pane_id,
+            instruction: "review",
+            role: "review",
+            access: "read",
+            dependsOn: ["impl"],
+          },
+          {
+            id: "verify",
+            workerPaneId: reviewer.pane_id,
+            instruction: "verify",
+            role: "verify",
+            access: "read",
+            dependsOn: verifyDeps,
+          },
+        ],
+      }),
+      false,
+      true,
+    );
+  const validate = (plan: ReturnType<typeof chain>) =>
+    validateAssignmentPlan(plan, lead, [author, reviewer], {
+      prior: [],
+      findingIds: [],
+      artifactIds: [],
+    });
+  assert.throws(
+    () => validate(chain(["review"])),
+    /must depend on that writer/,
+  );
+  assert.doesNotThrow(() => validate(chain(["impl", "review"])));
 });
 
 test("coding plan validator rejects a second writer and an unknown finding reference", () => {

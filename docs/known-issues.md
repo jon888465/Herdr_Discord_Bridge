@@ -3021,6 +3021,8 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 **2026-11-05 有 Worker 時的啟動實機驗收（本機 macOS，政策 L1，bridge 載入 main `ad5d30c`）：** 手動建 worktree workspace `w1X`（claude 當 Lead、codex 當 Worker，`team add w1X:p2`），驗收卡 `REQ-20261105-roster-worker`（只要求新增一個暫存檔、不 commit／push），`card assign REQ-20261105-roster-worker --coding`。結果：回覆「Team Task accepted · Lead: claude · Workers: codex」，沒有被零 Worker 檢查擋下 → **有 Worker 時 `--coding` 可啟動，ISSUE-085 的修正沒有誤擋**。但 task 約 5 秒後失敗：「Lead did not return a JSON Assignment plan」，見 ISSUE-086。收尾：關 workspace `w1X`、移除手動 worktree、刪分支與驗收卡，路由切回 `w1`/`w1:p1`。
 
+**2026-11-05 `--coding` 完整跑完的驗收嘗試（未完成，見 ISSUE-087）：** 建 workspace `w1Z`（claude Lead `w1Z:p1`、codex `w1Z:p2`／`w1Z:p3` 兩個 Worker，`team add` 兩個），驗收卡 `REQ-20261105-full`（新增 `tmp-full-ok.txt`、驗證用 `test -f … && grep -qx ok …`），`card assign REQ-20261105-full --coding`。Lead 在 5 秒內回了合格的三步計畫（`impl-1` 寫入 → `review-1` 依賴 `impl-1` → `verify-1` 依賴 `review-1`），bridge 驗證後判失敗：「read-only coding assignments in a writer round must depend on that writer」，task 在派工前結束，沒有任何 Worker 動作。收尾：關 workspace、移除 worktree、刪分支與驗收卡、路由切回 `w1:p1`。**`--coding` 完整流程（實作 → 獨立 review → 驗證 → 統整）仍未驗到。**
+
 另發現：Team 名單裡的失效 Worker 會讓任務在啟動前就失敗，屬既有行為，未另開 issue。
 
 使用者可見症狀：`card assign <id> --coding --worktree` 之後，卡片 pane 裡的 claude 回覆「沒有列出任何 Worker target，不能自己動手實作」，回空計畫。第一次（`REQ-20261104-lm-ok`，task `task-e66b125d`）：Lead 回了合格的空計畫 → `plan_validated`、`coding_assessed` → 統整後 task 判 failed（「no passing review for the current version; no successful verification for the current version」），沒有任何 commit。第二次（`REQ-20261104-lm-red`，task `task-f35daaf8`）：Lead 回的是沒有傳輸標記的說明文字，turn 一直沒 settle，task 停在 `planning` 約 6 分鐘直到手動 `team cancel`；`card cleanup` 在那之前因「任務尚未結束」而拒絕（這個保護是對的）。
@@ -3074,3 +3076,25 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 未驗證：是否與 `hookTransport` 為 `auto` 時 hook 回覆與標記截取有關；用 `hookTransport: parser` 是否可避免；非 `--coding` 的規劃是否也會發生；沒有 `--worktree`、沒有 `team add` 的情境。
 
 下一步：重現並取得 bridge 實際收到的 Lead 回覆文字（capture diagnostics 或加診斷紀錄），再判斷根因；與 ISSUE-085 分開處理，ISSUE-085 的零 Worker 檢查不受影響。
+
+## ISSUE-087：`--coding` 規劃驗證要求每個唯讀指派「直接」依賴 writer，Lead 的合理鏈狀計畫被判失敗，且提示沒說明這條規則
+
+更新日期：2026-11-05。狀態：已修正、待驗收（直接原因已確認；採用候選 (1)；原始碼與自動化檢查完成；**尚未重啟 bridge、尚未實機驗收**，也還沒驗到 `--coding` 完整跑完）。
+
+使用者可見症狀：`card assign <id> --coding`，有 Lead 與兩個 Worker 時，約 5 秒後「Team Task failed：read-only coding assignments in a writer round must depend on that writer」，task 在派工前結束，Worker 完全沒動。
+
+預期行為：Lead 依序規劃「實作 → review → 驗證」且後者依賴前者時，計畫應被接受並執行；或在提示中清楚告知必須怎麼寫，失敗時給 Lead 一次修正機會，而不是整個 task 失敗。
+
+重現方式／環境：2026-11-05 本機 macOS，政策 L1，bridge 載入 main `e0ffc57` 之後（含 ISSUE-085／086 修正），task `task-88b36ba2-0380-423f-9f90-695e1a8b72ed`。Lead 的計畫：`impl-1`（write，Worker `w1Z:p2`，`dependsOn: []`）、`review-1`（read，`w1Z:p3`，`dependsOn: ["impl-1"]`）、`verify-1`（read，`w1Z:p3`，`dependsOn: ["review-1"]`）。只重現一次，**未確認 Lead 每次都會這樣排**（但鏈狀依賴是自然的寫法）。
+
+已確認根因（程式閱讀，2026-11-05）：`src/coding-workflow.ts` 的 `validateCodingRound`（約 260 行）要求同一輪內「每個非 writer 的指派」的 `dependsOn` **直接**包含 writer 的 id，不接受經由 review 的傳遞依賴。`codingPlanningAddendum()` 只說「Dependencies still refer only to this round」，**沒有說明必須直接列出 writer**。所以 `verify-1` 只依賴 `review-1` 就違規。這條規則的目的（唯讀指派要等 writer 完成）傳遞依賴同樣滿足，因此是提示與驗證不一致，不是 Lead 亂排。另外驗證失敗直接讓 task 失敗，沒有讓 Lead 重新規劃一次的機會（既有行為）。
+
+修正範圍（2026-11-05，使用者選定候選 (1)）：`src/coding-workflow.ts` 的 `codingPlanningAddendum()` 新增一句，明說「同一輪有 writer 時，其他每個指派（diagnose、review、verify）都必須在自己的 dependsOn 直接列出 writer 的 id；只經由另一個指派間接依賴會被拒絕；可以再加其他依賴，例如 verify 同時依賴 review」。**驗證邏輯沒有放寬。**
+
+測試（2026-11-05，本機 macOS，非 CI）：`test/coding-workflow.test.ts` 新增 1 項（提示文字含該規則；鏈狀計畫 `verify` 只依賴 `review` 仍被拒絕、`verify` 依賴 `["impl","review"]` 被接受）。`npm run check` → 1130 tests、1129 pass、0 fail、1 skip（既有）；`npm run lint` ok。
+
+候選修法（使用者選了 (1)，其餘未採用）：(1) 在 `codingPlanningAddendum` 明說「每個 review／verify／diagnose 指派都必須把 writer 的 id 直接放進 dependsOn（可再加其他依賴）」——不放寬檢查，改動最小；(2) 把檢查改成接受傳遞依賴（放寬驗證，需確認不影響排程順序的保證）；(3) 驗證失敗時把錯誤回給 Lead 重排一次。
+
+未驗證：Lead 是否會照新提示列出 writer（模型行為，只有實機能驗）；Lead 換成其他 Agent 時是否也會這樣排；修正後 `--coding` 能否真的跑完 review／verify／統整（這部分連 ISSUE-085 的「完整跑完」都還沒驗到）。
+
+下一步：merge 後重啟 bridge；重做 `REQ-20261105-full` 型驗收（claude Lead + 兩個 codex Worker），確認 task 走到 `ready-to-integrate` 與最終統整。
