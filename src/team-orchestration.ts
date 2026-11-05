@@ -42,6 +42,8 @@ export interface CodingHooks {
     assignment: AssignmentPlan["assignments"][number],
     worker: AgentRecord,
     report: string,
+    /** ISSUE-088：codex 由 rollout 觀察到的實際 session。 */
+    observedSession?: { kind: string; value: string },
   ): void;
   assess(): { reasons: string[]; fingerprint: string };
 }
@@ -474,6 +476,7 @@ async function runAssignment(
         signal: input.signal,
         beforeComplete: input.beforeTurnComplete,
         hookFinal: input.hookFinal,
+        observeSession: input.coding === true,
         beforeDispatch: () =>
           emit({
             type: "turn_dispatched",
@@ -498,7 +501,12 @@ async function runAssignment(
     });
     const observed = bounded(settled.text, reportMaxChars);
     if (settled.state !== "blocked")
-      input.codingHooks?.onAssignmentDone(assignment, worker, observed);
+      input.codingHooks?.onAssignmentDone(
+        assignment,
+        worker,
+        observed,
+        settled.session,
+      );
     if (settled.state === "blocked") {
       emit({
         type: "assignment_blocked",

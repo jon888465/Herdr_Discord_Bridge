@@ -1,11 +1,103 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
   CodexTurn,
   Settlement,
+  findCodexSessionByNonce,
   rollingPreview,
   sessionCreatedSince,
 } from "../src/response-stream.js";
+
+/** ISSUE-088：建一個假的 CODEX_HOME，rollout 檔名帶 session id，內容是 prompt。 */
+function codexHomeWith(
+  files: Array<{ id: string; body: string; ageMs?: number }>,
+) {
+  const home = mkdtempSync(join(tmpdir(), "codex-home-"));
+  const day = join(home, "sessions", "2026", "11", "05");
+  mkdirSync(day, { recursive: true });
+  files.forEach((file, index) => {
+    const path = join(
+      day,
+      `rollout-2026-11-05T10-0${index}-00-${file.id}.jsonl`,
+    );
+    writeFileSync(path, file.body);
+    if (file.ageMs) {
+      const when = new Date(Date.now() - file.ageMs);
+      utimesSync(path, when, when);
+    }
+  });
+  return home;
+}
+const ID_A = "01a1a997-c717-7360-b65f-973392b0e228";
+const ID_B = "01a1a998-0000-7000-8000-000000000001";
+const NONCE = "0123456789abcdef0123456789abcdef";
+
+test("ISSUE-088: the rollout that contains this turn's nonce identifies the session", async () => {
+  const home = codexHomeWith([
+    { id: ID_A, body: `prompt BRIDGE_BEGIN_${NONCE}\n` },
+    { id: ID_B, body: "another conversation\n" },
+  ]);
+  try {
+    assert.deepEqual(
+      await findCodexSessionByNonce(NONCE, Date.now() - 1000, home),
+      {
+        kind: "id",
+        value: ID_A,
+      },
+    );
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("ISSUE-088: no match, several matches, a stale file or a bad nonce all mean unknown", async () => {
+  const none = codexHomeWith([{ id: ID_A, body: "nothing here\n" }]);
+  const both = codexHomeWith([
+    { id: ID_A, body: `x ${NONCE}\n` },
+    { id: ID_B, body: `y ${NONCE}\n` },
+  ]);
+  const stale = codexHomeWith([
+    { id: ID_A, body: `x ${NONCE}\n`, ageMs: 60 * 60 * 1000 },
+  ]);
+  try {
+    assert.equal(
+      await findCodexSessionByNonce(NONCE, Date.now() - 1000, none),
+      undefined,
+    );
+    assert.equal(
+      await findCodexSessionByNonce(NONCE, Date.now() - 1000, both),
+      undefined,
+    );
+    assert.equal(
+      await findCodexSessionByNonce(NONCE, Date.now() - 1000, stale),
+      undefined,
+    );
+    assert.equal(
+      await findCodexSessionByNonce("short", Date.now() - 1000, none),
+      undefined,
+    );
+    assert.equal(
+      await findCodexSessionByNonce(
+        NONCE,
+        Date.now(),
+        join(tmpdir(), "no-such-codex-home"),
+      ),
+      undefined,
+    );
+  } finally {
+    for (const home of [none, both, stale])
+      rmSync(home, { recursive: true, force: true });
+  }
+});
 
 const event = (payload: object) =>
   JSON.stringify({ type: "event_msg", payload });

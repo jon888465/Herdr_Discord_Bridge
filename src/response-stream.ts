@@ -229,3 +229,59 @@ export function sessionCreatedSince(
     : createdAt?.(s.value);
   return typeof ms === "number" && Number.isFinite(ms) && ms >= since - 5000;
 }
+
+/**
+ * ISSUE-088：codex 的 hook 由長駐 app-server daemon 執行，`HERDR_PANE_ID` 是 daemon 啟動時
+ * 的值，所以 Herdr 的 `agent_session` 對 codex 不可信。本回合 prompt 帶有唯一 nonce，
+ * 含該 nonce 的 rollout 檔就是這個 pane 此刻使用的 session。恰好一個檔案符合才回傳，
+ * 零個或多個都視為不明（呼叫端必須 fail closed）。
+ */
+const ROLLOUT_NAME =
+  /-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
+const MAX_ROLLOUT_BYTES = 64 * 1024 * 1024;
+
+export async function findCodexSessionByNonce(
+  nonce: string,
+  sinceMs: number,
+  codexHome = process.env.CODEX_HOME || join(homedir(), ".codex"),
+): Promise<{ kind: "id"; value: string } | undefined> {
+  if (!/^[a-f0-9]{16,}$/i.test(nonce)) return undefined;
+  const root = join(codexHome, "sessions");
+  const found = new Set<string>();
+  async function scan(dir: string, depth: number): Promise<void> {
+    let items;
+    try {
+      items = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const item of items) {
+      const path = join(dir, item.name);
+      if (item.isDirectory() && depth < 3) {
+        await scan(path, depth + 1);
+        continue;
+      }
+      if (!item.isFile()) continue;
+      const name = ROLLOUT_NAME.exec(item.name);
+      if (!name) continue;
+      try {
+        const info = await stat(path);
+        // 本回合開始之後有寫入、大小在上限內的檔案才可能含 nonce。
+        if (info.mtimeMs < sinceMs - 5000 || info.size > MAX_ROLLOUT_BYTES)
+          continue;
+        const file = await open(path, "r");
+        try {
+          const buffer = Buffer.alloc(info.size);
+          await file.read(buffer, 0, info.size, 0);
+          if (buffer.includes(nonce)) found.add(name[1]!.toLowerCase());
+        } finally {
+          await file.close();
+        }
+      } catch {
+        /* 讀不到就當作不符合 */
+      }
+    }
+  }
+  await scan(root, 0);
+  return found.size === 1 ? { kind: "id", value: [...found][0]! } : undefined;
+}

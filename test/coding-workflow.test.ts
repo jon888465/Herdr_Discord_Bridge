@@ -217,10 +217,18 @@ test("version fingerprint covers untracked bytes, ignores ignored files, and kee
   }
 });
 
+/** ISSUE-088：測試用的 session 標籤 → 固定的 UUID（rollout 檔名帶的 id）。 */
+function uuidFor(label: string): string {
+  const h = sha(label);
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+}
+
 function harness(options: {
   repo: string;
   reviewerSession?: string;
   omitReviewerSession?: boolean;
+  /** ISSUE-088：Herdr 對 codex pane 不提供 agent_session，身分只能從 rollout 得知。 */
+  hidePaneSessions?: boolean;
   script:
     | "happy"
     | "stale"
@@ -238,6 +246,11 @@ function harness(options: {
   hangWorker?: boolean;
 }) {
   const dir = mkdtempSync(join(tmpdir(), "coding-task-"));
+  // codex 的身分改由 rollout 觀察：每個有 session 的假 Agent 收到 prompt 時寫出對應 rollout。
+  const codexHome = join(dir, "codex-home");
+  const previousCodexHome = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = codexHome;
+  let rollouts = 0;
   const store = new TeamTaskStore(join(dir, "tasks"));
   const lead = agent("w1:p1", "lead-session", options.repo);
   const author = agent("w1:p2", "author-session", options.repo);
@@ -248,7 +261,18 @@ function harness(options: {
       : (options.reviewerSession ?? "review-session"),
     options.repo,
   );
-  let live = [lead, author, reviewer];
+  const labels = new Map(
+    [lead, author, reviewer].map((item) => [
+      item.pane_id,
+      (item.agent_session as { value?: string } | undefined)?.value,
+    ]),
+  );
+  const strip = (item: AgentRecord): AgentRecord => {
+    if (!options.hidePaneSessions) return item;
+    const { agent_session: _hidden, ...rest } = item;
+    return rest;
+  };
+  let live = [lead, author, reviewer].map(strip);
   const prompts: Array<{ target: string; text: string }> = [];
   const cancels: string[] = [];
   let plans = 0;
@@ -261,6 +285,15 @@ function harness(options: {
     listAgentsWithWorkspaceNames: async () => live,
     promptAgent: async (target: string, text: string) => {
       prompts.push({ target, text });
+      const label = labels.get(target);
+      if (label) {
+        const day = join(codexHome, "sessions", "2026", "11", "05");
+        mkdirSync(day, { recursive: true });
+        writeFileSync(
+          join(day, `rollout-${rollouts++}-${uuidFor(label)}.jsonl`),
+          text,
+        );
+      }
       if (text.includes("Do not modify files while planning")) plans += 1;
       if (text.includes("Coding role: review")) reviews += 1;
       if (
@@ -398,11 +431,15 @@ function harness(options: {
     port,
     prompts,
     cancels,
-    lead,
-    author,
-    reviewer,
+    lead: strip(lead),
+    author: strip(author),
+    reviewer: strip(reviewer),
     entered: enteredPromise,
-    close: () => rmSync(dir, { recursive: true, force: true }),
+    close: () => {
+      if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = previousCodexHome;
+      rmSync(dir, { recursive: true, force: true });
+    },
   };
 }
 
@@ -797,26 +834,93 @@ test("same-session and unknown reviewers do not pass the coding gate", async () 
         coding: true,
         timeoutMs: 500,
       });
+      // ISSUE-088：codex 的身分要等回合結束才由 rollout 確認，所以 review 會跑完，
+      // 但入帳時判定不獨立，不能算通過的 review。
       assert.equal(task.state, "failed");
+      const reviews = (task.coding?.artifacts ?? []).filter(
+        (item) => item.role === "review",
+      );
+      assert.ok(reviews.length > 0);
       assert.equal(
-        task.assignments.some(
-          (item) =>
-            item.plan.coding?.role === "review" && item.state === "done",
-        ),
+        reviews.some((item) => item.independentReview),
+        false,
+      );
+      assert.equal(
+        reviews.some((item) => item.verdict === "pass"),
         false,
       );
       assert.match(
-        task.assignments.map((item) => item.blocker ?? "").join("\n"),
+        reviews.map((item) => item.independenceFailure ?? "").join("\n"),
         mode === "same" ? /same-session/ : /unknown reviewer/,
-      );
-      assert.equal(
-        task.coding?.artifacts.some((item) => item.independentReview),
-        false,
       );
     } finally {
       h.close();
       rmSync(repo, { recursive: true, force: true });
     }
+  }
+});
+
+test("ISSUE-088: codex panes without a Herdr agent_session still get an independent review from the rollout identity", async () => {
+  const { repo } = repoWithBaseline();
+  const h = harness({ repo, script: "happy", hidePaneSessions: true });
+  try {
+    const task = await h.engine.run({
+      taskId: "task-rollout-identity",
+      prompt: "ship the local change",
+      lead: h.lead,
+      workers: [h.author, h.reviewer],
+      replan: true,
+      coding: true,
+      timeoutMs: 500,
+    });
+    const reviews = (task.coding?.artifacts ?? []).filter(
+      (item) => item.role === "review",
+    );
+    assert.ok(reviews.length > 0);
+    assert.ok(reviews.every((item) => item.independentReview === true));
+    assert.equal(
+      reviews.at(-1)?.reviewerSession?.value,
+      uuidFor("review-session"),
+    );
+    const implement = task.coding?.artifacts.find(
+      (item) => item.role === "implement",
+    );
+    assert.equal(implement?.authorSession?.value, uuidFor("author-session"));
+    assert.equal(task.state, "completed");
+  } finally {
+    h.close();
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("ISSUE-088: a reviewer that shares the author's rollout session is not independent even without a Herdr agent_session", async () => {
+  const { repo } = repoWithBaseline();
+  const h = harness({
+    repo,
+    script: "same",
+    reviewerSession: "author-session",
+    hidePaneSessions: true,
+  });
+  try {
+    const task = await h.engine.run({
+      taskId: "task-rollout-same",
+      prompt: "ship the local change",
+      lead: h.lead,
+      workers: [h.author, h.reviewer],
+      replan: true,
+      coding: true,
+      timeoutMs: 500,
+    });
+    assert.equal(task.state, "failed");
+    const reviews = (task.coding?.artifacts ?? []).filter(
+      (item) => item.role === "review",
+    );
+    assert.ok(reviews.length > 0);
+    assert.ok(reviews.every((item) => item.independentReview === false));
+    assert.match(reviews[0]!.independenceFailure ?? "", /same-session/);
+  } finally {
+    h.close();
+    rmSync(repo, { recursive: true, force: true });
   }
 });
 

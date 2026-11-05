@@ -53,6 +53,8 @@ export interface CodingArtifactRecord {
   reviewerPaneId?: string;
   reviewerSession?: { kind: string; value: string };
   independentReview?: boolean;
+  /** 不獨立時的原因（ISSUE-088：codex 的身分在 review 完成後才由 rollout 確認）。 */
+  independenceFailure?: string;
   verdict?: ReviewVerdict;
   reportedVerdict?: ReviewVerdict;
   findingIds: string[];
