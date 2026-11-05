@@ -3105,7 +3105,7 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 ## ISSUE-088：新開的 codex pane 沒有 `agent_session`，`--coding` 的獨立 review 被擋（unknown reviewer identity）
 
-更新日期：2026-11-05。狀態：待調查（現象已重現；根因已確認（見下），尚未修正；修法未選定）。
+更新日期：2026-11-05。狀態：已修正、待驗收（根因已確認；使用者選定「改 bridge 用 rollout 辨識 session」；原始碼與自動化檢查完成；**尚未 merge、尚未重啟 bridge、尚未用 codex Worker 實機驗收**）。
 
 使用者可見症狀：`card assign <id> --coding`，Worker 是新開的 codex pane 時，實作完成後 `review` 失敗：「unknown reviewer identity is not an independent review」，`verify` 因依賴 review 沒有執行，task 失敗（`task-2e9a15a0-73ff-4e14-8fcd-dbf8f31069d9`）。
 
@@ -3120,7 +3120,17 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 - `/hooks` 顯示 SessionStart 已安裝且 active（1/1），排除「hook 沒啟用／沒被信任」。
 - 連帶影響（**未實測**）：bridge 自己的 `herdr-discord-hook`（Stop）也靠 `HERDR_PANE_ID`，所以 codex 的 Stop 事件都記在 `w4:p1`；以 pane 比對的路徑不會對到其他 pane，但 `w4:p1` 的 session 是「最後啟動的 codex」，使用者在 `w4:p1` 的 codex 若走 hook 路徑，可能拿到別的 codex session 的回覆——尚未重現。
 
-**修法候選（尚未選定）：**（1）環境：停掉這兩個 daemon，讓它們不是從 Herdr pane 啟動——但沒有 `HERDR_*` 時 hook 腳本直接結束，仍然沒有 session，所以不是完整解法；（2）bridge：不依賴 hook 的 pane 對應，改由 codex 的 rollout（`~/.codex/sessions`，用 cwd＋時間或 prompt 內容）辨識 session——`CodexTranscript` 已在讀 rollout，可能可重用；（3）向 Herdr／Codex 回報：daemon 應該用每個 session 的環境執行 hook；（4）暫行：`--coding` 的 Worker 用 claude。
+**修法候選（使用者選定 (2)）：**（1）環境：停掉這兩個 daemon，讓它們不是從 Herdr pane 啟動——但沒有 `HERDR_*` 時 hook 腳本直接結束，仍然沒有 session，所以不是完整解法；（2）bridge：不依賴 hook 的 pane 對應，改由 codex 的 rollout（`~/.codex/sessions`，用 cwd＋時間或 prompt 內容）辨識 session——`CodexTranscript` 已在讀 rollout，可能可重用；（3）向 Herdr／Codex 回報：daemon 應該用每個 session 的環境執行 hook；（4）暫行：`--coding` 的 Worker 用 claude。
+
+**修正範圍（2026-11-05，採 (2)）：**
+- `src/response-stream.ts` 新增 `findCodexSessionByNonce(nonce, sinceMs)`：掃 `~/.codex/sessions`，只看本回合開始後有寫入的 rollout，檔案內容含本回合 nonce 者的檔名 UUID 即 session；恰好一個才回傳，否則 undefined。
+- `src/team-turn.ts`：`TeamTurnContext.observeSession` 為真且 Agent 是 codex 時，回合結果多帶 `session`。`src/team-orchestration.ts`：coding 任務的 Worker 回合開啟它，並把結果傳給 `onAssignmentDone`。
+- `src/team-task-engine.ts`：codex 的 author／reviewer 身分只認 rollout 觀察值（不採 Herdr 的 `agent_session`）；codex reviewer 派工前只擋同一個 pane，完整的獨立性檢查移到 review 入帳時（`assertIndependentReview`），不獨立就記 `independentReview: false`＋`independenceFailure`、verdict 改 inconclusive。其他 Agent 維持派工前檢查。`src/coding-workflow.ts` 新增 `independenceFailure` 欄位。
+- **刻意的行為變化：** codex reviewer 身分不明時，review 會先跑完才被判不獨立（原本在派工前就拒絕），多花一次 codex 額度；結果仍是 fail closed——沒有通過的 review，task 不能完成。
+
+測試（2026-11-05，本機 macOS，非 CI）：新增 4 項——`test/response-stream.test.ts` 2 項（nonce 對到唯一 rollout 回傳 session；無符合、多個符合、過舊檔案、不合格 nonce、不存在的目錄都回 undefined）；`test/coding-workflow.test.ts` 2 項（codex pane 沒有 agent_session 時仍由 rollout 得到獨立 review 並完成；reviewer 與 author 共用 rollout session 時不獨立、task 失敗）。既有「same-session／unknown reviewers」測試改成新語意（review 會跑完但不算通過）；測試 harness 讓假 codex 寫出 rollout。`npm run check` → 1134 tests、1133 pass、0 fail、1 skip（既有）；`npm run lint` ok。
+
+未驗證：用真的 codex Worker（兩個新開的 codex pane）跑 `--coding` 完整流程；codex 的 rollout 內容是否一定含完整 prompt（nonce）——目前依 rollout 記錄使用者輸入的行為；掃描大量或很大的 rollout 的耗時（單檔上限 64 MiB）；hook 路徑對 `w4:p1` 的連帶影響（未實測，未處理）。
 
 已確認：bridge 的 `assertIndependentReview`（`src/coding-workflow.ts`）要求 reviewer 與 author 都有可辨識的 session，缺任何一個就拒絕——這是設計（不能只靠不同 pane 當作獨立）。`~/.codex/hooks.json` 有 `herdr-agent-state.sh session` 與 `herdr-discord-hook`。（先前猜測的「新工作目錄的 hook 需要信任」已被排除，真正原因見下。）
 
@@ -3130,4 +3140,4 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 暫行做法：驗收 `--coding` 時 Worker 用 claude（有 session）。
 
-下一步：選定修法（建議評估 (2)：重用 `CodexTranscript` 讀 rollout 取得 session）；另可回報 Herdr 的 codex 整合。
+下一步：merge 後重啟 bridge；用兩個新開的 codex Worker（claude 或 codex 當 Lead）重做 `--coding` 完整驗收；另可回報 Herdr／Codex 的 daemon 環境問題。

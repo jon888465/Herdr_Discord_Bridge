@@ -42,6 +42,11 @@ type Port = OrchestrationPort & {
     options: { retries: number },
   ): Promise<void>;
 };
+/** ISSUE-088：codex 的 Herdr agent_session 不可信，身分改由 rollout 觀察。 */
+function isCodex(agent: AgentRecord): boolean {
+  return Boolean(agent.agent?.toLowerCase().includes("codex"));
+}
+
 function knownSession(a: AgentRecord): boolean {
   const s = a.agent_session as { kind?: unknown; value?: unknown } | undefined;
   return (
@@ -370,6 +375,15 @@ export class TeamTaskEngine {
             paneId: artifact.authorPaneId,
             session: artifact.authorSession,
           }));
+        if (isCodex(worker)) {
+          // ISSUE-088：codex 的 session 要等回合結束才能由 rollout 確認（見 onAssignmentDone），
+          // 這裡只先擋明確的同 pane；其餘一律在入帳時 fail closed。
+          if (!authors.length)
+            throw new Error("coding review has no implementation artifact");
+          if (authors.some((author) => author.paneId === worker.pane_id))
+            throw new Error("same-session review is not an independent review");
+          return;
+        }
         assertIndependentReview(authors, worker);
       },
       onAssignmentDone: (
@@ -379,8 +393,34 @@ export class TeamTaskEngine {
         },
         worker: Parameters<typeof sessionIdentity>[0],
         report: string,
+        observedSession?: { kind: string; value: string },
       ) => {
         if (!assignment.coding) return;
+        // ISSUE-088：codex 不採用 Herdr 的 agent_session（hook 的 pane 對應不可信），只認 rollout 觀察值。
+        const identity = isCodex(worker)
+          ? observedSession
+          : sessionIdentity(worker);
+        let independence: { independent: boolean; failure?: string } = {
+          independent: true,
+        };
+        if (assignment.coding.role === "review") {
+          try {
+            assertIndependentReview(
+              (this.store.get(taskId).coding?.artifacts ?? [])
+                .filter((artifact) => artifact.role === "implement")
+                .map((artifact) => ({
+                  paneId: artifact.authorPaneId,
+                  session: artifact.authorSession,
+                })),
+              { ...worker, agent_session: identity },
+            );
+          } catch (error) {
+            independence = {
+              independent: false,
+              failure: error instanceof Error ? error.message : String(error),
+            };
+          }
+        }
         const version = current();
         const parsed = parseCodingResult(report);
         const result =
@@ -413,7 +453,7 @@ export class TeamTaskEngine {
           ...(assignment.coding.role === "implement"
             ? {
                 authorPaneId: worker.pane_id,
-                authorSession: sessionIdentity(worker),
+                authorSession: identity,
               }
             : {
                 startVersionFingerprint: readonlyStarts.get(assignment.id),
@@ -425,10 +465,16 @@ export class TeamTaskEngine {
           ...(assignment.coding.role === "review"
             ? {
                 reviewerPaneId: worker.pane_id,
-                reviewerSession: sessionIdentity(worker),
-                independentReview: true,
+                reviewerSession: identity,
+                independentReview: independence.independent,
+                ...(independence.failure
+                  ? { independenceFailure: independence.failure }
+                  : {}),
                 reportedVerdict: result?.verdict,
-                verdict: drifted ? "inconclusive" : result?.verdict,
+                verdict:
+                  drifted || !independence.independent
+                    ? "inconclusive"
+                    : result?.verdict,
               }
             : {}),
           ...(assignment.coding.role === "verify"

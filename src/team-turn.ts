@@ -4,6 +4,7 @@ import { normalizeTerminalResponse } from "./cli-adapter.js";
 import { stripAnsi } from "./format.js";
 import {
   CodexTranscript,
+  findCodexSessionByNonce,
   hasAgentSession,
   sameAgentSession,
 } from "./response-stream.js";
@@ -22,6 +23,11 @@ export interface TeamTurnContext {
    * 回 undefined。hook 訊息不受 pane 寬度影響（ISSUE-086：Claude Code 依寬度硬換行會切斷 JSON）。
    */
   hookFinal?: (agent: AgentRecord, since: number) => string | undefined;
+  /**
+   * ISSUE-088：codex 的 `agent_session` 不可信，要求回合結束時用本回合 nonce 從 rollout 找出
+   * 實際 session（只有 coding 的獨立 review 需要）。
+   */
+  observeSession?: boolean;
 }
 
 /** 終端畫面已看到框、但 hook 事件可能還在路上時，最多再等多久。 */
@@ -43,7 +49,13 @@ export async function runTeamTurn(
   lines: number,
   context?: TeamTurnContext,
   onBlocked?: (agent: AgentRecord) => void | Promise<void>,
-): Promise<{ state: "done" | "blocked"; text: string; terminal: boolean }> {
+): Promise<{
+  state: "done" | "blocked";
+  text: string;
+  terminal: boolean;
+  /** 只在 `context.observeSession` 且 Agent 是 codex 時填入；找不到或不唯一則 undefined。 */
+  session?: { kind: "id"; value: string };
+}> {
   const signal = context?.signal;
   const check = () => signal?.throwIfAborted();
   check();
@@ -85,6 +97,10 @@ export async function runTeamTurn(
   }
   check();
   const since = Date.now();
+  const observedSession = async () =>
+    context?.observeSession && agent.agent?.toLowerCase().includes("codex")
+      ? await findCodexSessionByNonce(nonce, since)
+      : undefined;
   const hookFrame = (current: AgentRecord): string | undefined => {
     const message = context?.hookFinal?.(current, since);
     return message === undefined
@@ -191,7 +207,12 @@ export async function runTeamTurn(
           throw new Error(`Agent ${agent.pane_id} completed without a report`);
         await context?.beforeComplete?.();
         check();
-        return { state: "done", text, terminal: false };
+        return {
+          state: "done",
+          text,
+          terminal: false,
+          session: await observedSession(),
+        };
       }
     }
     if (["idle", "done"].includes(lastStatus) && !transcript?.turn.completed) {
@@ -201,7 +222,12 @@ export async function runTeamTurn(
           throw new Error(`Agent ${agent.pane_id} completed without a report`);
         await context?.beforeComplete?.();
         check();
-        return { state: "done", text: fromHook, terminal: false };
+        return {
+          state: "done",
+          text: fromHook,
+          terminal: false,
+          session: await observedSession(),
+        };
       }
     }
     // An available structured turn that is still pending is authoritative.
@@ -238,12 +264,22 @@ export async function runTeamTurn(
             if (fromHook?.trim()) {
               await context.beforeComplete?.();
               check();
-              return { state: "done", text: fromHook, terminal: false };
+              return {
+                state: "done",
+                text: fromHook,
+                terminal: false,
+                session: await observedSession(),
+              };
             }
           }
           await context?.beforeComplete?.();
           check();
-          return { state: "done", text, terminal: true };
+          return {
+            state: "done",
+            text,
+            terminal: true,
+            session: await observedSession(),
+          };
         }
       }
     }
