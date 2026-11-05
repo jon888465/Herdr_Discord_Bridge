@@ -209,3 +209,60 @@ test("sessionCreatedSince reads the creation time from a pi session file name (I
     false,
   );
 });
+
+// ISSUE-099：codex 自己開的子 agent 也有 rollout，而且引用了父 agent 的 prompt（含本回合 nonce）。
+const meta = (id: string, subagentOf?: string) =>
+  JSON.stringify({
+    type: "session_meta",
+    payload: {
+      id,
+      cwd: "/work",
+      ...(subagentOf
+        ? {
+            source: { subagent: { thread_spawn: { parent_thread_id: subagentOf } } },
+            thread_source: "subagent",
+          }
+        : { source: "vscode", thread_source: "user" }),
+    },
+  }) + "\n";
+const ID_C = "01a1a999-0000-7000-8000-000000000003";
+const ID_D = "01a1a999-0000-7000-8000-000000000004";
+
+test("ISSUE-099: subagent rollouts that quote the prompt do not make the parent session ambiguous", async () => {
+  const home = codexHomeWith([
+    { id: ID_A, body: meta(ID_A) + `prompt ${NONCE}\n` },
+    { id: ID_C, body: meta(ID_C, ID_A) + `parent said ${NONCE}\n` },
+    { id: ID_D, body: meta(ID_D, ID_A) + `parent said ${NONCE}\n` },
+  ]);
+  try {
+    assert.deepEqual(
+      await findCodexSessionByNonce(NONCE, Date.now() - 1000, home),
+      { kind: "id", value: ID_A },
+    );
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("ISSUE-099: two real sessions with the nonce, or only subagent sessions, are still unknown", async () => {
+  const twoReal = codexHomeWith([
+    { id: ID_A, body: meta(ID_A) + `x ${NONCE}\n` },
+    { id: ID_B, body: meta(ID_B) + `y ${NONCE}\n` },
+  ]);
+  const onlySub = codexHomeWith([
+    { id: ID_C, body: meta(ID_C, ID_A) + `x ${NONCE}\n` },
+  ]);
+  try {
+    assert.equal(
+      await findCodexSessionByNonce(NONCE, Date.now() - 1000, twoReal),
+      undefined,
+    );
+    assert.equal(
+      await findCodexSessionByNonce(NONCE, Date.now() - 1000, onlySub),
+      undefined,
+    );
+  } finally {
+    rmSync(twoReal, { recursive: true, force: true });
+    rmSync(onlySub, { recursive: true, force: true });
+  }
+});
