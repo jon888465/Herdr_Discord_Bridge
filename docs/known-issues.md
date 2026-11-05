@@ -3073,7 +3073,7 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 **2026-11-05 窄 pane 實機驗收通過（本機 macOS，政策 L1，bridge 載入 main `e0ffc57`）：** 手動建 workspace `w1Y`（claude Lead `w1Y:p1`、codex Worker `w1Y:p2` 左右對分，與先前失敗的 `w1X` 相同配置，`team add w1Y:p2`），驗收卡 `REQ-20261105-narrow`（新增暫存檔、不 commit／push），`card assign REQ-20261105-narrow --coding`。結果：console 出現 `hook Stop … pane=w1Y:p1 chars=456`，Lead 的計畫被接受，Assignment `a1` 在 `w1Y:p2` 開始並完成，Worker 實際建出 `tmp-roster-ok.txt`（內容 `ok`），task 進入 coding stage `review`——**先前失敗的「規劃」這一步已通過**。之後我取消任務（`team cancel`）並收尾：關 workspace、刪暫存檔、移除 worktree、刪分支與驗收卡、路由切回 `w1:p1`。
 
-**這次驗收沒有涵蓋：** coding 任務的 review／verification 階段與最終 synthesis（取消前停在 review）；Codex／agy／pi 作為 Lead 時的 hook 訊息；hook 事件晚於 1.5 秒寬限時的退回行為。另觀察到 console 有一筆 `hook Stop session=01a1a968 pane=w4:p1`，在 Worker 完成時出現，pane 不是 `w1Y:p2`（2026-11-05 已查：`session=01a1a968` 與 `w4:p1` 現在的 codex session id `01a1a968-634f-79f3-a23b-79382b2b7d4a` 完全相符，`w4` 是使用者另一個 workspace `python_test` 裡自己的 codex，工作目錄 `/Users/jon/git_wk/python_test`，與驗收無關；它剛好在同一時間結束一個回合。不是 hook 帶錯 pane，也不是派工配對錯誤。限制：驗收用的 Worker pane `w1Y:p2` 已關閉，無法再比對它自己的 session，所以「Worker 本身有沒有送 hook」沒有證據；它的 Assignment 仍正常完成，因為 Codex 另有 transcript 與畫面讀取）。
+**這次驗收沒有涵蓋：** coding 任務的 review／verification 階段與最終 synthesis（取消前停在 review）；Codex／agy／pi 作為 Lead 時的 hook 訊息；hook 事件晚於 1.5 秒寬限時的退回行為。另觀察到 console 有一筆 `hook Stop session=01a1a968 pane=w4:p1`，在 Worker 完成時出現，pane 不是 `w1Y:p2`（**2026-11-05 先前的結論有誤，已更正：**當時以為 `session=01a1a968` 是使用者自己在 `w4` 的 codex 剛好同時結束回合；後來發現 `~/.codex/sessions` 裡 `01a1a968-…` 的 rollout 工作目錄是 `…/worktrees/Herdr_Discord_Bridge/narrow`，就是驗收用 Worker `w1Y:p2` 的 session。也就是 Worker 的 hook 事件確實被記在 `w4:p1`——hook 帶錯 pane，原因見 ISSUE-088（codex app-server daemon 的環境變數）。對派工配對的影響：Worker 本身沒有 `agent_session`，派工仍靠畫面／transcript 完成；但 hook 事件與獨立 review 的身分判斷受影響，見 ISSUE-088。以下是當時錯誤的舊結論，保留供對照：限制：驗收用的 Worker pane `w1Y:p2` 已關閉，無法再比對它自己的 session，所以「Worker 本身有沒有送 hook」沒有證據；它的 Assignment 仍正常完成，因為 Codex 另有 transcript 與畫面讀取）。
 
 修正範圍：無。測試：無新增。
 
@@ -3105,7 +3105,7 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 ## ISSUE-088：新開的 codex pane 沒有 `agent_session`，`--coding` 的獨立 review 被擋（unknown reviewer identity）
 
-更新日期：2026-11-05。狀態：待調查（現象已重現一次；根因未確認；尚未修正）。
+更新日期：2026-11-05。狀態：待調查（現象已重現；根因已確認（見下），尚未修正；修法未選定）。
 
 使用者可見症狀：`card assign <id> --coding`，Worker 是新開的 codex pane 時，實作完成後 `review` 失敗：「unknown reviewer identity is not an independent review」，`verify` 因依賴 review 沒有執行，task 失敗（`task-2e9a15a0-73ff-4e14-8fcd-dbf8f31069d9`）。
 
@@ -3113,12 +3113,21 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 重現方式／環境：2026-11-05 本機 macOS，codex v0.166.0，bridge 載入 main `50daa86`。workspace `w10`（新建 worktree `~/.herdr/worktrees/Herdr_Discord_Bridge/full2`），`herdr pane run <pane> codex` 啟動兩個 codex。`herdr pane get` 這兩個 pane **都沒有 `agent_session` 欄位**（`w10:p2` 甚至在完成一個回合之後仍沒有）；同機的 claude pane 啟動後立即有 `agent_session`（`source: herdr:claude`）。使用者自己的 `w3:p3` codex 也沒有，而 `w4:p1` codex 有（`source: herdr:codex`）。
 
-已確認：bridge 的 `assertIndependentReview`（`src/coding-workflow.ts`）要求 reviewer 與 author 都有可辨識的 session，缺任何一個就拒絕——這是設計（不能只靠不同 pane 當作獨立）。`~/.codex/hooks.json` 有 `herdr-agent-state.sh session` 與 `herdr-discord-hook`。**未確認根因：** 為何有些 codex pane 沒登記 session（猜測：新工作目錄的 hook 需要信任、或 session 只在特定條件登記），尚未驗證。
+**根因已確認（2026-11-05 調查）：codex 的 hook 是由長駐的 `codex app-server` daemon 執行，繼承的是 daemon 啟動當時的環境變數，不是各 pane 的。**
+- 證據 1：`ps eww` 看到 daemon（pid 51075，自 10/28；pid 90269，自 10/30）的環境是 `HERDR_PANE_ID=w4:p1`、`HERDR_WORKSPACE_ID=w4`。Herdr 提供的 `~/.codex/herdr-agent-state.sh session`（SessionStart hook）用 `HERDR_PANE_ID` 回報 session，所以**每個新 codex session 都被回報成 `w4:p1`**，其他 pane 永遠沒有 `agent_session`，`w4:p1` 的 session 則被最後啟動的 codex session 覆蓋。
+- 證據 2：先前驗收 Worker（`w1Y:p2`）的 session `01a1a968-…`，其 rollout 的 cwd 是 `…/worktrees/Herdr_Discord_Bridge/narrow`，但當時 `herdr pane get w4:p1` 顯示的就是這個 session；本次調查新開 codex（rollout `01a1a997-…`）後，`w4:p1` 的 session 變成了 `01a1a997-…`，而該 pane 本身（`w22:p1`）沒有 session。
+- 證據 3（隔離）：手動把同一個 hook 腳本餵入 `SessionStart` JSON 並指定 `HERDR_PANE_ID=w22:p1`，`herdr pane get w22:p1` 立刻出現 `agent_session`——Herdr 端與腳本本身正常，問題只在 hook 的環境變數。
+- `/hooks` 顯示 SessionStart 已安裝且 active（1/1），排除「hook 沒啟用／沒被信任」。
+- 連帶影響（**未實測**）：bridge 自己的 `herdr-discord-hook`（Stop）也靠 `HERDR_PANE_ID`，所以 codex 的 Stop 事件都記在 `w4:p1`；以 pane 比對的路徑不會對到其他 pane，但 `w4:p1` 的 session 是「最後啟動的 codex」，使用者在 `w4:p1` 的 codex 若走 hook 路徑，可能拿到別的 codex session 的回覆——尚未重現。
+
+**修法候選（尚未選定）：**（1）環境：停掉這兩個 daemon，讓它們不是從 Herdr pane 啟動——但沒有 `HERDR_*` 時 hook 腳本直接結束，仍然沒有 session，所以不是完整解法；（2）bridge：不依賴 hook 的 pane 對應，改由 codex 的 rollout（`~/.codex/sessions`，用 cwd＋時間或 prompt 內容）辨識 session——`CodexTranscript` 已在讀 rollout，可能可重用；（3）向 Herdr／Codex 回報：daemon 應該用每個 session 的環境執行 hook；（4）暫行：`--coding` 的 Worker 用 claude。
+
+已確認：bridge 的 `assertIndependentReview`（`src/coding-workflow.ts`）要求 reviewer 與 author 都有可辨識的 session，缺任何一個就拒絕——這是設計（不能只靠不同 pane 當作獨立）。`~/.codex/hooks.json` 有 `herdr-agent-state.sh session` 與 `herdr-discord-hook`。（先前猜測的「新工作目錄的 hook 需要信任」已被排除，真正原因見下。）
 
 修正範圍：無。
 
-未驗證：codex 的 session 何時、在什麼條件下才會出現；新開 codex 先手動送一個 prompt 後是否會登記；codex 作為 author、claude 作為 reviewer 的混合配置是否可行（author 沒有 session 也會被擋）。
+未驗證：codex 作為 author、claude 作為 reviewer 的混合配置是否可行（author 沒有 session 也會被擋）；上述連帶影響；其他 Herdr 版本／不是從 pane 啟動 daemon 的情況。
 
 暫行做法：驗收 `--coding` 時 Worker 用 claude（有 session）。
 
-下一步：查 Herdr 的 codex session 登記條件（`herdr integration`、hook 信任），決定是修環境設定還是讓 bridge 對 codex 提供替代的身分來源。
+下一步：選定修法（建議評估 (2)：重用 `CodexTranscript` 讀 rollout 取得 session）；另可回報 Herdr 的 codex 整合。
