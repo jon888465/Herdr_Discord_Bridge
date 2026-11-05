@@ -17,7 +17,15 @@ export interface TeamTurnContext {
   signal?: AbortSignal;
   beforeDispatch?: () => void;
   beforeComplete?: () => Promise<void>;
+  /**
+   * 該 Agent 在 `since`（毫秒時間戳）之後由 CLI hook 回報的完整最終訊息；沒有（或 hook 未啟用）
+   * 回 undefined。hook 訊息不受 pane 寬度影響（ISSUE-086：Claude Code 依寬度硬換行會切斷 JSON）。
+   */
+  hookFinal?: (agent: AgentRecord, since: number) => string | undefined;
 }
+
+/** 終端畫面已看到框、但 hook 事件可能還在路上時，最多再等多久。 */
+const HOOK_GRACE_MS = 1500;
 
 const sources: ReadSource[] = [
   "recent_unwrapped",
@@ -76,6 +84,13 @@ export async function runTeamTurn(
     }
   }
   check();
+  const since = Date.now();
+  const hookFrame = (current: AgentRecord): string | undefined => {
+    const message = context?.hookFinal?.(current, since);
+    return message === undefined
+      ? undefined
+      : extractFrame(message, begin, end);
+  };
   let transcript = await CodexTranscript.connect(agent, prompt);
   check();
   context?.beforeDispatch?.();
@@ -179,6 +194,16 @@ export async function runTeamTurn(
         return { state: "done", text, terminal: false };
       }
     }
+    if (["idle", "done"].includes(lastStatus) && !transcript?.turn.completed) {
+      const fromHook = hookFrame(current);
+      if (fromHook !== undefined) {
+        if (!fromHook)
+          throw new Error(`Agent ${agent.pane_id} completed without a report`);
+        await context?.beforeComplete?.();
+        check();
+        return { state: "done", text: fromHook, terminal: false };
+      }
+    }
     // An available structured turn that is still pending is authoritative.
     // In particular, do not fall back to its prompt echo during an early idle.
     if (["idle", "done"].includes(lastStatus) && !transcript?.turn.completed) {
@@ -201,6 +226,21 @@ export async function runTeamTurn(
             throw new Error(
               `Agent ${agent.pane_id} completed without a report`,
             );
+          // 畫面框可能被硬換行切斷；hook 事件通常稍後才到，寬限一下以優先使用它。
+          if (context?.hookFinal) {
+            const graceEnd = Math.min(deadline, Date.now() + HOOK_GRACE_MS);
+            let fromHook = hookFrame(current);
+            while (fromHook === undefined && Date.now() < graceEnd) {
+              await delay(50);
+              check();
+              fromHook = hookFrame(current);
+            }
+            if (fromHook?.trim()) {
+              await context.beforeComplete?.();
+              check();
+              return { state: "done", text: fromHook, terminal: false };
+            }
+          }
           await context?.beforeComplete?.();
           check();
           return { state: "done", text, terminal: true };

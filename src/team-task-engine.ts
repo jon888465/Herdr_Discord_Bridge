@@ -81,6 +81,11 @@ export class TeamTaskEngine {
     private readonly allowedWorkspaces: string[] = [],
     /** ISSUE-061：取消等待派送完成期間，多久檢查一次 Agent 是否已開始工作。 */
     private readonly cancelPollMs = 1000,
+    /** ISSUE-086：Agent 在某時間後由 hook 回報的最終訊息（不受 pane 寬度影響）。 */
+    private readonly hookFinal?: (
+      agent: AgentRecord,
+      since: number,
+    ) => string | undefined,
   ) {}
   private authorize(task: DurableTeamTask): void {
     if (
@@ -158,6 +163,7 @@ export class TeamTaskEngine {
               ? this.codingHooks(input.taskId)
               : undefined,
             signal: controller.signal,
+            hookFinal: this.hookFinal,
             beforeTurnComplete: async () => {
               await Promise.allSettled(
                 [...this.replies.entries()]
