@@ -3105,7 +3105,7 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 ## ISSUE-088：新開的 codex pane 沒有 `agent_session`，`--coding` 的獨立 review 被擋（unknown reviewer identity）
 
-更新日期：2026-11-05。狀態：已修正、待驗收（根因已確認；使用者選定「改 bridge 用 rollout 辨識 session」；原始碼與自動化檢查完成；**尚未 merge、尚未重啟 bridge、尚未用 codex Worker 實機驗收**）。
+更新日期：2026-11-05。狀態：已驗收（身分判定部分）。PR #106 已 merge，bridge 於 2026-11-05 用 `./scripts/run.sh -r` 重啟載入 `bbd05c8`；用兩個新開的 codex Worker 實機驗到 author／reviewer 身分由 rollout 辨識、獨立 review 通過（見下）。**`--coding` 用 codex Worker 完整跑完仍未成功**：verify 階段另有問題，見 ISSUE-089。
 
 使用者可見症狀：`card assign <id> --coding`，Worker 是新開的 codex pane 時，實作完成後 `review` 失敗：「unknown reviewer identity is not an independent review」，`verify` 因依賴 review 沒有執行，task 失敗（`task-2e9a15a0-73ff-4e14-8fcd-dbf8f31069d9`）。
 
@@ -3130,6 +3130,8 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 測試（2026-11-05，本機 macOS，非 CI）：新增 4 項——`test/response-stream.test.ts` 2 項（nonce 對到唯一 rollout 回傳 session；無符合、多個符合、過舊檔案、不合格 nonce、不存在的目錄都回 undefined）；`test/coding-workflow.test.ts` 2 項（codex pane 沒有 agent_session 時仍由 rollout 得到獨立 review 並完成；reviewer 與 author 共用 rollout session 時不獨立、task 失敗）。既有「same-session／unknown reviewers」測試改成新語意（review 會跑完但不算通過）；測試 harness 讓假 codex 寫出 rollout。`npm run check` → 1134 tests、1133 pass、0 fail、1 skip（既有）；`npm run lint` ok。
 
+**2026-11-05 codex Worker 實機驗收（身分部分通過）：** 本機 macOS，政策 L1，bridge 載入 main `bbd05c8`。workspace `w23`（claude Lead `w23:p1`、兩個新開的 codex Worker `w23:p2`／`w23:p3`），驗收卡 `REQ-20261105-full4`，`card assign REQ-20261105-full4 --coding`（task `task-afbaeab7-c24c-4f26-aa12-fd51369abbdf`）。結果：Herdr 對這兩個 codex pane 沒有 `agent_session`，但 task journal 的 artifact 記錄 `implement` 的 `authorSession = 01a1a9c2-…b714eae4ad`、`review` 的 `reviewerSession = 01a1a9c2-…a4858d4bc7`（兩個不同的 session，由 rollout 辨識），`independentReview: true`、`verdict: pass`，coding 階段進到 `verify`——這正是先前被擋住的「unknown reviewer identity」那一步，現在通過。之後 `verify` 失敗，見 ISSUE-089，task 最終 failed（blocked）。收尾：關 workspace、刪暫存檔、移除 worktree、刪分支與驗收卡、路由切回 `w1:p1`。
+
 未驗證：用真的 codex Worker（兩個新開的 codex pane）跑 `--coding` 完整流程；codex 的 rollout 內容是否一定含完整 prompt（nonce）——目前依 rollout 記錄使用者輸入的行為；掃描大量或很大的 rollout 的耗時（單檔上限 64 MiB）；hook 路徑對 `w4:p1` 的連帶影響（未實測，未處理）。
 
 已確認：bridge 的 `assertIndependentReview`（`src/coding-workflow.ts`）要求 reviewer 與 author 都有可辨識的 session，缺任何一個就拒絕——這是設計（不能只靠不同 pane 當作獨立）。`~/.codex/hooks.json` 有 `herdr-agent-state.sh session` 與 `herdr-discord-hook`。（先前猜測的「新工作目錄的 hook 需要信任」已被排除，真正原因見下。）
@@ -3141,3 +3143,24 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 暫行做法：驗收 `--coding` 時 Worker 用 claude（有 session）。
 
 下一步：merge 後重啟 bridge；用兩個新開的 codex Worker（claude 或 codex 當 Lead）重做 `--coding` 完整驗收；另可回報 Herdr／Codex 的 daemon 環境問題。
+
+## ISSUE-089：codex Worker 的回合（review、verify）要等滿 timeout 才結算，verify 最後逾時失敗
+
+更新日期：2026-11-05。狀態：待調查（現象已重現一次；根因未確認；尚未修正）。
+
+使用者可見症狀：claude Lead＋兩個新開的 codex Worker 跑 `card assign … --coding`，`impl` 約 20 秒完成，但 `review` 從派工到結算整整 300 秒（`turn_dispatched 03:32:12` → `turn_settled 03:37:12`），`verify` 派工後約 10 分鐘才失敗：「Timed out waiting for current response from w23:p3 (last state: done); no verified completion」，task 因「no successful verification for the current version」失敗。Worker 實際早就做完：pane 上有完整的 `BRIDGE_BEGIN … BRIDGE_END` 回覆，codex 顯示 `Worked for 12s`，pane 狀態也是 `done`。
+
+預期行為：Worker 回覆完成後幾秒內結算；verify 結果被入帳。
+
+重現方式／環境：2026-11-05 本機 macOS，bridge 載入 main `bbd05c8`，task `task-afbaeab7-c24c-4f26-aa12-fd51369abbdf`，`w23:p2`／`w23:p3` 為新開的 codex。只重現一次，**未確認是否穩定**。同一天稍早用 claude Worker（`w21`）時 review／verify 都正常，沒有這種延遲。
+
+已知事實：
+- 時序：`review` 剛好 300 秒、`verify` 約兩個 300 秒，與 `promptAgentAndWait` 的 timeout（`src/herdr.ts`，預設 300000ms）吻合——推測 Herdr 的 `agent.prompt(wait=…)` 沒有回報這次 prompt 的 settled lifecycle，於是被當成 `agent_prompt_stalled`，bridge 之後再多等一輪 deadline 才讀畫面或放棄。這是依時間推測，**尚未驗證**。
+- 為什麼 `review` 在 300 秒後能讀到畫面框而 `verify` 不行，**未確認**。pane 畫面上 `verify` 的回覆框是完整的（`BRIDGE_BEGIN` … `BRIDGE_END`）。
+- 獨立發現（**程式閱讀，未實測**）：`parseCodingResult`（`src/coding-workflow.ts`）不像 `card review`／`card fix` 那樣先用 `unwrapCodexJson` 還原 codex 的硬換行。codex 在窄 pane 會把 `{"codingResult":{"kind":"verify","commands":[{"command":"test -f tmp-full-⏎  ok.txt && …` 這種字串切斷，JSON 因而無效，`evidence` 會變 `missing`。這與上面的逾時是兩件事，但同樣會讓 codex 的 verify 無法入帳。
+
+修正範圍：無。
+
+未驗證：Herdr `agent.prompt(wait)` 對這些 codex pane 的行為（是否與 codex 狀態偵測有關，因為 codex 的狀態 hook 同樣被 daemon 環境影響，見 ISSUE-088）；逾時後為何讀不到畫面框；`parseCodingResult` 對硬換行 JSON 的實際行為。
+
+下一步：重現並記錄 Herdr 對 `agent.prompt` 的回應與 `herdr pane get` 狀態變化時序；寫一個用硬換行 codex 回報測 `parseCodingResult` 的測試；決定修法。
