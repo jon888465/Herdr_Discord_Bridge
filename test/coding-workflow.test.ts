@@ -238,6 +238,7 @@ function harness(options: {
     | "same"
     | "unknown"
     | "no-verify"
+    | "gate-feedback"
     | "empty"
     | "general"
     | "review-drift"
@@ -519,6 +520,11 @@ function planFor(
     return {
       assignments: [implement, review("rev1")],
     };
+  }
+  if (script === "gate-feedback") {
+    // Lead 漏排 verify 就回空計畫；bridge 把閘門缺的東西回給它之後，它才補排 verify。
+    const rounds = [[implement], [review("rev1")], [], [verify], []];
+    return { assignments: rounds[round - 1] ?? [] };
   }
   if (script === "no-verify") {
     const rounds = [[implement], [review("rev1")], []];
@@ -919,6 +925,62 @@ test("ISSUE-089: a codex report whose JSON string was hard-wrapped by the termin
       { command: "node --test", exitCode: 0 },
     ]);
     assert.equal(task.state, "completed");
+  } finally {
+    h.close();
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("ISSUE-093: an empty plan with an unsatisfied gate sends the reasons back to the Lead, who can then add the missing verify", async () => {
+  const { repo } = repoWithBaseline();
+  const h = harness({ repo, script: "gate-feedback" });
+  try {
+    const task = await h.engine.run({
+      taskId: "task-gate-feedback",
+      prompt: "ship the local change",
+      lead: h.lead,
+      workers: [h.author, h.reviewer],
+      replan: true,
+      coding: true,
+      timeoutMs: 500,
+    });
+    assert.equal(task.state, "completed", task.detail);
+    assert.equal(task.coding?.stage, "ready-to-integrate");
+    assert.ok(
+      task.coding?.artifacts.some(
+        (item) => item.role === "verify" && item.verificationPassed,
+      ),
+    );
+    const notices = h.prompts.filter((item) =>
+      item.text.includes("acceptance gate is authoritative and is not satisfied"),
+    );
+    assert.equal(notices.length, 1);
+    assert.match(notices[0]!.text, /no successful verification/);
+  } finally {
+    h.close();
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("ISSUE-093: a Lead that keeps returning an empty plan is asked at most twice, then the task fails as before", async () => {
+  const { repo } = repoWithBaseline();
+  const h = harness({ repo, script: "no-verify" });
+  try {
+    const task = await h.engine.run({
+      taskId: "task-gate-feedback-cap",
+      prompt: "ship the local change",
+      lead: h.lead,
+      workers: [h.author, h.reviewer],
+      replan: true,
+      coding: true,
+      timeoutMs: 500,
+    });
+    assert.equal(task.state, "failed");
+    assert.match(task.detail ?? "", /no successful verification/);
+    const notices = h.prompts.filter((item) =>
+      item.text.includes("acceptance gate is authoritative and is not satisfied"),
+    );
+    assert.equal(notices.length, 2);
   } finally {
     h.close();
     rmSync(repo, { recursive: true, force: true });
