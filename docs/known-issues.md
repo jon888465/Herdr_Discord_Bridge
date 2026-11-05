@@ -3146,7 +3146,7 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 ## ISSUE-089：codex Worker 的回合（review、verify）要等滿 timeout 才結算，verify 最後逾時失敗
 
-更新日期：2026-11-05。狀態：待調查（現象已重現一次；根因未確認；尚未修正）。
+更新日期：2026-11-05。狀態：已修正、待驗收（根因已確認並在真實 codex pane 重現；原始碼與自動化檢查完成；**尚未 merge、尚未重啟 bridge、尚未用 codex Worker 重跑 `--coding` 完整流程**）。
 
 使用者可見症狀：claude Lead＋兩個新開的 codex Worker 跑 `card assign … --coding`，`impl` 約 20 秒完成，但 `review` 從派工到結算整整 300 秒（`turn_dispatched 03:32:12` → `turn_settled 03:37:12`），`verify` 派工後約 10 分鐘才失敗：「Timed out waiting for current response from w23:p3 (last state: done); no verified completion」，task 因「no successful verification for the current version」失敗。Worker 實際早就做完：pane 上有完整的 `BRIDGE_BEGIN … BRIDGE_END` 回覆，codex 顯示 `Worked for 12s`，pane 狀態也是 `done`。
 
@@ -3154,7 +3154,18 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 重現方式／環境：2026-11-05 本機 macOS，bridge 載入 main `bbd05c8`，task `task-afbaeab7-c24c-4f26-aa12-fd51369abbdf`，`w23:p2`／`w23:p3` 為新開的 codex。只重現一次，**未確認是否穩定**。同一天稍早用 claude Worker（`w21`）時 review／verify 都正常，沒有這種延遲。
 
-已知事實：
+**根因已確認（2026-11-05 調查）：codex 的回覆比 pane 可視高度長時，Herdr 的終端讀取（visible／recent／recent-unwrapped／detection 四種來源）只剩最後幾列，`BRIDGE_BEGIN` 和前面的內容已經讀不到，`extractFrame` 找不到框，回合只能等到逾時。**
+- 重現迴圈（約 10 秒～100 秒，可重跑）：對真的 codex pane 直接呼叫 `runTeamTurn`（腳本在 scratchpad `turn089.mjs`）。新開 codex、13 列高的 pane，prompt「印出 1 到 30，每行一個」→ **97.3 秒逾時**「Timed out waiting for current response … (last state: idle)」；`herdr agent read --source recent --lines 400` 只剩 `29`、`30`、`BRIDGE_END_…` 與輸入框。6 列高的 pane 連短回覆也逾時（兩次 ~98 秒）；把同一個 pane 放大（zoom，29 列）後同一個短回覆 9.2 秒完成；短回覆在 13 列 pane 6～10 秒完成。
+- Herdr 這一側正常：`~/.config/herdr/herdr-server.log` 顯示失敗那次實機任務的 `agent.prompt` 在 03:32:12 收到、03:32:32 完成（20 秒）、verify 在 03:37:14～03:37:27（13 秒）完成；bridge 的 turn_settled 卻是 03:37:12，`verify` 則一直讀不到框，所以延遲／逾時是 bridge 讀不到框，不是 Herdr 的 `agent.prompt(wait)` 卡住。**先前「推測 Herdr 沒回報 settled」的說法是錯的，已更正。**
+- 仍未解釋：實機 `review` 為何剛好在 300 秒時成功結算（可能是 pane 重繪後框剛好又可見），不影響上面的結論。
+
+修正範圍（2026-11-05）：`src/response-stream.ts` 新增 `findCodexRolloutByNonce`（回傳 session、rollout 路徑與讀取起點），`findCodexSessionByNonce` 改用它，`CodexTranscript.fromRollout`；`src/team-turn.ts`：codex 回合在 idle／done 且還沒有 transcript 時，每秒最多一次用 nonce 找 rollout，找到就讀它的 `final_answer`（`terminal: false`），讀不到才退回終端畫面。rollout 的文字沒有 pane 寬度的硬換行，因此也一併避開下面提到的 codex 硬換行 JSON 問題（僅限找得到 rollout 時）。
+
+測試（2026-11-05，本機 macOS，非 CI）：真實 codex pane 迴圈——修正前 97.3 秒逾時，修正後同一個 13 列 pane、同一個 30 行回覆 **6.7 秒**完成、30 行完整、`terminal=false`、session 由 rollout 取得。新增單元測試 1 項（終端只剩輸入框、框已捲出時從 rollout 取得 41 行完整內容與 session）。`npm run check` → 1135 tests、1134 pass、0 fail、1 skip（既有）；`npm run lint` ok。
+
+未驗證：重啟 bridge 後用 claude Lead＋兩個新開的 codex Worker 重跑 `--coding` 完整流程（verify 階段）；`parseCodingResult` 對沒有 rollout 時（例如找不到唯一 rollout）的硬換行 JSON 仍未處理；rollout 檔很大時的耗時（單檔上限 64 MiB）；Lead 為 codex 時的規劃回合（走同一條路徑但未實測）。
+
+舊的觀察與推測（保留供對照）：
 - 時序：`review` 剛好 300 秒、`verify` 約兩個 300 秒，與 `promptAgentAndWait` 的 timeout（`src/herdr.ts`，預設 300000ms）吻合——推測 Herdr 的 `agent.prompt(wait=…)` 沒有回報這次 prompt 的 settled lifecycle，於是被當成 `agent_prompt_stalled`，bridge 之後再多等一輪 deadline 才讀畫面或放棄。這是依時間推測，**尚未驗證**。
 - 為什麼 `review` 在 300 秒後能讀到畫面框而 `verify` 不行，**未確認**。pane 畫面上 `verify` 的回覆框是完整的（`BRIDGE_BEGIN` … `BRIDGE_END`）。
 - 獨立發現（**程式閱讀，未實測**）：`parseCodingResult`（`src/coding-workflow.ts`）不像 `card review`／`card fix` 那樣先用 `unwrapCodexJson` 還原 codex 的硬換行。codex 在窄 pane 會把 `{"codingResult":{"kind":"verify","commands":[{"command":"test -f tmp-full-⏎  ok.txt && …` 這種字串切斷，JSON 因而無效，`evidence` 會變 `missing`。這與上面的逾時是兩件事，但同樣會讓 codex 的 verify 無法入帳。
@@ -3163,4 +3174,4 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 未驗證：Herdr `agent.prompt(wait)` 對這些 codex pane 的行為（是否與 codex 狀態偵測有關，因為 codex 的狀態 hook 同樣被 daemon 環境影響，見 ISSUE-088）；逾時後為何讀不到畫面框；`parseCodingResult` 對硬換行 JSON 的實際行為。
 
-下一步：重現並記錄 Herdr 對 `agent.prompt` 的回應與 `herdr pane get` 狀態變化時序；寫一個用硬換行 codex 回報測 `parseCodingResult` 的測試；決定修法。
+下一步：merge 後重啟 bridge，重做 claude Lead＋兩個 codex Worker 的 `--coding` 完整驗收；視需要為 `parseCodingResult` 加 codex 硬換行 JSON 的還原。

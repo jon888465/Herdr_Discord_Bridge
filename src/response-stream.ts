@@ -127,6 +127,16 @@ export class CodexTranscript {
       return;
     }
   }
+  /**
+   * ISSUE-089：已用 nonce 找到本回合 rollout 時，從 prompt 所在位置附近開始讀（不是檔尾），
+   * 才讀得到這個回合的 task_started、user_message 與 final_answer。
+   */
+  static fromRollout(
+    found: { path: string; offset: number },
+    prompt: string,
+  ): CodexTranscript {
+    return new CodexTranscript(found.path, found.offset, prompt);
+  }
   async poll(): Promise<void> {
     const file = await open(this.path, "r");
     try {
@@ -240,14 +250,33 @@ const ROLLOUT_NAME =
   /-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
 const MAX_ROLLOUT_BYTES = 64 * 1024 * 1024;
 
+export interface CodexRolloutMatch {
+  kind: "id";
+  value: string;
+  path: string;
+  /** 讀取起點：nonce 所在位置往前一小段（對齊到行首），確保包含該回合的 task_started。 */
+  offset: number;
+}
+
+const ROLLOUT_LOOKBACK_BYTES = 256 * 1024;
+
 export async function findCodexSessionByNonce(
   nonce: string,
   sinceMs: number,
   codexHome = process.env.CODEX_HOME || join(homedir(), ".codex"),
 ): Promise<{ kind: "id"; value: string } | undefined> {
+  const match = await findCodexRolloutByNonce(nonce, sinceMs, codexHome);
+  return match ? { kind: "id", value: match.value } : undefined;
+}
+
+export async function findCodexRolloutByNonce(
+  nonce: string,
+  sinceMs: number,
+  codexHome = process.env.CODEX_HOME || join(homedir(), ".codex"),
+): Promise<CodexRolloutMatch | undefined> {
   if (!/^[a-f0-9]{16,}$/i.test(nonce)) return undefined;
   const root = join(codexHome, "sessions");
-  const found = new Set<string>();
+  const found = new Map<string, { path: string; offset: number }>();
   async function scan(dir: string, depth: number): Promise<void> {
     let items;
     try {
@@ -273,7 +302,15 @@ export async function findCodexSessionByNonce(
         try {
           const buffer = Buffer.alloc(info.size);
           await file.read(buffer, 0, info.size, 0);
-          if (buffer.includes(nonce)) found.add(name[1]!.toLowerCase());
+          const at = buffer.indexOf(nonce);
+          if (at >= 0) {
+            let offset = Math.max(0, at - ROLLOUT_LOOKBACK_BYTES);
+            if (offset > 0) {
+              const newline = buffer.indexOf(10, offset);
+              offset = newline < 0 ? at : newline + 1;
+            }
+            found.set(name[1]!.toLowerCase(), { path, offset });
+          }
         } finally {
           await file.close();
         }
@@ -283,5 +320,7 @@ export async function findCodexSessionByNonce(
     }
   }
   await scan(root, 0);
-  return found.size === 1 ? { kind: "id", value: [...found][0]! } : undefined;
+  if (found.size !== 1) return undefined;
+  const [value, where] = [...found][0]!;
+  return { kind: "id", value, ...where };
 }
