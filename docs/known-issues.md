@@ -3220,7 +3220,7 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 ## ISSUE-091：profile 啟動的 Worker 一律被判「未就緒」，Lead 自行分派的 `--coding` 任務在派工前失敗
 
-更新日期：2026-11-05。狀態：已修正、待驗收（根因已確認並在 live Herdr 重現；原始碼與自動化檢查完成；**尚未 merge、尚未重啟 bridge、尚未實機重跑 `--coding`**）。
+更新日期：2026-11-05。狀態：已驗收（PR #112 已 merge，bridge 於 2026-11-05 用 `./scripts/run.sh -r` 重啟載入 `0fac55b`；實機驗收見下方「E14 實機驗收」：Lead 自行啟動 profile 當 Worker 的 `--coding` 完整跑完）。
 
 使用者可見症狀：在 `w29`（只有 claude Lead）用 `team select` 勾選 `helper`、`reviewer`、`claude` 三個 profile 後，`card assign … --coding`。Lead 的計畫沒有問題（`impl`→`helper`、`review`→`reviewer`、`verify`→`claude`），但 `impl` 立刻失敗：「started Agent does not match requested profile/workspace or is not ready」，`review`、`verify` 因依賴失敗而沒執行，task `task-8fa522c1-e078-461d-8cae-7de1cfa8c003` 失敗。同時 pane `w29:p2` 其實已經正常啟動了 codex 並進入 idle。
 
@@ -3238,5 +3238,15 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 後續（E14，2026-11-05，使用者決定先用 claude、codex 把自動流程串起來）：同一個 PR 也實作了「`--coding` 沒有指定任何 Worker 時自動啟用 claude／codex profile」（`src/coding-roster.ts` 的 `autoEnableCodingProfiles`，`src/main.ts` 的 `startTeamTask` 呼叫；agy、pi 先排除；有指定一律照指定）。測試（2026-11-05，本機）：`test/coding-roster.test.ts` 新增 2 項（沒指定時啟用 helper／reviewer／claude 且排除 agy、pi；可用 profile 少於兩個時什麼都不啟用、仍被拒絕）。`node --test --test-timeout=60000 dist/test/*.test.js` → 1144 tests、1143 pass、0 fail、1 skip（既有）；`npm run lint` ok。詳見追蹤清單 E14。**未實機驗收**——需 merge 後重啟 bridge，用 `card assign … --worktree --coding` 實跑。
 
-下一步：merge 後重啟 bridge，重做 `w29` 型驗收，再用 `card assign --worktree --coding` 驗 E14，通過後進 H4 端到端案例。
+**E14 實機驗收（2026-11-05，本機 macOS，政策 L1，bridge 載入 main `0fac55b`）：** 在 workspace `w2B`（只有一個 claude Lead，沒有勾選任何 profile，`team pool` 全部未勾）執行 `card assign REQ-20261105-e14 --worktree --coding`（task `task-431598d1-c6a9-4414-b73a-b0cfc7216869`）。結果：
+- console 記「--coding 沒有指定 Worker；workspace w2C 自動啟用 profile：helper, reviewer, claude」；bridge 建好 worktree（分支 `card/REQ-20261105-e14`）與新 workspace `w2C`，並在其中啟動同種 Agent 當 Lead。
+- Lead 自行分派：`implement-1`→`profile:helper`（codex）、`review-1`→`profile:reviewer`（codex）、`verify-1`→`profile:claude`（claude）；三個 Worker 都由 bridge 啟動（`new-session`）且就緒後才派工（ISSUE-091 的修正生效，先前同型任務在此失敗）。
+- artifact：`implement`、`verify`（`verificationPassed: true`）、`review`（`independentReview: true`、`verdict: pass`），階段 `ready-to-integrate`；journal 最後事件 `task_completed`，從 07:04:21 到 07:05:59 共 98 秒，console 「Team Task completed」。
+- 注意：`implement` 與 `review` 都是 codex（不同 profile、不同 session），獨立性由 rollout 辨識的 session 判定（ISSUE-088）。
+- 收尾：關 workspace `w2B`、`w2C`，刪暫存檔、worktree、分支與驗收卡，路由切回 `w1:p1`；沒有 commit／push。
+- 觀察到「信任這個資料夾」提示**沒有**出現：新 worktree 在 `~/.herdr/worktrees/…`（不在 `git_wk` 底下）也沒被擋；另做了隔離實驗（2026-11-05）：`git_wk` 底下的新子資料夾直接 idle、`git_wk` 以外的資料夾 `blocked` 並出現「Quick safety check」。Linked git worktree 沿用主 repo 信任是從觀察推論，未做隔離對照。
+
+**未驗證：**agy、pi 當 Worker（E14 刻意先排除）；Lead 為 codex 或其他種類時 `--worktree --coding` 的自動啟用；profile 不足兩個時的實機拒絕（只有單元測試）。
+
+下一步：無（已驗收）；進追蹤清單 H4 端到端案例。
 
