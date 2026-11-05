@@ -3013,11 +3013,13 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 ## ISSUE-085：`card assign --coding` 在沒有 Worker 時 Lead 規劃出空計畫，task 失敗或卡在規劃
 
-更新日期：2026-11-05。狀態：已修正、待驗收（根因已確認；原始碼與自動化檢查完成；PR #97 已 merge（`ad5d30c`），bridge 已於 2026-11-05 用 `./scripts/run.sh -r` 重啟並載入該版本（`dist` 內有 `assertCodingRoster`）；零 Worker 拒絕已於 2026-11-05 實機驗收通過（見下），**有 Worker 時 `--coding` 正常啟動尚未驗**，不可把單元測試通過當成端到端通過）。
+更新日期：2026-11-05。狀態：已修正、待驗收（根因已確認；原始碼與自動化檢查完成；PR #97 已 merge（`ad5d30c`），bridge 已於 2026-11-05 用 `./scripts/run.sh -r` 重啟並載入該版本（`dist` 內有 `assertCodingRoster`）；零 Worker 拒絕已於 2026-11-05 實機驗收通過（見下），有 Worker 時 `--coding` 的**啟動**已於 2026-11-05 驗到（任務被接受、不再被零 Worker 檢查擋下），但該次任務在規劃階段失敗，見 ISSUE-086，所以「`--coding` 完整跑完」仍未驗；不可把單元測試通過當成端到端通過）。
 
 **2026-11-05 實機嘗試（未得到有效結果）：** 重啟後在 bridge console 於 workspace `w1` 執行 `team ask --coding …`，得到「Team Worker pane w1:p8 is stale or unavailable」——`w1` 的 Team 名單殘留一個失效的 Worker（`w1:p8`），根本沒走到零 Worker 的檢查，所以**不能算驗收**。須改在確實沒有 Worker 的 workspace（例如 `card assign --worktree` 新建的）重試。
 
 **2026-11-05 零 Worker 拒絕實機驗收通過（本機 macOS，政策 L1，bridge 載入 main `ad5d30c`，由 bridge console 操作）：** 匯入驗收卡 `REQ-20261105-roster-ok` 並設為 `ready`，執行 `card assign REQ-20261105-roster-ok --worktree --coding`。結果：worktree 已建立（workspace `w1W`），任務**沒有啟動**，回覆「--coding 任務需要至少一個 Worker…目前沒有任何 Worker。若只是要讓卡片的 Agent 自己做完，請不帶 --coding」，原因與出路都清楚；卡片 `status` 仍是 `ready`。收尾：`card cleanup` 移除 worktree、刪本機分支與驗收卡檔（分支未曾 push）；workspace `w1W` 已不存在。副作用：console 顯示「selected Agent exited」，需重新 `agent use`。**仍未驗：** 有 Worker（同 workspace 其他 Agent pane 或 `team select` 的 profile）時 `--coding` 能正常啟動。
+
+**2026-11-05 有 Worker 時的啟動實機驗收（本機 macOS，政策 L1，bridge 載入 main `ad5d30c`）：** 手動建 worktree workspace `w1X`（claude 當 Lead、codex 當 Worker，`team add w1X:p2`），驗收卡 `REQ-20261105-roster-worker`（只要求新增一個暫存檔、不 commit／push），`card assign REQ-20261105-roster-worker --coding`。結果：回覆「Team Task accepted · Lead: claude · Workers: codex」，沒有被零 Worker 檢查擋下 → **有 Worker 時 `--coding` 可啟動，ISSUE-085 的修正沒有誤擋**。但 task 約 5 秒後失敗：「Lead did not return a JSON Assignment plan」，見 ISSUE-086。收尾：關 workspace `w1X`、移除手動 worktree、刪分支與驗收卡，路由切回 `w1`/`w1:p1`。
 
 另發現：Team 名單裡的失效 Worker 會讓任務在啟動前就失敗，屬既有行為，未另開 issue。
 
@@ -3039,3 +3041,21 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 限制：只擋「完全沒有 Worker」；Worker 存在但都忙或不合用的情況由既有流程處理。
 
 下一步：merge 本 PR、重啟 bridge；用 L1 下的一張無害卡，`card assign <id> --worktree --coding` 確認被拒絕、訊息清楚、卡片仍是 ready。
+
+## ISSUE-086：`card assign --coding` 的 Lead 已回合格的 JSON 計畫，bridge 卻判「did not return a JSON Assignment plan」
+
+更新日期：2026-11-05。狀態：待調查（根因未確認；尚未修正）。
+
+使用者可見症狀：有 Worker 的 workspace（Lead claude `w1X:p1`、Worker codex `w1X:p2`）下 `card assign REQ-20261105-roster-worker --coding`，bridge 回「Team Task accepted」，約 5 秒後「Team Task failed：Lead did not return a JSON Assignment plan」。Lead pane 實際輸出了完整的 `BRIDGE_BEGIN_… {"assignments":[{"id":"a1","workerPaneId":"w1X:p2","role":"implement","access":"write","writeScope":["tmp-roster-ok.txt"],…}]} BRIDGE_END_…`。
+
+預期行為：Lead 回合格計畫時 task 進入派工。
+
+重現方式／環境：2026-11-05 本機 macOS，政策 L1，bridge 載入 main `ad5d30c`（以 `./scripts/run.sh -r` 重啟）；task `task-8661b3cc-bc30-49d0-b521-9255c06f9b08`；journal 事件順序 `plan_requested` → `turn_dispatched`（01:17:40）→ `turn_settled`（01:17:44）→ `task_failed`；console 當時有 `hook Stop … chars=482`。只重現一次，**未確認是否穩定**。
+
+已確認：把 pane 上那份計畫原文直接餵給 `dist` 的 `parseAssignmentPlan`（`codingMode=true`）能成功解析，所以不是計畫內容或解析器本身的問題。**未確認根因**：猜測是 bridge 取得的回覆文字與 pane 上的不同（hook 的 `chars=482` 與截取範圍、Lead 在 5 秒內結束），尚未驗證，不能當結論。
+
+修正範圍：無。測試：無新增。
+
+未驗證：是否與 `hookTransport` 為 `auto` 時 hook 回覆與標記截取有關；用 `hookTransport: parser` 是否可避免；非 `--coding` 的規劃是否也會發生；沒有 `--worktree`、沒有 `team add` 的情境。
+
+下一步：重現並取得 bridge 實際收到的 Lead 回覆文字（capture diagnostics 或加診斷紀錄），再判斷根因；與 ISSUE-085 分開處理，ISSUE-085 的零 Worker 檢查不受影響。
