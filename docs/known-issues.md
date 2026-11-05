@@ -3186,7 +3186,7 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 ## ISSUE-090：codex 的 hook 訊息可能被貼到錯的 pane（`w4:p1`），Discord 串流與核准補貼沒有檢查
 
-更新日期：2026-11-05。狀態：已修正、待驗收（原始碼與自動化檢查完成；**尚未 merge、尚未重啟 bridge、未用真的 codex pane 實機驗收**；隱患本身只有程式閱讀與測試推論，沒有在實機重現過）。
+更新日期：2026-11-05。狀態：已驗收（PR #110 已 merge，bridge 於 2026-11-05 重啟載入 `2e729fb`；在 `w4:p1` 實機重現出「session 被別的 codex 覆蓋」的狀態，並確認貼出的是 `w4:p1` 自己的回覆，見最下方「`w4:p1` 實機驗收」）。
 
 使用者可見症狀（推論，**未實機重現**）：使用者透過 Discord 對 `w4:p1`（codex）送問題時，若另一個 codex session 在同一時間結束回合，bridge 可能把那個 session 的回覆貼成 `w4:p1` 的答案。
 
@@ -3204,5 +3204,17 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 限制：這只是減輕風險；根本原因（daemon 環境）仍在 Herdr／Codex，見 ISSUE-088 的修法候選（3）。
 
-下一步：merge 後重啟 bridge，用 `w4:p1` 以外的 codex pane 與 Discord 發問驗證 hook 仍被採用；考慮回報 Herdr／Codex 的 daemon 環境問題。
+**2026-11-05 實機檢查（本機 macOS，bridge 載入 main `2e729fb`，經 bridge console）：**
+- 唯讀：對 live 的 codex pane 呼叫 `hookReplyTrusted`：`w3:p3`（你的 codex，無 session）→ `trusted=false`；新開的 `w27:p1`（無 session）→ `trusted=false`。當時 `w4:p1` 已不是 codex Agent（`herdr agent list` 沒有它），所以**無法**對 `w4:p1` 實測。
+- 端到端：新開 `w27` 的 codex（工作目錄為本 repo），`wk use w27`、`agent use w27:p1`，從 bridge console 送「只回覆 bridge-test-090」→ console 收到 `bridge-test-090`（畫面 parser 路徑，因為沒有可信 session）。同時 console 出現 `hook Stop session=01a1aa51 pane=w4:p1 chars=105`——證實 hook 事件仍被記在 `w4:p1`（ISSUE-088 的根因），且該事件**沒有**被用在 `w27:p1` 的回覆上。收尾：關 workspace、路由切回 `w1:p1`。
+- **這證明：** 修正沒有弄壞 codex 的正常串流（退回 parser 仍正確回覆）；hook 事件確實帶錯 pane。**這沒證明：** 「hook 可信時仍被採用」（沒有任何 live codex pane 的 session 對得上，無法驗）；「`w4:p1` 不會貼到別人的回覆」（`w4:p1` 當時不是 codex）。
+
+**`w4:p1` 實機驗收（2026-11-05，本機 macOS，bridge 載入 main `2e729fb`，使用者同意在 `w4:p1` 啟動 codex）：**
+1. 在 `w4:p1`（`python_test`）啟動 codex（`codex -a on-request -s read-only`）：它自己的 session `01a1aa56-…`，rollout 工作目錄 `/Users/jon/git_wk/python_test` = pane 工作目錄 → `hookReplyTrusted = true`（hook 可信時被採用的對照組）。
+2. 在另一個 workspace（本 repo）新開 codex 並送一個提問：`w4:p1` 的 `agent_session` 被覆蓋成 `01a1aa57-…`，其 rollout 工作目錄是 `/Users/jon/git_wk/Herdr_Discord_Bridge`，≠ `w4:p1` 的 `python_test` → `hookReplyTrusted = false`（**重現出 ISSUE-088／090 的錯位狀態**）。
+3. 用 bridge console（`wk use w4`、`agent use w4:p1`）對 `w4:p1` 送「只回覆 w4-own-reply」，並在 1 秒後讓另一個 codex 回「foreign-2」。console 出現 `hook Stop session=01a1aa57 pane=w4:p1 chars=9`（別人的回覆，剛好等於 `w4:p1` 被覆蓋後的 session）與 `hook Stop session=01a1aa56 pane=w4:p1 chars=102`（`w4:p1` 自己的），最後**貼出的是 `w4-own-reply`**。修正前，`streamAgent` 會對 `w4:p1` 採用 session `01a1aa57` 的 hook 訊息（`foreign-2`），這就是隱患；修正後該訊息被忽略、改走畫面 parser，回覆正確。
+- 附帶發現：我用 `herdr pane run` 在 `w4:p1` 輸入 `codex -a on-request -s read-only` 後，codex 的畫面上第一則使用者訊息就是這串指令文字，它因此自己做了一次網路搜尋（唯讀沙箱、無檔案變更）後回到 idle。**原因未確認**（推測是我輸入時前景已有 codex 在接收輸入；我事前讀到的畫面是 shell 提示字元，可能是過時的）。屬我的操作疏失，已告知使用者；沒有造成設定或檔案變更。
+- 收尾：關掉我開的測試 workspace，路由切回 `w1:p1`；`w4:p1` 的 codex 依使用者要求保持執行。
+
+下一步：無（已驗收）；根本原因（daemon 環境）仍在 Herdr／Codex，可考慮回報。
 
