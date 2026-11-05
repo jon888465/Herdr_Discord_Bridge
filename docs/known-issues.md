@@ -3044,7 +3044,7 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 ## ISSUE-086：`card assign --coding` 的 Lead 已回合格的 JSON 計畫，bridge 卻判「did not return a JSON Assignment plan」
 
-更新日期：2026-11-05。狀態：已修正、待驗收（機制由離線重現與程式閱讀支持，但 bridge 當時實際收到的文字沒有留存，所以根因屬「高度可能」而非實測；原始碼與自動化檢查完成；**尚未重啟 bridge、尚未實機驗收**）。
+更新日期：2026-11-05。狀態：已驗收（症狀：窄 pane 下 Lead 規劃被判無計畫；PR #100 已 merge，bridge 於 2026-11-05 用 `./scripts/run.sh -r` 重啟載入 `e0ffc57`，窄 pane 實機驗收通過，見下；根因仍是「高度可能」而非實測——失敗當時 bridge 收到的文字沒有留存，但同樣情境修正後不再失敗）。
 
 使用者可見症狀：有 Worker 的 workspace（Lead claude `w1X:p1`、Worker codex `w1X:p2`）下 `card assign REQ-20261105-roster-worker --coding`，bridge 回「Team Task accepted」，約 5 秒後「Team Task failed：Lead did not return a JSON Assignment plan」。Lead pane 實際輸出了完整的 `BRIDGE_BEGIN_… {"assignments":[{"id":"a1","workerPaneId":"w1X:p2","role":"implement","access":"write","writeScope":["tmp-roster-ok.txt"],…}]} BRIDGE_END_…`。
 
@@ -3065,7 +3065,9 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 未驗證：重啟後在窄 pane（約 81 欄）重跑 Claude Lead 的 `card assign --coding`，確認 task 進入派工；Codex／agy／pi 的 hook 訊息是否也帶完整框（只改了共用路徑，未逐一實測）；hook 事件比寬限時間更晚到時仍會退回畫面（此時窄 pane 仍可能失敗）；沒有 hook 的 Claude（未安裝）仍受換行影響。
 
-下一步：merge 後重啟 bridge，重做上述窄 pane 驗收。
+**2026-11-05 窄 pane 實機驗收通過（本機 macOS，政策 L1，bridge 載入 main `e0ffc57`）：** 手動建 workspace `w1Y`（claude Lead `w1Y:p1`、codex Worker `w1Y:p2` 左右對分，與先前失敗的 `w1X` 相同配置，`team add w1Y:p2`），驗收卡 `REQ-20261105-narrow`（新增暫存檔、不 commit／push），`card assign REQ-20261105-narrow --coding`。結果：console 出現 `hook Stop … pane=w1Y:p1 chars=456`，Lead 的計畫被接受，Assignment `a1` 在 `w1Y:p2` 開始並完成，Worker 實際建出 `tmp-roster-ok.txt`（內容 `ok`），task 進入 coding stage `review`——**先前失敗的「規劃」這一步已通過**。之後我取消任務（`team cancel`）並收尾：關 workspace、刪暫存檔、移除 worktree、刪分支與驗收卡、路由切回 `w1:p1`。
+
+**這次驗收沒有涵蓋：** coding 任務的 review／verification 階段與最終 synthesis（取消前停在 review）；Codex／agy／pi 作為 Lead 時的 hook 訊息；hook 事件晚於 1.5 秒寬限時的退回行為。另觀察到 console 有一筆 `hook Stop session=01a1a968 pane=w4:p1`，在 Worker 完成時出現，pane 不是 `w1Y:p2`（可能是 codex 的 hook 帶了別的 pane；**未調查**，不確定是否影響派工配對）。
 
 修正範圍：無。測試：無新增。
 
