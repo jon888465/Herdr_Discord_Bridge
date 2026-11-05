@@ -98,6 +98,8 @@ export interface TeamTaskInput {
   taskId: string;
   signal?: AbortSignal;
   beforeTurnComplete?: () => Promise<void>;
+  /** 見 `TeamTurnContext.hookFinal`（ISSUE-086）。 */
+  hookFinal?: (agent: AgentRecord, since: number) => string | undefined;
   onQuestion?: (
     agent: AgentRecord,
     phase: "planning" | "assignment" | "synthesis",
@@ -161,6 +163,7 @@ export async function runTeamTask(
         phase,
         signal: input.signal,
         beforeComplete: input.beforeTurnComplete,
+        hookFinal: input.hookFinal,
         beforeDispatch: () =>
           emit({ type: "turn_dispatched", taskId: input.taskId, agent, phase }),
       },
@@ -470,6 +473,7 @@ async function runAssignment(
         assignmentId: assignment.id,
         signal: input.signal,
         beforeComplete: input.beforeTurnComplete,
+        hookFinal: input.hookFinal,
         beforeDispatch: () =>
           emit({
             type: "turn_dispatched",

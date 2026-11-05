@@ -3044,7 +3044,7 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 ## ISSUE-086：`card assign --coding` 的 Lead 已回合格的 JSON 計畫，bridge 卻判「did not return a JSON Assignment plan」
 
-更新日期：2026-11-05。狀態：待調查（根因未確認；尚未修正）。
+更新日期：2026-11-05。狀態：已修正、待驗收（機制由離線重現與程式閱讀支持，但 bridge 當時實際收到的文字沒有留存，所以根因屬「高度可能」而非實測；原始碼與自動化檢查完成；**尚未重啟 bridge、尚未實機驗收**）。
 
 使用者可見症狀：有 Worker 的 workspace（Lead claude `w1X:p1`、Worker codex `w1X:p2`）下 `card assign REQ-20261105-roster-worker --coding`，bridge 回「Team Task accepted」，約 5 秒後「Team Task failed：Lead did not return a JSON Assignment plan」。Lead pane 實際輸出了完整的 `BRIDGE_BEGIN_… {"assignments":[{"id":"a1","workerPaneId":"w1X:p2","role":"implement","access":"write","writeScope":["tmp-roster-ok.txt"],…}]} BRIDGE_END_…`。
 
@@ -3052,7 +3052,20 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 重現方式／環境：2026-11-05 本機 macOS，政策 L1，bridge 載入 main `ad5d30c`（以 `./scripts/run.sh -r` 重啟）；task `task-8661b3cc-bc30-49d0-b521-9255c06f9b08`；journal 事件順序 `plan_requested` → `turn_dispatched`（01:17:40）→ `turn_settled`（01:17:44）→ `task_failed`；console 當時有 `hook Stop … chars=482`。只重現一次，**未確認是否穩定**。
 
-已確認：把 pane 上那份計畫原文直接餵給 `dist` 的 `parseAssignmentPlan`（`codingMode=true`）能成功解析，所以不是計畫內容或解析器本身的問題。**未確認根因**：猜測是 bridge 取得的回覆文字與 pane 上的不同（hook 的 `chars=482` 與截取範圍、Lead 在 5 秒內結束），尚未驗證，不能當結論。
+已確認：把 pane 上那份計畫原文直接餵給 `dist` 的 `parseAssignmentPlan`（`codingMode=true`）能成功解析，所以不是計畫內容或解析器本身的問題。
+
+**調查（2026-11-05）：**
+- 重現迴圈（離線、約 1 秒、可重跑）：把同一份計畫放進模擬的 Claude 畫面，經 `normalizeTerminalResponse("claude", …)` → 取 `BRIDGE_BEGIN…END` 之間 → `parseAssignmentPlan`。不換行（寬畫面）→ 成功；模擬 81 欄 pane 換行 → **失敗，訊息就是「Lead did not return a JSON Assignment plan」**，與症狀一致。
+- 機制（程式碼閱讀＋上面的重現）：`runTeamTurn`（`src/team-turn.ts`）對 Claude Lead 只讀終端畫面，`claudeResponseText` 只剝掉續行的 2 格縮排、保留換行；Claude Code 自己會依 pane 寬度硬換行，所以 JSON 的 key 或字串被換行切開（例如 `"acces⏎s"`），`JSON.parse` 失敗。Codex 有 `unwrapCodexJson` 處理，Claude 沒有。實際失敗時 Lead pane 寬度只有約 81 欄（`w1X` 左右對分），而之前成功的任務多半在整欄寬的單 pane。
+- **仍未確認：** bridge 當時實際收到的文字（沒有診斷紀錄）；換行也不能無損還原（硬切在 token 中間要直接接起來，在單字之間則原本被吃掉一個空白），所以單靠解析端修補有取捨；`hook Stop` 事件本身帶有完整未換行的回覆（`chars=482`），但 `runTeamTurn` 目前不使用它。
+
+修正範圍（2026-11-05，使用者選定候選 (1)）：`src/team-turn.ts` 的 `TeamTurnContext.hookFinal`——`runTeamTurn` 記下本回合開始時間，Agent 回到 idle／done 後先查 hook 的 Stop 訊息並取框內內容（`terminal: false`，不經畫面解析）；畫面已見到框但 hook 事件未到時最多再等 1.5 秒；沒有 hook 時照舊讀畫面。`src/team-orchestration.ts` 把 `hookFinal` 傳給規劃／統整／Worker 的回合；`src/team-task-engine.ts` 新增建構子參數；`src/main.ts` 以 `hookEvents` 與 `hookTransport` 設定實作（僅 `auto` 模式、依 session id 或 pane ID 比對）。未採用的候選：(2) 在解析端接回換行（空白無法無損還原）、(3) 要求 Lead 輸出單行 JSON（不可靠）。
+
+測試（2026-11-05，本機 macOS，非 CI）：`test/team-turn.test.ts` 新增 3 項（畫面框被換行切斷時採用 hook 完整訊息；沒有 hook 訊息時寬限後仍用畫面；hook 查詢帶本回合開始時間）。`npm run check` → 1129 tests、1128 pass、0 fail、1 skip（既有）；`npm run lint` ok。
+
+未驗證：重啟後在窄 pane（約 81 欄）重跑 Claude Lead 的 `card assign --coding`，確認 task 進入派工；Codex／agy／pi 的 hook 訊息是否也帶完整框（只改了共用路徑，未逐一實測）；hook 事件比寬限時間更晚到時仍會退回畫面（此時窄 pane 仍可能失敗）；沒有 hook 的 Claude（未安裝）仍受換行影響。
+
+下一步：merge 後重啟 bridge，重做上述窄 pane 驗收。
 
 修正範圍：無。測試：無新增。
 

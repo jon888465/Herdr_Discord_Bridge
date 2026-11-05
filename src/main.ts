@@ -226,6 +226,16 @@ async function startBridge(
     activeStreams,
     (owner) => pool.release(owner),
     config.allowedWorkspaceIds,
+    undefined,
+    (agent, since) => {
+      if (hookModeFor(config.hookTransport, agent.agent) !== "auto") return;
+      const session = agent.agent_session as
+        { kind?: string; value?: string } | undefined;
+      const event = session
+        ? hookEvents.stopSince(session.value, since)
+        : hookEvents.stopForPane(agent.pane_id, since);
+      return event?.message;
+    },
   );
   await tasks.reconcile();
   const handoffs = new SessionHandoffRuntime(
@@ -652,7 +662,8 @@ export async function handleCommand(
                   pullRequestChecks(defaultExec, repo, number),
                 files: (repo, number) =>
                   pullRequestFiles(defaultExec, repo, number),
-                allowedMethods: (repo) => allowedMergeMethods(defaultExec, repo),
+                allowedMethods: (repo) =>
+                  allowedMergeMethods(defaultExec, repo),
                 merge: (repo, input) =>
                   mergePullRequest(defaultExec, repo, input),
               },

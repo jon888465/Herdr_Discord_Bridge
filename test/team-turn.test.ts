@@ -108,3 +108,66 @@ test("the pane, terminal, workspace and Agent kind must still match even when a 
       JSON.stringify(changed),
     );
 });
+
+/** ISSUE-086：畫面上的 JSON 被 pane 寬度硬換行切斷，hook 訊息則是完整的。 */
+function wrappedPort(waits: AgentRecord[]) {
+  let prompt = "";
+  const port: OrchestrationPort = {
+    promptAgent: async (_target, text) => {
+      prompt = text;
+    },
+    waitAgent: async () => waits[0],
+    readAgent: async () => {
+      if (!prompt) return "";
+      const begin = prompt.match(/BRIDGE_BEGIN_[a-f0-9]+/)![0];
+      const end = prompt.match(/BRIDGE_END_[a-f0-9]+/)![0];
+      return `${begin}\n{"assignments":[{"id":"a1","acces\ns":"write"}]}\n${end}`;
+    },
+  };
+  const markers = () => ({
+    begin: prompt.match(/BRIDGE_BEGIN_[a-f0-9]+/)![0],
+    end: prompt.match(/BRIDGE_END_[a-f0-9]+/)![0],
+  });
+  return { port, markers };
+}
+
+test("a hook final message is used instead of a screen frame that the pane width broke", async () => {
+  const { port, markers } = wrappedPort([{ ...base }]);
+  const result = await runTeamTurn(base, "plan", port, 2_000, 20, {
+    taskId: "t",
+    phase: "planning",
+    hookFinal: () => {
+      const { begin, end } = markers();
+      return `${begin}\n{"assignments":[]}\n${end}`;
+    },
+  });
+  assert.equal(result.state, "done");
+  assert.equal(result.terminal, false);
+  assert.equal(result.text, '{"assignments":[]}');
+});
+
+test("without a hook message the screen frame is still used after a short grace period", async () => {
+  const { port } = wrappedPort([{ ...base }]);
+  const result = await runTeamTurn(base, "plan", port, 5_000, 20, {
+    taskId: "t",
+    phase: "planning",
+    hookFinal: () => undefined,
+  });
+  assert.equal(result.terminal, true);
+  assert.match(result.text, /acces\ns/);
+});
+
+test("the hook lookup is bounded by the time the turn started", async () => {
+  const { port } = wrappedPort([{ ...base }]);
+  const before = Date.now();
+  const seen: number[] = [];
+  await runTeamTurn(base, "plan", port, 5_000, 20, {
+    taskId: "t",
+    phase: "planning",
+    hookFinal: (_agent, since) => {
+      seen.push(since);
+      return undefined;
+    },
+  });
+  assert.ok(seen.length > 0 && seen.every((s) => s >= before));
+});
