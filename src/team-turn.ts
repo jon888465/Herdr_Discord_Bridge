@@ -4,7 +4,7 @@ import { normalizeTerminalResponse } from "./cli-adapter.js";
 import { stripAnsi } from "./format.js";
 import {
   CodexTranscript,
-  findCodexSessionByNonce,
+  findCodexRolloutByNonce,
   hasAgentSession,
   sameAgentSession,
 } from "./response-stream.js";
@@ -97,10 +97,15 @@ export async function runTeamTurn(
   }
   check();
   const since = Date.now();
-  const observedSession = async () =>
-    context?.observeSession && agent.agent?.toLowerCase().includes("codex")
-      ? await findCodexSessionByNonce(nonce, since)
-      : undefined;
+  const isCodex = Boolean(agent.agent?.toLowerCase().includes("codex"));
+  const observedSession = async () => {
+    if (!context?.observeSession || !isCodex) return undefined;
+    const match = await findCodexRolloutByNonce(nonce, since);
+    return match ? { kind: "id" as const, value: match.value } : undefined;
+  };
+  // ISSUE-089：codex 的回覆比 pane 可視高度長時，Herdr 的終端讀取只剩最後幾列，框會遺失；
+  // rollout 檔有完整、未換行的最終訊息。沒有已知 session 時用 nonce 找到 rollout。
+  let rolloutTriedAt = 0;
   const hookFrame = (current: AgentRecord): string | undefined => {
     const message = context?.hookFinal?.(current, since);
     return message === undefined
@@ -193,6 +198,20 @@ export async function runTeamTurn(
       throw new Error(`Agent ${agent.pane_id} ended in unknown`);
 
     check();
+    if (
+      !transcript &&
+      isCodex &&
+      ["idle", "done"].includes(lastStatus) &&
+      Date.now() - rolloutTriedAt >= 1000
+    ) {
+      rolloutTriedAt = Date.now();
+      try {
+        const match = await findCodexRolloutByNonce(nonce, since);
+        if (match) transcript = CodexTranscript.fromRollout(match, prompt);
+      } catch {
+        /* 找不到就維持原本的終端讀取 */
+      }
+    }
     if (transcript) {
       try {
         await transcript.poll();

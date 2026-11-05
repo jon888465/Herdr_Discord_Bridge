@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { runTeamTurn } from "../src/team-turn.js";
 import type { OrchestrationPort } from "../src/team-orchestration.js";
 import type { AgentRecord } from "../src/types.js";
@@ -170,4 +173,62 @@ test("the hook lookup is bounded by the time the turn started", async () => {
     },
   });
   assert.ok(seen.length > 0 && seen.every((s) => s >= before));
+});
+
+/**
+ * ISSUE-089：codex 的回覆比 pane 可視高度長時，終端讀取只剩最後幾列、框遺失；
+ * rollout 檔有完整的最終訊息，應優先採用，而且不受硬換行影響。
+ */
+test("a codex reply that scrolled out of the pane is read from its rollout file", async () => {
+  const home = mkdtempSync(join(tmpdir(), "codex-home-"));
+  const previous = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = home;
+  const codex: AgentRecord = { ...base, agent: "codex" };
+  let prompt = "";
+  const port: OrchestrationPort = {
+    promptAgent: async (_target, text) => {
+      prompt = text;
+      const begin = text.match(/BRIDGE_BEGIN_[a-f0-9]+/)![0];
+      const end = text.match(/BRIDGE_END_[a-f0-9]+/)![0];
+      const day = join(home, "sessions", "2026", "11", "05");
+      mkdirSync(day, { recursive: true });
+      const event = (payload: object) =>
+        JSON.stringify({ type: "event_msg", payload });
+      writeFileSync(
+        join(
+          day,
+          "rollout-2026-11-05T10-00-00-01a1a9e0-0000-7000-8000-000000000001.jsonl",
+        ),
+        [
+          event({ type: "task_started", turn_id: "t1" }),
+          event({ type: "user_message", message: text }),
+          event({
+            type: "agent_message",
+            phase: "final_answer",
+            message: `${begin}\n${"line\n".repeat(40)}{"ok":true}\n${end}`,
+          }),
+          event({ type: "task_complete", turn_id: "t1" }),
+        ].join("\n") + "\n",
+      );
+    },
+    waitAgent: async () => ({ ...codex, agent_status: "done" }),
+    // 終端畫面只剩輸入框：框已經捲出去，讀不到。
+    readAgent: async () => (prompt ? "› Ask Codex to do anything" : ""),
+  };
+  try {
+    const result = await runTeamTurn(codex, "plan", port, 5_000, 20, {
+      taskId: "t",
+      phase: "planning",
+      observeSession: true,
+    });
+    assert.equal(result.state, "done");
+    assert.equal(result.terminal, false);
+    assert.match(result.text, /\{"ok":true\}$/);
+    assert.equal(result.text.split("\n").length, 41);
+    assert.equal(result.session?.value, "01a1a9e0-0000-7000-8000-000000000001");
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previous;
+    rmSync(home, { recursive: true, force: true });
+  }
 });
