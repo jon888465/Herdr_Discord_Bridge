@@ -3327,3 +3327,20 @@ H4 目前進度（2026-11-05）：`REQ-20261105-h4b` 已走完 `card assign`→`
 修正範圍：無。候選：（1）`card pr`（和其他需要卡片狀態的指令）在檢查前先同步一次該卡片；（2）把掃描間隔縮短；（3）維持現狀，文件說明要等一下。**待使用者決定。**
 
 H4 脈絡：這是自動串接最小的摩擦；若要做成單一觸發，（1）最直接。
+
+## ISSUE-096：自動撿卡（H2）——政策選用的專案裡 `ready` 的卡片由 bridge 自己開始並依等級走到 merge
+
+更新日期：2026-11-05。狀態：修正中（第一部分已實作、待驗收：政策解析與執行器，**沒有任何呼叫端，所以目前不會自動發生任何事**；第二部分——接線、Lead 的開啟、實機驗收——尚未開始）。
+
+這是新功能，不是缺陷。使用者 2026-11-05 的決定（AskUserQuestion）：（1）自動做到哪一步：**一路到 merge**，由專案等級決定實際停在哪（L0 commit、L1 PR、L2 merge）；（2）哪些卡：**政策檔選用＋`ready`**（Agent 不能改政策檔，也不改變 `ready` 目前的意思）；（3）誰當 Lead：**bridge 自己開**，專案底下設定 repo 路徑與 Lead 種類；（4）並行：**一次一張**。
+
+第一部分的內容（2026-11-05）：`src/policy.ts` 新增 `autopick_lead`、`autopick:` 區塊與 `autopickFor`；autopick 的專案必須也明確列在 `projects`（不能靠 `default`，避免寬鬆的 default 讓工作自己開始）；路徑必須是絕對路徑、不可有 `..` 或控制字元。`src/autopick.ts`：`pickNext`（ready、宣告的專案被選用、先建立的先做、略過已試過的）、`runAutopick`（依等級依序執行並在每個停止條件停下）、`createAutopicker`（一次一張、不重試、政策檔有問題不撿）。所有外部動作經注入的 `AutopickSteps`，所以邏輯可以單元測試。
+
+安全設計：失敗或需要人就停下、保留 Lead 的 workspace 與 worktree；不重試（同一個程序內已試過的卡不再撿）；L2 的 merge 仍完全受 `card merge` 的守門（獨立 review、CI、PR 乾淨、不動敏感路徑）；沒有選用就什麼都不做。
+
+測試（2026-11-05，本機 macOS，非 CI）：`test/policy.test.ts` 新增 5 項（autopick 區塊與 Lead 種類、沒有區塊時政策物件形狀不變、Lead 預設 claude 且只收 claude／codex、autopick 專案必須在 projects 明確列出、路徑與重複的檢查）；`test/autopick.test.ts` 新增 11 項（選卡規則、legacy `project` 欄位、略過已試過的、L2 完整順序並在最後關閉 Lead、Lead 為 codex 時 reviewer 為 claude、L1 停在 PR 且 L0 停在 commit 都不 merge、失敗時停止並保留 Lead、task 未完成／卡片沒變 done／loop 沒 merge 都停下等人、Lead 開不起來就什麼都不做、排程器一次一張且不重試、政策檔缺少或不合法時不撿）。暫時破壞 L1 的停止條件時對應測試**失敗**（紅）。`node --test --test-timeout=60000 dist/test/*.test.js` → 1177 tests、1176 pass、0 fail、1 skip（既有）；`npm run lint` ok。
+
+未做／未驗證（第二部分）：接線（定期掃描、bridge 自己開 Lead workspace 並把本機 console 路由指過去、`command` 用本機 console 的 `handleCommand`、`waitTask` 與 `waitCardDone`（觸發卡片同步，ISSUE-095）、`loop` 的結果判讀）；通知（目前只會有 console 輸出）；實機驗收（先用 L0／L1 的無害卡，再用 L2）；`card policy` 顯示 autopick 設定；bridge 重啟時進行中的卡不會自動接續（會留在 in_progress，需要人處理）。
+
+下一步：第二部分——接線與實機驗收；先在 L1 專案用無害卡驗證到 PR，再驗 L2。
+

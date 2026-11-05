@@ -14,6 +14,13 @@
 //   projects:
 //     local:Herdr_Discord_Bridge: L1
 //
+// H2 自動撿卡（使用者 2026-11-05 決定）：政策檔明確選用才會有任何專案被自動撿卡——
+//   autopick_lead: claude          # 全域一個，claude 或 codex（預設 claude）
+//   autopick:
+//     local:Herdr_Discord_Bridge: /Users/jon/git_wk/Herdr_Discord_Bridge   # 專案 → repo 絕對路徑
+// 規則：autopick 的專案必須也明確列在 projects 裡（不能靠 default，避免寬鬆的 default 讓工作自己開始）；
+// 自動做到哪一步由該專案的等級決定（L0 到 commit、L1 到 PR、L2 一路到 merge），見 `src/autopick.ts`。
+//
 // 限制：同一個 OS 使用者的任何程序（包含 Agent）都能改這個檔案；這裡只拒絕「別人可寫」的檔案，
 // 不能防止同一使用者的 Agent。
 
@@ -21,9 +28,14 @@ import fs from "node:fs";
 import { PROJECT_NAME } from "./card.js";
 
 export type PolicyLevel = "L0" | "L1" | "L2";
+export type AutopickLead = "claude" | "codex";
 export interface Policy {
   default: PolicyLevel;
   projects: Record<string, PolicyLevel>;
+  /** 專案 → repo 絕對路徑；沒有 autopick 區塊時整個欄位不存在。 */
+  autopick?: Record<string, string>;
+  /** 自動撿卡時 bridge 自己開的 Lead 種類；只有設定過才存在，預設 claude。 */
+  autopickLead?: AutopickLead;
 }
 
 export const DEFAULT_POLICY: Policy = Object.freeze({
@@ -35,7 +47,15 @@ const LEVELS: readonly string[] = ["L0", "L1", "L2"];
 const MAX_LINE_CHARS = 200;
 const MAX_PROJECTS = 200;
 export const POLICY_MAX_BYTES = 16 * 1024;
-const TOP_KEYS = ["version", "default", "projects"];
+const TOP_KEYS = [
+  "version",
+  "default",
+  "projects",
+  "autopick",
+  "autopick_lead",
+];
+const MAX_AUTOPICK = 20;
+const AUTOPICK_LEADS: readonly string[] = ["claude", "codex"];
 
 export type ParsePolicyResult =
   { ok: true; policy: Policy } | { ok: false; error: string };
@@ -51,8 +71,9 @@ export function parsePolicy(text: string): ParsePolicyResult {
   const seen = new Set<string>();
   const policy: Policy = { default: "L0", projects: {} };
   let version: string | undefined;
-  let inProjects = false;
+  let section: "projects" | "autopick" | undefined;
   let count = 0;
+  let autopickCount = 0;
 
   const lines = text.replace(/\r\n/g, "\n").split("\n");
   for (const [index, raw] of lines.entries()) {
@@ -65,14 +86,18 @@ export function parsePolicy(text: string): ParsePolicyResult {
     const indent = line.length - line.trimStart().length;
 
     if (indent === 0) {
-      const match = /^([A-Za-z]+):(?: +(.*))?$/.exec(line);
+      const match = /^([A-Za-z_]+):(?: +(.*))?$/.exec(line);
       if (!match) return fail(n, 'expected "key: value"');
       const [, key, value] = match;
       if (!TOP_KEYS.includes(key)) return fail(n, `unknown key "${key}"`);
       if (seen.has(key)) return fail(n, `duplicate key "${key}"`);
       seen.add(key);
-      inProjects = key === "projects";
-      if (key === "version") {
+      section = key === "projects" || key === "autopick" ? key : undefined;
+      if (key === "autopick_lead") {
+        if (value === undefined || !AUTOPICK_LEADS.includes(value))
+          return fail(n, 'invalid "autopick_lead"; use claude or codex');
+        policy.autopickLead = value as AutopickLead;
+      } else if (key === "version") {
         if (value !== "1")
           return fail(n, 'unsupported version; only "version: 1" is known');
         version = value;
@@ -80,15 +105,47 @@ export function parsePolicy(text: string): ParsePolicyResult {
         if (!isLevel(value))
           return fail(n, `invalid level for "default"; use L0, L1 or L2`);
         policy.default = value;
-      } else if (value !== undefined)
+      } else if (
+        value !== undefined &&
+        (key === "projects" || key === "autopick")
+      )
         return fail(
           n,
-          '"projects" must be followed by an indented block, not a value',
+          `"${key}" must be followed by an indented block, not a value`,
         );
       continue;
     }
 
-    if (indent !== 2 || !inProjects) return fail(n, "unexpected indentation");
+    if (indent !== 2 || !section) return fail(n, "unexpected indentation");
+    if (section === "autopick") {
+      const entry = line.slice(2);
+      const at = entry.indexOf(": ");
+      if (at < 0) return fail(n, 'expected "<project>: <repo absolute path>"');
+      const name = entry.slice(0, at);
+      const repoPath = entry.slice(at + 2).trim();
+      if (!PROJECT_NAME.test(name))
+        return fail(
+          n,
+          `invalid project name "${name}"; use <machine>:<directory>, for example local:Foo`,
+        );
+      if (
+        !repoPath.startsWith("/") ||
+        repoPath.split("/").includes("..") ||
+        // eslint-disable-next-line no-control-regex
+        /[\u0000-\u001f\u007f]/.test(repoPath)
+      )
+        return fail(
+          n,
+          `autopick path for ${name} must be an absolute path without ".." or control characters`,
+        );
+      policy.autopick ??= {};
+      if (Object.hasOwn(policy.autopick, name))
+        return fail(n, `duplicate autopick project ${name}`);
+      if (++autopickCount > MAX_AUTOPICK)
+        return fail(n, `more than ${MAX_AUTOPICK} autopick projects`);
+      policy.autopick[name] = repoPath;
+      continue;
+    }
     const entry = line.slice(2);
     const split = entry.lastIndexOf(": ");
     if (split < 0) return fail(n, 'expected "<project>: <level>"');
@@ -109,6 +166,12 @@ export function parsePolicy(text: string): ParsePolicyResult {
   }
   if (version === undefined)
     return { ok: false, error: 'missing "version: 1"' };
+  for (const name of Object.keys(policy.autopick ?? {}))
+    if (!Object.hasOwn(policy.projects, name))
+      return {
+        ok: false,
+        error: `autopick project ${name} must also be listed under "projects" with an explicit level`,
+      };
   return { ok: true, policy };
 }
 
@@ -117,6 +180,20 @@ export function levelFor(policy: Policy, projectName: string): PolicyLevel {
   return Object.hasOwn(policy.projects, projectName)
     ? policy.projects[projectName]
     : policy.default;
+}
+
+/** 這個專案是否被選用自動撿卡：回傳 repo 路徑、等級與 Lead 種類；沒有選用回傳 undefined。 */
+export function autopickFor(
+  policy: Policy,
+  projectName: string,
+): { repoPath: string; level: PolicyLevel; lead: AutopickLead } | undefined {
+  if (!policy.autopick || !Object.hasOwn(policy.autopick, projectName))
+    return undefined;
+  return {
+    repoPath: policy.autopick[projectName],
+    level: levelFor(policy, projectName),
+    lead: policy.autopickLead ?? "claude",
+  };
 }
 
 export interface LoadedPolicy {
