@@ -3252,7 +3252,7 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 ## ISSUE-092：`--coding` 任務通過後沒有人 commit，`card pr` 無法接續（H4 端到端的第一個斷點）
 
-更新日期：2026-11-05。狀態：已修正、待驗收（原始碼與自動化檢查完成；**尚未 merge、尚未重啟 bridge、尚未實機驗收**）。
+更新日期：2026-11-05。狀態：已驗收（PR #114 已 merge，bridge 於 2026-11-05 重啟載入；`card commit` 在 H4 兩輪實機各成功一次，見下）。
 
 使用者可見症狀（由程式閱讀確認，H4 端到端案例的準備階段）：`card assign --worktree --coding` 走到 `ready-to-integrate`（ISSUE-091／E14 已驗收）之後，驗證過的版本只是 worktree 裡的**未提交修改**。`--coding` 的規則禁止 Worker commit、push，bridge 本身也不 commit（SPEC）；但 `card pr` 要求分支上有比基準多的 commit 且 worktree 乾淨，否則拒絕：「worktree 有未提交的修改，請先 commit 或處理」。所以自動流程在這裡斷開，先前的驗收都是我或使用者手動補 commit。
 
@@ -3267,6 +3267,8 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 未驗證：實機（真的 `--coding` 任務之後 `card commit` → `card pr`）；git hook（pre-commit）失敗時的回報；repo 沒有設定 git 使用者時的錯誤訊息；`card loop` 自動呼叫（沒做）。
 
 下一步：merge 後重啟 bridge，用真的卡跑 H4：`card assign --worktree --coding` → `card commit` → `card pr` → `card loop --merge`（merge 需要使用者把政策暫時設成 L2）。
+
+**實機驗收（2026-11-05，本機 macOS，政策 L2，bridge 載入 main `4511651` 之後）：** H4 第一輪卡 `REQ-20261105-h4b`：`card commit` → 「已 commit 到分支 card/REQ-20261105-h4b（c65cd471e501）：docs/h4-e2e-trace.md…沒有 push」，worktree 乾淨，commit 只含該檔；第二輪卡 `REQ-20261105-h4c`（刪除檔案）：`card commit` → commit `9bbe3f38a497`，刪除也被正確提交。兩次之後 `card pr` 都成功（PR #116、#118），代表分支上有 commit 且 worktree 乾淨的前提成立。**未驗證：** pre-commit hook 失敗、repo 沒有 git 使用者時的訊息；`card loop` 自動呼叫（沒做）。
 
 ## ISSUE-093：Lead 漏排 verify 就回空計畫，驗收閘門失敗且沒有補救機會（H4 端到端的第二個斷點）
 
@@ -3288,9 +3290,11 @@ H4 端到端進度：第一次嘗試在此停住（`card commit` 與 `card pr` �
 
 下一步：merge 後重啟 bridge，用新卡重跑 H4：`card assign --worktree --coding` → `card commit` → `card pr` → `card loop --merge`。
 
+
+**H4 兩輪的觀察（2026-11-05）：** 兩輪實機 coding 任務 Lead 都自己排了 verify，所以閘門回饋**沒有被觸發**，這個修正仍只有單元測試證據，狀態維持「已修正、待驗收」。
 ## ISSUE-094：Lead 的 pane 被 profile Worker 一路切小，之後 `card review`／`card loop` 開不出 reviewer 的 pane（H4 端到端的第三個斷點）
 
-更新日期：2026-11-05。狀態：已修正、待驗收（根因已確認；原始碼與自動化檢查完成；**尚未 merge、尚未重啟 bridge、尚未實機驗收**）。
+更新日期：2026-11-05。狀態：已驗收（PR #117 已 merge，bridge 於 2026-11-05 重啟載入 `dfac751`；H4 第二輪 `card loop` 的 reviewer pane 開得出來，見下）。
 
 使用者可見症狀：H4 端到端案例的第二次嘗試 `REQ-20261105-h4b`：`card assign --worktree --coding` 成功（Lead 自動啟用 helper／reviewer／claude 三個 profile，約 2 分 25 秒到 `ready-to-integrate`）、`card commit` 成功（commit `c65cd47`，worktree 乾淨、沒有 push）、`card pr` 成功（PR #116）。接著 `card loop REQ-20261105-h4b --agent codex --merge`：「loop 停下來了…停在 review。原因：review 沒有進行：基底 pane 太小，無法分割出 reviewer 的 pane（too small to split）」。
 
@@ -3308,3 +3312,18 @@ H4 目前進度（2026-11-05）：`REQ-20261105-h4b` 已走完 `card assign`→`
 
 下一步：merge 後重啟 bridge，重下 `card loop REQ-20261105-h4b --agent codex --merge`，走完 review → 等 CI → merge；merge 後另開 PR 刪除 `docs/h4-e2e-trace.md`，並清掉 H4 殘留（workspace `w2F`／`w2G`、worktree、卡片）。
 
+**實機驗收（2026-11-05，本機 macOS，政策 L2，bridge 載入 main `dfac751`）：** H4 第二輪卡 `REQ-20261105-h4c`（同一個 workspace 同樣有三個 profile Worker 把 Lead 的 pane 切小），`card loop REQ-20261105-h4c --agent codex --merge`：bridge 用 codex 開出 reviewer 的 pane（先前同型情況在此失敗：「基底 pane 太小…too small to split」），review 第 1 輪 pass、驗收條件兩項都 ✓、reviewer pane 自己關閉，CI 全過，接著 bridge 自己 squash merge PR #118。**未驗證：** 多次 review 後版面越來越擠。
+
+## ISSUE-095：task 完成後卡片要等到下一次掃描才變成 `done`，緊接著下 `card pr` 會被拒絕（H4 觀察）
+
+更新日期：2026-11-05。狀態：待決定（根因已確認；尚未修正；影響是自動串接需要等待或重試，不是資料錯誤）。
+
+使用者可見症狀：H4 兩輪都一樣：task `task_completed` 之後立刻下 `card commit`（成功）再下 `card pr`，第一次被拒絕「卡片 … 的狀態是 in_progress；只有 done 的卡片可以開 PR」，約幾十秒後 console 出現 `Card sync updated: <卡片>`，重下就成功。第二輪：`task_completed` 07:54:46、第一次 `card pr` 被拒絕約 07:55:25、重下成功約 07:56。
+
+預期行為：task 完成後，`card pr` 不需要使用者猜時間。
+
+已確認根因（程式閱讀，`src/main.ts`、`src/card-sync.ts`）：卡片檔與 task journal 的同步是**每 60 秒掃一次**（`CARD_SYNC_INTERVAL_MS = 60 * 1000`，`sweep` → `syncCards`）；`task_completed` 的事件與 `status: done` 都是在下一次掃描才寫入（事件時間取 task 的 `finishedAt`，所以流程紀錄看起來「同時」）。所以最壞要等 60 秒。
+
+修正範圍：無。候選：（1）`card pr`（和其他需要卡片狀態的指令）在檢查前先同步一次該卡片；（2）把掃描間隔縮短；（3）維持現狀，文件說明要等一下。**待使用者決定。**
+
+H4 脈絡：這是自動串接最小的摩擦；若要做成單一觸發，（1）最直接。
