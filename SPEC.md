@@ -189,6 +189,8 @@ active Agent 作為 Lead，先要求 Lead 產生受驗證的 Assignment plan，�
 
 `findingRefs` 只能引用 review 判 `changes_requested` 時登記的 finding，id 以 coding 證據列出的已儲存 id 為準；diagnose 回報的 finding 不會登記為可引用的 finding。將診斷成果交給後續指派時，應在 `artifactRefs` 引用該診斷的 artifact id（`a-<assignmentId>-<n>`），並可在指派的 instruction 摘要其內容（ISSUE-105；僅補規劃提示，驗證規則不變）。
 
+Coding 計畫回饋（ISSUE-106，2026-11-06，已修正、待實機驗收）：只在 coding 任務，`parseAssignmentPlan`、`validateAssignmentPlan`（含 `validateCodingRound`）、每輪／總指派數上限或跨輪 ID 重複檢查拒絕計畫時，把原錯誤回給 Lead 在同一工作回合重排；被拒計畫不得啟動任何指派，已完成的指派與 artifacts 保留。每 task 的 `MAX_PLAN_REJECTIONS = 2` 最多回饋兩次，第三次拒絕仍記錄後，以包含拒絕序號及原錯誤的訊息失敗。每次 planning 嘗試（含被拒重排）仍計入既有 `maxRounds` 上限；gate 回饋額度與驗證規則不變，非 coding 無效計畫仍立即失敗。`plan_rejected` journal 事件的完整 task 快照保存 `planRejections`（零起算工作回合 `round`、task 累計 `rejectionCount`、`errorMessage`），重啟載入保留紀錄；既有保守 reconciliation 不自動恢復或重新派工。本回饋不涵蓋 Worker 執行或派工前 artifact 檢查失敗。
+
 Coding 首版對 review／verify 期間漂移採保守失敗：任務若保留此類 drift artifact，後續 pass 不解除最終 gate 的拒絕；需另建任務與 baseline 重新驗收。正常 changes_requested 的修正與再 review 仍可在同一任務完成。
 
 Lead planning 對 Codex 優先讀取 dispatch 前連接的本機 transcript，以相符

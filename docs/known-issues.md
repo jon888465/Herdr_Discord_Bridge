@@ -3523,3 +3523,23 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 測試（2026-11-06，本機 macOS，非 CI）：初次 `npm run build` 因缺少 `tsc` 失敗（exit 127），`npm ci` 成功後，`npm run build && node --test --test-name-pattern 'ISSUE-105' dist/test/coding-workflow.test.js` 在提示修正前 **0/1 通過**（exit 1，紅，缺少引用說明）。提示修正後 `npm run build` 成功（exit 0）；`node --test --test-name-pattern 'ISSUE-105' dist/test/coding-workflow.test.js` **1/1 通過**（exit 0）；`node --test --test-timeout=60000 dist/test/coding-workflow.test.js` **26/26 通過、0 fail**（exit 0）；`npm run lint` 成功（exit 0，174 個 TypeScript 檔）。
 
 未驗證與下一步：**尚未實機驗證** Lead 之後是否會改用 `artifactRefs` 交接診斷成果；`REQ-20261106-agy-pool` 下一次嘗試為第一個驗證對象。原始碼與 build 已更新，但執行中的 bridge 未重啟、未部署；既有失敗 task 與診斷成果不會自動恢復，未 commit／push。自動化通過不代表 Discord／Herdr／CLI 端到端驗收完成。
+
+## ISSUE-106：coding 計畫驗證失敗沒有回饋 Lead 重排，直接令 task 失敗
+
+更新日期：2026-11-06。狀態：已修正、待驗收（原始碼與自動化檢查完成；**尚未實機驗證、尚未重啟或部署 bridge**）。
+
+使用者可見症狀／重現環境：2026-11-06，卡 `REQ-20261106-agy-pool` 的三類實機失敗：
+
+- `read-only coding assignments in a writer round must depend on that writer`：task `task-06eb2e97-7b7b-496e-b1b7-a10d722c343b`、`task-f10f36ba-f01d-4ed3-94fc-8f4c17d7bbb6`，約 30 秒被拒。
+- `coding review has no implementation artifact`：task `task-544ae3b7-5cdc-4086-b97f-7315def8ca39`，兩個診斷完成後第三個指派失敗。
+- `Assignment w1-agy-optin references unknown finding d2-optin-roster`：task `task-4cf4eab3-0449-4dd3-af75-d4c2c26a39fd`，三個診斷完成約 4 分鐘後，第二回合計畫被拒。
+
+預期行為：coding 計畫在解析／驗證、指派數量上限、跨回合 ID 重複檢查失敗時，把錯誤回給 Lead 在同一工作回合重排；拒絕的計畫不啟動指派，先前已完成指派及 artifacts 保留。每 task 最多回饋兩次，第三次拒絕以原錯誤與拒絕序號失敗。非 coding 任務立即失敗的行為不變。
+
+已確認根因：規劃迴圈的上述檢查直接 throw，沒有像 ISSUE-093 空計畫 gate 回饋的補救路徑。ISSUE-103／104／105 補提示只能處理特定誤排，無法提供通用回饋。`coding review has no implementation artifact` 的實機錯誤發生在派工前 artifact 檢查；本修正只回饋規劃解析／驗證拒絕，不重試 Worker 執行或派工前檢查，因此不能保證三類實機症狀全部自動恢復。
+
+修正範圍：`src/team-orchestration.ts` 在驗證成功、寫入 plan 與派工之前捕捉上述錯誤；`MAX_PLAN_REJECTIONS = 2` 為 task 共用額度，與 gate 額度分開。提示包含保留成果與不重做的指引；每次規劃嘗試仍消耗 `maxRounds`。`plan_rejected` 事件經 `src/team-task-engine.ts` reducer 寫入 `src/team-task-store.ts` 的 `planRejections` 快照，含零起算工作回合、累計拒絕次數及原錯誤；沿用完整快照重放，重啟不自動續跑。`validateCodingRound`、其他驗證規則、`config.json`、`policy.yml` 均未改。`SPEC.md` 同步契約；`CONTEXT.md` 已連結本清單與 durable task 文件，無需另增索引。
+
+測試（2026-11-06，本機，非 CI）：初次 `npm run build` 因缺少依賴（`tsc`）失敗（exit 127），`npm ci` 成功。暫時停用新回饋、恢復遇錯即 throw，以 `npm run build` 與 `node --test --test-name-pattern ISSUE-106 dist/test/coding-workflow.test.js` 驗證紅燈：4 項中 3 fail、1 pass（一般任務仍立即失敗），隨後恢復實作。最終 `npm run build`、`npm run lint` 成功（exit 0，174 個 TypeScript 檔）。`node --test --test-timeout=60000 dist/test/coding-workflow.test.js dist/test/team-orchestration.test.js dist/test/team-task-engine.test.js` → 73/73 pass、0 fail（exit 0；含 store 的 journal 與重啟測試）。涵蓋新增 6 項：writer 計畫被拒後修正完成且未重複派工、journal 事件與重啟載入、第三次拒絕失敗、一般任務直接失敗、跨回合成果保留與輪數上限、解析拒絕、數量上限拒絕；既有 ISSUE-093 gate 回饋測試通過。
+
+未驗證與下一步：**尚未實機驗證**；`REQ-20261106-agy-pool` 下一次嘗試是第一個驗證對象，觀察 Lead 被告知錯誤後是否真的修正計畫、被拒計畫未派工、已完成成果保留。原始碼／build 的檢查不代表執行中的 bridge 已更新；未重啟、未部署、未 commit／push，舊 failed task 不會自動恢復。既有輪數上限可能先於回饋額度用完而終止任務，這是保留的限制。
