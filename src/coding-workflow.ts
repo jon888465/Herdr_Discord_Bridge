@@ -278,6 +278,7 @@ export function codingPlanningAddendum(): string {
     "Return an empty assignments array only to request the acceptance gate. An empty plan does not authorize you to edit the repository. The bridge, not this prompt, decides completion.",
     "Review execution can succeed while its verdict asks for changes. Refer to earlier findings and artifacts by findingRefs and artifactRefs. Dependencies still refer only to this round.",
     "When a round contains a writer (access write), every other assignment in that round (diagnose, review, verify) must list the writer's assignment id directly in its own dependsOn. A dependency that reaches the writer only through another assignment, such as verify depending on review which depends on the writer, is rejected. Extra dependencies, for example verify also depending on review, are fine.",
+    "If diagnosis, research, or discussion/critique with other agents is needed before implementation, plan those read-only assignments as a standalone round with no writer. After those assignments finish, plan the writer and subsequent review and verify in the next round; each read-only assignment in that writer round must depend directly on that writer as described above.",
     "A verification counts as failed if one of the commands the verifier reports exits non-zero. When you instruct a verifier, ask it to report only checks that must pass with exit 0 and to write absence checks as `! grep -q \'text\' file`; the commands and exit codes of earlier verifications are in the coding evidence.",
   ].join("\n");
 }
