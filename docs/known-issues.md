@@ -3703,3 +3703,27 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 限制：v1 只能在選定 Agent 所在的機器啟動（跨機器另案）；遠端 canonical path 需 ssh 可用，否則拒絕；`--cwd` 以空白串接其餘參數；pane 太小沿用 ISSUE-108。
 
 未驗證／下一步：實機確認 (1) pane 以指定 model 與強度啟動；(2) agy 信任提示被回報而非確認；(3) 白名單非空時 `--cwd` 的拒絕與遠端 realpath；(4) 遠端同機啟動。完成後改為已驗收並記錄日期與環境。
+
+**2026-11-06 實機驗證（本機 macOS，bridge 以 main `27aa532` 重啟後，從 console 下指令）：**核心路徑通過，狀態維持「已修正、待驗收」，是否驗收由使用者決定。
+
+- 拒絕路徑（都沒有啟動任何東西）：`agent start` 無規格顯示用法；`:agy::high` →「agy 沒有已確認的推理強度（level）參數，不猜」；`:codex::med;touch/x` →「不合法的 level」；`:a:b:c:d` →「規格最多四段，收到 5 段」；`nope:codex` →「未知的 machine "nope"（只接受 local、agy-pod）」。
+- `agent start :codex:gpt-6.1-sol:medium` → 回報 pane `w1:p9`、機器 local、種類 codex、model `gpt-6.1-sol`、level `medium`、「未自動切換」。從行程確認實際參數為 `codex -m gpt-6.1-sol -c model_reasoning_effort=medium`，codex 畫面底部為 `GPT-6.1-Sol medium`（上一項(1)已驗）。
+- `agent start claude` → 回報 model、level 皆「CLI 預設」；`agent start :::high` → 種類沿用 claude、level `high`，pane 畫面為 `Sonnet 5.5 with high effort`（省略寫法已驗）。測試用的兩個 pane 已關閉。
+
+**仍未驗證：**(2) agy 信任提示被回報而非確認（這次工作目錄 `~/git_wk/Herdr_Discord_Bridge` 本來就已被 agy 信任，沒有機會看到提示）；(3) 白名單非空時 `--cwd` 的拒絕與遠端 realpath；(4) 遠端（`agy-pod`）同機啟動；Discord 端 `/herdr agent start` 沒有試。另：卡片原意是可指定其他 machine，v1 只在選定 Agent 所在的機器啟動（見「限制」），指定 `agy-pod:…` 目前不能用。
+
+## ISSUE-115：Team 的 verify 在 sandbox 內跑 `npm test` 一定撞 socket 限制，權限請求過期會讓整個 task 失敗
+
+更新日期：2026-11-06。狀態：待決定（已知限制；尚未修正）。
+
+使用者可見症狀：卡片 `REQ-20261106-agent-launch-spec`（task `task-f1480af3-308c-412f-85d8-caf25adc194d`）的 verify 由 codex（`profile:helper`）執行，`npm test` 在 sandbox 內因禁止 Unix socket listen 失敗（`EPERM`），codex 要求在 sandbox 外重跑，bridge 把它轉成權限請求。12:25 開出第一次請求，使用者選「1」（只允許這一次）；12:43 第二回合 `verify2` 再問一次，等到 12:58 逾時（約 15 分鐘），`verify2` 回報 `Timed out waiting for current response from w41:p4 (last state: blocked)`，task 失敗（`autopick_stopped`），**即使實作與兩輪 review（第 2 輪 pass）都已完成**。更早的 `REQ-20261106-agy-pool` 也問過同一個請求。
+
+預期行為：需要使用者回答的權限請求不應讓已經做完的 task 整個失敗；或 verify 不需要在 sandbox 內跑會被擋的測試。
+
+已確認事實：(1) `npm test` 含需要 Unix socket 的測試，在 codex sandbox 內一定失敗；(2) 每個 verify 回合都會再問一次（選「這次」不會延續到下一回合）；(3) 權限請求有約 15 分鐘期限，過期即令該指派失敗；(4) 通知只靠聊天回報，使用者不在畫面前就會漏掉（我也在到期前沒有再催）。**根因（為什麼 verify 不改用 CI 或 sandbox 外的方式）未確認。**
+
+處理：這次由我在 worktree 手動補跑 `npm run build` 與 `npm test`（1266 項中 1265 通過、0 失敗、1 略過），再手動 commit、開 PR #143，由使用者 merge。
+
+修正範圍：無。可能的方向（未決定）：(a) 使用者選「以後都不問」（放寬 sandbox 範圍，由使用者決定）；(b) verify 的提示改成「`npm test` 的 socket 測試在 sandbox 內會失敗，改請求權限前先說明」，或讓 verify 只跑 build 與相關測試，完整測試交 CI；(c) 權限請求過期時把指派標為 blocked 等人，而不是令 task 失敗，並可重新發出；(d) 請求等待超過一半時間時由 bridge 再通知一次。
+
+未驗證：codex 以外的 verify Worker（claude）是否也會撞同一個限制；(c) 的行為牽涉 `src/team-orchestration.ts`，修改前需確認不影響其他逾時語意。
