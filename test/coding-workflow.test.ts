@@ -1308,6 +1308,13 @@ test("team ask --coding is opt-in and does not reinterpret the original prompt",
   }
 });
 
+test("ISSUE-103: the planning prompt separates pre-implementation read-only work into a writer-less round", () => {
+  assert.match(
+    codingPlanningAddendum(),
+    /diagnosis, research, or discussion\/critique.*before implementation.*standalone round with no writer.*After those assignments finish.*writer and subsequent review and verify in the next round.*depend directly on that writer/s,
+  );
+});
+
 test("ISSUE-087: the planning prompt states that read-only assignments must list the writer directly, and the validator still enforces it", () => {
   assert.match(
     codingPlanningAddendum(),

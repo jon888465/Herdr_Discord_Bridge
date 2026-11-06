@@ -3476,3 +3476,19 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 未驗證：實機——merge 並重啟 bridge 後，一張會改 `SPEC.md` 的卡在 L2 能由 bridge 自己 merge。因為這個 PR 動到 `src/sensitive-paths.ts`（仍在清單內），本身必須由人 merge。
 
+## ISSUE-103：規劃提示未說明實作前的唯讀工作須先排在沒有 writer 的獨立回合
+
+更新日期：2026-11-06。狀態：已修正、待驗收（原始碼與自動化檢查完成；**尚未在實機執行流程驗證、尚未重啟或部署 bridge**）。
+
+使用者可見症狀／重現環境：2026-11-06 的卡 `REQ-20261106-agy-pool`，約 30 秒內連續兩次，Lead 將 `diagnose-agy`、`critique-plan`（唯讀）→ `implement-agy`（writer，依賴前兩者）→ `review-impl` 排在同一回合。整個計畫被 `read-only coding assignments in a writer round must depend on that writer` 拒絕，task 直接 failed，Worker 未開始實作。
+
+預期行為：需要先診斷、研究或與其他 Agent 討論／批評時，Lead 先將唯讀工作排成沒有 writer 的獨立回合；完成後的下一回合再排 writer 與後續 review／verify，該回合每個唯讀指派仍在自己的 `dependsOn` 直接列出 writer id。
+
+已確認根因：`codingPlanningAddendum()` 只說明有 writer 的回合中，其他指派必須直接依賴 writer，未說明實作前的診斷／討論必須放在更早、沒有 writer 的回合。這是規劃提示缺口，**不是 `validateCodingRound` 或其他驗證規則的 bug**。
+
+修正範圍（2026-11-06）：只在 `src/coding-workflow.ts` 的 `codingPlanningAddendum()` 增加上述兩句規劃指引，並在 `test/coding-workflow.test.ts` 新增提示文字測試；`validateCodingRound` 與所有守門邏輯不變。`SPEC.md` 同步記錄回合規則。
+
+測試（2026-11-06，本機，非 CI）：此 worktree 起初沒有依賴，`npm run build` 因找不到 `tsc` 失敗（exit 127）；`npm ci` 成功後，新增測試先以 `npm run build` 編譯，再執行 `node --test --test-name-pattern 'ISSUE-103' dist/test/coding-workflow.test.js`，修正提示前 **0/1 通過**（exit 1，紅）。提示修正後第一次測試的正規表示式把 `next round` 與 `writer` 順序寫反，`ISSUE-103|ISSUE-087` 為 **1/2 通過**（exit 1）；修正測試比對後，`npm run build` 成功，`node --test --test-name-pattern 'ISSUE-103|ISSUE-087' dist/test/coding-workflow.test.js` **2/2 通過**，`node --test --test-timeout=60000 dist/test/coding-workflow.test.js` **24/24 通過**，`npm run lint` 成功（174 個 TypeScript 檔）。
+
+未驗證與下一步：**尚未實機驗證** Lead 是否會將「先診斷、後實作」拆成兩回合；卡 `REQ-20261106-agy-pool` 是第一個驗證對象。此工作樹尚未 commit／push，執行中的 bridge 未重啟；自動化測試通過不能當作 live 驗收。
+
