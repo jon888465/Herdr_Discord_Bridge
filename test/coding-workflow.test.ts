@@ -1308,6 +1308,18 @@ test("team ask --coding is opt-in and does not reinterpret the original prompt",
   }
 });
 
+test("ISSUE-105: the planning prompt distinguishes registered review findings from diagnosis artifacts", () => {
+  const prompt = codingPlanningAddendum();
+  assert.match(
+    prompt,
+    /findingRefs.*only.*findings registered.*review.*changes_requested.*ids listed in the coding evidence/s,
+  );
+  assert.match(
+    prompt,
+    /Findings reported by diagnose.*not referenceable.*artifactRefs.*diagnosis artifact id.*a-<assignmentId>-<n>.*instruction/s,
+  );
+});
+
 test("ISSUE-104: the planning prompt reserves review for completed implementation and uses diagnose for pre-implementation critique", () => {
   const prompt = codingPlanningAddendum();
   assert.match(

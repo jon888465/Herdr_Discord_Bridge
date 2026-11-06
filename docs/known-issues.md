@@ -3507,3 +3507,19 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 測試（2026-11-06，本機，非 CI）：初次 `npm run build` 因缺少 `tsc` 失敗（exit 127），`npm ci` 成功後，`npm run build && node --test --test-name-pattern 'ISSUE-104' dist/test/coding-workflow.test.js` 在提示修正前 **0/1 通過**（exit 1，紅，缺少角色說明）。提示修正後首次 `npm run lint` 因腳本連字串內的 `any` 也禁止而失敗（exit 1）；改為同義的 `whichever Worker is selected` 並同步測試後，`npm run build` 成功（exit 0），`node --test --test-timeout=60000 dist/test/coding-workflow.test.js` **25/25 通過、0 fail**（exit 0），`npm run lint` 成功（exit 0，174 個 TypeScript 檔）。
 
 未驗證與下一步：**尚未實機驗證** Lead 之後是否會把實作前批評排成 `diagnose`；`REQ-20261106-agy-pool` 下一次嘗試是第一個驗證對象。原始碼與 build 已更新，但執行中的 bridge 未重啟、未部署，既有失敗 task 與診斷成果不會因此自動恢復；未 commit／push。自動化通過不代表 Discord／Herdr／CLI 端到端驗收完成。
+
+## ISSUE-105：規劃提示未說明 findingRefs 只能引用 review 登記的 finding，診斷成果應用 artifactRefs
+
+更新日期：2026-11-06。狀態：已修正、待驗收（原始碼與自動化檢查完成；**尚未實機驗證、尚未重啟或部署 bridge**）。
+
+使用者可見症狀／重現環境：2026-11-06，卡 `REQ-20261106-agy-pool` 第五次嘗試，task `task-4cf4eab3-0449-4dd3-af75-d4c2c26a39fd`。第一回合三個唯讀診斷完成，artifacts 為 `a-d1-adapter-flow-1`、`a-d2-roster-pool-2`、`a-d3-critique-3`，task 的 `coding.findings` 為空；第二回合 Lead 排 writer 時把 diagnose 報告的 finding id `d2-optin-roster` 放進 `findingRefs`，計畫被以 `references unknown finding` 拒絕，task 失敗，約 4 分鐘診斷成果作廢。
+
+預期行為：Lead 只在 `findingRefs` 引用 review 判 `changes_requested` 時登記的 finding，id 以 coding 證據列出的為準。diagnose 回報的 finding 不是可引用的 finding；交接診斷成果時，在 `artifactRefs` 引用診斷 artifact id（`a-<assignmentId>-<n>`），並可在後續指派的 instruction 摘要內容。
+
+已確認根因：`codingPlanningAddendum()` 原本只說用 findingRefs／artifactRefs 引用先前成果，未交代兩者的適用範圍。這是**提示缺口，非引擎規則錯誤**；`applyCodingResult` 只登記 review 判 `changes_requested` 的 findings，`validateCodingRound` 拒絕未登記的 finding id 是正確守門，不應放寬。
+
+修正範圍（2026-11-06）：只在 `src/coding-workflow.ts` 的 `codingPlanningAddendum()` 加入兩句引用指引；`test/coding-workflow.test.ts` 新增提示文字測試，既有測試不變；`SPEC.md` 同步 findingRefs／artifactRefs 語意。`validateCodingRound`、`applyCodingResult` 與其他驗證規則完全不變，未修改 `config.json`、`policy.yml`。`CONTEXT.md` 已連到本清單，無需新增索引。
+
+測試（2026-11-06，本機 macOS，非 CI）：初次 `npm run build` 因缺少 `tsc` 失敗（exit 127），`npm ci` 成功後，`npm run build && node --test --test-name-pattern 'ISSUE-105' dist/test/coding-workflow.test.js` 在提示修正前 **0/1 通過**（exit 1，紅，缺少引用說明）。提示修正後 `npm run build` 成功（exit 0）；`node --test --test-name-pattern 'ISSUE-105' dist/test/coding-workflow.test.js` **1/1 通過**（exit 0）；`node --test --test-timeout=60000 dist/test/coding-workflow.test.js` **26/26 通過、0 fail**（exit 0）；`npm run lint` 成功（exit 0，174 個 TypeScript 檔）。
+
+未驗證與下一步：**尚未實機驗證** Lead 之後是否會改用 `artifactRefs` 交接診斷成果；`REQ-20261106-agy-pool` 下一次嘗試為第一個驗證對象。原始碼與 build 已更新，但執行中的 bridge 未重啟、未部署；既有失敗 task 與診斷成果不會自動恢復，未 commit／push。自動化通過不代表 Discord／Herdr／CLI 端到端驗收完成。
