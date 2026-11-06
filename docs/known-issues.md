@@ -56,7 +56,7 @@
 | ISSUE-054 | 缺少單檔卡片驗證指令，Agent 轉 Mantis 單後無法自我檢查 | 已修正、待驗收 | 2026-10-30 新增 `herdr-card-check`；自動化測試通過；待使用者用真實 Mantis 單請 Agent 轉卡片並以此指令驗收 |
 | ISSUE-055 | 遠端長期存在的 pod 上，開發完成後的 worktree／workspace／分支清理尚未設計 | 待調查（先紀錄，未來處理） | 2026-11-02 使用者要求先紀錄；功能尚未實作，無實際殘留；原則與 3 個問題待使用者決定 |
 | ISSUE-056 | 機敏內容遮蔽漏掉多種憑證樣式；兩份遮蔽邏輯重複且不一致；handoff 摘要先截斷再遮蔽 | 已修正、待驗收 | 2026-11-02 已整併為 `src/redact.ts`，自動化測試通過；待實際 session handoff 驗收 |
-| ISSUE-047 | Codex 在 Discord 送問後出現「Agent identity changed (session changed); response capture stopped」，擷取在核准通知前中止 | 已修正、待驗收（2026-11-06；尚未在 Discord 對全新 Agent 實機驗證） | 首次登記共用判斷；見 ISSUE-047「2026-11-06 重新開啟」 |
+| ISSUE-047 | Codex 在 Discord 送問後出現「Agent identity changed (session changed); response capture stopped」，擷取在核准通知前中止 | 已修正、待驗收（2026-11-06；Discord 對全新 codex 第一次送問已實機驗證通過，待使用者確認驗收） | 首次登記共用判斷；見 ISSUE-047「2026-11-06 重新開啟」 |
 | ISSUE-046 | Discord 輸入權限選項數字（3）後沒有任何反應，之後按 Approve 才有動作 | 已驗收（2026-10-28，數字／allow／deny／按鈕／📨；原 `3` 沒反應根因未確認） | 2026-10-28 重啟後數字 1／2 回覆成功且有 📨；使用者早先的 `3` 沒反應原因仍未確認 |
 | ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | Claude Stop 與 PermissionRequest 已驗收（2026-10-28，使用者實測）；Codex Stop 與 allow／deny（y／esc 快捷鍵）、hookTransport 設定與 hooks 指令已驗收（2026-10-28）；agy Stop 已驗收（2026-10-28）；pi Linux 缺漏補裝後已驗收（2026-10-29，保留 macOS 驗收歷史）；遠端 machine（agy）已驗收（2026-10-28，修正後重測） | 遠端 Claude／Codex／pi 未涵蓋；見 docs/hook-transport-proposal.md |
 | ISSUE-044 | Claude 回覆在 Discord 被重複貼出多則 | 重新開啟→已修正、待驗收 | 2026-10-28 重現，確認根因為回合尾巴後的「※ recap」行擋住完成判斷；原始碼與單元測試完成，已 commit（ccec39b）並於 2026-10-28 重啟（w2:p10），Discord 未驗收 |
@@ -1737,6 +1737,10 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 測試紀錄（2026-11-06，本機 macOS，非 CI）：初次 `npm run build` 因缺少 tsc exit 127；`npm ci` exit 0 後，新增串流案例紅燈 5 pass／1 fail（exit 1）。純函式測試先因尚未匯出函式 build exit 2；實作後補齊 fixture 的 agent_status。最終 `npm run build` exit 0；`node --test dist/test/response-delivery.test.js dist/test/response-stream.test.js dist/test/console-agent.test.js` 33/33 pass、0 fail（exit 0；此 checkout 無 console-agent.test.ts，實際執行前兩個檔案）。首次執行既有診斷寫入設定目錄被 sandbox 拒絕（EPERM，不影響斷言），改以 `HERDR_PLUGIN_STATE_DIR=/private/tmp/issue047-capture-tests` 重跑同一命令仍 33/33 pass、exit 0，診斷成功保存，無需 sandbox 外執行。`npm run lint` exit 0（177 TypeScript 檔），`git diff --check` exit 0。本次新增涵蓋首次登記送出答案、舊 session A → B 拒絕、pane／terminal／workspace／種類改變拒絕、純函式拒絕候選消失／空 session，並補回合中新建 session 的串流回歸案例；原有 `sessionCreatedSince` 的 codex／agy／pi 測試未刪除或弱化。
 
 部署／驗收限制：**尚未在 Discord 對全新 Agent 實機驗證**；未重啟、未部署 bridge，執行中的 bridge 未載入本次修改，舊訊息不會因此補送。下一步由 Lead 交付後安排 Discord 對全新 Agent 的第一次送問驗收，另驗證 Console 與既有 session 替換守門。claude／agy／pi 新 pane 實機情境仍未驗證。
+
+**2026-11-06 部署與 Discord 實機驗證（使用者操作，本機 macOS）：**PR #149 以 `c4201c9` merge 後，bridge 於 22:19（台北）重啟，`dist/src/response-stream.js` 與 `dist/src/main.js` 含 `isFirstSessionRegistration`。我用 `agent start :codex:gpt-6.1-sol:medium` 開全新的 codex `w1:pG`（送問前 `agent_session` 為 `null`），使用者在 Discord 下 `agent use w1:pG`，第一次送「你在什麼專案」（22:36，附圖 `.herdr-discord-bridge/attachments/message-LaQNrR/1.jpg`，已以圖片工具讀取）：回應卡片顯示 `finished — final response delivered · 總耗時 5秒`，答案「目前在 Herdr_Discord_Bridge 專案」有送回 Discord，沒有 `session changed`。bridge log 同時出現 `codex session first registered during turn pane=w1:pG; following new session`（修正新增的那一行，證明走的是這條路徑）與 `hook Stop session=01a1b13b pane=w1:pG`，沒有 `capture stopped`。修正前同樣情境在 `w1:p9`、`w1:pE` 連續 2 次中止。
+
+**驗證範圍與限制：**這證明「`agent start` 開的全新 codex 第一次從 Discord 送問」已修好；console 的 `ask w1:pF …`（不經 `ConsoleAgent`）在修正前後都沒中止，也沒有走到新分支（log 沒有該行），所以它不能鑑別修正有沒有效，只算回歸檢查（回答 `ok` 正常）。**仍未驗證：**第二次送問、claude／agy／pi 的新 pane、既有 session 被換成別的 session 的守門（只有單元測試）。狀態維持「已修正、待驗收」，是否標已驗收由使用者決定。
 
 ### ISSUE-042 修正（2026-10-28，已實作、待驗收）
 
@@ -3651,6 +3655,8 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 使用者可見症狀：卡 `REQ-20261106-plan-rounds` 第一次嘗試（task `task-2204c0af-69e9-41d3-b2a4-e2cff7bec906`）：3 個指派 06:37:07Z 完成後，bridge 在 06:37:08Z 把 replan 的 prompt 派給 Lead（`w37:p1`，journal 記為 `dispatched`），之後 Lead 畫面是空的輸入列、狀態 `idle`，沒有新的 Stop hook，約 15 分鐘後 06:52:13Z 逾時，task 變成 `blocked`：`Timed out waiting for current response from w37:p1 (last state: idle); no verified completion`。同一個 workspace 有 4 個 pane，Lead 與 claude Worker 的可視高度各只有 6 行（codex 兩個分別是 13 與 29 行），claude Worker 的畫面停在「Teach auto mode about your environment?」選單（我在 06:51 手動選了 Not now 才消失）。
 
 預期行為：pane 太小時不要繼續分割，改開新 tab；prompt 送出後如果 Lead 沒有開始處理要能偵測並重送或明確失敗，不要等到 15 分鐘逾時。
+
+**2026-11-06 再現（卡 `REQ-20261106-stream-first-session`，task `task-d1e2ff49-db63-4dd2-bf45-95fdfd7fd23f`）：**這次打到的是 bridge 自己的 review，不是 Lead。Team 完成後 PR #149 開出（14:00:29Z），`card loop` 在 14:00:32Z 停在 review：`review 沒有進行：基底 pane 太小，無法分割出 reviewer 的 pane（too small to split）；同一個版面裡也沒有夠大的 pane`，`autopick` 因此停止。當時 workspace `w43` 的四個 pane 可視高度為 6、6、7、7 行。我把三個已完成的 Worker pane 關掉，Lead pane 變成 35 行後，手動 `card loop … --merge`，review 才執行（第 1 輪 pass）。同一次還有另一個無關的衝突：PR 與剛 merge 的 main 衝突（`mergeStateStatus` 為 `DIRTY`，CI 因此沒有啟動），head 換了之後上一輪 review 對新 head 不算數，需再 `card review`。**根因仍未確認**，但 ISSUE-108 的「pane 太小」現在影響 Lead 規劃、Worker 與 reviewer 三處；人工緩解是關掉已完成的 Worker pane。
 
 已確認：pane 高度如上；逾時由既有機制產生。**未確認：**Lead 沒有處理 replan prompt 的直接原因（小 pane 吞掉輸入、被選單遮住、或其他）；我試過放大 Lead pane 查看，但該 workspace 不在聚焦狀態、放大沒生效，沒有取得 Lead 當時的完整畫面。重跑同一張卡（06:57:37Z）沒有再發生，不能確定是小 pane 造成。
 
