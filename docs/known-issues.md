@@ -3546,9 +3546,9 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 ## ISSUE-107：agy 作為 `--coding` Worker／Reviewer 的支援（分三部分）
 
-更新日期：2026-11-06。狀態：修正中。
+更新日期：2026-11-06。狀態：已修正、待驗收。
 
-**ISSUE-107 第 1 部分（自動候選選用）已完成；本工作樹補上第 2 部分 session 登記的原始碼與自動化檢查，第 3 部分 reviewer 獨立性仍未完成。整體狀態維持修正中，agy 尚不可視為可用，使用者不應現在打開 agy 選用。**
+**第 1、2 部分已合併；本卡補齊第 3 部分，整合合併後三部分即全部合併（本工作樹尚未 commit／merge）。agy 作為 Worker／Reviewer 的 `--coding` 全流程尚未實機驗證。使用者須自行在 agy profile 的 capabilities 加入 `implementation` 或 `review` 才會自動啟用。**
 
 使用者可見症狀：`--coding` 未指定 Worker 時，即使 agy profile 宣告 implementation／review，也不會加入自動候選。手動勾選不能補齊 session 登記與獨立 reviewer 支援。
 
@@ -3558,14 +3558,14 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 已確認根因：自動候選原本只比對 `AUTO_CODING_KINDS` 的 claude／codex，未讀 agy capabilities。參考分支的診斷另指出 session 首次出現後的 pool 登記與 reviewer 身分傳遞缺口；第 1 部分未修第 2、3 部分；第 2 部分進度見下節，仍沒有實機確認其表現。
 
-修正範圍（第 1 部分）：`src/coding-roster.ts` 加入 `OPT_IN_CODING_KIND`、`OPT_IN_CODING_CAPABILITIES` 與 `autoCodingCandidate`，同步註解、錯誤訊息與 roster 測試；`src/main.ts` 只改 startTeamTask 的 E14 註解；同步 SPEC 與兩份 README。未修改 agent-pool、team-*、config.json 或 policy.yml，獨立 review、verify 與 card merge 守門不變。
+修正範圍（第 1 部分，以下保留該部分當時的範圍與測試紀錄）：`src/coding-roster.ts` 加入 `OPT_IN_CODING_KIND`、`OPT_IN_CODING_CAPABILITIES` 與 `autoCodingCandidate`，同步註解、錯誤訊息與 roster 測試；`src/main.ts` 只改 startTeamTask 的 E14 註解；同步 SPEC 與兩份 README。未修改 agent-pool、team-*、config.json 或 policy.yml，獨立 review、verify 與 card merge 守門不變。
 
 測試命令與結果（2026-11-06，本機，非 CI）：首次 `npm run build` 因缺少 `tsc` 失敗（exit 127）；`npm ci` 成功後，`npm run build` 成功（exit 0），`node --test dist/test/coding-roster.test.js` 為 10/10 pass、0 fail（exit 0）。最終重跑 build 與同一測試仍成功（10/10 pass）；`npm run lint` 成功（exit 0，174 個 TypeScript 檔），`git diff --check` 成功。涵蓋 agy 未宣告／空清單／analysis-only 不入池、implementation／review／兩者入池、pi 排除、至少兩個與既有 claude／codex 行為。
 
-未驗證與下一步：Lead 接續第 2 部分 session 登記、第 3 部分 reviewer 獨立性，再安排 agy 首輪／重用 session、implement 與獨立 review 的實機驗收。本卡沒有部署或重啟 bridge，執行中的 bridge 不代表已載入新原始碼或 build；舊失敗 task／訊息不會自動補送。沒有 commit／push。
+未驗證與下一步：前兩部分與本卡第三部分整合後，Lead 安排 agy 首輪／重用 session、implement 與獨立 review 的實機驗收。本卡沒有部署或重啟 bridge，執行中的 bridge 不代表已載入新原始碼或 build；舊失敗 task／訊息不會自動補送。沒有 commit／push。
 
 
-### 第 2 部分：首輪驗證後登記 pool session（2026-11-06）
+### 第 2 部分：首輪驗證後登記 pool session（2026-11-06，保留當時紀錄）
 
 狀態：修正中。症狀／預期：agy 啟動時沒有 session，首輪完成才被 Herdr 登記，pool 仍保留未知身分，下一次 acquire 因 unknown → known 拒絕。預期僅將回合中核對一致的 session 回寫原綁定，讓之後可安全重用。
 
@@ -3577,4 +3577,17 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 測試命令與結果（2026-11-06，本機 macOS，非 CI）：`npm ci` exit 0；`npx tsc --noEmit` exit 0；`npm run build` exit 0；`node --test --test-timeout=60000 dist/test/agent-pool.test.js dist/test/team-turn.test.js dist/test/team-task-engine.test.js` 76/76 pass、0 fail、0 skip，exit 0；`npm run lint` exit 0（174 個 TypeScript 檔）。包含 pool 各項拒絕條件、查詢期間保留／綁定改變、持久化後重用、turn session 核對，以及真實 pool 接線的 done／blocked／failed／codex fixture。
 
-未驗證與交接：**尚未實機驗證，沒有 Discord／Herdr／CLI 端到端驗收證據**。原始碼與 build 已更新，執行中的 bridge 未部署／重啟，舊 failed task／訊息不會補送；未 commit／push。Lead 接續第 3 部分及整體實機驗收。本卡限定八個檔案，SPEC／README 的整體「尚未可用」限制仍適用；其中第 2 部分進度文字須由後續整合卡同步，不能據本次自動化結果宣稱 agy 已可用。
+未驗證與交接：**尚未實機驗證，沒有 Discord／Herdr／CLI 端到端驗收證據**。原始碼與 build 已更新，執行中的 bridge 未部署／重啟，舊 failed task／訊息不會補送；未 commit／push。第 3 部分原始碼進度見下節；Lead 接續整體實機驗收。本卡限定八個檔案，SPEC／README 的整體「尚未可用」限制仍適用；其中第 2 部分進度文字須由後續整合卡同步，不能據本次自動化結果宣稱 agy 已可用。
+
+
+### 第 3 部分：reviewer 獨立性的守門時機（2026-11-06）
+
+狀態：已修正、待驗收。症狀／根因（原始碼與 fixture 確認）：agy 首輪派工前沒有 session，原本的 review 派工檢查會以 unknown reviewer 拒絕；implement 入帳只用派工紀錄，亦遺失回合中確認的 authorSession。
+
+修正範圍：只修改 `src/team-task-engine.ts`、`test/team-task-engine.test.ts` 與本節。新增 sessionDeferredKind；agy／antigravity 沒有 session 時，派工前只拒絕沒有 implementation artifact 與同作者 pane。已知 session 的 agy 與其他非 codex 種類仍走原本 assertIndependentReview；codex rollout 規則不變。入帳優先採用 `observedSession ?? sessionIdentity(worker)`（codex 仍只認 observedSession），讓首輪 authorSession 正確入帳。**這是守門時機的調整，不是放寬**：入帳仍呼叫既有 assertIndependentReview，未知作者、未知 reviewer、同 session 一律記 independentReview=false、independenceFailure 與 verdict=inconclusive，不能記 pass。verify／card merge 守門不變。
+
+測試涵蓋：agy 首輪作者身分入帳、無 session reviewer 可派工並以不同已知 session 通過、未知作者／未知 reviewer／同 session 入帳 fail closed、同 pane 與沒有 implementation artifact 派工前拒絕，以及 opencode／claude／pi 無已知 reviewer 身分仍派工前拒絕。
+
+測試命令與結果（2026-11-06，本機 macOS，非 CI）：初次工作樹缺依賴，`npx tsc --noEmit` 嘗試查 registry 遇 ENOTFOUND；`npm ci` 成功（exit 0）後，重跑 `npx tsc --noEmit` 成功（exit 0），`npm run build` 成功（exit 0），`node --test --test-timeout=60000 dist/test/team-task-engine.test.js` 39/39 pass、0 fail、0 skip（exit 0；含本卡新增 8 項測試），`git diff --check` 成功（exit 0）。
+
+未驗證與交接：第 1、2 部分已在 main 合併，本卡第 3 部分交由 Lead／bridge 合併；三部分合併後仍為「已修正、待驗收」，**agy Worker／Reviewer `--coding` 全流程尚未實機驗證**，使用者須自行加入上述 profile capability 才會啟用。沒有部署／重啟 bridge，執行中程序未確認載入新版本，舊 failed task／訊息不會補送；未 commit／push。依本卡三檔限制未修改 SPEC／README，其中舊的第 1／2 部分進度敘述須由 Lead 後續整合同步；本節不把未合併改動或自動化結果宣稱為已部署或實機可用。

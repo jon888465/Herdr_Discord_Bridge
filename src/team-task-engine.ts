@@ -48,6 +48,15 @@ function isCodex(agent: AgentRecord): boolean {
   return Boolean(agent.agent?.toLowerCase().includes("codex"));
 }
 
+/**
+ * ISSUE-107：agy 要處理完第一個 prompt 才被 Herdr 登記 session，所以派工時可能還沒有身分。
+ * 這種 reviewer 的獨立性判斷延後到回合結束；其他種類維持派工前就要有已知身分。
+ */
+function sessionDeferredKind(agent: AgentRecord): boolean {
+  const kind = agent.agent?.toLowerCase() ?? "";
+  return kind === "agy" || kind.includes("antigravity");
+}
+
 function knownSession(a: AgentRecord): boolean {
   const s = a.agent_session as { kind?: unknown; value?: unknown } | undefined;
   return (
@@ -395,6 +404,15 @@ export class TeamTaskEngine {
             throw new Error("same-session review is not an independent review");
           return;
         }
+        // ISSUE-107：agy 還沒有 session 時，只先擋沒有 implementation artifact 與同 pane；
+        // 未知作者、未知 reviewer、同 session 都在入帳時 fail closed（inconclusive）。
+        if (sessionDeferredKind(worker) && !sessionIdentity(worker)) {
+          if (!authors.length)
+            throw new Error("coding review has no implementation artifact");
+          if (authors.some((author) => author.paneId === worker.pane_id))
+            throw new Error("same-session review is not an independent review");
+          return;
+        }
         assertIndependentReview(authors, worker);
       },
       onAssignmentDone: (
@@ -408,9 +426,10 @@ export class TeamTaskEngine {
       ) => {
         if (!assignment.coding) return;
         // ISSUE-088：codex 不採用 Herdr 的 agent_session（hook 的 pane 對應不可信），只認 rollout 觀察值。
+        // ISSUE-107：優先採用回合內核對的身分，沒有才退回派工紀錄。
         const identity = isCodex(worker)
           ? observedSession
-          : sessionIdentity(worker);
+          : (observedSession ?? sessionIdentity(worker));
         let independence: { independent: boolean; failure?: string } = {
           independent: true,
         };
