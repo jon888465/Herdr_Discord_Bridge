@@ -3606,6 +3606,8 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 **2026-11-06 合併狀況：**因為第一次的完整實作（PR #136，diff 73638 字元）超過 review 上限 60000，bridge 的獨立 review 沒有執行（見 ISSUE-111），改拆成三個 PR，各自由 bridge 自己 review 並 merge：#137（`a96fda5`，選用機制）、#138（`fc7398c`，session 登記）、#139（`4e8a1d7`，reviewer 獨立性判斷）；bridge 已於 2026-11-06 09:23:02Z 重啟載入。**agy 作為 Worker 或 Reviewer 的 `--coding` 全流程仍未實機驗證**（從沒真的讓 agy 擔任過）；要驗證需使用者在 `config.json` 的 agy profile 加上 `implementation` 或 `review`，再用一張無害的卡跑一輪。PR #136 仍開著、等使用者決定關閉。
 
+**agy 實機驗證卡（2026-11-06）：**本卡 `REQ-20261106-agy-verify` 的實作階段由 `agy` profile 擔任 writer 執行，實作完成時 `agy` 自報僅修改 `docs/known-issues.md` 一個檔案。至於後續獨立 review 是否通過，以及 `agy` 的 session 身分是否被正確登記，見這張卡的流程紀錄與 task journal，由使用者核對。
+
 **2026-11-06 實機證據（agy 驗證卡 `REQ-20261106-agy-verify`，PR #141 `2d3b2ce`）：**第一次嘗試（task `task-9b81c6dc-…`，09:43–09:44Z）失敗，原因見 ISSUE-113（agy 停在信任資料夾提示，profile 啟動不就緒）。使用者在 agy pane 確認信任後清理重跑，第二次（task `task-6460f2c0-4562-49cb-9994-50c047049c2f`，11:04:17–11:07:19Z，約 3 分鐘；11:09:48Z 由 bridge 在 L2 下 squash merge）從 task journal 核對到：
 
 - writer：`impl-agy` 的 `workerPaneId` 是 `profile:agy`，在 pane `w3Z:p2` 執行，agent 為 `agy`（`herdr:antigravity_cli`）；implement artifact `a-impl-agy-1` 的 `authorSession` 是 agy 的 session `0c50ac78-0e6b-43fb-a553-6ce72d927462`，與 agent-pool 的 `w3Z/agy` 綁定一致（第 2 部分 `refreshSession`、`onWorkerSession` 在實機上有作用）。
