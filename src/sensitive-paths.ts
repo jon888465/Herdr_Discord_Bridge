@@ -11,7 +11,6 @@ export const SENSITIVE_PATHS: readonly string[] = [
   "AGENTS.md",
   "package.json",
   "scripts/",
-  "SPEC.md",
   "src/policy.ts",
   "src/github.ts",
   "src/sensitive-paths.ts",

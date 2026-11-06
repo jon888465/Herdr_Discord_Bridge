@@ -474,12 +474,12 @@ const withFiles = (files: string | Error) =>
 
 test("the outcome lists the sensitive paths the PR touches, after the PR exists (F6)", async () => {
   const { deps, log } = withFiles(
-    "src/main.ts\n.github/workflows/ci.yml\nSPEC.md\n",
+    "src/main.ts\n.github/workflows/ci.yml\nAGENTS.md\n",
   );
   const result = await openCardPullRequest(deps, { card: card(), worktree });
   assert.deepEqual(result.sensitivePaths, [
     ".github/workflows/ci.yml",
-    "SPEC.md",
+    "AGENTS.md",
   ]);
   const create = log.findIndex((line) => line.includes("pr create"));
   const files = log.findIndex((line) => line.includes("/files"));

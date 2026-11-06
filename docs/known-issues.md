@@ -3459,3 +3459,20 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 測試（2026-11-06，本機 macOS，非 CI）：`test/autopick-wiring.test.ts` 新增 1 項（含三個情境：進度行在前、最後以「loop 結束…已 merge」收尾 → 算合併；進度裡有「已 merge」但以「loop 停下來了」收尾 → 不算；進度在前、「loop 結束」但沒有「已 merge」 → 不算）。修正前該項**失敗**（紅，重現實機問題），修正後通過。`node --test --test-timeout=60000 dist/test/*.test.js` → 1196 tests、1195 pass、0 fail、1 skip（既有）；`npm run lint` ok。
 
 未驗證：實機（merge 後 runner 回報「完成到 loop」、不寫 `failed`、關閉 Lead workspace）；這次誤報留下的殘留（Lead workspace `autopick-REQ-20261106-auto5`、卡片上的 `failed` 事件、遠端分支 `card/REQ-20261106-auto5`）需手動清理，卡片事件是事實紀錄不改寫。
+
+## ISSUE-102：`SPEC.md` 在敏感路徑清單內，導致功能類的卡片在 L2 幾乎都退回人工 merge（H2 自動撿卡觀察）
+
+更新日期：2026-11-06。狀態：已修正、待驗收（原始碼與自動化檢查完成；**尚未 merge、尚未重啟 bridge、尚未實機驗證**）。
+
+使用者可見症狀：自動撿卡 L2 跑 ISSUE-095 的卡（`REQ-20261106-issue095`，PR #130）：獨立 review 第 2 輪 `pass`、CI 全綠，`card merge` 卻拒絕：「這個 PR 動到敏感路徑：SPEC.md。這類 PR 一律由人 merge」，runner 停在 merge、卡片記 `failed`／`autopick_stopped`、Lead workspace 保留。使用者 2026-11-06 手動 merge（`1e66fc4`）。
+
+預期行為：敏感路徑只放「改了就能讓程式在 CI／使用者機器上執行任意東西，或改動守門規則」的檔案。`SPEC.md` 是文件，AGENTS.md 又要求「行為改變時必須同步 SPEC.md」，所以新功能的 PR 幾乎一定會改它；列在清單內等於讓 L2 對功能類卡片幾乎都退回人工。
+
+使用者決定（2026-11-06）：把 `SPEC.md` 移出清單。取捨：Agent 可能靠改 `SPEC.md` 暗中降低驗收標準；仍有獨立 reviewer 看 diff 與 AGENTS.md 的規定把關，不再由 merge 守門硬擋。
+
+修正範圍（2026-11-06）：`src/sensitive-paths.ts` 移除 `SPEC.md`；其餘清單（`.github/`、`AGENTS.md`、`package.json`、`scripts/`、`src/policy.ts`、`src/github.ts`、清單檔自己）不變。`SPEC.md` 的敏感路徑段落同步。
+
+測試（2026-11-06，本機 macOS，非 CI）：`test/sensitive-paths.test.ts` 新增「SPEC.md 不是保護路徑」；原本用 `SPEC.md` 當敏感範例的 5 個測試改用 `AGENTS.md`／`package.json`（`card-merge-wiring`、`card-fix-flow`、`card-pr-flow`、`sensitive-paths`）。`node --test --test-timeout=60000 dist/test/*.test.js` → 1201 tests、1200 pass、0 fail、1 skip（既有）；`npm run build`、`npm run lint` ok。
+
+未驗證：實機——merge 並重啟 bridge 後，一張會改 `SPEC.md` 的卡在 L2 能由 bridge 自己 merge。因為這個 PR 動到 `src/sensitive-paths.ts`（仍在清單內），本身必須由人 merge。
+

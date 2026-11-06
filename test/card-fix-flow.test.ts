@@ -287,11 +287,11 @@ test("a partial fix keeps the skipped findings with their reasons", async () => 
 });
 
 test("a fix that touches sensitive paths is still reported as fixed, with those paths listed", async () => {
-  const { deps } = setup({ files: ["src/export.ts", "SPEC.md", ".github/workflows/ci.yml"] });
+  const { deps } = setup({ files: ["src/export.ts", "AGENTS.md", ".github/workflows/ci.yml"] });
   const result = await runCardFix(deps, input());
   const outcome = result.ok ? result.outcome : undefined;
   assert.equal(outcome?.kind, "fixed");
-  assert.deepEqual(outcome?.kind === "fixed" && outcome.sensitivePaths, ["SPEC.md", ".github/workflows/ci.yml"]);
+  assert.deepEqual(outcome?.kind === "fixed" && outcome.sensitivePaths, ["AGENTS.md", ".github/workflows/ci.yml"]);
 });
 
 test("a pane that cannot be closed is reported but does not change the outcome", async () => {

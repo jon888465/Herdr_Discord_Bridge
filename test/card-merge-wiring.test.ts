@@ -174,7 +174,7 @@ test("each failing condition refuses the merge, lists every reason, and never ca
     ["review of an older head", {}, {}, { body: passedBody("e".repeat(40)) }, /review 通過的是 head eeeeeeeeeeee/],
     ["red CI", { checks: async () => ({ conclusion: "failure" }) }, {}, {}, /CI/],
     ["pending CI", { checks: async () => ({ conclusion: "pending" }) }, {}, {}, /還在跑/],
-    ["sensitive path", { files: async () => ({ files: ["SPEC.md", "src/a.ts"], complete: true }) }, {}, {}, /敏感路徑.*SPEC\.md/s],
+    ["sensitive path", { files: async () => ({ files: ["AGENTS.md", "src/a.ts"], complete: true }) }, {}, {}, /敏感路徑.*AGENTS\.md/s],
     ["unknown file list", { files: async () => ({ files: [], complete: false }) }, {}, {}, /無法確認/],
     ["behind main", { mergeState: async () => ({ state: "OPEN", headSha: HEAD, isDraft: false, mergeable: "MERGEABLE", mergeStateStatus: "BEHIND", base: "main" }) }, {}, {}, /落後/],
     ["draft", { mergeState: async () => ({ state: "OPEN", headSha: HEAD, isDraft: true, mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", base: "main" }) }, {}, {}, /草稿/],
