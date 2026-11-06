@@ -3606,6 +3606,14 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 **2026-11-06 合併狀況：**因為第一次的完整實作（PR #136，diff 73638 字元）超過 review 上限 60000，bridge 的獨立 review 沒有執行（見 ISSUE-111），改拆成三個 PR，各自由 bridge 自己 review 並 merge：#137（`a96fda5`，選用機制）、#138（`fc7398c`，session 登記）、#139（`4e8a1d7`，reviewer 獨立性判斷）；bridge 已於 2026-11-06 09:23:02Z 重啟載入。**agy 作為 Worker 或 Reviewer 的 `--coding` 全流程仍未實機驗證**（從沒真的讓 agy 擔任過）；要驗證需使用者在 `config.json` 的 agy profile 加上 `implementation` 或 `review`，再用一張無害的卡跑一輪。PR #136 仍開著、等使用者決定關閉。
 
+**2026-11-06 實機證據（agy 驗證卡 `REQ-20261106-agy-verify`，PR #141 `2d3b2ce`）：**第一次嘗試（task `task-9b81c6dc-…`，09:43–09:44Z）失敗，原因見 ISSUE-113（agy 停在信任資料夾提示，profile 啟動不就緒）。使用者在 agy pane 確認信任後清理重跑，第二次（task `task-6460f2c0-4562-49cb-9994-50c047049c2f`，11:04:17–11:07:19Z，約 3 分鐘；11:09:48Z 由 bridge 在 L2 下 squash merge）從 task journal 核對到：
+
+- writer：`impl-agy` 的 `workerPaneId` 是 `profile:agy`，在 pane `w3Z:p2` 執行，agent 為 `agy`（`herdr:antigravity_cli`）；implement artifact `a-impl-agy-1` 的 `authorSession` 是 agy 的 session `0c50ac78-0e6b-43fb-a553-6ce72d927462`，與 agent-pool 的 `w3Z/agy` 綁定一致（第 2 部分 `refreshSession`、`onWorkerSession` 在實機上有作用）。
+- reviewer 獨立性：review 由 codex（`w3Z:p3`，session `01a1b089-…`）執行，與作者 session 不同，結果 `pass`，沒有被 fail closed 擋下（第 3 部分的入帳身分判斷在實機上有作用）。
+- verify：claude（`w3Z:p4`）的 `git diff` 檢查命令 exit code 皆為 0；diff 只有 `docs/known-issues.md` +2 行。
+
+**仍未驗證：**agy 擔任 **reviewer**（這次 reviewer 是 codex）、agy 的 session 在 agy 為 reviewer 時是否能取得並判斷獨立。第 1 部分的自動候選（不指定 Worker 時由 roster 自動加入）這次是 Lead 在計畫裡明確指名 `profile:agy`，也沒有單獨驗證。狀態維持「已修正、待驗收」，是否驗收由使用者決定。
+
 ## ISSUE-108：同一個 workspace 有多個 Agent pane 時，Lead／Worker pane 只剩約 6 行，replan 的 prompt 沒有被 Lead 處理
 
 更新日期：2026-11-06。狀態：待調查（根因未確認；使用者建議：pane 太小時改開新 tab）。
@@ -3655,3 +3663,21 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 預期行為：workspace 已不存在時，`card cleanup` 仍應能移除 worktree（沒有未提交修改的前提下）並更新索引，或至少給出明確的人工處理步驟。SPEC 目前只寫了「使用者手動移除 worktree 後 cleanup 會失敗」，這次是相反的順序（先關 workspace）。
 
 已確認根因：`card cleanup` 經由 Herdr 的 `worktree.remove`，需要 workspace 還在。修正範圍：無。教訓：要清理時先下 `card cleanup`，再關 Lead workspace。
+
+## ISSUE-113：agy 在新的 worktree 資料夾會停在「信任資料夾」提示，profile 啟動不就緒，錯誤訊息沒指出要去哪個 pane 處理
+
+更新日期：2026-11-06。狀態：待決定（已知限制；尚未修正，目前靠使用者手動確認）。
+
+使用者可見症狀：agy 驗證卡 `REQ-20261106-agy-verify` 第一次執行時，Lead 的計畫正確（`implement` 給 `profile:agy`），但 agy pane `w3X:p2` 停在 Antigravity CLI 的選單 `Do you trust the contents of this project? > Yes, I trust this folder / No, exit`。bridge 的 `waitUntilReady` 等約 30 秒後回報 `started Agent does not match requested profile/workspace or is not ready`（09:44:19Z），implement 失敗，review、verify 因依賴它也失敗，task 在 09:44:31Z 失敗。訊息沒有提到是信任提示，也沒有指出是哪個 pane。
+
+預期行為：bridge 不替使用者確認信任提示（與現有行為一致，不改）；但不就緒時應告知「agy pane 在等信任資料夾確認，請到 `<pane id>` 處理」，讓使用者知道要做什麼。
+
+重現／環境：2026-11-06，本機 macOS，Antigravity CLI 1.4.12；每張卡的 worktree 都是新資料夾（`~/.herdr/worktrees/<repo>/card-<id>`）。
+
+已確認根因：agy 的信任清單 `~/.gemini/antigravity-cli/settings.json` 的 `trustedWorkspaces` **只比對完整路徑，不含子資料夾**：清單裡雖然已有上層 `/Users/jon/.herdr/worktrees/Herdr_Discord_Bridge`，仍然會詢問；過去 7 張卡的 worktree 也都是各自一條。因此每張卡的 worktree 對 agy 都要信任一次。Claude 不受影響，是因為它信任了上層的 `git_wk`。
+
+處理：使用者在 pane 確認「Yes, I trust this folder」（我依使用者明確授權送出 Enter），agy 把該路徑寫進 `trustedWorkspaces`。清理（`card cleanup`、刪分支、關 workspace）後重跑，同一張卡的 worktree 路徑固定，已信任過所以第二次沒有再問；重跑成功，見 ISSUE-107 的實機證據。
+
+修正範圍：無。可能的方向（未決定）：(a) 不就緒時抓畫面辨識信任提示並在訊息中指出 pane；(b) 建 worktree 時預先把路徑寫進 agy 的 `trustedWorkspaces`（會代替使用者做信任決定，需使用者同意）；(c) 先接受現狀，把「agy 每張卡要手動信任一次」寫進使用說明。
+
+未驗證：其他 profile（pi、opencode）有沒有類似的提示；agy 是否有設定可以改成信任子資料夾。
