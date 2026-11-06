@@ -5,7 +5,7 @@
 
 import path from "node:path";
 import type { Card } from "./card.js";
-import { parseFindings, summarizeFindings } from "./card-findings.js";
+import { blockingOpenFindings, parseFindings } from "./card-findings.js";
 import { checkMergeable, pickMergeMethod } from "./card-merge.js";
 import { projectName } from "./card-projects.js";
 import type { CardPullRequest } from "./card-prs.js";
@@ -20,7 +20,15 @@ import { sensitivePathsIn } from "./sensitive-paths.js";
 
 type Repo = { owner: string; repo: string };
 
+/** GitHub 還在計算能不能合併時，最多讀這麼多次、每次間隔多久（總共約 27 秒）。 */
+const MERGEABILITY_READS = 10;
+const MERGEABILITY_INTERVAL_MS = 3000;
+const defaultSleep = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 export interface MergeWiringDeps {
+  /** 等待用；測試可注入。 */
+  sleep?: (ms: number) => Promise<void>;
   /** 只用來知道卡片屬於哪個專案（worktree 清掉之後仍可用）。 */
   worktrees: { latest(cardId: string): CardWorktree | undefined };
   prs: { forCard(cardId: string): CardPullRequest[] };
@@ -91,7 +99,18 @@ export async function mergeCardPullRequest(
   const repo: Repo = { owner, repo: name };
 
   // 事實一律在這一刻重新讀取，不信索引或開 PR 時的結果。
-  const state = await deps.github.mergeState(repo, tracked.number);
+  // ISSUE-100：GitHub 剛收到 push 或剛開 PR 時 mergeable 會是 UNKNOWN，過幾秒就算好；
+  // 有上限地等一下再讀，不要把這個暫時狀態當成拒絕理由。
+  let state = await deps.github.mergeState(repo, tracked.number);
+  for (
+    let attempt = 1;
+    attempt < MERGEABILITY_READS &&
+    (state.mergeable === "UNKNOWN" || state.mergeStateStatus === "UNKNOWN");
+    attempt++
+  ) {
+    await (deps.sleep ?? defaultSleep)(MERGEABILITY_INTERVAL_MS);
+    state = await deps.github.mergeState(repo, tracked.number);
+  }
   const checks = await deps.github.checks(repo, tracked.number);
   const listed = await deps.github.files(repo, tracked.number);
 
@@ -113,7 +132,7 @@ export async function mergeCardPullRequest(
             round: latest.round,
           }
         : {}),
-      openFindings: summarizeFindings(card.body, 0).counts.open,
+      openFindings: blockingOpenFindings(card.body),
     },
     pr: {
       state: state.state,
