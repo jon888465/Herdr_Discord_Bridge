@@ -3492,3 +3492,18 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 未驗證與下一步：**尚未實機驗證** Lead 是否會將「先診斷、後實作」拆成兩回合；卡 `REQ-20261106-agy-pool` 是第一個驗證對象。此工作樹尚未 commit／push，執行中的 bridge 未重啟；自動化測試通過不能當作 live 驗收。
 
+## ISSUE-104：規劃提示未說明 review 只審已完成的實作，實作前批評應用 diagnose
+
+更新日期：2026-11-06。狀態：已修正、待驗收（原始碼與自動化檢查完成；**尚未實機驗證、尚未重啟或部署 bridge**）。
+
+使用者可見症狀／重現環境：2026-11-06，卡 `REQ-20261106-agy-pool` 第四次嘗試，task `task-544ae3b7-5cdc-4086-b97f-7315def8ca39`。兩個平行唯讀診斷 `diag-adapter`、`diag-session` 都完成後，Lead 將批評診斷結論的 `critique` 指派給 reviewer profile，角色填成 `review`；07:12:59 開始時被引擎以 `coding review has no implementation artifact` 退回，task failed，前兩個診斷成果也跟著作廢。
+
+預期行為：`review` 只審這個任務已完成的實作，只能排在 writer 之後。實作前要批評或檢驗診斷結果、計畫時使用 `diagnose`（唯讀），可指定給任何 Worker，包括只標 review capability 的 profile，因為 capability 目前不是派工的守門；實作前的唯讀回合仍依 ISSUE-103 與 writer 回合分開。
+
+已確認根因：`codingPlanningAddendum()` 未交代 review 的實作 artifact 前提，也未指引實作前批評使用 diagnose。這是**提示缺口，非引擎規則錯誤**；`src/coding-workflow.ts:127` 與 `src/team-task-engine.ts:393` 拒絕沒有已完成實作 artifact 的 review，規則正確，不應放寬。
+
+修正範圍（2026-11-06）：只在 `src/coding-workflow.ts` 的 `codingPlanningAddendum()` 新增兩句角色與 capability 說明；`test/coding-workflow.test.ts` 新增提示文字測試，`SPEC.md` 同步角色語意。`validateCodingRound`、`src/team-task-engine.ts` 與其他驗證規則／守門完全不變，未修改 `config.json`、`policy.yml`。`CONTEXT.md` 沒有逐項 issue 索引，維持既有 ledger 連結。
+
+測試（2026-11-06，本機，非 CI）：初次 `npm run build` 因缺少 `tsc` 失敗（exit 127），`npm ci` 成功後，`npm run build && node --test --test-name-pattern 'ISSUE-104' dist/test/coding-workflow.test.js` 在提示修正前 **0/1 通過**（exit 1，紅，缺少角色說明）。提示修正後首次 `npm run lint` 因腳本連字串內的 `any` 也禁止而失敗（exit 1）；改為同義的 `whichever Worker is selected` 並同步測試後，`npm run build` 成功（exit 0），`node --test --test-timeout=60000 dist/test/coding-workflow.test.js` **25/25 通過、0 fail**（exit 0），`npm run lint` 成功（exit 0，174 個 TypeScript 檔）。
+
+未驗證與下一步：**尚未實機驗證** Lead 之後是否會把實作前批評排成 `diagnose`；`REQ-20261106-agy-pool` 下一次嘗試是第一個驗證對象。原始碼與 build 已更新，但執行中的 bridge 未重啟、未部署，既有失敗 task 與診斷成果不會因此自動恢復；未 commit／push。自動化通過不代表 Discord／Herdr／CLI 端到端驗收完成。

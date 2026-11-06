@@ -1308,6 +1308,22 @@ test("team ask --coding is opt-in and does not reinterpret the original prompt",
   }
 });
 
+test("ISSUE-104: the planning prompt reserves review for completed implementation and uses diagnose for pre-implementation critique", () => {
+  const prompt = codingPlanningAddendum();
+  assert.match(
+    prompt,
+    /review role.*only.*completed implementation.*this task.*after the writer/s,
+  );
+  assert.match(
+    prompt,
+    /Before implementation.*critique or validate diagnosis results or plans.*diagnose.*read-only/s,
+  );
+  assert.match(
+    prompt,
+    /diagnose.*whichever Worker is selected.*profiles.*only review capability.*capability.*not.*dispatch gate/s,
+  );
+});
+
 test("ISSUE-103: the planning prompt separates pre-implementation read-only work into a writer-less round", () => {
   assert.match(
     codingPlanningAddendum(),

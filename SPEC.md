@@ -185,6 +185,8 @@ active Agent 作為 Lead，先要求 Lead 產生受驗證的 Assignment plan，�
 
 實作前若需要唯讀的診斷、研究或與其他 Agent 討論／批評，Lead 應先規劃沒有 writer 的獨立回合；完成後下一回合才規劃 writer 及後續 review／verify。該 writer 回合的每個唯讀指派仍須在 `dependsOn` 直接列出 writer id（ISSUE-103；僅補規劃提示，驗證規則不變）。
 
+`review` 角色只用來審這個任務已完成的實作，只能排在 writer 之後；實作前批評或檢驗診斷結果、計畫應使用 `diagnose`（唯讀）。這樣的 diagnose 可指定給任何 Worker，包括只標 review capability 的 profile，因為 capability 目前不是派工的守門（ISSUE-104；僅補規劃提示，驗證規則不變）。
+
 Coding 首版對 review／verify 期間漂移採保守失敗：任務若保留此類 drift artifact，後續 pass 不解除最終 gate 的拒絕；需另建任務與 baseline 重新驗收。正常 changes_requested 的修正與再 review 仍可在同一任務完成。
 
 Lead planning 對 Codex 優先讀取 dispatch 前連接的本機 transcript，以相符
