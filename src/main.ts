@@ -1744,7 +1744,8 @@ async function startTeamTask(
       return agent;
     });
   workers.push(...(runtime.pool?.roster(workspaceId) || []));
-  // E14：--coding 沒有指定任何 Worker 時，自動啟用 claude／codex profile 當候選，誰寫誰審交給 Lead。
+  // E14：--coding 沒有指定任何 Worker 時，自動啟用 claude／codex profile（以及使用者以 capabilities 選用的 agy，
+  // ISSUE-107）當候選，誰寫誰審交給 Lead。
   if (coding && workers.length === 0 && runtime.pool) {
     const enabled = autoEnableCodingProfiles(workspaceId, runtime.pool);
     if (enabled.length) {
@@ -1759,6 +1760,8 @@ async function startTeamTask(
 
   const taskId = `task-${randomUUID()}`;
   if (!runtime.tasks) throw new Error("Team Task Engine unavailable");
+  // ISSUE-107：本任務啟動或重用的 profile Worker 的 pane → profile id，供回合後更新 pool 綁定。
+  const profilePanes = new Map<string, string>();
   const running = runtime.tasks.run(
     {
       taskId,
@@ -1793,12 +1796,31 @@ async function startTeamTask(
             };
         if (!acquired.agent)
           throw new Error("Worker session changed or exited");
+        if (target.pane_id.startsWith("profile:"))
+          profilePanes.set(acquired.agent.pane_id, target.pane_id.slice(8));
         if (
           acquired.agent.pane_id === lead.pane_id ||
           acquired.agent.workspace_id !== workspaceId
         )
           throw new Error("invalid Worker target");
         return { agent: acquired.agent, continuity: acquired.continuity };
+      },
+      // ISSUE-107：profile Worker 在第一個回合後才登記 session（agy）時，更新 pool 綁定讓之後還能 acquire。
+      // 失敗只記錄：綁定維持原狀，下次 acquire 會因身分不明而拒絕，不會放寬。
+      onWorkerSession: async (worker, session) => {
+        const profileId = profilePanes.get(worker.pane_id);
+        if (!profileId || !runtime.pool) return;
+        try {
+          await runtime.pool.refreshSession(
+            workspaceId,
+            profileId,
+            taskId,
+            worker,
+            session,
+          );
+        } catch (error) {
+          console.error(safeError(error));
+        }
       },
       // 將設定的 timeout 傳給 Lead planning、每個 Worker 與 Lead synthesis。
       timeoutMs: runtime.config.approvalTimeoutMs,

@@ -234,6 +234,12 @@ npm run build
 
 在 plugin `config.json` 加入 `agentProfiles`（見 [設定範例](config.example.jsonc)），定義 CLI kind、可選的 model／args 及 capabilities。模型名稱需符合你的 CLI 與帳號。
 
+`--coding` 沒有指定 Worker 時，bridge 會自動啟用 claude、codex 的 profile。`agy` profile 是選用：只有 `capabilities` 含 `implementation` 或 `review` 才會一併自動啟用（要你自己改 `config.json`；只有 `analysis` 不會改變行為，`pi` 一律不自動啟用）。`capabilities` 只決定要不要自動入池，誰寫、誰審仍由 Lead 決定。agy 當 `--coding` 的 Worker／Reviewer 已實作並有單元測試，但**尚未實機驗收**（見 [docs/known-issues.md](docs/known-issues.md) 的 ISSUE-107）。
+
+```json
+{ "agentProfiles": [{ "id": "agy", "kind": "agy", "capabilities": ["analysis", "implementation", "review"] }] }
+```
+
 ```text
 agent use <lead-pane>
 team pool

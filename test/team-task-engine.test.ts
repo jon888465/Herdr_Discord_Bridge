@@ -11,6 +11,8 @@ import {
   renameSync,
   mkdirSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -19,6 +21,7 @@ import {
   type TaskState,
 } from "../src/team-task-store.js";
 import { TeamTaskEngine } from "../src/team-task-engine.js";
+import { AgentPool } from "../src/agent-pool.js";
 import type { AgentRecord } from "../src/types.js";
 import { handleCommand } from "../src/main.js";
 import { createConsoleContext } from "../src/console.js";
@@ -792,5 +795,545 @@ test("cancel while the atomic prompt is pending sends nothing to an Agent that h
     assert.deepEqual(f.cancels, [lead.pane_id]);
   } finally {
     f.close();
+  }
+});
+
+// 有 session 的對照組用 opencode（非 codex、畫面解析是通用的），只有 agy 模擬「第一個 prompt 之後才登記 session」。
+type Participant = {
+  agent: string;
+  /** 派工前就有的 session。 */
+  initial?: string;
+  /** 處理完第一個 prompt 後才被登記的 session（模擬 agy）。 */
+  after?: string;
+};
+
+function codingRepo(): string {
+  const repo = mkdtempSync(join(tmpdir(), "agy-coding-repo-"));
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", repo, ...args], {
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: "Test",
+        GIT_AUTHOR_EMAIL: "test@example.com",
+        GIT_COMMITTER_NAME: "Test",
+        GIT_COMMITTER_EMAIL: "test@example.com",
+      },
+    });
+  git("init", "-b", "main");
+  writeFileSync(join(repo, "base.txt"), "base\n");
+  git("add", "base.txt");
+  git("commit", "-m", "base");
+  return repo;
+}
+
+function codingRun(options: {
+  author: Participant;
+  reviewer: Participant;
+  /** review 指派給作者自己的 pane。 */
+  reviewOnAuthorPane?: boolean;
+  /** 計畫略過 implement。 */
+  skipImplement?: boolean;
+}) {
+  const repo = codingRepo();
+  const dir = mkdtempSync(join(tmpdir(), "agy-coding-task-"));
+  const store = new TeamTaskStore(join(dir, "tasks"));
+  const make = (pane: string, kind: string, initial?: string): AgentRecord => ({
+    pane_id: pane,
+    terminal_id: `term-${pane}`,
+    workspace_id: "w1",
+    tab_id: "t1",
+    agent: kind,
+    agent_status: "idle",
+    cwd: repo,
+    ...(initial ? { agent_session: { kind: "id", value: initial } } : {}),
+  });
+  const leadAgent = make("w1:p1", "opencode", "lead-session");
+  const author = make("w1:p2", options.author.agent, options.author.initial);
+  const reviewer = make(
+    "w1:p3",
+    options.reviewer.agent,
+    options.reviewer.initial,
+  );
+  const specs = new Map<string, Participant>([
+    [author.pane_id, options.author],
+    [reviewer.pane_id, options.reviewer],
+  ]);
+  const registered = new Set<string>();
+  const sessionNow = (pane: string): AgentRecord["agent_session"] => {
+    const spec = specs.get(pane);
+    if (!spec) return { kind: "id", value: "lead-session" };
+    const value = registered.has(pane)
+      ? (spec.after ?? spec.initial)
+      : spec.initial;
+    return value ? { kind: "id", value } : undefined;
+  };
+  const record = (item: AgentRecord): AgentRecord => {
+    const { agent_session: _drop, ...rest } = item;
+    const session = sessionNow(item.pane_id);
+    return session ? { ...rest, agent_session: session } : rest;
+  };
+  const all = [leadAgent, author, reviewer];
+  const prompts: Array<{ target: string; text: string }> = [];
+  let plans = 0;
+  const port = {
+    listAgentsWithWorkspaceNames: async () => all.map(record),
+    promptAgent: async (target: string, text: string) => {
+      prompts.push({ target, text });
+      if (text.includes("Do not modify files while planning")) plans += 1;
+      if (text.includes("Coding role: implement"))
+        writeFileSync(join(repo, "added.txt"), "one\n");
+      // 第一個 prompt 處理完之後 Herdr 才登記 session。
+      registered.add(target);
+    },
+    waitAgent: async (target: string) => ({
+      ...record(all.find((item) => item.pane_id === target)!),
+      agent_status: "done" as const,
+    }),
+    readAgent: async (target: string) => {
+      const prompt = prompts
+        .filter((item) => item.target === target)
+        .at(-1)?.text;
+      if (!prompt) return "historical";
+      let body = "done";
+      if (prompt.includes("Do not modify files while planning")) {
+        const implement = {
+          id: "impl",
+          workerPaneId: author.pane_id,
+          instruction: "Add the feature",
+          role: "implement",
+          access: "write",
+          writeScope: ["added.txt"],
+        };
+        const review = {
+          id: "rev",
+          workerPaneId: options.reviewOnAuthorPane
+            ? author.pane_id
+            : reviewer.pane_id,
+          instruction: "Review the current version",
+          role: "review",
+          access: "read",
+        };
+        const verify = {
+          id: "ver",
+          workerPaneId: reviewer.pane_id,
+          instruction: "Run the local check",
+          role: "verify",
+          access: "read",
+        };
+        const first = options.skipImplement ? [review] : [implement];
+        const rounds = options.skipImplement
+          ? [first, []]
+          : [first, [review], [verify], []];
+        body = JSON.stringify({ assignments: rounds[plans - 1] ?? [] });
+      } else if (prompt.includes("Coding role: implement"))
+        body = JSON.stringify({
+          codingResult: { kind: "implement", files: ["added.txt"] },
+        });
+      else if (prompt.includes("Coding role: review"))
+        body = JSON.stringify({
+          codingResult: { kind: "review", verdict: "pass", findings: [] },
+        });
+      else if (prompt.includes("Coding role: verify"))
+        body = JSON.stringify({
+          codingResult: {
+            kind: "verify",
+            commands: [{ command: "node --test", exitCode: 0 }],
+          },
+        });
+      else if (
+        prompt.includes("Synthesize") ||
+        prompt.includes("acceptance gate")
+      )
+        body = "Local delivery report";
+      return `${prompt.match(/BRIDGE_BEGIN_[a-f0-9]+/)![0]}\n${body}\n${prompt.match(/BRIDGE_END_[a-f0-9]+/)![0]}`;
+    },
+    cancelAgent: async () => {},
+  };
+  const engine = new TeamTaskEngine(store, port, new Set());
+  return {
+    run: () =>
+      engine.run({
+        taskId: "task-agy",
+        prompt: "ship the local change",
+        lead: record(leadAgent),
+        workers: [record(author), record(reviewer)],
+        replan: true,
+        coding: true,
+        timeoutMs: 500,
+      }),
+    close: () => {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(repo, { recursive: true, force: true });
+    },
+  };
+}
+
+test("ISSUE-107: a session that agy gets only after its first turn becomes the implement artifact's authorSession, and a different known reviewer passes", async () => {
+  const h = codingRun({
+    author: { agent: "agy", after: "agy-author" },
+    reviewer: { agent: "opencode", initial: "claude-review" },
+  });
+  try {
+    const task = await h.run();
+    const implement = task.coding?.artifacts.find(
+      (a) => a.role === "implement",
+    );
+    assert.deepEqual(implement?.authorSession, {
+      kind: "id",
+      value: "agy-author",
+    });
+    const reviews = (task.coding?.artifacts ?? []).filter(
+      (a) => a.role === "review",
+    );
+    assert.ok(reviews.length > 0);
+    assert.ok(
+      reviews.every(
+        (a) => a.independentReview === true && a.verdict === "pass",
+      ),
+    );
+    assert.equal(task.state, "completed");
+  } finally {
+    h.close();
+  }
+});
+
+test("ISSUE-107: an agy reviewer with no session at assignment start is judged when its turn completes; a different session passes", async () => {
+  const h = codingRun({
+    author: { agent: "opencode", initial: "claude-author" },
+    reviewer: { agent: "agy", after: "agy-review" },
+  });
+  try {
+    const task = await h.run();
+    const reviews = (task.coding?.artifacts ?? []).filter(
+      (a) => a.role === "review",
+    );
+    assert.ok(reviews.length > 0);
+    assert.deepEqual(reviews[0].reviewerSession, {
+      kind: "id",
+      value: "agy-review",
+    });
+    assert.ok(
+      reviews.every(
+        (a) => a.independentReview === true && a.verdict === "pass",
+      ),
+    );
+    assert.equal(task.state, "completed");
+  } finally {
+    h.close();
+  }
+});
+
+test("ISSUE-107: an agy reviewer that turns out to share the author's session is inconclusive, never a pass", async () => {
+  const h = codingRun({
+    author: { agent: "opencode", initial: "shared" },
+    reviewer: { agent: "agy", after: "shared" },
+  });
+  try {
+    const task = await h.run();
+    const reviews = (task.coding?.artifacts ?? []).filter(
+      (a) => a.role === "review",
+    );
+    assert.ok(reviews.length > 0);
+    assert.ok(reviews.every((a) => a.independentReview === false));
+    assert.ok(reviews.every((a) => a.verdict === "inconclusive"));
+    assert.match(reviews[0].independenceFailure ?? "", /same-session/);
+    assert.notEqual(task.state, "completed");
+  } finally {
+    h.close();
+  }
+});
+
+test("ISSUE-107: an agy reviewer that never gets a session is inconclusive (fail closed)", async () => {
+  const h = codingRun({
+    author: { agent: "opencode", initial: "claude-author" },
+    reviewer: { agent: "agy" },
+  });
+  try {
+    const task = await h.run();
+    const reviews = (task.coding?.artifacts ?? []).filter(
+      (a) => a.role === "review",
+    );
+    assert.ok(reviews.length > 0);
+    assert.ok(
+      reviews.every(
+        (a) => a.independentReview === false && a.verdict === "inconclusive",
+      ),
+    );
+    assert.match(reviews[0].independenceFailure ?? "", /unknown reviewer/);
+    assert.notEqual(task.state, "completed");
+  } finally {
+    h.close();
+  }
+});
+
+test("ISSUE-107: an agy author that never gets a session leaves reviews inconclusive (unknown author)", async () => {
+  const h = codingRun({
+    author: { agent: "agy" },
+    reviewer: { agent: "opencode", initial: "claude-review" },
+  });
+  try {
+    const task = await h.run();
+    assert.equal(
+      (task.coding?.artifacts ?? []).some(
+        (a) => a.role === "review" && a.verdict === "pass",
+      ),
+      false,
+    );
+    assert.notEqual(task.state, "completed");
+  } finally {
+    h.close();
+  }
+});
+
+test("ISSUE-107: deferring the agy session check still rejects the author's own pane before dispatch", async () => {
+  const h = codingRun({
+    author: { agent: "agy", after: "agy-author" },
+    reviewer: { agent: "opencode", initial: "claude-review" },
+    reviewOnAuthorPane: true,
+  });
+  try {
+    const task = await h.run();
+    assert.equal(
+      (task.coding?.artifacts ?? []).filter((a) => a.role === "review").length,
+      0,
+    );
+    assert.notEqual(task.state, "completed");
+    assert.match(JSON.stringify(task.assignments), /same-session review/);
+  } finally {
+    h.close();
+  }
+});
+
+test("ISSUE-107: deferring the agy session check still requires an implementation artifact before review", async () => {
+  const h = codingRun({
+    author: { agent: "opencode", initial: "claude-author" },
+    reviewer: { agent: "agy", after: "agy-review" },
+    skipImplement: true,
+  });
+  try {
+    const task = await h.run();
+    assert.equal(
+      (task.coding?.artifacts ?? []).filter((a) => a.role === "review").length,
+      0,
+    );
+    assert.notEqual(task.state, "completed");
+    assert.match(
+      JSON.stringify(task.assignments),
+      /no implementation artifact/,
+    );
+  } finally {
+    h.close();
+  }
+});
+
+// ISSUE-107（review 追補）：從 orchestration 的 `onWorkerSession` 一路到真實 AgentPool 綁定的整合測試。
+// 回呼的接線與 `src/main.ts` 的 `startTeamTask` 相同（pane → profile id，再呼叫 `pool.refreshSession`）。
+function wiringRun(options: {
+  kind: "agy" | "codex";
+  turn: "done" | "blocked" | "failed";
+}) {
+  const repo = codingRepo();
+  const dir = mkdtempSync(join(tmpdir(), "agy-wiring-"));
+  const codexHome = join(dir, "codex-home");
+  const previousCodexHome = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = codexHome;
+  const uuid = (label: string) => {
+    const h = createHash("sha256").update(label).digest("hex");
+    return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+  };
+  const lead: AgentRecord = {
+    pane_id: "w1:p1",
+    terminal_id: "term-lead",
+    workspace_id: "w1",
+    tab_id: "t1",
+    agent: "opencode",
+    agent_status: "idle",
+    cwd: repo,
+    agent_session: { kind: "id", value: "lead-session" },
+  };
+  const paneId = "w1:p2";
+  let prompted = false;
+  let rollouts = 0;
+  // agy 的 session 在第一個 prompt 處理完才登記；codex 的 Herdr session 另外存在（但不可信、不會被採用）。
+  const authorRecord = (): AgentRecord => ({
+    pane_id: paneId,
+    terminal_id: "term-author",
+    workspace_id: "w1",
+    tab_id: "t1",
+    agent: options.kind,
+    agent_status: "idle",
+    cwd: repo,
+    ...(prompted
+      ? { agent_session: { kind: "id", value: "s1" } }
+      : {}),
+  });
+  let started = false;
+  const agents = () => [lead, ...(started ? [authorRecord()] : [])];
+  const prompts: string[] = [];
+  const port = {
+    listAgentsWithWorkspaceNames: async () => agents(),
+    startProfile: async (
+      _lead: AgentRecord,
+      _profile: unknown,
+      _name: string,
+      onPane: (id: string) => void,
+    ) => {
+      started = true;
+      onPane(paneId);
+      return authorRecord();
+    },
+    promptAgent: async (target: string, text: string) => {
+      if (target === lead.pane_id) {
+        prompts.push(text);
+        return;
+      }
+      prompted = true;
+      prompts.push(text);
+      writeFileSync(join(repo, "added.txt"), "one\n");
+      if (options.kind === "codex") {
+        const day = join(codexHome, "sessions", "2026", "11", "05");
+        mkdirSync(day, { recursive: true });
+        writeFileSync(
+          join(day, `rollout-${rollouts++}-${uuid("rollout-session")}.jsonl`),
+          text,
+        );
+      }
+    },
+    waitAgent: async (target: string) => {
+      const record = target === lead.pane_id ? lead : authorRecord();
+      if (target === lead.pane_id) return { ...record, agent_status: "done" as const };
+      if (options.turn === "blocked")
+        return { ...record, agent_status: "blocked" as const };
+      if (options.turn === "failed")
+        return { ...record, terminal_id: "other-terminal", agent_status: "done" as const };
+      return { ...record, agent_status: "done" as const };
+    },
+    readAgent: async (target: string) => {
+      const prompt = target === lead.pane_id
+        ? prompts.filter((t) => t.includes("Do not modify files while planning")).at(-1)
+        : prompts.filter((t) => t.includes("Coding role: implement")).at(-1);
+      if (!prompt) return "historical";
+      const planning = target === lead.pane_id && prompt.includes("Do not modify files while planning");
+      const plans = prompts.filter((t) => t.includes("Do not modify files while planning")).length;
+      const body = planning
+        ? JSON.stringify({
+            assignments:
+              plans === 1
+                ? [
+                    {
+                      id: "impl",
+                      workerPaneId: "profile:agy",
+                      instruction: "Add the feature",
+                      role: "implement",
+                      access: "write",
+                      writeScope: ["added.txt"],
+                    },
+                  ]
+                : [],
+          })
+        : target === lead.pane_id
+          ? "Local delivery report"
+          : JSON.stringify({ codingResult: { kind: "implement", files: ["added.txt"] } });
+      return `${prompt.match(/BRIDGE_BEGIN_[a-f0-9]+/)![0]}\n${body}\n${prompt.match(/BRIDGE_END_[a-f0-9]+/)![0]}`;
+    },
+    cancelAgent: async () => {},
+  };
+  const poolFile = join(dir, "pool.json");
+  const profiles = [{ id: "agy", kind: options.kind }];
+  const pool = new AgentPool(poolFile, profiles, port, ["w1"]);
+  pool.select("w1", "agy", true);
+  const taskId = "task-wiring";
+  const calls: Array<{ pane: string; session: unknown }> = [];
+  const profilePanes = new Map<string, string>();
+  const store = new TeamTaskStore(join(dir, "tasks"));
+  const engine = new TeamTaskEngine(store, port, new Set());
+  return {
+    pool,
+    calls,
+    poolFile,
+    reopen: () => new AgentPool(poolFile, profiles, port, ["w1"]),
+    lead,
+    taskId,
+    binding: () =>
+      (JSON.parse(readFileSync(poolFile, "utf8")) as {
+        sessions: Record<string, { agent?: { agent_session?: unknown } }>;
+      }).sessions["w1/agy"]?.agent?.agent_session,
+    run: () =>
+      engine.run({
+        taskId,
+        prompt: "ship the local change",
+        lead,
+        workers: pool.roster("w1"),
+        replan: true,
+        coding: true,
+        timeoutMs: 500,
+        acquireWorker: async (target) => {
+          const acquired = await pool.acquire("w1", target.pane_id.slice(8), lead, taskId);
+          profilePanes.set(acquired.agent.pane_id, target.pane_id.slice(8));
+          return { agent: acquired.agent, continuity: acquired.continuity };
+        },
+        onWorkerSession: async (worker, session) => {
+          calls.push({ pane: worker.pane_id, session });
+          const id = profilePanes.get(worker.pane_id);
+          if (id) await pool.refreshSession("w1", id, taskId, worker, session);
+        },
+      }),
+    close: () => {
+      if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = previousCodexHome;
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(repo, { recursive: true, force: true });
+    },
+  };
+}
+
+test("ISSUE-107: an agy first turn reaches onWorkerSession after it is done, refreshes the real pool binding to s1, and the same profile can be acquired again", async () => {
+  const h = wiringRun({ kind: "agy", turn: "done" });
+  try {
+    await h.run();
+    assert.deepEqual(h.calls, [{ pane: "w1:p2", session: { kind: "id", value: "s1" } }]);
+    assert.deepEqual(h.binding(), { kind: "id", value: "s1" });
+    h.pool.release(h.taskId);
+    const again = await h.reopen().acquire("w1", "agy", h.lead, "task-2");
+    assert.equal(again.continuity, "same-session");
+    assert.deepEqual(again.agent.agent_session, { kind: "id", value: "s1" });
+  } finally {
+    h.close();
+  }
+});
+
+test("ISSUE-107: onWorkerSession never fires for a blocked turn, and the binding stays unknown", async () => {
+  const h = wiringRun({ kind: "agy", turn: "blocked" });
+  try {
+    await h.run();
+    assert.deepEqual(h.calls, []);
+    assert.equal(h.binding(), undefined);
+  } finally {
+    h.close();
+  }
+});
+
+test("ISSUE-107: onWorkerSession never fires for a failed turn, and the binding stays unknown", async () => {
+  const h = wiringRun({ kind: "agy", turn: "failed" });
+  try {
+    await h.run();
+    assert.deepEqual(h.calls, []);
+    assert.equal(h.binding(), undefined);
+  } finally {
+    h.close();
+  }
+});
+
+test("ISSUE-107: onWorkerSession never fires for codex even though its rollout session was observed", async () => {
+  const h = wiringRun({ kind: "codex", turn: "done" });
+  try {
+    const task = await h.run();
+    // 前提：codex 的 rollout session 有被觀察到並記成 authorSession（所以守門不是因為「沒有 session」才通過）。
+    const implement = task.coding?.artifacts.find((a) => a.role === "implement");
+    assert.ok(implement?.authorSession?.value);
+    assert.deepEqual(h.calls, []);
+    assert.equal(h.binding(), undefined);
+  } finally {
+    h.close();
   }
 });

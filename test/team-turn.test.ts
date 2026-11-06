@@ -232,3 +232,64 @@ test("a codex reply that scrolled out of the pane is read from its rollout file"
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+// ISSUE-107：agy 要處理完第一個 prompt 才被 Herdr 登記 session；coding 引擎需要回合內驗證過的 session。
+const observing = {
+  taskId: "t",
+  phase: "assignment" as const,
+  observeSession: true,
+};
+const runObserving = (agent: AgentRecord, waits: AgentRecord[]) =>
+  runTeamTurn(agent, "work", fakePort(waits), 2_000, 20, observing);
+
+test("a non-codex Agent's session first seen during the turn is returned when the caller asks to observe it", async () => {
+  const result = await runObserving(base, [
+    { ...base, agent_session: session("s1") },
+  ]);
+  assert.deepEqual(result.session, { kind: "id", value: "s1" });
+});
+
+test("a non-codex Agent that already had a session returns exactly that session", async () => {
+  const known = { ...base, agent: "opencode", agent_session: session("s0") };
+  const result = await runObserving(known, [{ ...known }]);
+  assert.deepEqual(result.session, { kind: "id", value: "s0" });
+});
+
+test("no session is returned when none appeared, or when the caller did not ask", async () => {
+  assert.equal((await runObserving(base, [{ ...base }])).session, undefined);
+  const result = await runTeamTurn(
+    base,
+    "work",
+    fakePort([{ ...base, agent_session: session("s1") }]),
+    2_000,
+    20,
+    { taskId: "t", phase: "assignment" },
+  );
+  assert.equal(result.session, undefined);
+});
+
+test("a session that changed during the turn is never returned", async () => {
+  await assert.rejects(
+    runTeamTurn(
+      base,
+      "work",
+      fakePort([
+        { ...base, agent_status: "blocked", agent_session: session("s1") },
+        { ...base, agent_session: session("s2") },
+      ]),
+      2_000,
+      20,
+      observing,
+      () => {},
+    ),
+    /Agent identity changed/,
+  );
+});
+
+test("codex never takes its session from Herdr's agent_session, only from its rollout", async () => {
+  const codex = { ...base, agent: "codex" };
+  const result = await runObserving(codex, [
+    { ...codex, agent_session: session("hook-pane-session") },
+  ]);
+  assert.equal(result.session, undefined);
+});

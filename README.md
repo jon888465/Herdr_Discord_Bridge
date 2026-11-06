@@ -266,6 +266,12 @@ After `herdr machine add`, list the machine under `machines` in the plugin confi
 
 Define `agentProfiles` in the plugin config (see [config.example.jsonc](config.example.jsonc)). Profiles configure CLI kind, optional model/arguments and capabilities; no model name is assumed valid for your account.
 
+For `--coding` tasks with no Worker specified, the bridge auto-enables claude and codex profiles. An `agy` profile is opt-in: it is added only when its `capabilities` include `implementation` or `review` (you edit `config.json` yourself; `analysis` alone changes nothing, and `pi` is never auto-enabled). `capabilities` only decides auto-enabling; the Lead still chooses who writes and who reviews. agy as a `--coding` Worker/Reviewer is implemented and unit-tested but **not yet verified on a real run** (see ISSUE-107 in [docs/known-issues.md](docs/known-issues.md)).
+
+```json
+{ "agentProfiles": [{ "id": "agy", "kind": "agy", "capabilities": ["analysis", "implementation", "review"] }] }
+```
+
 ```text
 agent use <lead-pane>
 team pool

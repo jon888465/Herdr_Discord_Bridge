@@ -4,24 +4,47 @@
 
 /**
  * E14（使用者 2026-11-05）：`--coding` 沒有指定任何 Worker 時，由 bridge 自動補上候選，誰寫、誰審交給 Lead。
- * 先只用 `--coding` 完整流程已實機驗過的 CLI（claude、codex）；agy、pi 還沒驗，等自動流程串起來後再用它處理。
+ * 預設只用 `--coding` 完整流程已實機驗過的 CLI（claude、codex）。
+ * agy（ISSUE-107）是選用：只有使用者在 `config.json` 的 agy profile 的 `capabilities` 加上 `implementation`
+ * 或 `review`，才會跟著自動啟用；沒有宣告（含只有 `analysis`）時行為與以前完全相同。agy 的 `--coding` 全流程
+ * 還沒有實機驗收，所以由使用者決定何時打開。pi 還沒驗，不論 capabilities 都不自動啟用。
+ * capabilities 在這裡只是「是否自動入池」的條件，不是角色守門：誰寫、誰審仍由 Lead 決定（ISSUE-104）。
  * 有指定（`team add` 的 pane、`team select` 勾選的 profile）時一律照指定，不自動加。
  */
 export const AUTO_CODING_KINDS = ["claude", "codex"];
 
+/** 需要使用者在 profile 的 `capabilities` 明確宣告其中之一才會自動啟用的 kind（目前只有 agy）。 */
+export const OPT_IN_CODING_KIND = "agy";
+export const OPT_IN_CODING_CAPABILITIES = ["implementation", "review"];
+
 interface AutoPool {
-  profiles: ReadonlyArray<{ id: string; kind: string }>;
+  profiles: ReadonlyArray<{
+    id: string;
+    kind: string;
+    capabilities?: readonly string[];
+  }>;
   select(workspace: string, id: string, enabled: boolean): void;
 }
 
-/** 沒有 Worker 時自動啟用 claude／codex profile；至少要有兩個，獨立 review 才可能成立。回傳新啟用的 id。 */
+function autoCodingCandidate(profile: AutoPool["profiles"][number]): boolean {
+  if (AUTO_CODING_KINDS.includes(profile.kind)) return true;
+  return (
+    profile.kind === OPT_IN_CODING_KIND &&
+    OPT_IN_CODING_CAPABILITIES.some((capability) =>
+      profile.capabilities?.includes(capability),
+    )
+  );
+}
+
+/**
+ * 沒有 Worker 時自動啟用 claude／codex profile，加上宣告了 implementation／review 的 agy profile；
+ * 至少要有兩個，獨立 review 才可能成立。回傳新啟用的 id。
+ */
 export function autoEnableCodingProfiles(
   workspace: string,
   pool: AutoPool,
 ): string[] {
-  const ids = pool.profiles
-    .filter((profile) => AUTO_CODING_KINDS.includes(profile.kind))
-    .map((profile) => profile.id);
+  const ids = pool.profiles.filter(autoCodingCandidate).map((p) => p.id);
   if (ids.length < 2) return [];
   for (const id of ids) pool.select(workspace, id, true);
   return ids;
@@ -30,6 +53,6 @@ export function autoEnableCodingProfiles(
 export function assertCodingRoster(coding: boolean, workerCount: number): void {
   if (!coding || workerCount > 0) return;
   throw new Error(
-    "--coding 任務需要至少一個 Worker（同一個 workspace 裡除了 Lead 以外的 Agent pane，或已用 `team select` 勾選的 profile；沒有指定時會自動啟用 `config.json` 的 `agentProfiles` 裡 claude／codex 的 profile，但至少要有兩個）：Lead 不能用空計畫自己實作，也不能指派自己，review 也要與作者不同的 session。目前沒有任何 Worker。若只是要讓卡片的 Agent 自己做完，請不帶 --coding 指派（例如 `card assign <id> --worktree`）",
+    "--coding 任務需要至少一個 Worker（同一個 workspace 裡除了 Lead 以外的 Agent pane，或已用 `team select` 勾選的 profile；沒有指定時會自動啟用 `config.json` 的 `agentProfiles` 裡 claude／codex 的 profile，以及 `capabilities` 宣告了 `implementation` 或 `review` 的 agy profile（agy 是選用，要使用者自己在設定加；pi 還沒驗，不會自動啟用），但至少要有兩個）：Lead 不能用空計畫自己實作，也不能指派自己，review 也要與作者不同的 session。目前沒有任何 Worker。若只是要讓卡片的 Agent 自己做完，請不帶 --coding 指派（例如 `card assign <id> --worktree`）",
   );
 }

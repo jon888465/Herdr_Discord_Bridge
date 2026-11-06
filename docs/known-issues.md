@@ -3246,7 +3246,7 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 - 收尾：關 workspace `w2B`、`w2C`，刪暫存檔、worktree、分支與驗收卡，路由切回 `w1:p1`；沒有 commit／push。
 - 觀察到「信任這個資料夾」提示**沒有**出現：新 worktree 在 `~/.herdr/worktrees/…`（不在 `git_wk` 底下）也沒被擋；另做了隔離實驗（2026-11-05）：`git_wk` 底下的新子資料夾直接 idle、`git_wk` 以外的資料夾 `blocked` 並出現「Quick safety check」。Linked git worktree 沿用主 repo 信任是從觀察推論，未做隔離對照。
 
-**未驗證：**agy、pi 當 Worker（E14 刻意先排除）；Lead 為 codex 或其他種類時 `--worktree --coding` 的自動啟用；profile 不足兩個時的實機拒絕（只有單元測試）。
+**未驗證：**agy、pi 當 Worker（E14 刻意先排除；agy 的選用機制見 ISSUE-107，pi 仍未驗）；Lead 為 codex 或其他種類時 `--worktree --coding` 的自動啟用；profile 不足兩個時的實機拒絕（只有單元測試）。
 
 下一步：無（已驗收）；進追蹤清單 H4 端到端案例。
 
@@ -3543,3 +3543,106 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 測試（2026-11-06，本機，非 CI）：初次 `npm run build` 因缺少依賴（`tsc`）失敗（exit 127），`npm ci` 成功。暫時停用新回饋、恢復遇錯即 throw，以 `npm run build` 與 `node --test --test-name-pattern ISSUE-106 dist/test/coding-workflow.test.js` 驗證紅燈：4 項中 3 fail、1 pass（一般任務仍立即失敗），隨後恢復實作。最終 `npm run build`、`npm run lint` 成功（exit 0，174 個 TypeScript 檔）。`node --test --test-timeout=60000 dist/test/coding-workflow.test.js dist/test/team-orchestration.test.js dist/test/team-task-engine.test.js` → 73/73 pass、0 fail（exit 0；含 store 的 journal 與重啟測試）。涵蓋新增 6 項：writer 計畫被拒後修正完成且未重複派工、journal 事件與重啟載入、第三次拒絕失敗、一般任務直接失敗、跨回合成果保留與輪數上限、解析拒絕、數量上限拒絕；既有 ISSUE-093 gate 回饋測試通過。
 
 未驗證與下一步：**尚未實機驗證**；`REQ-20261106-agy-pool` 下一次嘗試是第一個驗證對象，觀察 Lead 被告知錯誤後是否真的修正計畫、被拒計畫未派工、已完成成果保留。原始碼／build 的檢查不代表執行中的 bridge 已更新；未重啟、未部署、未 commit／push，舊 failed task 不會自動恢復。既有輪數上限可能先於回饋額度用完而終止任務，這是保留的限制。
+
+## ISSUE-107：agy 無法正式加入 `--coding` 的 agent pool（Worker／Reviewer 候選）
+
+更新日期：2026-11-06。狀態：已修正、待驗收（原始碼與自動化檢查完成；**沒有任何 agy 實機驗證，尚未重啟或部署 bridge**）。
+
+使用者可見症狀：使用者的 `config.json` 已有 `kind: agy` 的 profile（`capabilities` 只有 `analysis`），但 `--coding` 沒指定 Worker 時只會自動啟用 claude／codex（`AUTO_CODING_KINDS`，註解寫「agy、pi 還沒驗」）。就算手動勾選 agy，依程式閱讀它也跑不完整個 `--coding` 流程（見下方問題 4～6）。
+
+預期行為：使用者在 agy profile 的 `capabilities` 加上 `implementation` 或 `review` 之後，agy 才成為 `--coding` 自動候選，由 Lead 決定誰寫、誰審；使用者沒改設定時，預設行為與以前完全相同。agy 的 session 在第一個回合後才出現時，獨立 review 判斷仍然 fail closed。
+
+重現／環境：2026-11-06 本機 macOS，依 `AGENTS.md` 先讀 `SPEC.md`、`CONTEXT.md`、本清單。問題清單由三位 Agent 的唯讀診斷整理（見下），**沒有**讓 agy 實際跑過 `--coding`。
+
+### 問題清單（claude 診斷 12 項＋codex 診斷＋critique 補充）與處置
+
+| # | 問題 | 嚴重度 | 處置 |
+|---|---|---|---|
+| 1 | `capabilities` 只被存起來，沒有任何地方讀 | 高 | **已修正（縮小範圍）**：只當成「agy 是否自動入池」的條件（`src/coding-roster.ts`），不當成派工守門 |
+| 2 | `AUTO_CODING_KINDS` 寫死，agy 無法選用 | 高 | **已修正**：claude／codex 不變；agy 宣告 `implementation` 或 `review` 才加入並計入「至少兩個」 |
+| 3 | 沒有角色對 capability 的派工守門 | 高（診斷）→ **不採用** | **駁回**：capabilities 目前是描述資料，Lead 已看得到完整 profile，ISSUE-104 明載它不是守門；對手動勾選的 analysis-only agy 突然拒絕是改變既有行為，不是 bug 修復 |
+| 4 | 新 agy reviewer 派工時沒有 session，被 `assertIndependentReview` 以「unknown reviewer identity」擋下 | 高 | **已修正**：agy 且沒有 session 時，派工前只擋同 pane 與沒有 implementation artifact，獨立性延後到回合結束判定 |
+| 5 | `onAssignmentDone` 拿到的是派工前的 worker 紀錄，agy 的 `authorSession` 記成 undefined，之後所有 review 都失敗 | 高 | **已修正**：非 codex 採用回合內驗證過的 session，沒有才用派工前紀錄 |
+| 6 | `observeSession` 只服務 codex | 中 | **已修正**：`runTeamTurn` 對非 codex 回傳回合內核對過（pane／terminal／workspace／種類不變、session 全程一致）的 session；codex 仍只認 nonce rollout，不採用 Herdr 的 `agent_session` |
+| 7 | agy profile 設了 `model` 卻沒有 `modelFlag` 會被驗證擋下 | 中 | **不是 bug**：現有契約（非 claude／codex 需明確 `modelFlag`），不猜 agy 的旗標；沒設 `model` 的 agy 不受影響 |
+| 8 | 錯誤訊息、註解、文件寫死 claude／codex | 中 | **已修正**：`coding-roster.ts` 註解與錯誤訊息、`main.ts` 註解、`SPEC.md`、兩份 README 同步 |
+| 9 | agy 長回覆、窄 pane、hook 缺席時的回報擷取（終端 JSON 硬換行、BEGIN 捲出、hook 只拿到較早的非工具訊息、Stop 與 transcript 寫入競爭） | 中 | **延後，待驗收，先要證據**：沒有 agy 實機 fixture，不猜 transcript 路徑、不套用 `unwrapCodexJson`；`src/hook-agy.ts`、`src/hook-cli.ts`、`src/cli-adapter.ts` 未改 |
+| 10 | profile `kind: agy` 與 Herdr 實際回報的 kind（可能是 `antigravity`）嚴格比對 | 中 | **延後，待驗收，先要證據**：目前只是條件式風險，沒有證據顯示 Herdr 會回報別名，不加全域 canonicalization |
+| 11 | `REVIEWER_KINDS` 已含 agy | 低 | **不是 bug**：那是 card review 的單一 reviewer 路徑，不是 `--coding`；`src/review-pane.ts` 未改 |
+| 12 | 附圖與核准相關的 claude 專屬處理 | 低 | **範圍外**：與 `--coding` 無關 |
+| 13（critique 補充） | `AgentPool.acquire()` 比較活著的 session 與啟動時存下的綁定；agy 的 session 由 unknown 變 known 後綁定沒有更新路徑，同一個 profile 下次 acquire 會被當成「session 改變」而拒絕 | 高 | **已修正**：新增 `AgentPool.refreshSession`，只接受通過驗證的回合結果（細節見修正範圍） |
+
+### 討論與 review 結論（本任務 `task-e9cb8674-b86c-42b0-b639-544054c2632f`，三位 Agent 的唯讀成果）
+
+- **claude 診斷**：列出 12 項，建議把所有「非預設 kind」都開放選用，並加上計畫階段的角色 capability 檢查。
+- **codex 診斷**：確認 session 傳遞缺口（問題 4、5、6），另提出最終回覆復原、hook partial-tail、live 契約三項（問題 9、10 的來源），都標明需要實機確認。
+- **critique（獨立 reviewer）**：**駁回**「所有其他 kind 都能選用」——這會連 pi 一起開放，超出本卡需求，也可能讓已為其他 kind 宣告 capability 的使用者在沒改設定下行為改變；改成只對 agy。**駁回**全域角色守門（理由見問題 3）。**補充**問題 13（pool 綁定）。**要求**問題 9、10 先取得實機證據再改程式，並合併處理 final recovery 與 hook partial-tail。
+- 採用的設計：claude／codex 預設不變；agy 由使用者在 `config.json` 加 capability 才自動入池（選用）；session 傳遞修正；pool 綁定更新。**選用的理由：**agy 的 `--coding` 全流程沒有實機證據，預設不該自動啟用；選用讓 merge 後的預設行為與現在一致，由使用者決定何時打開。
+
+### 修正範圍
+
+- `src/coding-roster.ts`：新增 `OPT_IN_CODING_KIND`／`OPT_IN_CODING_CAPABILITIES` 與 `autoCodingCandidate`；`autoEnableCodingProfiles` 在 claude／codex 之外加入宣告了 `implementation` 或 `review` 的 agy profile（維持至少兩個、有指定 Worker 不自動加）；`AUTO_CODING_KINDS` 仍只有 claude、codex；註解與 `assertCodingRoster` 的錯誤訊息說明 agy 是選用、pi 未驗。`src/main.ts` 只改註解並接上 `onWorkerSession`。
+- `src/team-turn.ts`：`TeamTurnContext.observeSession` 時，非 codex 回傳回合內驗證過的 session；codex 行為不變。
+- `src/team-task-engine.ts`：agy 且沒有 session 的 reviewer 在派工前只檢查「有 implementation artifact」與「不是作者的 pane」，其餘延後到入帳；入帳時身分取 `observedSession ?? 派工前的 session`（codex 仍只用 rollout）。作者不明、reviewer 不明、同 session 仍是 `independentReview: false`／inconclusive。獨立 review、verify、版本漂移、`card merge` 的條件都沒有放寬。
+- `src/agent-pool.ts`：`refreshSession(workspace, id, owner, worker, session)`。只有在呼叫者持有該 profile 的保留、綁定不是 uncertain、設定未變、pane／terminal／workspace／種類相符、綁定原本沒有 session、活著的 pane 回報同一個 session 時才寫入；已有 session 時不取代（相同回 true、不同回 false）；codex 一律拒絕。任何不符都回 false 且不改狀態。`src/team-orchestration.ts`／`src/main.ts`：新增選用的 `onWorkerSession` 回呼，回合完成後對 profile Worker 呼叫（codex 不呼叫）；更新失敗只記 console，綁定維持原狀。
+- 未修改 `config.json`、`policy.yml`、`src/hook-agy.ts`、`src/hook-cli.ts`、`src/cli-adapter.ts`、`src/review-pane.ts`。
+
+### 使用者要自己做的事（我不改設定）
+
+在你的 `config.json` 把 agy profile 改成（`id` 沿用你現有的）：
+
+```json
+{
+  "agentProfiles": [
+    { "id": "agy", "kind": "agy", "capabilities": ["analysis", "implementation", "review"] }
+  ]
+}
+```
+
+只加 `"review"`（或只加 `"implementation"`）也會讓 agy profile 自動入池，但**這不是角色限制**：capability 只決定要不要自動啟用，Lead 仍可以把 implement 派給只宣告 `review` 的 agy（刻意不做角色對 capability 的守門，ISSUE-104）。改完要重啟 bridge。沒加之前行為與以前相同。
+
+### 測試（2026-11-06，本機 macOS，非 CI）
+
+- 環境：此 worktree 沒有 `node_modules`，用符號連結指向主 checkout 的 `node_modules`（該路徑已寫入本機 `.git/info/exclude`，不在 repo 內）後 build。
+- **紅燈（修正前）：**`coding-roster.test.js` 新增 5 項，恢復舊版 `src/coding-roster.ts` 後 10 項中 3 fail（agy 宣告 capability 後加入、agy 計入至少兩個、錯誤訊息三項；其餘「預設不變」類本來就通過）；`team-turn.test.js` 新增 5 項，2 fail（回傳 session 的兩項）；`team-task-engine.test.js` 新增 7 項，5 fail（agy 作者首次 session、agy reviewer 延後判定、同 session、無 session、同 pane 的訊息），2 pass（作者從未有 session 本來就不會通過、缺 implementation artifact 本來就被擋，作為不退步的回歸）；`agent-pool.test.js` 新增 5 項（`refreshSession` 先是空殼回 false）2 fail，另 3 項是「拒絕類」本來就通過。
+- **綠燈（修正後）：**`npm run build` exit 0；`npm run lint` exit 0（`lint ok (174 TypeScript files)`）；`node --test dist/test/*.test.js` 結果見本檔最後一次記錄（下方「最終驗證」）。
+- 單元測試涵蓋：roster（沒有 agy、analysis-only、只 implementation、只 review、兩者、pi 宣告 capability 不加入、claude／codex 預設清單不變、agy 計入至少兩個、單獨 agy 不夠）；session（首次出現的 session 成為 `authorSession`、不同已知 reviewer 通過、同 session／未知／變更被拒、同 pane 與缺 implementation artifact 在派工前被擋、codex 不採用 Herdr session）；pool（refresh 後再次 acquire 為 same-session 並可跨重載、未 refresh 仍拒絕、錯 pane／terminal／workspace／種類／非 owner／空值／活著的 pane 回報不同 session／已知 session 不同值皆拒絕）。
+
+### 已實機驗證與待驗收
+
+**已實機驗證：沒有。**以上全是原始碼與單元測試，不是 Discord／Herdr／CLI 端到端驗收。執行中的 bridge 未重啟、未載入這個 build；舊 task 不會補送。
+
+**待驗收與缺少的條件：**
+
+- 真實 agy 的啟動就緒、Herdr 回報的 kind（`agy` 或 `antigravity`）、prompt 是否真的送達：缺 live pane 與事件紀錄。
+- conversationId 與 `agent_session` 的對應、第一個回合後才出現的時機、同 conversation 重用、兩個不同 conversation 的獨立性：缺第一輪、第二輪與另一個 conversation 的對照。
+- 長回覆、窄 pane、hook 正常與缺席時的回報擷取，Stop 與 transcript 寫入的競爭：缺可關聯 nonce 的原始 fixture（問題 9、10 就等這些證據）。
+- 執行中的 bridge 載入新 build：需 merge 後重啟。
+- 使用者在 agy profile 加上 `implementation`／`review`（見上方 JSON）：在此之前不能宣稱正式 config 的自動入池已端到端驗收。
+
+**live 驗收清單（依序，每一步只驗它實際走過的路徑）：**
+
+1. agy 當唯讀 `diagnose`（明確選取 agy profile 的 `--coding` 任務）：記錄 pane kind、ready 狀態、第一輪前後的 `agent_session`、回報是 hook 還是畫面、耗時。
+2. 同一個 agy profile 再跑一輪唯讀，驗證 pool 綁定更新後的重用（same-session）；再用另一個 agy conversation 對照 session 不同。
+3. agy 當 `implement`（write scope 限一個暫存檔），確認 artifact 記到 `authorSession`。
+4. claude 或 codex review 該 agy 作者的實作（`independentReview: true`），再安排 verify。
+5. agy 當 `review`（作者是 claude／codex），確認 `reviewerSession` 與 `independentReview`。
+6. 任何一步失敗：先保留原始畫面／transcript，再更新本 issue（或重新開啟），不要憑推測改程式。
+
+不執行 card merge、不修改 config／policy。
+
+未驗證與下一步：以上待驗收項目；不可把單元測試通過寫成實機驗收。未 commit／push（bridge 處理）。
+
+**最終驗證（2026-11-06，本機 macOS，非 CI）：**`npm run build` exit 0；`npm run lint` exit 0（`lint ok (174 TypeScript files)`）；`node --test dist/test/*.test.js` exit 0 → 1232 tests、1231 pass、0 fail、0 cancelled、1 skipped（既有的 skip）。這只是原始碼與自動化檢查，不是 agy 實機驗收。
+
+### 後續：review 的三項發現與修正（2026-11-06，指派 `fix-agy-review-findings`）
+
+獨立 review（`review-agy-pool`）判 `changes_requested`，未發現獨立性守門被放寬，三項都是驗證與文字缺口，`refreshSession` 與 opt-in roster 的產品行為**沒有改**：
+
+1. **`agy-review-refresh-wiring`（中）**：沒有測試走過「orchestration 的 `onWorkerSession` → 真實 `AgentPool` 綁定 → 再次 acquire」。**修正：**`test/team-task-engine.test.ts` 新增整合測試（真實 `TeamTaskEngine`、orchestration 與 `AgentPool`；回呼接線與 `src/main.ts` 相同）：agy 首輪 done 後回呼恰好觸發一次、持久化綁定變成 s1、重新載入的 pool 再 acquire 為 same-session；blocked、failed（身分改變）的回合不觸發、綁定維持 unknown；codex 即使 rollout session 已被觀察到（測試先確認 `authorSession` 有值）也不觸發。**突變驗證（暫時修改後已還原）：**移除 `src/team-orchestration.ts` 的 `onWorkerSession` 呼叫 → agy 整合測試紅（1 fail）；移除 codex 守門 → codex 測試紅（1 fail）；移除 `settled.state !== "blocked"` 條件 → **沒有測試變紅**，因為 blocked 回合本來就不會回傳 session，該條件是多餘的防護，不是獨立可測的行為。
+2. **`agy-review-refresh-guards`（中）**：舊測試的 fixture 沒有持有 lease，所以全部在 lease 檢查就返回，其他 guard 沒被測到；「vanished session」標題名不符實。**修正：**`test/agent-pool.test.ts` 改寫成每個 guard 單獨測：fixture 先滿足所有前置條件（有 lease、binding 不是 uncertain、fingerprint 未變、pane／terminal／workspace／種類相符、binding 原本沒有 session、活著的 pane 回報同一個 session；另有 baseline 測試確認此時回 true），每個測試只破壞一個條件：無 lease（已釋放、他人）、uncertain、fingerprint 改變、錯 pane、錯 terminal、錯 workspace、錯種類、binding 內存的 Agent 的 terminal／workspace／種類不符、無效 session、活著的 pane 消失、活著的 pane 的 terminal／workspace／種類改變、活著的 pane 的 session 消失、活著的 pane 回報不同 session、binding 已有已知 session（s1→s2 不取代，同值冪等）、真正的 codex profile。舊的「uncertain startup or changed profile」與「vanished session」測試已移除。**突變驗證（逐項暫時移除 `refreshSession` 的檢查，build 後只跑該檔，之後還原；共 19 次可編譯的突變，含兩個 worker terminal 子句同時移除的一次）：**codex 守門、lease、uncertain、fingerprint、binding.paneId、binding workspace、binding kind、worker workspace、worker kind、live 消失、live workspace、live terminal、live kind、live session 比對、已知 session 不取代，各自讓對應測試紅（各 1 fail，共 15 項）；worker terminal 的兩個子句各自單獨移除不會紅，要**同時**移除才會紅（兩者是同一條件）。**兩處是冗餘防護，無法單獨變紅，已如實記錄：**`!hasAgentSession(session)`（因為後面「活著的 pane 的 session 必須與回報相同」已經拒絕無效 session）；`binding.agent.terminal_id !== worker.terminal_id` 與 `worker.terminal_id !== binding.agent.terminal_id` 擇一即可。另一個嘗試移除 `!binding?.agent` 的突變因型別錯誤無法編譯，不算有效。
+3. **`agy-review-review-only-doc`（低）**：本 issue 先前寫「只想讓 agy 當 reviewer 就只加 `review`」，容易被讀成角色限制。**修正：**改為「只加 `review`（或只加 `implementation`）也會讓 agy 自動入池，但這不是角色限制；capability 只決定是否自動啟用，Lead 仍可把 implement 派給只宣告 review 的 agy（刻意沒有角色對 capability 的守門，ISSUE-104）」。已核對 `SPEC.md`、`README.md`、`README.zh-TW.md`：它們已經寫明「capabilities 只決定是否自動入池，誰寫、誰審仍由 Lead 決定」，沒有同樣的誤導句，所以**沒有修改**這三份。
+
+另外還原 `src/main.ts` 中兩處與本卡無關、只是 Prettier 重排的格式變動（autopick 的 `code:` 與 `console.error`）；`src/main.ts` 現在只剩 ISSUE-107 的註解與 `onWorkerSession` 接線。
+
+**後續驗證（2026-11-06，本機 macOS，非 CI）：**`npm run build` exit 0；`npm run lint` exit 0（`lint ok (174 TypeScript files)`）；`node --test dist/test/*.test.js` exit 0 → 1249 tests、1248 pass、0 fail、0 cancelled、1 skipped（既有的 skip）。上一輪（同日，修正前）為 1232 tests、1231 pass；這次多出的 17 項是新增的整合測試與逐 guard 測試。**已實機驗證：沒有**；上述「待驗收與缺少的條件」與 live 驗收清單不變，仍未重啟或載入新 build，不是 agy 端到端驗收。

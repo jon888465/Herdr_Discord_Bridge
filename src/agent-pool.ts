@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import type { AgentRecord } from "./types.js";
 import type { HerdrClient } from "./herdr.js";
-import { sameAgentSession } from "./response-stream.js";
+import { hasAgentSession, sameAgentSession } from "./response-stream.js";
 
 export interface AgentProfile {
   id: string;
@@ -342,6 +342,57 @@ export class AgentPool {
       );
       if (found) current = found;
     }
+  }
+  /**
+   * ISSUE-107：agy 啟動時沒有 session，處理完第一個回合後才被 Herdr 登記。回合結果已經核對過 session 全程一致
+   * （`runTeamTurn`），這裡再確認：呼叫者持有這個 profile 的保留、綁定仍是同一個 pane／terminal／workspace／
+   * 種類／設定、綁定原本沒有 session，而且目前活著的 pane 回報的正是這個 session，才把它寫進綁定。
+   * 已有 session 的綁定不會被取代（相同值回傳 true，不同值回傳 false）；codex 的 Herdr session 不可信，
+   * 不採用。任何一項不符都回傳 false 且不改狀態；unknown → known 不會在任意 acquire 時被接受。
+   */
+  async refreshSession(
+    workspace: string,
+    id: string,
+    owner: string,
+    worker: AgentRecord,
+    session: { kind: string; value: string },
+  ): Promise<boolean> {
+    this.authorize(workspace);
+    const p = this.profile(id);
+    const key = `${workspace}/${id}`;
+    if (p.kind.toLowerCase().includes("codex")) return false;
+    if (this.leases.get(key) !== owner) return false;
+    const binding = this.state.sessions[key];
+    if (
+      !binding?.agent ||
+      binding.uncertain ||
+      binding.fingerprint !== JSON.stringify(p) ||
+      binding.paneId !== worker.pane_id ||
+      binding.agent.terminal_id !== worker.terminal_id ||
+      binding.agent.workspace_id !== workspace ||
+      binding.agent.agent !== p.kind ||
+      worker.workspace_id !== workspace ||
+      worker.terminal_id !== binding.agent.terminal_id ||
+      worker.agent !== p.kind ||
+      !hasAgentSession(session)
+    )
+      return false;
+    const live = (await this.herdr.listAgentsWithWorkspaceNames()).find(
+      (a) => a.pane_id === binding.paneId,
+    );
+    if (
+      !live ||
+      live.workspace_id !== workspace ||
+      live.terminal_id !== binding.agent.terminal_id ||
+      live.agent !== p.kind ||
+      !sameAgentSession(live.agent_session, session)
+    )
+      return false;
+    if (hasAgentSession(binding.agent.agent_session))
+      return sameAgentSession(binding.agent.agent_session, session);
+    binding.agent = { ...binding.agent, agent_session: live.agent_session };
+    this.save();
+    return true;
   }
   release(owner: string): void {
     for (const [key, lease] of this.leases)
