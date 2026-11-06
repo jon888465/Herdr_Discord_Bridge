@@ -133,8 +133,10 @@ export function createAutopickSteps(deps: AutopickWiringDeps): AutopickSteps {
       const text = await deps.command(
         `card loop ${cardId} --agent ${reviewer} --merge`,
       );
+      // ISSUE-101：收到的是 `card loop` 印出的全部輸出（進度行在前、最後才是「loop 結束」），
+      // 所以要找「以『loop 結束：』開頭、同一行含『已 merge』」的那一行，不能假設它在整段文字開頭。
       return {
-        merged: text.startsWith("loop 結束：") && text.includes("已 merge"),
+        merged: /^loop 結束：.*已 merge/m.test(text),
         text,
       };
     },

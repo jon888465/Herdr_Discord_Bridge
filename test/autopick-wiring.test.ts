@@ -188,3 +188,41 @@ test("loop only counts as merged when the reply says the PR was merged", async (
     "card loop REQ-20261105-x --agent codex --merge",
   ]);
 });
+
+// ISSUE-101：`card loop` 一路印出進度（review 完成、已 merge…），最後才是「loop 結束」；
+// 自動撿卡收到的是全部輸出，不能假設「loop 結束」在開頭（實機：PR 已被 bridge 合併，卻被誤報成停下來等人）。
+test("ISSUE-101: a merge is recognised even when progress lines come before the final loop line", async () => {
+  const progress = [
+    "review 完成：REQ-20261105-x · PR #128（head c0bcc5c16557）· 第 1 輪",
+    "https://github.com/jon888465/Herdr_Discord_Bridge/pull/128",
+    "判定：pass",
+    "已 merge：REQ-20261105-x · PR #128（squash，head c0bcc5c16557）",
+  ].join("\n");
+  const merged = harness({
+    command: async () =>
+      `${progress}\nloop 結束：REQ-20261105-x 的 review 已通過、CI 全綠，已 merge（共 3 個步驟）。`,
+  });
+  assert.equal(
+    (await merged.steps.loop("REQ-20261105-x", "codex")).merged,
+    true,
+  );
+
+  // 進度裡出現「已 merge」，但 loop 沒有以「結束…已 merge」收尾（例如 merge 後的清理步驟出錯）→ 不算。
+  const noFinalLine = harness({
+    command: async () => `${progress}\nloop 停下來了：REQ-20261105-x（停在 merge）。`,
+  });
+  assert.equal(
+    (await noFinalLine.steps.loop("REQ-20261105-x", "codex")).merged,
+    false,
+  );
+
+  // 沒有 --merge 的 loop 結束（只是 review 通過）不是 merge。
+  const reviewOnly = harness({
+    command: async () =>
+      `${progress}\nloop 結束：REQ-20261105-x 的 review 已通過（共 1 個步驟）。`,
+  });
+  assert.equal(
+    (await reviewOnly.steps.loop("REQ-20261105-x", "codex")).merged,
+    false,
+  );
+});

@@ -3332,7 +3332,7 @@ H4 脈絡：這是自動串接最小的摩擦；若要做成單一觸發，（1�
 
 ## ISSUE-096：自動撿卡（H2）——政策選用的專案裡 `ready` 的卡片由 bridge 自己開始並依等級走到 merge
 
-更新日期：2026-11-05。狀態：已修正、待驗收（第一部分＝政策解析與執行器 PR #120 已 merge；第二部分＝接線已實作；**尚未 merge、尚未重啟 bridge、尚未實機驗收**，不可把單元測試通過當成端到端通過）。
+更新日期：2026-11-06。狀態：已驗收（主路徑：L1 於 2026-11-05、L2 於 2026-11-06 實機驗收；回報誤判見 ISSUE-101，已修正、待驗收）。
 
 這是新功能，不是缺陷。使用者 2026-11-05 的決定（AskUserQuestion）：（1）自動做到哪一步：**一路到 merge**，由專案等級決定實際停在哪（L0 commit、L1 PR、L2 merge）；（2）哪些卡：**政策檔選用＋`ready`**（Agent 不能改政策檔，也不改變 `ready` 目前的意思）；（3）誰當 Lead：**bridge 自己開**，專案底下設定 repo 路徑與 Lead 種類；（4）並行：**一次一張**。
 
@@ -3353,9 +3353,14 @@ H4 脈絡：這是自動串接最小的摩擦；若要做成單一觸發，（1�
 **實機驗收計畫：**使用者已把 `policy.yml` 設成 `Herdr_Discord_Bridge: L1` 並加 `autopick:`（bridge 解析器驗證為 loaded）。merge 並重啟 bridge 後，匯入一張宣告 `project: local:Herdr_Discord_Bridge` 的無害卡並設成 ready，**不下任何指令**，等待 bridge 自己撿卡、做到 PR 為止（L1）；驗證完成後由使用者決定是否升到 L2 再驗 merge。重啟前確認卡片目錄沒有其他 ready 的卡（2026-11-05 查過是空的）。
 
 **未驗證：**真的定期掃描與撿卡；Lead 開在新 workspace 的版面與 Claude 的信任提示（repo 在已信任的 `git_wk` 底下）；`autopick` 使用者 id 的路由與 console 路由確實互不影響；失敗時卡片 `failed` 事件的內容；長時間（45 分鐘）等待期間 bridge 重啟的處理（不接續）；Discord 通知（目前只有 console 輸出）。
+
+**L2 實機驗收（2026-11-06，本機 macOS，政策 L2，bridge 載入 main `ed6c7f5`）：**卡 `REQ-20261106-auto5`（追蹤清單 H2 狀態欄位的一行替換），我只做了一個動作——03:41:28（UTC）把它改成 `ready`。之後全部由 bridge 自己完成：03:42:18 撿卡並 `assigned`；03:44:31 coding 任務完成（獨立 review 通過、verify 通過，階段 `ready-to-integrate`）；03:45:08 `card commit`（`c0bcc5c16557`）；03:45:16 開 PR #128；03:46:11 `card loop` 的 reviewer（codex）第 1 輪 `pass`（約 1 分鐘）；03:47:08 CI 全綠；**03:47:21 bridge 自己 squash merge 進公開 `main`（`94f92aa`）**；03:48:07 記 `merged`、03:48:08 自動清理 worktree。從 `ready` 到合併約 6 分鐘，沒有任何人下指令。合併的內容恰好是卡片要求的一行變更（`docs/card-to-merge-tracker.md` 1 行新增 1 行刪除，舊文字不見、新文字出現）。
+**這次實機走通的環節：**撿卡、bridge 自己開 Lead、`--worktree --coding`、profile 自動啟用、`card commit`、`card pr`、`card loop --merge` 的獨立 review、CI、`card merge`、merge 後清理。**這次沒有碰到的（仍是待驗收）：**ISSUE-098（沒有發生 `agent_pane_busy` 競爭）、ISSUE-099（這次 reviewer 沒有開子 agent：最近 25 分鐘沒有任何 subagent rollout）、ISSUE-100（沒有 low 的 finding，也沒有觀察到 `UNKNOWN`）、`changes_requested` 之後的自動修正。
+**已知的小問題：**runner 把成功的合併誤報成「停下來等人，停在 loop」，卡片多了一筆錯誤的 `failed`／`autopick_stopped`，也沒有關閉自己開的 Lead workspace——見 ISSUE-101。
+
 ## ISSUE-097：verify 的 Worker 回報了一個預期 exit 1 的指令，整個驗證被判失敗（H2 自動撿卡 L2 第一次嘗試的斷點）
 
-更新日期：2026-11-05。狀態：已修正、待驗收（根因已確認；原始碼與自動化檢查完成；**尚未 merge、尚未重啟 bridge、尚未實機重跑 L2**）。
+更新日期：2026-11-06。狀態：已驗收（PR #123 已 merge；H2 自動撿卡 L2 實機：verifier 寫 `! grep -qF …` 並回報 exit 0，閘門通過，見 ISSUE-096 的 L2 驗收）。
 
 使用者可見症狀：H2 自動撿卡 L2 第一次嘗試（卡 `REQ-20261105-auto2`，task `task-cbc8ddf3-7de8-4e08-b9ae-38b185674efc`）：bridge 自己撿卡、coding 完成、獨立 review pass，但兩次 verify 都被記成 `verificationPassed: false`，task failed「no successful verification for the current version」，自動撿卡停在 `task`（console：「停下來等人，停在 task」，卡片記 `failed`／`autopick_stopped`）。Worker 的文字報告兩次都寫「驗證通過」。
 
@@ -3370,6 +3375,8 @@ H4 脈絡：這是自動串接最小的摩擦；若要做成單一觸發，（1�
 未驗證：實機重跑 L2——merge 並重啟 bridge 後以新卡重做；模型是否真的遵守新提示（只有實機能驗）；Worker 仍列出非 0 指令時，Lead 是否能靠 evidence 的指令與 exit code 改正。
 
 H2 自動撿卡 L2 目前進度：第一次嘗試停在 coding 階段的 verify（本 issue）；撿卡、開 Lead、assign、coding、獨立 review 都已實機走過（L1 驗收見 ISSUE-096）；L2 的 `card loop --merge` 在自動流程裡還沒走到。測試殘留：卡片 `REQ-20261105-auto2`（in_progress）、其 worktree 與 workspace，修正 merge 後清掉並用新卡重跑。
+
+**實機驗收（2026-11-06，task `task-9fd82904-0c4d-4a7f-892d-e2cde29a04a7`）：**同樣的卡片寫法（驗收條件含「舊文字已不存在」）這次 verifier 回報的指令是 `! grep -qF '**已實作、待實機驗收**（ISSUE-096）' docs/card-to-merge-tracker.md`，exit 0，`verificationPassed: true`，一次就過（先前兩次各因回報 `grep -cF` 的 exit 1 而失敗）。
 
 ## ISSUE-098：Worker profile 啟動時新 pane 的 shell 還沒就緒，`agent.start` 被拒絕，整個任務失敗（H2 自動撿卡 L2 第二次嘗試的斷點）
 
@@ -3388,6 +3395,8 @@ H2 自動撿卡 L2 目前進度：第一次嘗試停在 coding 階段的 verify�
 未驗證：實機重跑 L2 全程；shell 超過 15 秒仍未就緒時的行為（仍是原錯誤，任務失敗）；是否該讓「基礎設施性」的 assignment 失敗允許 Lead 重排一次（目前不改）。
 
 H2 自動撿卡 L2 進度（2026-11-05）：第一次嘗試停在 verify（ISSUE-097，已修）；第二次嘗試停在 Worker 啟動（本 issue）；`card loop --merge` 在自動流程裡仍沒走到。每次失敗都是不同的環節，也都被守門擋在 merge 之前，公開 `main` 沒有被動到。測試殘留：卡片 `REQ-20261105-auto3`（in_progress）與其 worktree、workspace，修正 merge 後清掉並用新卡重跑。
+
+**2026-11-06 觀察：**H2 L2 第四次嘗試沒有遇到 `agent_pane_busy`（Worker 啟動一次成功），所以這個重試仍沒有實機證據，狀態維持「已修正、待驗收」。
 
 ## ISSUE-099：codex 開了子 agent，rollout 辨識遇到多個符合而判「不明」，reviewer 的回覆永遠讀不到（H2 自動撿卡 L2 第三次嘗試的斷點）
 
@@ -3409,6 +3418,8 @@ H2 自動撿卡 L2 進度（2026-11-05）：第一次嘗試停在 verify（ISSUE
 
 H2 自動撿卡 L2 進度（2026-11-05）：三次嘗試各停在不同環節——verify（ISSUE-097）、Worker 啟動（ISSUE-098）、reviewer 回覆辨識（本 issue），都被守門擋在 merge 之前，公開 `main` 沒有被動到；撿卡、開 Lead、assign、coding、獨立 review、commit、PR、CI 都已在自動流程裡走過。測試殘留：卡片 `REQ-20261105-auto4`、PR #125（開著，內容與預期相同、CI 通過）、worktree 與 workspace，修正 merge 後清掉（PR #125 不合併，直接關閉）並用新卡重跑。
 
+**2026-11-06 觀察：**H2 L2 第四次嘗試的 reviewer 沒有開子 agent（最近 25 分鐘沒有任何 subagent rollout），第 1 輪約 1 分鐘就 `pass`，所以這個修正仍沒有實機證據，狀態維持「已修正、待驗收」。
+
 ## ISSUE-100：review 已 pass，卻因 `low` 等級的 open finding 與「GitHub 還在計算」而停在 merge（H2 自動撿卡 L2 第三次嘗試的後半）
 
 更新日期：2026-11-06。狀態：已修正、待驗收（原始碼與自動化檢查完成；**尚未 merge、尚未重啟 bridge、尚未實機重跑 L2**）。
@@ -3427,3 +3438,20 @@ H2 自動撿卡 L2 進度（2026-11-05）：三次嘗試各停在不同環節—
 
 H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節——verify（ISSUE-097）、Worker 啟動（ISSUE-098）、reviewer 回覆辨識（ISSUE-099）、merge 的兩個守門（本 issue）；都被守門擋在 merge 之前，公開 `main` 沒有被動到；撿卡、開 Lead、assign、coding、獨立 review（含逾時後自動重審）、commit、PR、CI 都已在自動流程裡走過。測試殘留已清（PR #125 關閉不合併、分支、卡片、worktree、workspace）。
 
+**2026-11-06 觀察：**H2 L2 第四次嘗試的 review 沒有 finding，也沒有觀察到 PR 狀態停在 `UNKNOWN`，所以這個修正仍沒有實機證據（只有單元測試），狀態維持「已修正、待驗收」。
+
+## ISSUE-101：自動撿卡把成功的合併誤報成「停下來等人」（H2 L2 第四次嘗試）
+
+更新日期：2026-11-06。狀態：已修正、待驗收（根因已確認；原始碼與自動化檢查完成；**尚未 merge、尚未重啟 bridge、尚未實機驗證**）。
+
+使用者可見症狀：H2 自動撿卡 L2 第四次嘗試（卡 `REQ-20261106-auto5`）：bridge 已經把 PR #128 squash merge 進 `main`（`94f92aa`，卡片也記了 `merged` 與 `cleanup_done`），console 卻同時印出「自動撿卡 REQ-20261106-auto5（local:Herdr_Discord_Bridge，L2）：停下來等人，停在 loop：review 完成…」，卡片流程紀錄多了一筆 `failed`（code `autopick_stopped`），而且 bridge 為這張卡開的 Lead workspace 沒有關閉（成功收尾才會關）。
+
+預期行為：合併成功就回報「完成到 loop」，不寫 `failed`，並關閉自己開的 Lead workspace。
+
+已確認根因：`src/autopick-wiring.ts` 的 `loop` 判斷有沒有合併用 `text.startsWith("loop 結束：")`。自動撿卡拿到的是 `card loop` 在本機 console 印出的**全部輸出**（進度行在前：「review 完成…判定：pass」「已 merge：…」，最後才是「loop 結束：…已 merge（共 3 個步驟）。」），所以字串開頭是進度行，判斷落空。卡片上 `failed` 事件的原因欄位也以「review 完成：…」開頭，印證這一點。ISSUE-096 第二部分的單元測試只餵了單行回覆，沒有涵蓋進度行在前的情況。
+
+修正範圍（2026-11-06）：改成逐行比對 `/^loop 結束：.*已 merge/m`——必須有一行以「loop 結束：」開頭且同一行含「已 merge」。進度裡出現「已 merge」但沒有這樣收尾的一行（例如 merge 後的步驟出錯）、或只是沒有 `--merge` 的「loop 結束」（review 通過）都不算合併。
+
+測試（2026-11-06，本機 macOS，非 CI）：`test/autopick-wiring.test.ts` 新增 1 項（含三個情境：進度行在前、最後以「loop 結束…已 merge」收尾 → 算合併；進度裡有「已 merge」但以「loop 停下來了」收尾 → 不算；進度在前、「loop 結束」但沒有「已 merge」 → 不算）。修正前該項**失敗**（紅，重現實機問題），修正後通過。`node --test --test-timeout=60000 dist/test/*.test.js` → 1196 tests、1195 pass、0 fail、1 skip（既有）；`npm run lint` ok。
+
+未驗證：實機（merge 後 runner 回報「完成到 loop」、不寫 `failed`、關閉 Lead workspace）；這次誤報留下的殘留（Lead workspace `autopick-REQ-20261106-auto5`、卡片上的 `failed` 事件、遠端分支 `card/REQ-20261106-auto5`）需手動清理，卡片事件是事實紀錄不改寫。
