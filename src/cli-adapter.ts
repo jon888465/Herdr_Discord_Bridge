@@ -2,6 +2,8 @@ import { stripAnsi } from "./format.js";
 
 export interface CliOutputAdapter {
   modelCommand(model: string): string;
+  /** 啟動參數的推理強度；沒有已確認的參數就不實作（拒絕，不猜）。 */
+  levelArgs?(level: string): string[];
   extractLatestResponse(
     prompt: string,
     output: string,
@@ -13,6 +15,7 @@ class MarkerCliAdapter implements CliOutputAdapter {
   constructor(
     private readonly markers: readonly string[],
     private readonly modelCommandPrefix = "/model",
+    readonly levelArgs?: (level: string) => string[],
   ) {}
 
   modelCommand(model: string): string {
@@ -295,6 +298,10 @@ class ClaudeCliAdapter implements CliOutputAdapter {
     return "/model " + model;
   }
 
+  levelArgs(level: string): string[] {
+    return ["--effort", level];
+  }
+
   extractLatestResponse(
     prompt: string,
     output: string,
@@ -474,7 +481,10 @@ const grokAdapter = new GrokCliAdapter();
 const claudeAdapter = new ClaudeCliAdapter();
 const piAdapter = new PiCliAdapter();
 
-const codexAdapter = new MarkerCliAdapter(["› ", "❯ "]);
+const codexAdapter = new MarkerCliAdapter(["› ", "❯ "], "/model", (level) => [
+  "-c",
+  `model_reasoning_effort=${level}`,
+]);
 const antigravityAdapter = new MarkerCliAdapter(["> "]);
 const opencodeAdapter = new MarkerCliAdapter(["> "]);
 const genericAdapter = new MarkerCliAdapter([
@@ -542,6 +552,27 @@ export function conversationMovedPast(prompt: string, output: string): boolean {
   return lines
     .slice(last + 1)
     .some((line) => /^\s*[❯›>]\s+\S/.test(line) && !line.includes(key));
+}
+
+/** 只檢查格式（不得以 `-` 開頭）；有效值由 CLI 自己回應，不寫死清單。 */
+const LEVEL_FORMAT = /^[A-Za-z0-9_][A-Za-z0-9_-]{0,31}$/;
+
+export function levelArgsFor(
+  agentKind: string,
+  level: string,
+): { ok: true; args: string[] } | { ok: false; reason: string } {
+  if (!LEVEL_FORMAT.test(level))
+    return {
+      ok: false,
+      reason: `不合法的 level "${level.slice(0, 40)}"（只接受英數字與 - _，不得以 - 開頭，≤32 字元）`,
+    };
+  const adapter = adapterFor(agentKind);
+  if (!adapter.levelArgs)
+    return {
+      ok: false,
+      reason: `${agentKind} 沒有已確認的推理強度（level）參數，不猜`,
+    };
+  return { ok: true, args: adapter.levelArgs(level) };
 }
 
 function adapterFor(agentKind: string | undefined): CliOutputAdapter {

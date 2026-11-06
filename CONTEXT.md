@@ -167,3 +167,5 @@ Discord single-Agent baseline, streaming, rewatch, and direct-marker observation
 now use visible snapshots only. Hook/transcript finals remain preferred. Off-screen
 parser text and markers may be unavailable; explicit read/handoff remain separate.
 The second fix still requires runtime deployment and live acceptance.
+
+`agent start`（ISSUE-114）：`src/agent-launch*.ts`；契約見 `SPEC.md`。
