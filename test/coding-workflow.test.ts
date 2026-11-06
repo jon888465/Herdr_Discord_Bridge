@@ -248,6 +248,7 @@ function harness(options: {
     | "prior-cover"
     | "repeat-finding"
     | "overlap";
+  planningReply?: (attempt: number) => string;
   hangWorker?: boolean;
 }) {
   const dir = mkdtempSync(join(tmpdir(), "coding-task-"));
@@ -427,6 +428,8 @@ function harness(options: {
           writeFileSync(join(options.repo, "added.txt"), "lead-edit\n");
         body = "Local delivery report";
       }
+      if (options.planningReply && prompt.includes("Do not modify files while planning"))
+        body = options.planningReply(plans);
       return framed(prompt, body);
     },
     cancelAgent: async (target: string) => {
@@ -1462,3 +1465,188 @@ test("coding plan validator rejects a second writer and an unknown finding refer
     /unknown finding/,
   );
 });
+
+test("ISSUE-106: rejected writer plan starts nothing, corrected plan completes and journal replays", async () => {
+  const { repo } = repoWithBaseline();
+  const h = harness({
+    repo,
+    script: "same",
+    planningReply: (attempt) => {
+      if (attempt === 1)
+        return JSON.stringify(planFor("overlap", 1, "w1:p2", "w1:p3"));
+      return JSON.stringify(planFor("same", attempt - 1, "w1:p2", "w1:p3"));
+    },
+  });
+  try {
+    const task = await h.engine.run({
+      taskId: "plan-retry",
+      prompt: "ship",
+      lead: h.lead,
+      workers: [h.author, h.reviewer],
+      coding: true,
+      replan: true,
+      timeoutMs: 500,
+    });
+    assert.equal(task.state, "completed", task.detail);
+    assert.equal(
+      h.prompts.filter((p) => p.text.includes("Coding role: implement")).length,
+      1,
+    );
+    assert.equal(task.assignments.length, 3);
+    assert.deepEqual(task.planRejections, [
+      {
+        round: 0,
+        rejectionCount: 1,
+        errorMessage:
+          "read-only coding assignments in a writer round must depend on that writer",
+      },
+    ]);
+    const feedback = h.prompts.find((p) =>
+      p.text.includes("previous plan was rejected"),
+    );
+    assert.match(
+      feedback?.text ?? "",
+      /completed assignments.*will not be redone/,
+    );
+    assert.equal(
+      h.store.events(task.taskId).filter((e) => e.type === "plan_rejected")
+        .length,
+      1,
+    );
+    const replay = new TeamTaskStore(join(h.dir, "tasks"));
+    assert.deepEqual(
+      replay.get(task.taskId)?.planRejections,
+      task.planRejections,
+    );
+  } finally {
+    h.close();
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+for (const coding of [true, false]) {
+  test(`ISSUE-106: invalid plan ${coding ? "fails on rejection 3" : "fails immediately for general tasks"}`, async () => {
+    const { repo } = repoWithBaseline();
+    const h = harness({
+      repo,
+      script: "same",
+      planningReply: () =>
+        '{"assignments":[{"id":"bad","workerPaneId":"missing","instruction":"inspect","role":"diagnose","access":"read"}]}',
+    });
+    try {
+      const task = await h.engine.run({
+        taskId: "bad-plan",
+        prompt: "ship",
+        lead: h.lead,
+        workers: [h.author, h.reviewer],
+        coding,
+        replan: true,
+        timeoutMs: 500,
+      });
+      assert.equal(task.state, "failed");
+      assert.match(task.detail ?? "", /missing/);
+      assert.equal(task.assignments.length, 0);
+      assert.equal(
+        h.prompts.filter((p) =>
+          p.text.includes("Do not modify files while planning"),
+        ).length,
+        coding ? 3 : 1,
+      );
+      assert.equal(task.planRejections?.length ?? 0, coding ? 3 : 0);
+      if (coding) assert.match(task.detail ?? "", /Plan rejection #3/);
+    } finally {
+      h.close();
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+}
+
+test("ISSUE-106: cross-round rejection preserves completed artifacts and consumes planning budget", async () => {
+  for (const maxRounds of [2, 8]) {
+    const { repo } = repoWithBaseline();
+    const h = harness({
+      repo,
+      script: "same",
+      planningReply: (attempt) =>
+        JSON.stringify(
+          planFor(
+            "same",
+            attempt === 2 ? 1 : attempt > 2 ? attempt - 1 : attempt,
+            "w1:p2",
+            "w1:p3",
+          ),
+        ),
+    });
+    try {
+      const task = await h.engine.run({
+        taskId: "prior-plan",
+        prompt: "ship",
+        lead: h.lead,
+        workers: [h.author, h.reviewer],
+        coding: true,
+        replan: true,
+        maxRounds,
+        timeoutMs: 500,
+      });
+      assert.equal(
+        task.state,
+        maxRounds === 2 ? "failed" : "completed",
+        task.detail,
+      );
+      assert.equal(
+        h.prompts.filter((p) => p.text.includes("Coding role: implement"))
+          .length,
+        1,
+      );
+      assert.equal(
+        task.coding?.artifacts.filter((a) => a.role === "implement").length,
+        1,
+      );
+      assert.match(
+        task.planRejections?.[0]?.errorMessage ?? "",
+        /unique across rounds/,
+      );
+      assert.equal(task.planRejections?.[0]?.round, 1);
+      if (maxRounds === 2)
+        assert.match(task.detail ?? "", /planning round limit/);
+    } finally {
+      h.close();
+      rmSync(repo, { recursive: true, force: true });
+    }
+  }
+});
+
+for (const failure of ["parse", "count"]) {
+  test(`ISSUE-106: ${failure} rejection feeds back before dispatch`, async () => {
+    const { repo } = repoWithBaseline();
+    const h = harness({
+      repo,
+      script: "same",
+      planningReply: (attempt) => {
+        if (attempt !== 1)
+          return JSON.stringify(planFor("same", attempt - 1, "w1:p2", "w1:p3"));
+        return failure === "parse" ? "not a plan" : JSON.stringify({
+          assignments: Array.from({ length: 17 }, (_, i) => ({
+            id: `diag-${i}`, workerPaneId: "w1:p2", instruction: "Inspect",
+            role: "diagnose", access: "read",
+          })),
+        });
+      },
+    });
+    try {
+      const task = await h.engine.run({
+        taskId: "plan-boundary", prompt: "ship", lead: h.lead,
+        workers: [h.author, h.reviewer], coding: true, replan: true, timeoutMs: 500,
+      });
+      assert.equal(task.state, "completed", task.detail);
+      assert.equal(task.planRejections?.length, 1);
+      const rejected = h.store.events(task.taskId).find(e => e.type === "plan_rejected");
+      assert.equal(rejected?.task.assignments.length, 0);
+      assert.equal(task.assignments.length, 3);
+      if (failure === "count") assert.equal(task.planRejections?.[0]?.errorMessage, "too many assignments");
+    } finally {
+      h.close();
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+}

@@ -568,6 +568,13 @@ export class TeamTaskEngine {
         case "plan_requested":
           task.state = "planning";
           break;
+        case "plan_rejected":
+          (task.planRejections ??= []).push({
+            round: event.round!,
+            rejectionCount: event.rejectionCount!,
+            errorMessage: event.detail!,
+          });
+          break;
         case "plan_validated":
           for (const plan of event.plan!.assignments)
             task.assignments.push({

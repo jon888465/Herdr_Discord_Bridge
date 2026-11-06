@@ -71,6 +71,7 @@ export type OrchestrationEvent = {
   type:
     | "question_opened"
     | "plan_validated"
+    | "plan_rejected"
     | "turn_dispatched"
     | "turn_settled"
     | "task_started"
@@ -84,6 +85,8 @@ export type OrchestrationEvent = {
     | "task_blocked"
     | "task_failed";
   taskId: string;
+  round?: number;
+  rejectionCount?: number;
   questionId?: string;
   assignmentId?: string;
   paneId?: string;
@@ -215,6 +218,11 @@ export async function runTeamTask(
     // ISSUE-093：Lead 回空計畫但驗收閘門還有未滿足的原因時，把原因回給 Lead 再排一輪（最多兩次），
     // 不直接結束；否則 Lead 漏排 verify 之類的步驟就會讓整個任務失敗，沒有補救機會。
     const MAX_GATE_NOTICES = 2;
+    const MAX_PLAN_REJECTIONS = 2;
+    let planRejections = 0;
+    let planRejection = "";
+    // Rejections keep the work round, but each planning attempt consumes maxRounds.
+    let planningRound = 0;
     let gateNotices = 0;
     let gateNotice: string[] = [];
     for (let round = 0; ; round++) {
@@ -234,13 +242,19 @@ export async function runTeamTask(
         (gateNotice.length
           ? `\nThe bridge acceptance gate is authoritative and is not satisfied yet: ${gateNotice.join("; ")}. Plan new assignments that resolve these (for example a read-only verify assignment on the current version, or another review), or return an empty assignments array only if nothing more can be done. If a verify failed, look at the commands and exit codes in the coding evidence: a verification fails when one of the reported commands exited non-zero, so tell the next verifier to report only checks that must pass and to write absence checks as \`! grep -q …\`.`
           : "");
-      gateNotice = [];
+      const rejectionPrompt = planRejection
+        ? `\nYour previous plan was rejected by the engine because: ${planRejection}. Re-plan following the rules in the SAME round; completed assignments and their artifacts are kept and will not be redone. The rejected plan started no assignments.`
+        : "";
       emit({
         type: "plan_requested",
         taskId: input.taskId,
         paneId: input.lead.pane_id,
       });
-      const planned = await turn(input.lead, planningPrompt, "planning");
+      const planned = await turn(
+        input.lead,
+        planningPrompt + rejectionPrompt,
+        "planning",
+      );
       if (planned.state === "blocked") {
         emit({
           type: "task_blocked",
@@ -254,34 +268,59 @@ export async function runTeamTask(
           reports,
         };
       }
-      plan = parseAssignmentPlan(
-        planned.text,
-        planned.terminal && input.lead.agent?.toLowerCase().includes("codex"),
-        input.coding === true,
-      );
-      validateAssignmentPlan(
-        plan,
-        input.lead,
-        input.workers,
-        input.coding
-          ? {
-              prior: allAssignments,
-              findingIds: input.codingHooks!.findingIds(),
-              artifactIds: input.codingHooks!.artifactIds(),
-            }
-          : undefined,
-      );
-      if (
-        plan.assignments.length > 16 ||
-        allAssignments.length + plan.assignments.length > 64
-      )
-        throw new Error("too many assignments");
-      if (
-        plan.assignments.some((a) =>
-          allAssignments.some((old) => old.id === a.id),
+      try {
+        plan = parseAssignmentPlan(
+          planned.text,
+          planned.terminal && input.lead.agent?.toLowerCase().includes("codex"),
+          input.coding === true,
+        );
+        validateAssignmentPlan(
+          plan,
+          input.lead,
+          input.workers,
+          input.coding
+            ? {
+                prior: allAssignments,
+                findingIds: input.codingHooks!.findingIds(),
+                artifactIds: input.codingHooks!.artifactIds(),
+              }
+            : undefined,
+        );
+        if (
+          plan.assignments.length > 16 ||
+          allAssignments.length + plan.assignments.length > 64
         )
-      )
-        throw new Error("Assignment IDs must be unique across rounds");
+          throw new Error("too many assignments");
+        if (
+          plan.assignments.some((a) =>
+            allAssignments.some((old) => old.id === a.id),
+          )
+        )
+          throw new Error("Assignment IDs must be unique across rounds");
+      } catch (error) {
+        if (!input.coding) throw error;
+        const detail = error instanceof Error ? error.message : String(error);
+        planRejections += 1;
+        emit({
+          type: "plan_rejected",
+          taskId: input.taskId,
+          round: planningRound,
+          rejectionCount: planRejections,
+          detail,
+        });
+        if (planRejections > MAX_PLAN_REJECTIONS) {
+          if (error instanceof Error) {
+            error.message = `Plan rejection #${planRejections}: ${detail}`;
+            throw error;
+          }
+          throw new Error(`Plan rejection #${planRejections}: ${detail}`);
+        }
+        planRejection = detail;
+        continue;
+      }
+      planRejection = "";
+      gateNotice = [];
+      planningRound += 1;
       emit({ type: "plan_validated", taskId: input.taskId, plan });
       allAssignments.push(...plan.assignments);
       if (!plan.assignments.length) {

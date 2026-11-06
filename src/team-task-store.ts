@@ -69,6 +69,11 @@ export interface TeamQuestion {
   state: "pending" | "sending" | "answered" | "stale" | "unknown" | "cancelled";
 }
 export interface DurableTeamTask {
+  planRejections?: Array<{
+    round: number;
+    rejectionCount: number;
+    errorMessage: string;
+  }>;
   questions?: TeamQuestion[];
   origin?: TeamTaskInput["origin"];
   taskId: string;
