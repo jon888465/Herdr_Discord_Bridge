@@ -3672,6 +3672,8 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 2026-11-07 card 接續：使用者授權走 card PR 與 L2 自動 merge。卡片 `REQ-20261106-issue108-pane-tabs` 的 task `task-c7fc2323-5756-4bdb-b4d0-a8ca79b3d1e8` 在獨立 worktree 套用既有 patch，11 個檔案的 SHA256 與原清單一致，並建立修正 commit。該 worktree 重跑 `npm test`（含 build）為 1278 tests、1277 pass、0 fail、1 skip，`npm run typecheck` 與 `npm run lint` 通過（2026-11-07，本機 macOS）。原目錄的同份未提交修改已在核對已提交副本後移除。接續 `card pr` 與 `card loop --merge`，獨立 review／CI／merge 結果記於營運卡片；合併不代表部署或實機驗收，bridge 尚未重啟，既有待驗收項目保持開放。
 
+2026-11-07 PR／CI 接續：`card pr` 已建立 PR #151（https://github.com/jon888465/Herdr_Discord_Bridge/pull/151），head `1432360679f0` 的獨立 Codex review 第 1 輪 pass、無 findings，reviewer pane 已關閉。CI run `42248903152` 的 Ubuntu 全部通過，但 macOS job `127998371786` 排隊約 15 分鐘後 cancelled，沒有執行任何測試；annotation 確認 hosted runner 多次嘗試仍未取得，並提示 macOS arm64 runner 容量不足（https://github.com/jon888465/Herdr_Discord_Bridge/actions/runs/42248903152）。`card loop --merge` 正確停在 ci，沒有 merge。這是 GitHub runner 供應限制，不是已重現的程式測試失敗；不取消必要檢查、不修改 CI 規則、不繞過 merge gate。同步本紀錄後，透過 `card pr` 更新同一張 PR，再由 `card loop --merge` 對新 head 重新 review／等待 CI；後續執行結果保留在同一張營運卡片與 GitHub run。實機驗收與部署狀態不變。
+
 ## ISSUE-109：卡片只有「描述」與「驗收條件」會送給 Lead，其他段落被丟棄且沒有任何提示
 
 更新日期：2026-11-06。狀態：待決定（根因已確認；尚未修正）。
