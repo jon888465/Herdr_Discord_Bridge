@@ -3683,3 +3683,23 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 修正範圍：無。可能的方向（未決定）：(a) 不就緒時抓畫面辨識信任提示並在訊息中指出 pane；(b) 建 worktree 時預先把路徑寫進 agy 的 `trustedWorkspaces`（會代替使用者做信任決定，需使用者同意）；(c) 先接受現狀，把「agy 每張卡要手動信任一次」寫進使用說明。
 
 未驗證：其他 profile（pi、opencode）有沒有類似的提示；agy 是否有設定可以改成信任子資料夾。
+
+## ISSUE-114：新增 `agent start <machine:agent:model:level>`，臨時指定機器、Agent、model 與推理強度（level）
+
+更新日期：2026-11-06。狀態：已修正、待驗收（**尚未做任何 Discord／Herdr／CLI 實機驗證**；bridge 尚未重啟，執行中的仍是舊版）。
+
+症狀（卡片 `REQ-20261106-agent-launch-spec`）：開特定 model／強度的 Agent 只能事先寫 `agentProfiles`。預期：`agent start <規格> [--cwd <路徑>]` 在選定 Agent 的 workspace 開新 pane，規則見 `SPEC.md`。根因：非 bug，是功能缺口。
+
+修正範圍：新增 `src/agent-launch-spec.ts`、`src/agent-launch.ts`；`cli-adapter.ts` 新增 `levelArgsFor`；`startAgentInPane` 新增選填 `args`；`main.ts` 新增分派。model 驗證呼叫 `validateProfiles`，未放寬。不改 `config.json`、`policy.yml`、profile、`--coding`、Team roster。
+
+審查發現與修正（2026-11-06）：
+- f1：遠端 `--cwd` 只比對文字，symlink 可越界。改為白名單非空時經 ssh `realpath` 比對 canonical path，無法驗證就拒絕。
+- f2：成功前未核對實際 Agent。現在核對種類、workspace、pane、terminal，不符視為失敗。
+- f3：`validateProfiles` 只擋 CR／LF／NUL。`agent start` 另拒絕 model 內所有 C0、DEL、C1；profile 行為不變。
+- `waitUntilReady` 不改動，blocked 訊息的「reviewer」在此換成「Agent」。
+
+測試（2026-11-06，本機 macOS，未實機）：typecheck、`npm test`（含 build）、`npm run lint` 退出碼皆 0；1266 項中 1265 通過、0 失敗、1 略過。新增 `test/agent-launch.test.ts` 涵蓋 f1–f3。
+
+限制：v1 只能在選定 Agent 所在的機器啟動（跨機器另案）；遠端 canonical path 需 ssh 可用，否則拒絕；`--cwd` 以空白串接其餘參數；pane 太小沿用 ISSUE-108。
+
+未驗證／下一步：實機確認 (1) pane 以指定 model 與強度啟動；(2) agy 信任提示被回報而非確認；(3) 白名單非空時 `--cwd` 的拒絕與遠端 realpath；(4) 遠端同機啟動。完成後改為已驗收並記錄日期與環境。

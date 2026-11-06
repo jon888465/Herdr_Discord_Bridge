@@ -36,13 +36,14 @@ const SETTLE_INTERVAL_MS = 1_000;
 
 export async function startAgentInPane(
   port: AgentStartPort,
-  input: { paneId: string; kind: string; name: string },
+  input: { paneId: string; kind: string; name: string; args?: string[] },
   clock: Clock = realClock,
 ): Promise<AgentRecord> {
   const params = {
     pane_id: input.paneId,
     name: input.name,
     kind: input.kind,
+    ...(input.args?.length ? { args: input.args } : {}),
     timeout_ms: 30000,
   };
   const retryDeadline = clock.now() + BUSY_RETRY_MS;

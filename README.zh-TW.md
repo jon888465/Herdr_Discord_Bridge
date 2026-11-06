@@ -186,6 +186,8 @@ Agent 完成後，回覆會更新原本的 progress message；預設不會另外
 
 `bridge>` 的 Agent 選取以 workspace scope 保存；Discord user／thread mapping 仍各自獨立。請輸入 `agent use <pane ID>` 後再執行 `current`。
 
+臨時啟動 Agent：`agent start <machine:agent:model:level> [--cwd <路徑>]`（Discord 加 `/herdr`）。省略的 `machine`／`agent` 沿用目前 Agent，省略的 `model`／`level` 用 CLI 預設，例如 `agent start :codex:gpt-6.1-sol:medium`。不自動 `agent use`、不自動確認信任提示。見 `SPEC.md`、ISSUE-114（尚未實機驗證）。
+
 ### 選擇 Agent
 
 選擇 workspace 與選擇 Agent 是兩個不同動作。要把 Discord thread 導向

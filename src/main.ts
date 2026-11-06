@@ -30,6 +30,11 @@ import {
   prepareCardWorktree,
 } from "./card-worktree-flow.js";
 import { startAgentInPane } from "./agent-start.js";
+import {
+  parseAgentStartArgs,
+  runAgentStart,
+  sshRealpath,
+} from "./agent-launch.js";
 import { CardStore } from "./card-store.js";
 import { LEDGER_MAX_FILE_BYTES } from "./card.js";
 import { recordCleanupOnCard } from "./card-cleanup.js";
@@ -604,7 +609,9 @@ export async function handleCommand(
         await detachConsoleAgent(args.slice(1), context, runtime);
         return;
       }
-      if (args[0]?.toLowerCase() === "use")
+      if (args[0]?.toLowerCase() === "start")
+        await startAgentCommand(args.slice(1), context, runtime);
+      else if (args[0]?.toLowerCase() === "use")
         await useAgentOrWorkspace(args.slice(1), context, runtime);
       else await listAgents(args, context, runtime);
       return;
@@ -1085,6 +1092,43 @@ async function detachConsoleAgent(
     context.message,
     "✅ Detached local Agent pane observer. The Agent keeps running and routing is unchanged. Inspect with `attach <pane>`.",
   );
+}
+
+async function startAgentCommand(
+  args: string[],
+  context: CommandContext,
+  runtime: Runtime,
+): Promise<void> {
+  const input = parseAgentStartArgs(args);
+  const mapping = effectiveTarget(context, runtime.routing);
+  const selected = mapping?.paneId
+    ? (await runtime.herdr.listAgentsWithWorkspaceNames()).find(
+        (item) => item.pane_id === mapping.paneId,
+      )
+    : undefined;
+  if (selected)
+    validateAgentTarget(selected, mapping, runtime.config.allowedWorkspaceIds);
+  const workspace = selected
+    ? (await runtime.herdr.listWorkspaces()).find(
+        (item) => item.workspace_id === selected.workspace_id,
+      )
+    : undefined;
+  const text = await runAgentStart(
+    {
+      port: runtime.herdr,
+      selected,
+      workspacePath: workspace ? workspacePath(workspace) : undefined,
+      machineIds: runtime.config.machines.map((machine) => machine.id),
+      remoteRealpath: (id, target) =>
+        sshRealpath(
+          runtime.config.machines.find((m) => m.id === id)!,
+          target,
+        ),
+      allowedWorkspaceIds: runtime.config.allowedWorkspaceIds,
+    },
+    input,
+  );
+  await runtime.discord.reply(context.message, text);
 }
 
 async function currentTarget(
@@ -2552,13 +2596,16 @@ function startAutopick(runtime: Runtime): () => void {
     if (result.outcome === "reached") return;
     const logged = new CardStore(rootDir).recordEvent(result.cardId, {
       event: "failed",
-      code: result.outcome === "stopped" ? "autopick_stopped" : "autopick_failed",
+      code:
+        result.outcome === "stopped" ? "autopick_stopped" : "autopick_failed",
       reason: `${result.lastStep}：${result.reason ?? ""}`.slice(0, 200),
       time: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
       eventId: `autopick-${result.lastStep}-${Date.now()}`,
     });
     if (!logged.ok)
-      console.error(`自動撿卡：卡片紀錄失敗（${result.cardId}）：${logged.error}`);
+      console.error(
+        `自動撿卡：卡片紀錄失敗（${result.cardId}）：${logged.error}`,
+      );
   };
   const picker = createAutopicker({
     policy: () => loadPolicy(join(configDirectory(), "policy.yml")),
@@ -3808,6 +3855,7 @@ function consoleHelpText(): string {
     "**選擇與查詢**",
     "agent — 列出目前可用 Agent",
     "agent use <pane> — 選取對話目標，不顯示 CLI 畫面",
+    "agent start <machine:agent:model:level> [--cwd <路徑>] — 在目前 Agent 的 workspace 開新 pane 啟動 Agent；省略的段落沿用目前的或用 CLI 預設",
     "attach <pane> — 開啟終端快照檢視（40 行／6000 字元）",
     "watch <pane> — 只顯示狀態變化；detach 回到對話",
     "team pool / team select — 檢視／勾選可用 Agent profiles",
