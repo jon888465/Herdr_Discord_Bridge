@@ -3606,6 +3606,8 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 **2026-11-06 合併狀況：**因為第一次的完整實作（PR #136，diff 73638 字元）超過 review 上限 60000，bridge 的獨立 review 沒有執行（見 ISSUE-111），改拆成三個 PR，各自由 bridge 自己 review 並 merge：#137（`a96fda5`，選用機制）、#138（`fc7398c`，session 登記）、#139（`4e8a1d7`，reviewer 獨立性判斷）；bridge 已於 2026-11-06 09:23:02Z 重啟載入。**agy 作為 Worker 或 Reviewer 的 `--coding` 全流程仍未實機驗證**（從沒真的讓 agy 擔任過）；要驗證需使用者在 `config.json` 的 agy profile 加上 `implementation` 或 `review`，再用一張無害的卡跑一輪。PR #136 仍開著、等使用者決定關閉。
 
+**agy 實機驗證卡（2026-11-06）：**本卡 `REQ-20261106-agy-verify` 的實作階段由 `agy` profile 擔任 writer 執行，實作完成時 `agy` 自報僅修改 `docs/known-issues.md` 一個檔案。至於後續獨立 review 是否通過，以及 `agy` 的 session 身分是否被正確登記，見這張卡的流程紀錄與 task journal，由使用者核對。
+
 ## ISSUE-108：同一個 workspace 有多個 Agent pane 時，Lead／Worker pane 只剩約 6 行，replan 的 prompt 沒有被 Lead 處理
 
 更新日期：2026-11-06。狀態：待調查（根因未確認；使用者建議：pane 太小時改開新 tab）。
