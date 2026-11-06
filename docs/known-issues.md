@@ -56,7 +56,7 @@
 | ISSUE-054 | 缺少單檔卡片驗證指令，Agent 轉 Mantis 單後無法自我檢查 | 已修正、待驗收 | 2026-10-30 新增 `herdr-card-check`；自動化測試通過；待使用者用真實 Mantis 單請 Agent 轉卡片並以此指令驗收 |
 | ISSUE-055 | 遠端長期存在的 pod 上，開發完成後的 worktree／workspace／分支清理尚未設計 | 待調查（先紀錄，未來處理） | 2026-11-02 使用者要求先紀錄；功能尚未實作，無實際殘留；原則與 3 個問題待使用者決定 |
 | ISSUE-056 | 機敏內容遮蔽漏掉多種憑證樣式；兩份遮蔽邏輯重複且不一致；handoff 摘要先截斷再遮蔽 | 已修正、待驗收 | 2026-11-02 已整併為 `src/redact.ts`，自動化測試通過；待實際 session handoff 驗收 |
-| ISSUE-047 | Codex 在 Discord 送問後出現「Agent identity changed (session changed); response capture stopped」，擷取在核准通知前中止 | 已驗收（2026-10-28，使用者實測 Discord 送問後不再中止、核准流程正常） | 觸發原因（Codex 第一個 prompt 才建新 session）屬推測；見 ISSUE-047 |
+| ISSUE-047 | Codex 在 Discord 送問後出現「Agent identity changed (session changed); response capture stopped」，擷取在核准通知前中止 | 重新開啟／待調查（2026-11-06 在 `agent start` 開的 codex pane 再現；2026-10-28 的驗收只涵蓋當時情境） | 根因未確認；見 ISSUE-047「2026-11-06 重新開啟」 |
 | ISSUE-046 | Discord 輸入權限選項數字（3）後沒有任何反應，之後按 Approve 才有動作 | 已驗收（2026-10-28，數字／allow／deny／按鈕／📨；原 `3` 沒反應根因未確認） | 2026-10-28 重啟後數字 1／2 回覆成功且有 📨；使用者早先的 `3` 沒反應原因仍未確認 |
 | ISSUE-045 | 畫面擷取判斷完成與權限不可靠，改用 CLI hook／協定，parser 保留備用 | Claude Stop 與 PermissionRequest 已驗收（2026-10-28，使用者實測）；Codex Stop 與 allow／deny（y／esc 快捷鍵）、hookTransport 設定與 hooks 指令已驗收（2026-10-28）；agy Stop 已驗收（2026-10-28）；pi Linux 缺漏補裝後已驗收（2026-10-29，保留 macOS 驗收歷史）；遠端 machine（agy）已驗收（2026-10-28，修正後重測） | 遠端 Claude／Codex／pi 未涵蓋；見 docs/hook-transport-proposal.md |
 | ISSUE-044 | Claude 回覆在 Discord 被重複貼出多則 | 重新開啟→已修正、待驗收 | 2026-10-28 重現，確認根因為回合尾巴後的「※ recap」行擋住完成判斷；原始碼與單元測試完成，已 commit（ccec39b）並於 2026-10-28 重啟（w2:p10），Discord 未驗收 |
@@ -1695,7 +1695,7 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 
 ## ISSUE-047：Codex 送問後擷取因 session changed 中止，核准通知與 allow 驗收無法進行
 
-更新日期：2026-10-28　狀態：已驗收（2026-10-28，使用者在 Discord 重測 Codex 送問不再中止；session 切換的觸發原因仍屬推測）
+更新日期：2026-11-06　狀態：重新開啟／待調查（2026-11-06 再現，見下方「2026-11-06 重新開啟」；2026-10-28 的驗收記錄保留：使用者在 Discord 重測 Codex 送問不再中止，當時 session 切換的觸發原因仍屬推測）
 
 使用者症狀：在 Discord 對 Codex（w4:p1，python_test）送出「建立 hook_test_allow.txt」的 ISSUE-045 驗收提示後，回應卡片只顯示 `Agent identity changed (session changed); response capture stopped.`。Codex 實際停在核准提示（Herdr 狀態 blocked、標題 Action Required），但 Discord 上沒有走到 allow 的流程，因此 Codex 的 allow／deny 驗收尚未進行。
 
@@ -1709,6 +1709,23 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 推測（未驗證）：該 Codex 為重新啟動或新執行緒，session 於第一個 prompt 才實體化，因此 bridge 記下的 `initial.agent_session` 仍是舊值。尚無送問當下 `initial.agent_session` 的紀錄，無法證明舊值就是 `01a180eb`。
 修正：`sessionCreatedSince`（`src/response-stream.ts`）判斷 UUIDv7 session id 是否建立於送問時間（容忍 5 秒）之後；`streamAgent` 對 Codex 在同 pane／terminal／workspace 下遇到這種新 id 時改追蹤新 id（log：`<agent> session created during turn pane=…`，codex／agy／pi 通用），其餘 id 變動仍停止擷取。新增 1 項測試。2026-10-28：lint 通過；完整 `npm test` 272 項、265 通過、6 失敗（ISSUE-035 既有項目）。注意：`CodexTranscript` 仍綁定舊 session 檔，換 session 後完成判斷靠 Stop hook 或畫面 parser。
 下一步：使用者重新送問驗收；另記錄送問當下與換 id 當下的 `agent_session`以確認觸發原因。修正做法是在同一 pane／terminal／cwd 下，若新 session id（UUIDv7 內含毫秒時間）的時間不早於本次送問時間，視為同一回合的 session 實體化而改採新 id，其餘情況仍停止擷取，避免轉發其他對話。
+
+### 2026-11-06 重新開啟：`agent start` 開的 codex pane，第一次從 Discord 送問就中止（待調查）
+
+使用者症狀（附圖 `.herdr-discord-bridge/attachments/message-mlpENO/1.jpg`，已以圖片工具讀取）：使用者在專案的 Discord thread 下 `agent use w1:p9`（bridge 回「目前對話 Agent：hdb-start-286cc66b」），再送「你看得到這thread剛剛有回應的嗎」（9:37 PM，台北時間；約 13:37Z）。bridge 的回應卡片標題為 codex／`w1:p9`，內容只有 `Agent identity changed (session changed); response capture stopped.`。codex 本身有回答（pane 畫面可見回答與 `Worked for 11s`），但答案沒有送回 Discord。使用者隨後下 `Agent use w1:p1` 切回 Claude。
+
+環境：2026-11-06，本機 macOS，bridge 載入 main `27aa532`（含 `agent start`）；`w1:p9` 是 `agent start :codex:gpt-6.1-sol:medium` 開的新 pane，codex v0.166.0。bridge console log：`Response capture stopped: session changed (pane=w1:p9).`，之後 `hook Stop session=01a1b0fb pane=w1:p9`。
+
+與 2026-10-28 的差異（舊修正沒有涵蓋）：目前 `w1:p9` 的 session id 是 `01a1b0fb-9774-77a3-9161-2351eac06ada`，UUIDv7 內含時間為 **13:10:40Z**（建立於 codex 啟動時），使用者送問約在 13:37Z，**早了約 27 分鐘**。`sessionCreatedSince`（`src/response-stream.ts`）要求 session id 時間 `>= 送問時間 - 5 秒` 才改追蹤新 id，因此不成立；於是走到 `!sameAgentSession(candidate.agent_session, trackedSession)` 而停止擷取。也就是 2026-10-28 的假設（session 在第一個 prompt 才建立）不適用這個情境。
+
+已確認：(1) 中止來自 `streamAgent` 的 identity 比較（`src/main.ts` 的 `session changed` 分支）；(2) 事後 pane list 的 `agent_session` 與 Stop hook 的 session 都是 `01a1b0fb`，其 UUIDv7 時間早於送問；**送問當下與送問前**的 session 值沒有紀錄，不能說它「從頭到尾沒變」。
+**根因未確認**：送問當下 bridge 記下的 `initial.agent_session` 是什麼（沒有保留）。比較合理的推測是 `agent start` 回傳的 Agent 記錄在 codex 還沒回報 session 時就被 bridge 保存（沒有 session 或是舊值），第一次送問期間 Herdr 才補上 session，造成「前後不一致」；但這沒有驗證。與 ISSUE-107 第 2 部分（agy 第一個回合後才登記的 session，`AgentPool.refreshSession`）同類，但那裡修的是 Worker 池，不是 Discord 回應串流。
+
+影響：用 `agent start` 開出來的 Agent，第一次從 Discord 對話可能收不到回答（要再問一次或自己看 pane）；`agent start` 的設計是「不自動 `agent use`，使用者要選用才切換」，所以每個新 Agent 都會走這條路。
+
+修正範圍：無（只記錄）。下一步：(a) 在串流開始時記錄 `initial.agent_session`，用 `agent start` 再開一個 codex、`agent use` 後從 Discord 與 console 各送一次問題，確認是否可穩定重現、console 路徑是否也受影響；(b) 重現後再決定修法，例如 `agent start` 回報前等 session 出現，或串流開始時 session 缺值就改用 pane 位置辨識，**不得放寬成接受任何不同 session**（避免轉發其他對話）。
+
+未驗證：claude 的新 pane 是否也會；agy／pi 是否也會；console 路徑；問題是否只發生在第一次送問。
 
 ### ISSUE-042 修正（2026-10-28，已實作、待驗收）
 
