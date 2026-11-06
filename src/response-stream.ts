@@ -193,6 +193,22 @@ export function hasAgentSession(value: unknown): boolean {
   );
 }
 
+/** A first session registration preserves the pinned Agent's full location. */
+export function isFirstSessionRegistration(
+  initial: AgentRecord,
+  candidate: AgentRecord | undefined,
+): boolean {
+  return (
+    !hasAgentSession(initial.agent_session) &&
+    candidate !== undefined &&
+    hasAgentSession(candidate.agent_session) &&
+    candidate.pane_id === initial.pane_id &&
+    candidate.terminal_id === initial.terminal_id &&
+    candidate.workspace_id === initial.workspace_id &&
+    candidate.agent === initial.agent
+  );
+}
+
 // Provider/source metadata can change without replacing the underlying session.
 export function sameAgentSession(left: unknown, right: unknown): boolean {
   if (left == null || right == null) return left == null && right == null;

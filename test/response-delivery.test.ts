@@ -571,3 +571,92 @@ test("a forced finish resumes capture when the Agent produces new output", async
   assert.equal(replies.length, 1);
   assert.match(replies[0], /再度運作/);
 });
+
+for (const scenario of [
+  "first",
+  "midturn",
+  "replacement",
+  "pane",
+  "terminal",
+  "workspace",
+  "kind",
+] as const) {
+  test(`ISSUE-047 startup session registration: ${scenario}`, async (t) => {
+    const started = Date.parse("2026-11-06T14:00:00Z");
+    t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: started });
+    const initial = {
+      terminal_id: "term",
+      pane_id: "w2:p4",
+      workspace_id: "w2",
+      tab_id: "w2:t1",
+      agent: "codex",
+      agent_status: "idle",
+      agent_session:
+        scenario === "replacement" || scenario === "midturn"
+          ? { kind: "id", value: "session-A" }
+          : null,
+    };
+    const candidate = {
+      ...initial,
+      agent_session: {
+        kind: "id",
+        value:
+          scenario === "midturn"
+            ? `${started.toString(16).padStart(12, "0").slice(0, 8)}-${started.toString(16).padStart(12, "0").slice(8)}-7000-8000-000000000001`
+            : "01a1b0fb-9774-77a3-9161-2351eac06ada",
+      },
+      ...(scenario === "pane" ? { pane_id: "w2:p5" } : {}),
+      ...(scenario === "terminal" ? { terminal_id: "other" } : {}),
+      ...(scenario === "workspace" ? { workspace_id: "other" } : {}),
+      ...(scenario === "kind" ? { agent: "claude" } : {}),
+    };
+    const sent: string[] = [];
+    const cards: string[] = [];
+    const runtime = {
+      config: { streamIntervalMs: 1000, outputLines: 40 },
+      herdr: {
+        listAgentsWithWorkspaceNames: async () => [candidate],
+        readAgent: async () => {
+          assert.ok(scenario === "first" || scenario === "midturn");
+          return "";
+        },
+      },
+      discord: {
+        editProgress: async (_: unknown, text: string) => {
+          cards.push(text);
+        },
+        postOutput: async (_: unknown, text: string) => {
+          sent.push(text);
+        },
+      },
+    } as unknown as Parameters<typeof streamAgent>[2];
+    const transcript = {
+      poll: async () => {
+        assert.ok(scenario === "first" || scenario === "midturn");
+      },
+      turn: { completed: true, final: "first answer" },
+    } as unknown as Parameters<typeof streamAgent>[5];
+    const task = streamAgent(
+      initial,
+      {} as Parameters<typeof streamAgent>[1],
+      runtime,
+      "question",
+      "",
+      transcript,
+    );
+    t.mock.timers.tick(1000);
+    await task;
+    if (scenario === "first" || scenario === "midturn") {
+      assert.deepEqual(sent, ["first answer"]);
+      assert.ok(!cards.some((card) => card.includes("capture stopped")));
+    } else {
+      assert.deepEqual(sent, []);
+      assert.match(
+        cards.at(-1)!,
+        scenario === "replacement"
+          ? /session changed/
+          : /pane\/terminal\/workspace\/agent changed/,
+      );
+    }
+  });
+}

@@ -82,6 +82,8 @@ import {
   CodexTranscript,
   Settlement,
   rollingPreview,
+  hasAgentSession,
+  isFirstSessionRegistration,
   sameAgentSession,
   sessionCreatedSince,
 } from "./response-stream.js";
@@ -3316,6 +3318,14 @@ export async function streamAgent(
       return;
     }
     if (
+      !hasAgentSession(trackedSession) &&
+      isFirstSessionRegistration(initial, candidate)
+    ) {
+      console.log(
+        `${initial.agent} session first registered during turn pane=${initial.pane_id}; following new session`,
+      );
+      trackedSession = candidate!.agent_session;
+    } else if (
       sameLocation &&
       !sessionMatches &&
       ["codex", "agy", "pi"].includes(initial.agent ?? "") &&

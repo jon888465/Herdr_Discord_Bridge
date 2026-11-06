@@ -15,6 +15,7 @@ import {
   findCodexSessionByNonce,
   rollingPreview,
   sessionCreatedSince,
+  isFirstSessionRegistration,
 } from "../src/response-stream.js";
 
 /** ISSUE-088：建一個假的 CODEX_HOME，rollout 檔名帶 session id，內容是 prompt。 */
@@ -219,7 +220,9 @@ const meta = (id: string, subagentOf?: string) =>
       cwd: "/work",
       ...(subagentOf
         ? {
-            source: { subagent: { thread_spawn: { parent_thread_id: subagentOf } } },
+            source: {
+              subagent: { thread_spawn: { parent_thread_id: subagentOf } },
+            },
             thread_source: "subagent",
           }
         : { source: "vscode", thread_source: "user" }),
@@ -265,4 +268,41 @@ test("ISSUE-099: two real sessions with the nonce, or only subagent sessions, ar
     rmSync(twoReal, { recursive: true, force: true });
     rmSync(onlySub, { recursive: true, force: true });
   }
+});
+
+test("ISSUE-047 first registration requires an empty pinned session and unchanged location", () => {
+  const initial = {
+    pane_id: "w:p",
+    terminal_id: "term",
+    workspace_id: "w",
+    tab_id: "w:t",
+    agent: "codex",
+    agent_status: "idle",
+    agent_session: null,
+  };
+  const candidate = { ...initial, agent_session: { kind: "id", value: ID_A } };
+  assert.equal(isFirstSessionRegistration(initial, candidate), true);
+  assert.equal(
+    isFirstSessionRegistration(
+      { ...initial, agent_session: { kind: "id", value: ID_B } },
+      candidate,
+    ),
+    false,
+  );
+  assert.equal(isFirstSessionRegistration(initial, undefined), false);
+  for (const agent_session of [null, undefined, {}, { kind: "id", value: "" }])
+    assert.equal(
+      isFirstSessionRegistration(initial, { ...candidate, agent_session }),
+      false,
+    );
+  for (const change of [
+    { pane_id: "other" },
+    { terminal_id: "other" },
+    { workspace_id: "other" },
+    { agent: "claude" },
+  ])
+    assert.equal(
+      isFirstSessionRegistration(initial, { ...candidate, ...change }),
+      false,
+    );
 });
