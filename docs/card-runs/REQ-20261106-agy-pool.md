@@ -91,7 +91,7 @@
 
 ### 仍未完成
 
-- agy 作為 Worker／Reviewer 的 `--coding` 全流程實機驗證：需使用者在 agy profile 加 `implementation` 或 `review`，用無害的卡跑一輪。
+- agy 作為 **reviewer** 的實機驗證（writer 已驗，見下節）；ISSUE-107 是否「已驗收」由使用者決定。
 - ISSUE-106（計畫重排）、ISSUE-098／099／100 沒被觸發。
 - ISSUE-108（小 pane、Lead 沒收到 prompt）、ISSUE-109 到 112 待決定。
 - PR #136（舊的大 PR）仍開著，等使用者決定關閉；遠端分支 `card/REQ-20261106-agy-pool` 與卡片檔 `REQ-20261106-agy-pool.md` 保留作為比對。
@@ -257,3 +257,14 @@ agy 作為 coding Worker／Reviewer 還沒有實機驗證，我（使用者）�
 1. `agy-1-roster`：`src/coding-roster.ts` 的選用機制（agy profile 的 `capabilities` 含 `implementation` 或 `review` 才自動入池）、測試、文件。
 2. `agy-2-session`：`src/team-turn.ts`、`src/agent-pool.ts` 的 `refreshSession`、`src/team-orchestration.ts` 的 `onWorkerSession`、`src/main.ts` 接線、測試。
 3. `agy-3-reviewer`：`src/team-task-engine.ts` 的 `sessionDeferredKind` 與入帳身分、測試；入帳時未知作者、未知 reviewer、同 session 一律 fail closed。
+
+## 後續：agy 實機驗證卡（2026-11-06）
+
+使用者在 agy profile 的 `capabilities` 加上 `implementation` 後，建了無害的卡 `REQ-20261106-agy-verify`（在 `docs/known-issues.md` 的 ISSUE-107 加一段，要求 implement 由 `profile:agy` 擔任、失敗要明說不得改派）。
+
+| # | 時間（UTC） | 結果 | 原因與處理 |
+|---|---|---|---|
+| 1 | 09:43:34–09:44:31 | task 失敗（約 1 分鐘） | agy 停在信任資料夾提示，profile 啟動不就緒（ISSUE-113）。使用者授權後我在 pane 送 Enter，agy 把這個 worktree 路徑加入信任清單。 |
+| 2 | 11:04:17–11:07:19 | task 完成，PR #141 於 11:09:48 由 bridge squash merge（`2d3b2ce`） | 清理（先 `card cleanup`，再刪分支、關 workspace）後重跑。writer 是 agy（session `0c50ac78-…` 已登記），reviewer 是 codex（不同 session）pass，verify 由 claude 執行。 |
+
+觀察：Lead 的計畫完全照卡片要求（implement 給 agy、review、verify 給其他 Worker），沒有多餘的診斷回合；agy 的實作約 1.5 分鐘，diff 只有 +2 行。**這證明了 writer 路徑與 session 登記，沒有證明 agy 擔任 reviewer。**另外，agy 每張卡的 worktree 都要手動信任一次，這是自動化的缺口（ISSUE-113）。
