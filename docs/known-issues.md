@@ -3715,7 +3715,9 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 - 指定其他機器被拒：選定遠端 Agent 時 `agent start local:agy` →「v1 只能在選定 Agent 所在的機器（agy-pod）啟動，不能開在 local（跨機器另案）」。測試 pane 已關閉，選用已切回 `w1:p1`。
 - agy 信任提示：用全新、agy 沒信任過的資料夾當 `--cwd` 啟動 agy，**bridge 回報「✅ 已啟動」，實際上 agy 停在 `Do you trust the contents of this project?`**。bridge 沒有替人確認（測試 pane 已關閉，信任清單沒有被寫入）。但「回報成功」是錯的，見 ISSUE-116。
 
-**仍未驗證：**白名單非空時 `--cwd` 的拒絕與遠端 realpath（`allowedWorkspaceIds` 在這台機器的 `config.json` 是空的，實機走不到，只有單元測試）；Discord 端 `/herdr agent start`（無法代使用者在 Discord 輸入）；遠端的 claude／codex；pane 太小時的行為（ISSUE-116）。另：卡片原意可指定其他 machine，v1 只在選定 Agent 所在的機器啟動（上面已驗證會被明確拒絕）。
+**`--cwd` 白名單（同日，使用者同意暫時把 `allowedWorkspaceIds` 改成 `["w1"]`，重啟驗證後已還原為 `[]` 並再重啟；`config.json` 與備份一致）：**`--cwd /tmp` →「allowedWorkspaceIds 非空時，--cwd 必須在選定 workspace 之內」；不存在的資料夾 →「--cwd 不是存在的資料夾」；相對路徑 →「--cwd 必須是不含控制字元的絕對路徑」；在白名單根目錄內放一個指向 `/tmp` 的暫時 symlink 當 `--cwd` 也被拒絕（canonical path 比對生效，驗完已刪除該 symlink）。
+
+**仍未驗證：**白名單非空時遠端的 realpath（`agy-pod` 只有 agy，且這次只驗了本機）；Discord 端 `/herdr agent start`（無法代使用者在 Discord 輸入）；遠端的 claude／codex；pane 太小時的行為（ISSUE-116）。另：卡片原意可指定其他 machine，v1 只在選定 Agent 所在的機器啟動（上面已驗證會被明確拒絕）。
 
 ## ISSUE-115：Team 的 verify 在 sandbox 內跑 `npm test` 一定撞 socket 限制，權限請求過期會讓整個 task 失敗
 
