@@ -3409,3 +3409,21 @@ H2 自動撿卡 L2 進度（2026-11-05）：第一次嘗試停在 verify（ISSUE
 
 H2 自動撿卡 L2 進度（2026-11-05）：三次嘗試各停在不同環節——verify（ISSUE-097）、Worker 啟動（ISSUE-098）、reviewer 回覆辨識（本 issue），都被守門擋在 merge 之前，公開 `main` 沒有被動到；撿卡、開 Lead、assign、coding、獨立 review、commit、PR、CI 都已在自動流程裡走過。測試殘留：卡片 `REQ-20261105-auto4`、PR #125（開著，內容與預期相同、CI 通過）、worktree 與 workspace，修正 merge 後清掉（PR #125 不合併，直接關閉）並用新卡重跑。
 
+## ISSUE-100：review 已 pass，卻因 `low` 等級的 open finding 與「GitHub 還在計算」而停在 merge（H2 自動撿卡 L2 第三次嘗試的後半）
+
+更新日期：2026-11-06。狀態：已修正、待驗收（原始碼與自動化檢查完成；**尚未 merge、尚未重啟 bridge、尚未實機重跑 L2**）。
+
+使用者可見症狀：H2 自動撿卡 L2 第三次嘗試（卡 `REQ-20261105-auto4`，PR #125，task `task-21c93caa…`）：第 1 輪 review 因 ISSUE-099 拖了約 11 分鐘逾時（記 `inconclusive`），第 2 輪約 1 分鐘 `pass`，接著 `card merge` 拒絕：「還有 1 筆 open 的 finding」與「GitHub 還在計算這個 PR 能不能合併，請稍後再試」，自動撿卡停在 `loop`（console：「停下來等人」，卡片記 `failed`／`autopick_stopped`）。公開 `main` 沒有被動到。
+
+兩個原因：（1）第 2 輪 reviewer 判 `pass`、兩條驗收條件都達成，但另外留了一筆 `low` 的 open finding F1：「H2 已標示 L1 驗收完成，但同列後文仍將 L1 實測寫為下一步；本次需求明確要求保留後文，可另案更新。」——reviewer 自己註明「可另案更新」，是備註性質，但 `card merge` 的守門是「有 open 的 finding 就不 merge」。（2）GitHub 剛收到 push／剛開 PR 時 `mergeable` 是 `UNKNOWN`，過幾秒就算好，卻被當成拒絕。
+
+使用者決定（2026-11-06，AskUserQuestion）：選「**low 等級的 finding 不擋 merge**」（而不是「pass 但有 open finding 就再修一輪」或維持現狀）。
+
+修正範圍（2026-11-06）：（1）`src/card-findings.ts` 新增 `blockingOpenFindings`：只數 medium 與 high 的 open finding；`card merge` 的守門（`src/card-merge-wiring.ts`）改用它，拒絕訊息註明「medium 以上；low 等級的備註不擋 merge」。`low` 的 finding 仍留在卡片上；review 判 `changes_requested` 時 `card loop` 要不要修正的判斷**不變**（仍看全部 open finding）；其他守門（獨立 review 通過且在最新 head、CI 全綠、PR 乾淨、不動敏感路徑）**不變**。（2）`mergeCardPullRequest` 讀 PR 狀態時，`mergeable`／`mergeStateStatus` 是 `UNKNOWN` 就每 3 秒重讀、最多讀 10 次（約 27 秒）再判定；仍是 `UNKNOWN` 才維持原本的拒絕。
+
+測試（2026-11-06，本機 macOS，非 CI）：`test/card-merge-wiring.test.ts` 新增 4 項——只有 low 的 open finding 時照樣 merge 且 finding 仍在卡片上；medium 或 high 的 open finding 仍拒絕並註明筆數；`UNKNOWN` 讀兩次後變 `CLEAN` 就 merge（讀 3 次、等 2 次）；一直 `UNKNOWN` 時在有限次數（2 到 12 次）內拒絕。暫時讓 low 也計入時第一項**失敗**，暫時把讀取次數改成 1 時兩項等待測試**失敗**（紅）。`node --test --test-timeout=60000 dist/test/*.test.js` → 1195 tests、1194 pass、0 fail、1 skip（既有）；`npm run lint` ok。
+
+未驗證：實機重跑 L2——merge 並重啟 bridge 後用新卡；`low` 等級由 reviewer 自己判定，reviewer 若把重要問題標成 low 會被放行（這是使用者選擇的取捨，other 守門仍在）；`UNKNOWN` 超過約 27 秒的情況（仍拒絕）；`BEHIND`（PR 落後目標分支）目前仍直接拒絕、沒有自動 Update branch。
+
+H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節——verify（ISSUE-097）、Worker 啟動（ISSUE-098）、reviewer 回覆辨識（ISSUE-099）、merge 的兩個守門（本 issue）；都被守門擋在 merge 之前，公開 `main` 沒有被動到；撿卡、開 Lead、assign、coding、獨立 review（含逾時後自動重審）、commit、PR、CI 都已在自動流程裡走過。測試殘留已清（PR #125 關閉不合併、分支、卡片、worktree、workspace）。
+

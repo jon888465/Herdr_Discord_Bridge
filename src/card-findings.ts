@@ -384,6 +384,16 @@ export function setFindingStatus(
 }
 
 /** 各狀態的數量，以及最前面幾筆 `open` 的 finding（`card show` 用）。 */
+/**
+ * 會擋 merge 的 open finding 數：medium 與 high。`low` 等級的 open finding 是 reviewer 的備註
+ * （例如「可另案更新」），留在卡片上但不擋 merge（ISSUE-100，使用者 2026-11-06 決定）。
+ */
+export function blockingOpenFindings(body: string): number {
+  return summarizeFindings(body, Number.MAX_SAFE_INTEGER).open.filter(
+    (item) => item.severity !== "low",
+  ).length;
+}
+
 export function summarizeFindings(body: string, openLimit = 10): FindingsSummary {
   const counts: Record<FindingStatus, number> = {
     open: 0,

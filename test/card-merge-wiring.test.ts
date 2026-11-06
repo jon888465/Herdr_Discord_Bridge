@@ -214,3 +214,74 @@ test("a failure of GitHub while merging is passed through, and nothing is claime
   });
   await assert.rejects(mergeCardPullRequest(deps, card(), {}), /Head branch was modified/);
 });
+
+// ISSUE-100：review 判 pass 但留了一筆 low 等級的 open finding（「可另案更新」的備註）時，
+// 不該讓整個 L2 流程停下來；medium／high 的 open finding 仍然擋。
+function passWithOpenFinding(severity: "low" | "medium" | "high"): string {
+  const recorded = recordFindingBatch("# x\n\n## 描述\n內容\n\n## 驗收條件\n- a\n", {
+    round: 1,
+    scope: "whole",
+    headSha: HEAD,
+    verdict: "pass",
+    findings: [{ severity, path: "docs/a.md", summary: "後文仍寫著下一步" }],
+  });
+  assert.ok(recorded.ok);
+  return recorded.ok ? recorded.body : "";
+}
+
+test("ISSUE-100: a pass with only a low-severity open finding is merged, and the finding stays on the card", async () => {
+  const { deps, merges } = setup();
+  const body = passWithOpenFinding("low");
+  await mergeCardPullRequest(deps, card({ body }), {});
+  assert.equal(merges.length, 1);
+  assert.match(body, /\| low \| open \|/);
+});
+
+test("ISSUE-100: a medium or high open finding still refuses the merge, naming how many block it", async () => {
+  for (const severity of ["medium", "high"] as const) {
+    const { deps, merges } = setup();
+    await assert.rejects(
+      mergeCardPullRequest(deps, card({ body: passWithOpenFinding(severity) }), {}),
+      /1 筆 open 的 finding/,
+      severity,
+    );
+    assert.equal(merges.length, 0);
+  }
+});
+
+// ISSUE-100：GitHub 剛收到 push／剛開 PR 時 mergeable 會是 UNKNOWN，過幾秒就算好；等一下再讀，不要當成拒絕。
+test("ISSUE-100: a merge state that GitHub is still computing is waited out, then the merge goes ahead", async () => {
+  let reads = 0;
+  const sleeps: number[] = [];
+  const { deps, merges } = setup(
+    {
+      mergeState: async () => {
+        reads += 1;
+        return reads < 3
+          ? { state: "OPEN", headSha: HEAD, isDraft: false, mergeable: "UNKNOWN", mergeStateStatus: "UNKNOWN", base: "main" }
+          : { state: "OPEN", headSha: HEAD, isDraft: false, mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", base: "main" };
+      },
+    },
+    { sleep: async (ms) => void sleeps.push(ms) },
+  );
+  await mergeCardPullRequest(deps, card(), {});
+  assert.equal(reads, 3);
+  assert.equal(sleeps.length, 2);
+  assert.equal(merges.length, 1);
+});
+
+test("ISSUE-100: if GitHub never finishes computing, the merge is refused after a bounded number of reads", async () => {
+  let reads = 0;
+  const { deps, merges } = setup(
+    {
+      mergeState: async () => {
+        reads += 1;
+        return { state: "OPEN", headSha: HEAD, isDraft: false, mergeable: "UNKNOWN", mergeStateStatus: "UNKNOWN", base: "main" };
+      },
+    },
+    { sleep: async () => undefined },
+  );
+  await assert.rejects(mergeCardPullRequest(deps, card(), {}), /還在計算/);
+  assert.ok(reads > 1 && reads <= 12, `reads=${reads}`);
+  assert.equal(merges.length, 0);
+});

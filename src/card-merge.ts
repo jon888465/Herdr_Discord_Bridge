@@ -66,7 +66,9 @@ export function checkMergeable(facts: MergeFacts): MergeCheck {
       `review 通過的是 head ${review.headSha12}，但 PR 現在的 head 是 ${head12}（review 之後有新的 commit）；請重新 review`,
     );
   if (review.openFindings > 0)
-    reasons.push(`還有 ${review.openFindings} 筆 open 的 finding`);
+    reasons.push(
+      `還有 ${review.openFindings} 筆 open 的 finding（medium 以上；low 等級的備註不擋 merge）`,
+    );
 
   if (facts.checks !== "success") reasons.push(CHECK_TEXT[facts.checks]);
 
