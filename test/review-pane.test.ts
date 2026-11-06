@@ -96,16 +96,13 @@ test("a reviewer pane is split from the base pane in its workspace, in the given
   });
 });
 
-test("a pane that is not wide enough is split downwards, and one that is too small is refused before anything is created", async () => {
+test("a narrow pane splits downwards and a small layout opens a tab", async () => {
   const down = fakePort({ "pane.layout": () => narrow, "pane.split": () => split() });
   await openReviewerPane(down.port, { basePaneId: "w5:p1", workspaceId: "w5", cwd: "/x" });
   assert.equal(down.calls.find((c) => c.method === "pane.split")?.params?.direction, "down");
 
-  const small = fakePort({ "pane.layout": () => tiny, "pane.split": () => split() });
-  await assert.rejects(
-    openReviewerPane(small.port, { basePaneId: "w5:p1", workspaceId: "w5", cwd: "/x" }),
-    /too small|太小/,
-  );
+  const small = fakePort({ "pane.layout": () => tiny, "tab.create": () => ({ root_pane: split().pane }) });
+  await openReviewerPane(small.port, { basePaneId: "w5:p1", workspaceId: "w5", cwd: "/x" });
   assert.equal(small.calls.some((c) => c.method === "pane.split"), false);
 });
 

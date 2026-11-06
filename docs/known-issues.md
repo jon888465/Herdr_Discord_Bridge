@@ -3650,7 +3650,7 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 ## ISSUE-108：同一個 workspace 有多個 Agent pane 時，Lead／Worker pane 只剩約 6 行，replan 的 prompt 沒有被 Lead 處理
 
-更新日期：2026-11-06。狀態：待調查（根因未確認；使用者建議：pane 太小時改開新 tab）。
+更新日期：2026-11-07。狀態：已修正、待驗收（pane 分割與新 tab 備援已修正；Lead 未處理 replan prompt 的直接原因仍待調查，未新增重送或提早失敗機制）。
 
 使用者可見症狀：卡 `REQ-20261106-plan-rounds` 第一次嘗試（task `task-2204c0af-69e9-41d3-b2a4-e2cff7bec906`）：3 個指派 06:37:07Z 完成後，bridge 在 06:37:08Z 把 replan 的 prompt 派給 Lead（`w37:p1`，journal 記為 `dispatched`），之後 Lead 畫面是空的輸入列、狀態 `idle`，沒有新的 Stop hook，約 15 分鐘後 06:52:13Z 逾時，task 變成 `blocked`：`Timed out waiting for current response from w37:p1 (last state: idle); no verified completion`。同一個 workspace 有 4 個 pane，Lead 與 claude Worker 的可視高度各只有 6 行（codex 兩個分別是 13 與 29 行），claude Worker 的畫面停在「Teach auto mode about your environment?」選單（我在 06:51 手動選了 Not now 才消失）。
 
@@ -3660,7 +3660,18 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 已確認：pane 高度如上；逾時由既有機制產生。**未確認：**Lead 沒有處理 replan prompt 的直接原因（小 pane 吞掉輸入、被選單遮住、或其他）；我試過放大 Lead pane 查看，但該 workspace 不在聚焦狀態、放大沒生效，沒有取得 Lead 當時的完整畫面。重跑同一張卡（06:57:37Z）沒有再發生，不能確定是小 pane 造成。
 
-修正範圍：無。候選：（1）`chooseSplitTarget`／`startProfile`（ISSUE-094）加最小高度，不足就開新 tab；（2）派工 prompt 送出後確認 Lead 有開始處理；（3）兩者都做。待使用者決定。
+**2026-11-06 修正與根因補充：**回歸測試確認舊 `directionFor` 對往右分割完全不檢查高度（200 欄、8 列仍允許分割），往下只要求原 pane 至少 16 列，沒有保護分割後兩邊的高度；而 `openReviewerPane`／`startProfile` 在同版面全部不足時直接失敗，沒有新 tab 備援。這些是已確認的版面問題根因；不能據此斷言 Lead 當時漏處理 prompt 的原因。上面「根因未確認」的歷史敘述針對 Lead 沒有處理 prompt 的直接原因。
+
+修正範圍：`src/pane-split.ts` 新增共用 `createAgentPane`，分割後兩邊 rect 至少 60 欄、18 列（含框線，另留 1 格分隔線）；高度檢查亦適用於往右分割。基底不足仍找同版面面積最大且可安全分割的 pane，全部不足則以 `tab.create` 的 `root_pane` 建立同 workspace、cwd、`focus=false` 的新 pane。`startProfile`、`openReviewerPane` 共用，因此涵蓋 Worker、reviewer／修正者與 `agent start`。基底 layout 缺失拒絕；建立操作 `retries: 0`，失敗不換另一種方式，避免不確定送達造成重複 pane；沿用身分核對及 reviewer 的安全關閉。
+
+測試（2026-11-06，本機 macOS）：先執行 `npm run build && node --test --test-name-pattern=ISSUE-108 dist/test/pane-split.test.js`，兩項皆失敗（短而寬的 pane 仍往右分割、擁擠版面直接拒絕）；修正後兩項通過。更新既有門檻測試與 tab 行為預期，補上 Worker 啟動／登記順序、tab 身分錯誤、送達不明不重試、缺失 layout、遠端 tab ID 轉換。第一輪 sandbox 內 `npm test` 因 Unix socket `listen EPERM` 失敗，亦包含當時尚未更新的舊門檻測試失敗；預期已同步。獲准在 sandbox 外重跑 `npm test`（含 build）→ 1278 tests、1277 pass、0 fail、1 skip；`npm run typecheck`、`npm run lint` 通過。補上遠端 tab ID 轉換測試後，一輪完整測試發現預期少列既有的 `machine` 裝飾欄位而失敗；已修正測試預期，最終 `npm test`（含 build）再次通過：1278 tests、1277 pass、0 fail、1 skip（2026-11-06），包含遠端 tab ID 與 machine 欄位檢查。
+
+第一階段狀態（2026-11-06）：原始碼與文件已修改，build 已產出；本輪未 commit、push、重啟或部署 bridge，執行中 bridge 未載入本輪修正。舊任務與訊息不會自動重送。
+
+未驗證／下一步：重啟後在擁擠版面跑多 Worker → replan → reviewer／fix，確認新 tab 同 workspace／cwd、不搶焦點、關閉 reviewer root pane 的 tab 清理與既有 Agent 不受影響；遠端同機與 `agent start` 的 tab 路徑尚未實機驗證。既有小 pane 不會自動放大，視窗太小或之後縮小也可能不足。Lead 漏處理 prompt 的直接原因及提早確認是否開始處理仍未解決，若再發生需保留 hook／畫面證據繼續調查；不安全地重送 prompt 不在本次修正範圍。ISSUE-116 的信任提示誤判仍獨立待調查。
+
+2026-11-07 card 接續：使用者授權走 card PR 與 L2 自動 merge。卡片 `REQ-20261106-issue108-pane-tabs` 的 task `task-c7fc2323-5756-4bdb-b4d0-a8ca79b3d1e8` 在獨立 worktree 套用既有 patch，11 個檔案的 SHA256 與原清單一致，並建立修正 commit。該 worktree 重跑 `npm test`（含 build）為 1278 tests、1277 pass、0 fail、1 skip，`npm run typecheck` 與 `npm run lint` 通過（2026-11-07，本機 macOS）。原目錄的同份未提交修改已在核對已提交副本後移除。接續 `card pr` 與 `card loop --merge`，獨立 review／CI／merge 結果記於營運卡片；合併不代表部署或實機驗收，bridge 尚未重啟，既有待驗收項目保持開放。
+
 ## ISSUE-109：卡片只有「描述」與「驗收條件」會送給 Lead，其他段落被丟棄且沒有任何提示
 
 更新日期：2026-11-06。狀態：待決定（根因已確認；尚未修正）。
