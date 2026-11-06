@@ -8,6 +8,7 @@ import { CardStore } from "../src/card-store.js";
 import { DEFAULT_POLICY } from "../src/policy.js";
 import type { CardAssignment } from "../src/card-assignments.js";
 import { buildAssignmentPrompt } from "../src/card-handoff.js";
+import { syncCards } from "../src/card-sync.js";
 import { runCardCommand, type CardCommandDeps } from "../src/card-command.js";
 
 const cat = (...parts: string[]): string => parts.join("");
@@ -1106,6 +1107,100 @@ test("card pr opens the pull request, prints its full URL, and records it on the
     (log.ok && log.entries[0].text) || "",
     /^PR #42 0123456789ab https:\/\/github\.com\//,
   );
+});
+
+test("card pr syncs a completed task before reading its stale in_progress card", async () => {
+  const seen: string[] = [];
+  const { store, rootDir, run } = setup({
+    syncCard: (id) => {
+      seen.push(`sync:${id}`);
+      return syncCards({
+        rootDir,
+        cardId: id,
+        tasks: {
+          get: () => ({
+            state: "completed",
+            finishedAt: "2026-11-06T01:00:00Z",
+          }),
+        },
+        now: () => "2026-11-06T01:00:00Z",
+      });
+    },
+    openPullRequest: async (card) => {
+      seen.push(`open:${card.status}`);
+      if (card.status !== "done") throw new Error("只有 done 的卡片可以開 PR");
+      return prOutcome;
+    },
+  });
+  store.create(
+    assignable("REQ-20261102-work", {
+      status: "in_progress",
+      tasks: ["task-a"],
+    }),
+  );
+  await run("pr", "REQ-20261102-work");
+  assert.deepEqual(seen, ["sync:REQ-20261102-work", "open:done"]);
+  const read = store.read("REQ-20261102-work");
+  assert.equal(read.ok && read.card.status, "done");
+});
+
+test("card pr still refuses a stale card whose task is running", async () => {
+  const { store, rootDir, run } = setup({
+    syncCard: (id) =>
+      syncCards({
+        rootDir,
+        cardId: id,
+        tasks: { get: () => ({ state: "running" }) },
+        now: () => "2026-11-06T01:00:00Z",
+      }),
+    openPullRequest: async (card) => {
+      if (card.status !== "done")
+        throw new Error(
+          `卡片 ${card.id} 的狀態是 ${card.status}；只有 done 的卡片可以開 PR`,
+        );
+      return prOutcome;
+    },
+  });
+  store.create(
+    assignable("REQ-20261102-work", {
+      status: "in_progress",
+      tasks: ["task-a"],
+    }),
+  );
+  await assert.rejects(
+    run("pr", "REQ-20261102-work"),
+    /狀態是 in_progress；只有 done 的卡片可以開 PR/,
+  );
+});
+
+test("card pr ignores sync exceptions and reported problems before the existing status refusal", async () => {
+  for (const syncCard of [
+    () => {
+      throw new Error("sync failed");
+    },
+    () => ({ updated: [], missing: [], problems: ["sync failed"] }),
+  ]) {
+    const { store, run } = setup({
+      syncCard,
+      openPullRequest: async (card) => {
+        if (card.status !== "done")
+          throw new Error(
+            `卡片 ${card.id} 的狀態是 ${card.status}；只有 done 的卡片可以開 PR`,
+          );
+        return prOutcome;
+      },
+    });
+    store.create(
+      assignable("REQ-20261102-work", {
+        status: "in_progress",
+        tasks: ["task-a"],
+      }),
+    );
+    await assert.rejects(
+      run("pr", "REQ-20261102-work"),
+      /狀態是 in_progress；只有 done 的卡片可以開 PR/,
+    );
+  }
 });
 
 test("card pr on a branch that already had an open PR says it only pushed, and logs no new pr_opened", async () => {

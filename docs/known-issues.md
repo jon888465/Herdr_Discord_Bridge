@@ -3310,7 +3310,7 @@ H4 端到端進度：第一次嘗試在此停住（`card commit` 與 `card pr` �
 
 未驗證：實機重跑 `card loop REQ-20261105-h4b --agent codex --merge`；分割對象不是 Lead／作者的 pane 時，Herdr 的版面是否合理（只是排版，不影響功能）；多次 review 後版面越來越擠（reviewer 用完會關閉，但 profile Worker 的 pane 仍保留以便重用 session）。
 
-H4 目前進度（2026-11-05）：`REQ-20261105-h4b` 已走完 `card assign`→`card commit`→`card pr`（PR #116 開著，head `c65cd47`，CI 由 bridge 每分鐘輪詢），停在 `card loop` 的 review。另外觀察到：task 完成（07:39:47）之後，卡片狀態從 `in_progress` 變成 `done` 有延遲，我下的第一次 `card pr` 被拒絕「只有 done 的卡片可以開 PR」，幾秒到一分鐘後重下就成功（同步稍後出現「Card sync updated」）；**未調查**，屬小問題，會讓自動串接需要等待或重試。
+H4 目前進度（2026-11-05）：`REQ-20261105-h4b` 已走完 `card assign`→`card commit`→`card pr`（PR #116 開著，head `c65cd47`，CI 由 bridge 每分鐘輪詢），停在 `card loop` 的 review。另外觀察到：task 完成（07:39:47）之後，卡片狀態從 `in_progress` 變成 `done` 有延遲，我下的第一次 `card pr` 被拒絕「只有 done 的卡片可以開 PR」，幾秒到一分鐘後重下就成功（同步稍後出現「Card sync updated」）；當時尚未調查，後續根因及修正見 ISSUE-095。
 
 下一步：merge 後重啟 bridge，重下 `card loop REQ-20261105-h4b --agent codex --merge`，走完 review → 等 CI → merge；merge 後另開 PR 刪除 `docs/h4-e2e-trace.md`，並清掉 H4 殘留（workspace `w2F`／`w2G`、worktree、卡片）。
 
@@ -3318,17 +3318,21 @@ H4 目前進度（2026-11-05）：`REQ-20261105-h4b` 已走完 `card assign`→`
 
 ## ISSUE-095：task 完成後卡片要等到下一次掃描才變成 `done`，緊接著下 `card pr` 會被拒絕（H4 觀察）
 
-更新日期：2026-11-05。狀態：待決定（根因已確認；尚未修正；影響是自動串接需要等待或重試，不是資料錯誤）。
+更新日期：2026-11-06。狀態：已修正、待驗收（原始碼與自動化檢查完成；尚未實機驗收）。
 
 使用者可見症狀：H4 兩輪都一樣：task `task_completed` 之後立刻下 `card commit`（成功）再下 `card pr`，第一次被拒絕「卡片 … 的狀態是 in_progress；只有 done 的卡片可以開 PR」，約幾十秒後 console 出現 `Card sync updated: <卡片>`，重下就成功。第二輪：`task_completed` 07:54:46、第一次 `card pr` 被拒絕約 07:55:25、重下成功約 07:56。
 
-預期行為：task 完成後，`card pr` 不需要使用者猜時間。
+預期行為：task 完成後，`card pr` 不需要使用者猜時間；task 尚未完成時仍由「只有 done 的卡片可以開 PR」守門拒絕。
 
 已確認根因（程式閱讀，`src/main.ts`、`src/card-sync.ts`）：卡片檔與 task journal 的同步是**每 60 秒掃一次**（`CARD_SYNC_INTERVAL_MS = 60 * 1000`，`sweep` → `syncCards`）；`task_completed` 的事件與 `status: done` 都是在下一次掃描才寫入（事件時間取 task 的 `finishedAt`，所以流程紀錄看起來「同時」）。所以最壞要等 60 秒。
 
-修正範圍：無。候選：（1）`card pr`（和其他需要卡片狀態的指令）在檢查前先同步一次該卡片；（2）把掃描間隔縮短；（3）維持現狀，文件說明要等一下。**待使用者決定。**
+決定與修正範圍（2026-11-06）：採用候選（1），範圍限於 `card pr`。`src/card-command.ts` 在該指令路徑讀卡片前呼叫單卡同步；`src/main.ts` 注入與定時掃描相同的 `taskSourceFrom`／`syncCards`，`src/card-sync.ts` 新增可選 card id，指定時只處理該卡。同步丟例外或回報問題都照原流程繼續，由既有狀態守門決定是否拒絕。其他 PR 守門、定時掃描與 `CARD_SYNC_INTERVAL_MS` 不變；`src/autopick-wiring.ts` 的 `waitCardDone` 保留。
 
-H4 脈絡：這是自動串接最小的摩擦；若要做成單一觸發，（1）最直接。
+測試（2026-11-06，本機 macOS，非 CI）：新增 `test/card-command.test.ts` 3 項，涵蓋 task 已完成但卡片檔尚為 `in_progress`、task 仍在跑、同步丟例外或回報問題；`test/card-sync.test.ts` 新增單卡同步不影響其他卡片。修正前 `node --test --test-name-pattern='card pr (syncs|still refuses|ignores sync)' dist/test/card-command.test.js` → 3 項中 1 fail（已完成 task 的卡仍被拒絕）；修正後同指令 → 3 pass、0 fail；`node --test dist/test/card-sync.test.js` → 19 pass、0 fail；`npm run build` → pass；`npm run lint` → pass（174 個 TypeScript 檔）；`node --test --test-timeout=60000 dist/test/card-command.test.js dist/test/card-sync.test.js dist/test/card-pr-flow.test.js dist/test/autopick-wiring.test.js` → 155 pass、0 fail。
+
+未驗證／下一步：尚未做 Discord／Herdr／CLI 端到端實機驗收；bridge 未重啟、未部署，目前執行中的 bridge 不代表已載入此修正。合併並部署後，用 task 剛完成且卡片仍為 `in_progress` 的情境實測第一次 `card pr`，並確認未完成 task 仍遭拒絕；舊訊息不會補送。
+
+H4 脈絡：這是自動串接最小的摩擦；已選用（1）的單卡同步。
 
 ## ISSUE-096：自動撿卡（H2）——政策選用的專案裡 `ready` 的卡片由 bridge 自己開始並依等級走到 merge
 

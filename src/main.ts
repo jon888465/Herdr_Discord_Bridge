@@ -675,6 +675,15 @@ export async function handleCommand(
         download: downloadDiscordText,
         readLocalFile: readLocalCardFile,
         assignments: lazyCardAssignments(),
+        syncCard: (cardId) =>
+          runtime.tasks
+            ? syncCards({
+                rootDir: join(stateDirectory(), "cards"),
+                cardId,
+                tasks: taskSourceFrom(runtime.tasks.store),
+                now: () => new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+              })
+            : { problems: [] },
         policy: () => loadPolicy(join(configDirectory(), "policy.yml")),
         mergePullRequest: (card, options) =>
           mergeCardPullRequest(

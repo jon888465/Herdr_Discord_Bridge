@@ -663,6 +663,8 @@ Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*
 
 `card pr <id>`（Discord 與 console）：把卡片的分支 push 並開 PR。**這是 bridge 第一次對外 push。** 使用者 2026-11-03 的決定：卡片要 `done`、第一版包含 CI 輪詢與回報、第一次 live 驗收用 Herdr_Discord_Bridge 本身的無害文件卡、身分用現有的 `gh`／ssh 登入（F2；L2 也用現有登入，使用者 2026-11-03 選 A，尚未實作）、PR 標題用卡片標題且內文只放卡片 id 與結構化事實。
 
+`card pr` 在讀取卡片並檢查前提之前，先用與每分鐘掃描相同的 task 來源及 `syncCards` 邏輯，只同步指定的這張卡片一次（ISSUE-095，2026-11-06，已實作、待實機驗收）。task 已完成而卡片檔仍是 `in_progress` 時，這次同步可把它更新為 `done`。同步丟出例外或回報問題時仍照原流程讀卡片，由原有的狀態守門拒絕；不新增錯誤型態。定時掃描間隔與 `card loop` 的 push 路徑不變，自動撿卡的 `waitCardDone` 仍保留。
+
 - **前提（任何一項不符就拒絕，什麼都不 push、不開）：**
   1. 卡片 `status: done`（失敗或取消的任務卡片仍是 `in_progress`，不能開 PR）。
   2. 卡片有 worktree 紀錄（`card assign --worktree` 建立；worktree 已被 `card cleanup` 清掉也可以，改用 repo 的分支），且 `## 異動專案` 記有 `base`。
