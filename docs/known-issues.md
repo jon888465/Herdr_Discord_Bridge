@@ -1721,7 +1721,14 @@ Presence Intent 開啟並重啟（pid 81540）後，使用者在 openab/test 討
 已確認：(1) 中止來自 `streamAgent` 的 identity 比較（`src/main.ts` 的 `session changed` 分支）；(2) 事後 pane list 的 `agent_session` 與 Stop hook 的 session 都是 `01a1b0fb`，其 UUIDv7 時間早於送問；**送問當下與送問前**的 session 值沒有紀錄，不能說它「從頭到尾沒變」。
 **當時根因未確認（保留原始調查紀錄）**：送問當下 bridge 記下的 `initial.agent_session` 是什麼（沒有保留）。比較合理的推測是 `agent start` 回傳的 Agent 記錄在 codex 還沒回報 session 時就被 bridge 保存（沒有 session 或是舊值），第一次送問期間 Herdr 才補上 session，造成「前後不一致」；但這沒有驗證。與 ISSUE-107 第 2 部分（agy 第一個回合後才登記的 session，`AgentPool.refreshSession`）同類，但那裡修的是 Worker 池，不是 Discord 回應串流。
 
-影響：用 `agent start` 開出來的 Agent，第一次從 Discord 對話可能收不到回答（要再問一次或自己看 pane）；`agent start` 的設計是「不自動 `agent use`，使用者要選用才切換」，所以每個新 Agent 都會走這條路。
+**2026-11-06 重現（同日，bridge 載入 main `27aa532`）：**
+- 前提：新開的 codex（`agent start :codex:gpt-6.1-sol:medium`）在送第一個 prompt 之前，Herdr 回報的 `agent_session` 是 `null`（`w1:pD`、`w1:pE` 都在啟動後等 20 秒仍是 `null`），第一次送問後才出現；該 session id 的 UUIDv7 時間是 **codex 啟動時**（`pD`：13:43:24Z，送問約 13:44:00Z，早約 36 秒；`pE`：13:45:25Z，送問約 13:47Z）。
+- **Discord 路徑：連續 2 次在新 codex 的第一次送問都中止**：`w1:p9`（使用者截圖）與 `w1:pE`（使用者第二次試，bridge log `Response capture stopped: session changed (pane=w1:pE)`）；兩次 codex 都回答了（`Worked for 3s`），答案沒送回 Discord。
+- **console 路徑：1 次未中止**：`agent use w1:pD` 後送「回答 ok 兩個字就好」，正常收到 `ok`。
+- 程式差異（讀碼，未以實驗證明）：`ConsoleAgent`（`src/console-agent.ts`）有 ISSUE-069 的 `firstSession`，把「session 從沒有變成有」（pane／terminal／種類不變）視為第一次登記而不是被換掉；`streamAgent`（`src/main.ts`）對 `trackedSession` 為空、候選 session 有值時，只有在 `sessionCreatedSince`（session id 時間不早於送問時間 5 秒前）成立才改追蹤，否則判 `session changed`。新 codex 的 session 在啟動時就建立，所以不成立。
+- 因此**目前較可信的根因**：`streamAgent` 沒有 ISSUE-069 的「第一次登記」處理，而 2026-10-28 的 `sessionCreatedSince` 假設 session 在送問時才建立，對 `agent start`（啟動後過一陣子才第一次送問）不成立。**仍不是已證明**：沒有紀錄送問當下 `initial.agent_session` 的值，也沒有解釋 console 那一次為什麼沒中止（可能與 Herdr 回報 session 的時間點有關，競態未排除）。
+
+影響：用 `agent start` 開出來的 Agent，第一次從 Discord 對話收不到回答（要再問一次或看 pane）。再問第二次是否正常**尚未驗證**；console 路徑為什麼沒中止也未解釋。
 
 修正與自行確認（2026-11-06）：讀碼確認 Discord 的 `streamAgent` 原本只靠 `sessionCreatedSince` 接受不同 session，空值首次變成啟動時已建立的舊 UUIDv7 會被拒絕；Console 的 ISSUE-069 已有首次登記例外。假 runtime 以空 session → 早於送問約 49 分鐘的 UUIDv7 重現：修正前答案漏送，6 個新增案例中 1 fail、5 pass。這確認了此判斷缺口，不補稱已取得當時缺少的 initial 實機記錄。
 
