@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentPool, validateProfiles } from "../src/agent-pool.js";
@@ -308,5 +308,368 @@ test("a profile started as a different CLI fails immediately instead of waiting"
     assert.ok(Date.now() - startedAt < 2000);
   } finally {
     f.close();
+  }
+});
+
+// ISSUE-107：agy 啟動時沒有 session，處理完第一個回合後才被 Herdr 登記；經過驗證的回合結果要能更新綁定，
+// 之後同一個 profile 才能再被 acquire（否則 unknown → known 會被當成 session 改變而拒絕）。
+function agyFixture() {
+  const dir = mkdtempSync(join(tmpdir(), "bridge-pool-agy-"));
+  const file = join(dir, "pool.json");
+  const agy = { id: "agy", kind: "agy" };
+  const agents: AgentRecord[] = [lead];
+  const port = {
+    listAgentsWithWorkspaceNames: async () => agents,
+    startProfile: async (
+      _lead: AgentRecord,
+      _profile: unknown,
+      _name: string,
+      onPane: (id: string) => void,
+    ) => {
+      const a: AgentRecord = {
+        ...lead,
+        pane_id: "w1:p2",
+        terminal_id: "agy-term",
+        agent: "agy",
+      };
+      onPane(a.pane_id);
+      agents.push(a);
+      return a;
+    },
+  };
+  const make = () => new AgentPool(file, [agy], port, ["w1"]);
+  return {
+    make,
+    file,
+    agents,
+    live: () => agents.find((a) => a.pane_id === "w1:p2")!,
+    close: () => rmSync(dir, { recursive: true, force: true }),
+  };
+}
+const s1 = { kind: "id", value: "agy-s1" };
+
+test("a session that appears after the first validated turn is persisted, so the same profile can be acquired again", async () => {
+  const f = agyFixture();
+  try {
+    const pool = f.make();
+    pool.select("w1", "agy", true);
+    const first = await pool.acquire("w1", "agy", lead, "task-1");
+    assert.equal(first.continuity, "new-session");
+    assert.equal(first.agent.agent_session, undefined);
+    f.agents[1] = { ...f.live(), agent_session: s1 };
+    assert.equal(
+      await pool.refreshSession("w1", "agy", "task-1", first.agent, s1),
+      true,
+    );
+    pool.release("task-1");
+    // 重新載入持久化狀態後仍然認得這個 conversation。
+    const again = await f.make().acquire("w1", "agy", lead, "task-2");
+    assert.equal(again.continuity, "same-session");
+    assert.deepEqual(again.agent.agent_session, s1);
+  } finally {
+    f.close();
+  }
+});
+
+test("without a refresh, an unknown session that became known is still rejected at the next acquire", async () => {
+  const f = agyFixture();
+  try {
+    const pool = f.make();
+    pool.select("w1", "agy", true);
+    await pool.acquire("w1", "agy", lead, "task-1");
+    f.agents[1] = { ...f.live(), agent_session: s1 };
+    pool.release("task-1");
+    await assert.rejects(
+      pool.acquire("w1", "agy", lead, "task-2"),
+      /bound session identity changed/,
+    );
+  } finally {
+    f.close();
+  }
+});
+
+// 各 guard fixture 先滿足其餘前置條件，再單獨破壞被測條件。
+type PoolInternals = {
+  state: {
+    sessions: Record<
+      string,
+      {
+        uncertain?: boolean;
+        fingerprint: string;
+        agent?: AgentRecord;
+      }
+    >;
+  };
+};
+
+async function guardFixture(kind = "agy") {
+  const dir = mkdtempSync(join(tmpdir(), "bridge-pool-guard-"));
+  const file = join(dir, "pool.json");
+  const profile = { id: "p", kind };
+  const agents: AgentRecord[] = [lead];
+  const port = {
+    listAgentsWithWorkspaceNames: async () => agents,
+    startProfile: async (
+      _lead: AgentRecord,
+      _profile: unknown,
+      _name: string,
+      onPane: (id: string) => void,
+    ) => {
+      const a: AgentRecord = {
+        ...lead,
+        pane_id: "w1:p2",
+        terminal_id: "p-term",
+        agent: kind,
+      };
+      onPane(a.pane_id);
+      agents.push(a);
+      return a;
+    },
+  };
+  const pool = new AgentPool(file, [profile], port, ["w1"]);
+  pool.select("w1", "p", true);
+  const first = await pool.acquire("w1", "p", lead, "task-1");
+  const setLive = (patch: Partial<AgentRecord>) => {
+    agents[1] = { ...agents[1], ...patch };
+  };
+  setLive({ agent_session: s1 });
+  const binding = () =>
+    (pool as unknown as PoolInternals).state.sessions["w1/p"];
+  const persisted = () =>
+    (JSON.parse(readFileSync(file, "utf8")) as PoolInternals["state"]).sessions[
+      "w1/p"
+    ]?.agent?.agent_session;
+  return {
+    pool,
+    worker: first.agent,
+    port,
+    setLive,
+    binding,
+    persisted,
+    dropLive: () => agents.splice(1, 1),
+    refresh: (
+      worker: AgentRecord = first.agent,
+      owner = "task-1",
+      session: { kind: string; value: string } = s1,
+    ) => pool.refreshSession("w1", "p", owner, worker, session),
+    close: () => rmSync(dir, { recursive: true, force: true }),
+  };
+}
+
+test("refresh baseline: with every precondition satisfied the unknown session is persisted", async () => {
+  const f = await guardFixture();
+  try {
+    assert.equal(await f.refresh(), true);
+    assert.deepEqual(f.persisted(), s1);
+  } finally {
+    f.close();
+  }
+});
+
+test("refresh guard: a caller without the lease is refused (released, or another owner)", async () => {
+  const f = await guardFixture();
+  try {
+    assert.equal(await f.refresh(f.worker, "someone-else"), false);
+    f.pool.release("task-1");
+    assert.equal(await f.refresh(), false);
+    assert.equal(f.persisted(), undefined);
+  } finally {
+    f.close();
+  }
+});
+
+test("refresh guard: an uncertain binding is refused", async () => {
+  const f = await guardFixture();
+  try {
+    f.binding().uncertain = true;
+    assert.equal(await f.refresh(), false);
+    assert.equal(f.persisted(), undefined);
+  } finally {
+    f.close();
+  }
+});
+
+test("refresh guard: a binding made for a different profile configuration is refused", async () => {
+  const f = await guardFixture();
+  try {
+    f.binding().fingerprint = JSON.stringify({
+      id: "p",
+      kind: "agy",
+      args: ["--other"],
+    });
+    assert.equal(await f.refresh(), false);
+    assert.equal(f.persisted(), undefined);
+  } finally {
+    f.close();
+  }
+});
+
+test("refresh guard: a worker on a different pane than the binding is refused", async () => {
+  const f = await guardFixture();
+  try {
+    assert.equal(await f.refresh({ ...f.worker, pane_id: "w1:p9" }), false);
+    assert.equal(f.persisted(), undefined);
+  } finally {
+    f.close();
+  }
+});
+
+test("refresh guard: a worker with a different terminal than the binding is refused", async () => {
+  const f = await guardFixture();
+  try {
+    assert.equal(await f.refresh({ ...f.worker, terminal_id: "other" }), false);
+    assert.equal(f.persisted(), undefined);
+  } finally {
+    f.close();
+  }
+});
+
+test("refresh guard: a worker record from another workspace is refused", async () => {
+  const f = await guardFixture();
+  try {
+    assert.equal(await f.refresh({ ...f.worker, workspace_id: "w2" }), false);
+    assert.equal(f.persisted(), undefined);
+  } finally {
+    f.close();
+  }
+});
+
+test("refresh guard: a worker record of another CLI kind is refused", async () => {
+  const f = await guardFixture();
+  try {
+    assert.equal(await f.refresh({ ...f.worker, agent: "claude" }), false);
+    assert.equal(f.persisted(), undefined);
+  } finally {
+    f.close();
+  }
+});
+
+test("refresh guard: a binding whose stored Agent has another terminal, workspace or kind is refused", async () => {
+  for (const patch of [
+    { terminal_id: "other" },
+    { workspace_id: "w2" },
+    { agent: "claude" },
+  ]) {
+    const f = await guardFixture();
+    try {
+      f.binding().agent = { ...f.binding().agent!, ...patch };
+      assert.equal(await f.refresh(), false, JSON.stringify(patch));
+      assert.equal(f.persisted(), undefined);
+    } finally {
+      f.close();
+    }
+  }
+});
+
+test("refresh guard: a session without a kind of id/path or without a value is refused", async () => {
+  const f = await guardFixture();
+  try {
+    assert.equal(
+      await f.refresh(f.worker, "task-1", { kind: "id", value: "" }),
+      false,
+    );
+    assert.equal(
+      await f.refresh(f.worker, "task-1", { kind: "other", value: "agy-s1" }),
+      false,
+    );
+    assert.equal(f.persisted(), undefined);
+  } finally {
+    f.close();
+  }
+});
+
+test("refresh guard: a live pane that no longer exists is refused", async () => {
+  const f = await guardFixture();
+  try {
+    f.dropLive();
+    assert.equal(await f.refresh(), false);
+    assert.equal(f.persisted(), undefined);
+  } finally {
+    f.close();
+  }
+});
+
+test("refresh guard: a live pane whose terminal, workspace or kind changed is refused", async () => {
+  for (const patch of [
+    { terminal_id: "other" },
+    { workspace_id: "w2" },
+    { agent: "claude" },
+  ]) {
+    const f = await guardFixture();
+    try {
+      f.setLive(patch);
+      assert.equal(await f.refresh(), false, JSON.stringify(patch));
+      assert.equal(f.persisted(), undefined);
+    } finally {
+      f.close();
+    }
+  }
+});
+
+test("refresh guard: a live pane whose session vanished is refused", async () => {
+  const f = await guardFixture();
+  try {
+    f.setLive({ agent_session: undefined });
+    assert.equal(await f.refresh(), false);
+    assert.equal(f.persisted(), undefined);
+  } finally {
+    f.close();
+  }
+});
+
+test("refresh guard: a live pane that reports a different session than the one reported is refused", async () => {
+  const f = await guardFixture();
+  try {
+    f.setLive({ agent_session: { kind: "id", value: "agy-other" } });
+    assert.equal(await f.refresh(), false);
+    assert.equal(f.persisted(), undefined);
+  } finally {
+    f.close();
+  }
+});
+
+test("refresh guard: a binding that already has a known session is never replaced, including s1 to s2", async () => {
+  const f = await guardFixture();
+  try {
+    f.binding().agent = { ...f.binding().agent!, agent_session: s1 };
+    const s2 = { kind: "id", value: "agy-s2" };
+    f.setLive({ agent_session: s2 });
+    assert.equal(await f.refresh(f.worker, "task-1", s2), false);
+    assert.deepEqual(f.binding().agent?.agent_session, s1);
+    // 已有 session，即使相同也拒絕，且不會改動
+    f.setLive({ agent_session: s1 });
+    assert.equal(await f.refresh(), false);
+    assert.deepEqual(f.binding().agent?.agent_session, s1);
+  } finally {
+    f.close();
+  }
+});
+
+test("refresh guard: a codex profile is refused even when every other precondition holds", async () => {
+  const f = await guardFixture("codex");
+  try {
+    assert.equal(await f.refresh(), false);
+    assert.equal(f.persisted(), undefined);
+  } finally {
+    f.close();
+  }
+});
+
+test("refresh rechecks reservation and binding after the live lookup", async () => {
+  for (const change of ["release", "binding"] as const) {
+    const f = await guardFixture();
+    try {
+      const list = f.port.listAgentsWithWorkspaceNames;
+      f.port.listAgentsWithWorkspaceNames = async () => {
+        if (change === "release") f.pool.release("task-1");
+        else f.binding().agent = { ...f.worker, terminal_id: "replacement" };
+        return list();
+      };
+      assert.equal(await f.refresh(), false);
+      assert.equal(f.persisted(), undefined);
+      assert.equal(f.binding().agent?.agent_session, undefined);
+    } finally {
+      f.close();
+    }
   }
 });

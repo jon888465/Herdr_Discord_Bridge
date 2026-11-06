@@ -3548,7 +3548,7 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 更新日期：2026-11-06。狀態：修正中。
 
-**整個 ISSUE-107 目前只完成第 1 部分（自動候選選用）；agy 的 session 登記（第 2 部分）與 reviewer 獨立性（第 3 部分）還沒做，所以 agy 尚不可用，使用者不應現在打開 agy 選用。**
+**ISSUE-107 第 1 部分（自動候選選用）已完成；本工作樹補上第 2 部分 session 登記的原始碼與自動化檢查，第 3 部分 reviewer 獨立性仍未完成。整體狀態維持修正中，agy 尚不可視為可用，使用者不應現在打開 agy 選用。**
 
 使用者可見症狀：`--coding` 未指定 Worker 時，即使 agy profile 宣告 implementation／review，也不會加入自動候選。手動勾選不能補齊 session 登記與獨立 reviewer 支援。
 
@@ -3556,10 +3556,25 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 重現方式／環境：2026-11-06，本機 worktree；以 roster fixture 放入 claude／codex、不同 capabilities 的 agy 與 pi，呼叫 `autoEnableCodingProfiles`。未執行 agy 的 Discord／Herdr／CLI 端到端流程。
 
-已確認根因：自動候選原本只比對 `AUTO_CODING_KINDS` 的 claude／codex，未讀 agy capabilities。參考分支的診斷另指出 session 首次出現後的 pool 登記與 reviewer 身分傳遞缺口；本卡不修第 2、3 部分，也沒有實機確認其表現。
+已確認根因：自動候選原本只比對 `AUTO_CODING_KINDS` 的 claude／codex，未讀 agy capabilities。參考分支的診斷另指出 session 首次出現後的 pool 登記與 reviewer 身分傳遞缺口；第 1 部分未修第 2、3 部分；第 2 部分進度見下節，仍沒有實機確認其表現。
 
 修正範圍（第 1 部分）：`src/coding-roster.ts` 加入 `OPT_IN_CODING_KIND`、`OPT_IN_CODING_CAPABILITIES` 與 `autoCodingCandidate`，同步註解、錯誤訊息與 roster 測試；`src/main.ts` 只改 startTeamTask 的 E14 註解；同步 SPEC 與兩份 README。未修改 agent-pool、team-*、config.json 或 policy.yml，獨立 review、verify 與 card merge 守門不變。
 
 測試命令與結果（2026-11-06，本機，非 CI）：首次 `npm run build` 因缺少 `tsc` 失敗（exit 127）；`npm ci` 成功後，`npm run build` 成功（exit 0），`node --test dist/test/coding-roster.test.js` 為 10/10 pass、0 fail（exit 0）。最終重跑 build 與同一測試仍成功（10/10 pass）；`npm run lint` 成功（exit 0，174 個 TypeScript 檔），`git diff --check` 成功。涵蓋 agy 未宣告／空清單／analysis-only 不入池、implementation／review／兩者入池、pi 排除、至少兩個與既有 claude／codex 行為。
 
 未驗證與下一步：Lead 接續第 2 部分 session 登記、第 3 部分 reviewer 獨立性，再安排 agy 首輪／重用 session、implement 與獨立 review 的實機驗收。本卡沒有部署或重啟 bridge，執行中的 bridge 不代表已載入新原始碼或 build；舊失敗 task／訊息不會自動補送。沒有 commit／push。
+
+
+### 第 2 部分：首輪驗證後登記 pool session（2026-11-06）
+
+狀態：修正中。症狀／預期：agy 啟動時沒有 session，首輪完成才被 Herdr 登記，pool 仍保留未知身分，下一次 acquire 因 unknown → known 拒絕。預期僅將回合中核對一致的 session 回寫原綁定，讓之後可安全重用。
+
+已確認根因（原始碼與 fixture）：`runTeamTurn` 原本只回傳 codex rollout session；非 codex 雖接受首次 session 出現並核對後續 identity，卻沒有將結果傳回 pool；orchestration／main 也沒有完成後更新綁定的接線。實機表現尚未驗證。
+
+修正範圍：`src/team-turn.ts` 提前宣告 expectedSession；要求 observeSession 時回傳非 codex 回合內核對的 session。首次出現可接受，沒有 session 不回傳；已觀察 session 改變／消失，或 pane／terminal／workspace／kind 改變仍拋 identity error，不回傳結果。`src/agent-pool.ts` 新增 refreshSession：只有保留 owner、未知且非 uncertain 的原綁定、相同 profile 設定與 pane／terminal／workspace／kind，以及 live pane 完全相同的 session 全部符合才寫入。已有 session（即使相同）及 codex 一律 false；不符不修改狀態；等待 live 查詢後重新核對保留、綁定與設定。
+
+`src/team-orchestration.ts` 新增 onWorkerSession；coding 或有此回呼時觀察 session，僅在完成且非 blocked、非 codex、有驗證 session 時呼叫。`src/main.ts` 以 task 內 pane → profile map 接回 pool；false 或例外只記錄，不放寬 acquire。E14 註解、task engine、coding roster、config.json、policy.yml、獨立 review／verify／card merge 守門均未修改。未引入第 3 部分 reviewer 延後判定測試。
+
+測試命令與結果（2026-11-06，本機 macOS，非 CI）：`npm ci` exit 0；`npx tsc --noEmit` exit 0；`npm run build` exit 0；`node --test --test-timeout=60000 dist/test/agent-pool.test.js dist/test/team-turn.test.js dist/test/team-task-engine.test.js` 76/76 pass、0 fail、0 skip，exit 0；`npm run lint` exit 0（174 個 TypeScript 檔）。包含 pool 各項拒絕條件、查詢期間保留／綁定改變、持久化後重用、turn session 核對，以及真實 pool 接線的 done／blocked／failed／codex fixture。
+
+未驗證與交接：**尚未實機驗證，沒有 Discord／Herdr／CLI 端到端驗收證據**。原始碼與 build 已更新，執行中的 bridge 未部署／重啟，舊 failed task／訊息不會補送；未 commit／push。Lead 接續第 3 部分及整體實機驗收。本卡限定八個檔案，SPEC／README 的整體「尚未可用」限制仍適用；其中第 2 部分進度文字須由後續整合卡同步，不能據本次自動化結果宣稱 agy 已可用。

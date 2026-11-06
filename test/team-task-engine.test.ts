@@ -1,4 +1,7 @@
 import test from "node:test";
+import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { AgentPool } from "../src/agent-pool.js";
 import { HerdrClient } from "../src/herdr.js";
 import assert from "node:assert/strict";
 import {
@@ -792,5 +795,259 @@ test("cancel while the atomic prompt is pending sends nothing to an Agent that h
     assert.deepEqual(f.cancels, [lead.pane_id]);
   } finally {
     f.close();
+  }
+});
+
+
+function codingRepo(): string {
+  const repo = mkdtempSync(join(tmpdir(), "agy-coding-repo-"));
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", repo, ...args], {
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: "Test",
+        GIT_AUTHOR_EMAIL: "test@example.com",
+        GIT_COMMITTER_NAME: "Test",
+        GIT_COMMITTER_EMAIL: "test@example.com",
+      },
+    });
+  git("init", "-b", "main");
+  writeFileSync(join(repo, "base.txt"), "base\n");
+  git("add", "base.txt");
+  git("commit", "-m", "base");
+  return repo;
+}
+// ISSUE-107（review 追補）：從 orchestration 的 `onWorkerSession` 一路到真實 AgentPool 綁定的整合測試。
+// 回呼的接線與 `src/main.ts` 的 `startTeamTask` 相同（pane → profile id，再呼叫 `pool.refreshSession`）。
+function wiringRun(options: {
+  kind: "agy" | "codex";
+  turn: "done" | "blocked" | "failed";
+}) {
+  const repo = codingRepo();
+  const dir = mkdtempSync(join(tmpdir(), "agy-wiring-"));
+  const codexHome = join(dir, "codex-home");
+  const previousCodexHome = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = codexHome;
+  const uuid = (label: string) => {
+    const h = createHash("sha256").update(label).digest("hex");
+    return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+  };
+  const lead: AgentRecord = {
+    pane_id: "w1:p1",
+    terminal_id: "term-lead",
+    workspace_id: "w1",
+    tab_id: "t1",
+    agent: "opencode",
+    agent_status: "idle",
+    cwd: repo,
+    agent_session: { kind: "id", value: "lead-session" },
+  };
+  const paneId = "w1:p2";
+  let prompted = false;
+  let rollouts = 0;
+  // agy 的 session 在第一個 prompt 處理完才登記；codex 的 Herdr session 另外存在（但不可信、不會被採用）。
+  const authorRecord = (): AgentRecord => ({
+    pane_id: paneId,
+    terminal_id: "term-author",
+    workspace_id: "w1",
+    tab_id: "t1",
+    agent: options.kind,
+    agent_status: "idle",
+    cwd: repo,
+    ...(prompted ? { agent_session: { kind: "id", value: "s1" } } : {}),
+  });
+  let started = false;
+  const agents = () => [lead, ...(started ? [authorRecord()] : [])];
+  const prompts: string[] = [];
+  const port = {
+    listAgentsWithWorkspaceNames: async () => agents(),
+    startProfile: async (
+      _lead: AgentRecord,
+      _profile: unknown,
+      _name: string,
+      onPane: (id: string) => void,
+    ) => {
+      started = true;
+      onPane(paneId);
+      return authorRecord();
+    },
+    promptAgent: async (target: string, text: string) => {
+      if (target === lead.pane_id) {
+        prompts.push(text);
+        return;
+      }
+      prompted = true;
+      prompts.push(text);
+      writeFileSync(join(repo, "added.txt"), "one\n");
+      if (options.kind === "codex") {
+        const day = join(codexHome, "sessions", "2026", "11", "05");
+        mkdirSync(day, { recursive: true });
+        writeFileSync(
+          join(day, `rollout-${rollouts++}-${uuid("rollout-session")}.jsonl`),
+          text,
+        );
+      }
+    },
+    waitAgent: async (target: string) => {
+      const record = target === lead.pane_id ? lead : authorRecord();
+      if (target === lead.pane_id)
+        return { ...record, agent_status: "done" as const };
+      if (options.turn === "blocked")
+        return { ...record, agent_status: "blocked" as const };
+      if (options.turn === "failed")
+        return {
+          ...record,
+          terminal_id: "other-terminal",
+          agent_status: "done" as const,
+        };
+      return { ...record, agent_status: "done" as const };
+    },
+    readAgent: async (target: string) => {
+      const prompt =
+        target === lead.pane_id
+          ? prompts
+              .filter((t) => t.includes("Do not modify files while planning"))
+              .at(-1)
+          : prompts.filter((t) => t.includes("Coding role: implement")).at(-1);
+      if (!prompt) return "historical";
+      const planning =
+        target === lead.pane_id &&
+        prompt.includes("Do not modify files while planning");
+      const plans = prompts.filter((t) =>
+        t.includes("Do not modify files while planning"),
+      ).length;
+      const body = planning
+        ? JSON.stringify({
+            assignments:
+              plans === 1
+                ? [
+                    {
+                      id: "impl",
+                      workerPaneId: "profile:agy",
+                      instruction: "Add the feature",
+                      role: "implement",
+                      access: "write",
+                      writeScope: ["added.txt"],
+                    },
+                  ]
+                : [],
+          })
+        : target === lead.pane_id
+          ? "Local delivery report"
+          : JSON.stringify({
+              codingResult: { kind: "implement", files: ["added.txt"] },
+            });
+      return `${prompt.match(/BRIDGE_BEGIN_[a-f0-9]+/)![0]}\n${body}\n${prompt.match(/BRIDGE_END_[a-f0-9]+/)![0]}`;
+    },
+    cancelAgent: async () => {},
+  };
+  const poolFile = join(dir, "pool.json");
+  const profiles = [{ id: "agy", kind: options.kind }];
+  const pool = new AgentPool(poolFile, profiles, port, ["w1"]);
+  pool.select("w1", "agy", true);
+  const taskId = "task-wiring";
+  const calls: Array<{ pane: string; session: unknown }> = [];
+  const profilePanes = new Map<string, string>();
+  const store = new TeamTaskStore(join(dir, "tasks"));
+  const engine = new TeamTaskEngine(store, port, new Set());
+  return {
+    pool,
+    calls,
+    poolFile,
+    reopen: () => new AgentPool(poolFile, profiles, port, ["w1"]),
+    lead,
+    taskId,
+    binding: () =>
+      (
+        JSON.parse(readFileSync(poolFile, "utf8")) as {
+          sessions: Record<string, { agent?: { agent_session?: unknown } }>;
+        }
+      ).sessions["w1/agy"]?.agent?.agent_session,
+    run: () =>
+      engine.run({
+        taskId,
+        prompt: "ship the local change",
+        lead,
+        workers: pool.roster("w1"),
+        replan: true,
+        coding: true,
+        timeoutMs: 500,
+        acquireWorker: async (target) => {
+          const acquired = await pool.acquire(
+            "w1",
+            target.pane_id.slice(8),
+            lead,
+            taskId,
+          );
+          profilePanes.set(acquired.agent.pane_id, target.pane_id.slice(8));
+          return { agent: acquired.agent, continuity: acquired.continuity };
+        },
+        onWorkerSession: async (worker, session) => {
+          calls.push({ pane: worker.pane_id, session });
+          const id = profilePanes.get(worker.pane_id);
+          if (id) await pool.refreshSession("w1", id, taskId, worker, session);
+        },
+      }),
+    close: () => {
+      if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = previousCodexHome;
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(repo, { recursive: true, force: true });
+    },
+  };
+}
+
+test("ISSUE-107: an agy first turn reaches onWorkerSession after it is done, refreshes the real pool binding to s1, and the same profile can be acquired again", async () => {
+  const h = wiringRun({ kind: "agy", turn: "done" });
+  try {
+    await h.run();
+    assert.deepEqual(h.calls, [
+      { pane: "w1:p2", session: { kind: "id", value: "s1" } },
+    ]);
+    assert.deepEqual(h.binding(), { kind: "id", value: "s1" });
+    h.pool.release(h.taskId);
+    const again = await h.reopen().acquire("w1", "agy", h.lead, "task-2");
+    assert.equal(again.continuity, "same-session");
+    assert.deepEqual(again.agent.agent_session, { kind: "id", value: "s1" });
+  } finally {
+    h.close();
+  }
+});
+
+test("ISSUE-107: onWorkerSession never fires for a blocked turn, and the binding stays unknown", async () => {
+  const h = wiringRun({ kind: "agy", turn: "blocked" });
+  try {
+    await h.run();
+    assert.deepEqual(h.calls, []);
+    assert.equal(h.binding(), undefined);
+  } finally {
+    h.close();
+  }
+});
+
+test("ISSUE-107: onWorkerSession never fires for a failed turn, and the binding stays unknown", async () => {
+  const h = wiringRun({ kind: "agy", turn: "failed" });
+  try {
+    await h.run();
+    assert.deepEqual(h.calls, []);
+    assert.equal(h.binding(), undefined);
+  } finally {
+    h.close();
+  }
+});
+
+test("ISSUE-107: onWorkerSession never fires for codex even though its rollout session was observed", async () => {
+  const h = wiringRun({ kind: "codex", turn: "done" });
+  try {
+    const task = await h.run();
+    // 前提：codex 的 rollout session 有被觀察到並記成 authorSession（所以守門不是因為「沒有 session」才通過）。
+    const implement = task.coding?.artifacts.find(
+      (a) => a.role === "implement",
+    );
+    assert.ok(implement?.authorSession?.value);
+    assert.deepEqual(h.calls, []);
+    assert.equal(h.binding(), undefined);
+  } finally {
+    h.close();
   }
 });
