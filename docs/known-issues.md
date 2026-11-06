@@ -3710,7 +3710,12 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 - `agent start :codex:gpt-6.1-sol:medium` → 回報 pane `w1:p9`、機器 local、種類 codex、model `gpt-6.1-sol`、level `medium`、「未自動切換」。從行程確認實際參數為 `codex -m gpt-6.1-sol -c model_reasoning_effort=medium`，codex 畫面底部為 `GPT-6.1-Sol medium`（上一項(1)已驗）。
 - `agent start claude` → 回報 model、level 皆「CLI 預設」；`agent start :::high` → 種類沿用 claude、level `high`，pane 畫面為 `Sonnet 5.5 with high effort`（省略寫法已驗）。測試用的兩個 pane 已關閉。
 
-**仍未驗證：**(2) agy 信任提示被回報而非確認（這次工作目錄 `~/git_wk/Herdr_Discord_Bridge` 本來就已被 agy 信任，沒有機會看到提示）；(3) 白名單非空時 `--cwd` 的拒絕與遠端 realpath；(4) 遠端（`agy-pod`）同機啟動；Discord 端 `/herdr agent start` 沒有試。另：卡片原意是可指定其他 machine，v1 只在選定 Agent 所在的機器啟動（見「限制」），指定 `agy-pod:…` 目前不能用。
+**同日補驗（同一個 bridge，console）：**
+- 遠端同機啟動：`agent use agy-pod:w2:p1` 後 `agent start :agy` → 回報 pane `agy-pod:w2:p2`、機器 agy-pod、工作目錄 `/root`；ssh 到 pod 確認該 pane 真的跑著 agy（Antigravity CLI 1.4.7）。pod 上只裝了 agy，所以沒驗遠端的 claude／codex。
+- 指定其他機器被拒：選定遠端 Agent 時 `agent start local:agy` →「v1 只能在選定 Agent 所在的機器（agy-pod）啟動，不能開在 local（跨機器另案）」。測試 pane 已關閉，選用已切回 `w1:p1`。
+- agy 信任提示：用全新、agy 沒信任過的資料夾當 `--cwd` 啟動 agy，**bridge 回報「✅ 已啟動」，實際上 agy 停在 `Do you trust the contents of this project?`**。bridge 沒有替人確認（測試 pane 已關閉，信任清單沒有被寫入）。但「回報成功」是錯的，見 ISSUE-116。
+
+**仍未驗證：**白名單非空時 `--cwd` 的拒絕與遠端 realpath（`allowedWorkspaceIds` 在這台機器的 `config.json` 是空的，實機走不到，只有單元測試）；Discord 端 `/herdr agent start`（無法代使用者在 Discord 輸入）；遠端的 claude／codex；pane 太小時的行為（ISSUE-116）。另：卡片原意可指定其他 machine，v1 只在選定 Agent 所在的機器啟動（上面已驗證會被明確拒絕）。
 
 ## ISSUE-115：Team 的 verify 在 sandbox 內跑 `npm test` 一定撞 socket 限制，權限請求過期會讓整個 task 失敗
 
@@ -3727,3 +3732,21 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 修正範圍：無。可能的方向（未決定）：(a) 使用者選「以後都不問」（放寬 sandbox 範圍，由使用者決定）；(b) verify 的提示改成「`npm test` 的 socket 測試在 sandbox 內會失敗，改請求權限前先說明」，或讓 verify 只跑 build 與相關測試，完整測試交 CI；(c) 權限請求過期時把指派標為 blocked 等人，而不是令 task 失敗，並可重新發出；(d) 請求等待超過一半時間時由 bridge 再通知一次。
 
 未驗證：codex 以外的 verify Worker（claude）是否也會撞同一個限制；(c) 的行為牽涉 `src/team-orchestration.ts`，修改前需確認不影響其他逾時語意。
+
+## ISSUE-116：`agent start` 在很小的 pane 啟動 agy 時，agy 停在信任提示卻被回報「已啟動」
+
+更新日期：2026-11-06。狀態：待調查（現象已重現；偵測缺口的根因未確認）。
+
+使用者可見症狀：`agent start agy --cwd <agy 沒信任過的新資料夾>`（本機，選定 Agent 在 `w1`）回 `✅ 已啟動 Agent：pane w1:pC`，但該 pane 畫面是 `Accessing workspace: … Do you trust the contents of this project?`，Agent 沒有就緒。Herdr 對該 pane 的 `agent_status` 一直是 `idle`（等了約 15 秒仍是 `idle`），`scroll.viewport_rows` 只有 7。
+
+預期行為：停在信任提示時應回報「卡在啟動提示，請到 pane 處理」並保留 pane（`waitUntilReady` 對 `blocked` 本來就是這樣處理，見 ISSUE-091）。
+
+重現／環境：2026-11-06，本機 macOS，Antigravity CLI 1.4.12，bridge 以 main `27aa532` 重啟後從 console 執行。對照：agy 驗證卡（ISSUE-113）時 agy pane 有 29 行，Herdr 狀態為 `blocked`，`waitUntilReady` 正確失敗。
+
+已確認：(1) `waitUntilReady`（`src/agent-ready.ts`）只相信 Herdr 回報的 `agent_status`，`idle` 就視為就緒；(2) 兩次現象的差別是 pane 高度（7 行 vs 29 行）與狀態（`idle` vs `blocked`）。**根因未確認**：推測是 pane 太小時選單被截掉，Herdr 的畫面偵測看不到提示，與 ISSUE-108（小 pane）同類，但沒有驗證過把 pane 變大是否就會變成 `blocked`。
+
+影響：`agent start` 的「已啟動」回報在小 pane 不可靠；使用者要自己看 pane 才知道。`card` 的 Worker 啟動也走 `waitUntilReady`，若 Worker pane 很小也可能把「在等信任」誤當就緒（ISSUE-113 那次沒有發生，因為 pane 夠大）。
+
+修正範圍：無。可能的方向（未決定）：(a) 與 ISSUE-108 一起處理，pane 太小時改開 tab；(b) 就緒後額外讀畫面，看到已知的信任／更新提示字樣就視為 blocked（不替人確認）。
+
+未驗證：pane 變大後是否變成 `blocked`；其他 CLI（claude、codex）在小 pane 的信任提示是否也被偵測成 `idle`。
