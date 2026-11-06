@@ -1744,7 +1744,8 @@ async function startTeamTask(
       return agent;
     });
   workers.push(...(runtime.pool?.roster(workspaceId) || []));
-  // E14：--coding 沒有指定任何 Worker 時，自動啟用 claude／codex profile 當候選，誰寫誰審交給 Lead。
+  // E14：--coding 沒有指定 Worker 時，自動候選為 claude／codex 與 capabilities 含 implementation／review 的 agy。
+  // capabilities 只決定自動入池，誰寫誰審交給 Lead；ISSUE-107 第 2、3 部分尚未完成，目前不應開啟 agy 選用。
   if (coding && workers.length === 0 && runtime.pool) {
     const enabled = autoEnableCodingProfiles(workspaceId, runtime.pool);
     if (enabled.length) {

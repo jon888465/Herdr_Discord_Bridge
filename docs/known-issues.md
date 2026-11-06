@@ -3543,3 +3543,23 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 測試（2026-11-06，本機，非 CI）：初次 `npm run build` 因缺少依賴（`tsc`）失敗（exit 127），`npm ci` 成功。暫時停用新回饋、恢復遇錯即 throw，以 `npm run build` 與 `node --test --test-name-pattern ISSUE-106 dist/test/coding-workflow.test.js` 驗證紅燈：4 項中 3 fail、1 pass（一般任務仍立即失敗），隨後恢復實作。最終 `npm run build`、`npm run lint` 成功（exit 0，174 個 TypeScript 檔）。`node --test --test-timeout=60000 dist/test/coding-workflow.test.js dist/test/team-orchestration.test.js dist/test/team-task-engine.test.js` → 73/73 pass、0 fail（exit 0；含 store 的 journal 與重啟測試）。涵蓋新增 6 項：writer 計畫被拒後修正完成且未重複派工、journal 事件與重啟載入、第三次拒絕失敗、一般任務直接失敗、跨回合成果保留與輪數上限、解析拒絕、數量上限拒絕；既有 ISSUE-093 gate 回饋測試通過。
 
 未驗證與下一步：**尚未實機驗證**；`REQ-20261106-agy-pool` 下一次嘗試是第一個驗證對象，觀察 Lead 被告知錯誤後是否真的修正計畫、被拒計畫未派工、已完成成果保留。原始碼／build 的檢查不代表執行中的 bridge 已更新；未重啟、未部署、未 commit／push，舊 failed task 不會自動恢復。既有輪數上限可能先於回饋額度用完而終止任務，這是保留的限制。
+
+## ISSUE-107：agy 作為 `--coding` Worker／Reviewer 的支援（分三部分）
+
+更新日期：2026-11-06。狀態：修正中。
+
+**整個 ISSUE-107 目前只完成第 1 部分（自動候選選用）；agy 的 session 登記（第 2 部分）與 reviewer 獨立性（第 3 部分）還沒做，所以 agy 尚不可用，使用者不應現在打開 agy 選用。**
+
+使用者可見症狀：`--coding` 未指定 Worker 時，即使 agy profile 宣告 implementation／review，也不會加入自動候選。手動勾選不能補齊 session 登記與獨立 reviewer 支援。
+
+預期行為：claude／codex 預設規則不變；agy 只有 capabilities 含 `implementation` 或 `review` 才自動入池；未宣告、空清單或只有 `analysis` 時不啟用；pi 不論 capabilities 都不啟用。候選合計至少兩個才啟用，已指定 Worker 時不加人。capabilities 只是自動入池條件，不是角色守門，誰寫誰審仍由 Lead 決定。
+
+重現方式／環境：2026-11-06，本機 worktree；以 roster fixture 放入 claude／codex、不同 capabilities 的 agy 與 pi，呼叫 `autoEnableCodingProfiles`。未執行 agy 的 Discord／Herdr／CLI 端到端流程。
+
+已確認根因：自動候選原本只比對 `AUTO_CODING_KINDS` 的 claude／codex，未讀 agy capabilities。參考分支的診斷另指出 session 首次出現後的 pool 登記與 reviewer 身分傳遞缺口；本卡不修第 2、3 部分，也沒有實機確認其表現。
+
+修正範圍（第 1 部分）：`src/coding-roster.ts` 加入 `OPT_IN_CODING_KIND`、`OPT_IN_CODING_CAPABILITIES` 與 `autoCodingCandidate`，同步註解、錯誤訊息與 roster 測試；`src/main.ts` 只改 startTeamTask 的 E14 註解；同步 SPEC 與兩份 README。未修改 agent-pool、team-*、config.json 或 policy.yml，獨立 review、verify 與 card merge 守門不變。
+
+測試命令與結果（2026-11-06，本機，非 CI）：首次 `npm run build` 因缺少 `tsc` 失敗（exit 127）；`npm ci` 成功後，`npm run build` 成功（exit 0），`node --test dist/test/coding-roster.test.js` 為 10/10 pass、0 fail（exit 0）。最終重跑 build 與同一測試仍成功（10/10 pass）；`npm run lint` 成功（exit 0，174 個 TypeScript 檔），`git diff --check` 成功。涵蓋 agy 未宣告／空清單／analysis-only 不入池、implementation／review／兩者入池、pi 排除、至少兩個與既有 claude／codex 行為。
+
+未驗證與下一步：Lead 接續第 2 部分 session 登記、第 3 部分 reviewer 獨立性，再安排 agy 首輪／重用 session、implement 與獨立 review 的實機驗收。本卡沒有部署或重啟 bridge，執行中的 bridge 不代表已載入新原始碼或 build；舊失敗 task／訊息不會自動補送。沒有 commit／push。

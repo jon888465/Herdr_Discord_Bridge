@@ -253,6 +253,8 @@ Lead 自行決定角色、是否委派，以及依報告追加工作，無固定
 
 ## Durable Team Task（Phase 1）
 
+E14 自動候選（2026-11-06，ISSUE-107 第 1／3 部分）：`--coding` 沒有指定 Worker 時，會自動啟用 claude／codex profile，以及 `capabilities` 含 `implementation` 或 `review` 的 agy profile，合計至少兩個才啟用。有指定 Worker 時不自動加入；agy 未宣告 capabilities、空清單或只有 `analysis` 時維持不啟用，pi 不論 capabilities 都不啟用。capabilities 只決定是否自動入池，不是角色守門，誰寫誰審仍由 Lead 決定。**目前只完成第 1 部分；第 2 部分 agy session 登記與第 3 部分 reviewer 獨立性尚未完成，agy 尚不可用，使用者不應現在開啟 agy 選用。**
+
 `team ask <prompt>` 保存任務、Lead/session、凍結 roster、Assignment、事件與報告。`team ask --coding <prompt>` 才啟用本機 Git coding 驗收：單一 writer、不同已知 session review、版本指紋相符的 review／test 證據。Review 或 verify 期間工作樹若改變，該證據不算通過。旗標不會從 prompt 文字推論。它不 commit、不 push，write scope 也不是作業系統鎖。見 [本機 coding workflow](docs/coding-workflow-proposal.md) 與 ISSUE-025。
 `team status [task-id]` 查看目前 workspace 的持久狀態；`team cancel <task-id>` 取消整個任務。Discord 使用 `/herdr` 前綴。
 重啟後先核對 pane/session，標示 blocked/recoverable 或 unknown，不自動重送工作。取消只使用既有 Ctrl-C，確認停止後才 cancelled；不確定時保留 cancelling 與 reservation，不關閉 CLI。
