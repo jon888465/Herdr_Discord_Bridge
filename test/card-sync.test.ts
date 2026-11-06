@@ -89,6 +89,27 @@ test("a completed task moves the card to done and logs completed with the finish
   ]);
 });
 
+test("a targeted sync updates only the requested card", () => {
+  const { rootDir, store } = setup();
+  store.create(card(ID));
+  const other = "REQ-20261102-other";
+  store.create(card(other));
+  const result = syncCards({
+    rootDir,
+    cardId: ID,
+    tasks: {
+      get: () => ({ state: "completed", terminalSequence: 7, ...finished }),
+    },
+    now: () => "2026-11-02T09:00:00Z",
+  });
+  assert.deepEqual(result.updated, [ID]);
+  const selected = store.read(ID);
+  const untouched = store.read(other);
+  assert.equal(selected.ok && selected.card.status, "done");
+  assert.equal(untouched.ok && untouched.card.status, "in_progress");
+  assert.deepEqual(logOf(store, other), []);
+});
+
 test("a running task changes nothing and does not rewrite the file", () => {
   for (const state of [
     "planning",

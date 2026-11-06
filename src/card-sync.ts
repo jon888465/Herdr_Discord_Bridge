@@ -153,6 +153,8 @@ function findMissing(
 export function syncCards(options: {
   rootDir: string;
   tasks: TaskSource;
+  /** 只同步這張卡；不掃其他卡片或刪除偵測。未提供時維持定時全量掃描。 */
+  cardId?: string;
   /** 有提供時才會偵測被刪除的卡片。 */
   assignments?: { list(): CardAssignment[] };
   now: () => string;
@@ -166,7 +168,7 @@ export function syncCards(options: {
   const store = directory.exists
     ? new CardStore(options.rootDir, { maxFileBytes: LEDGER_MAX_FILE_BYTES })
     : undefined;
-  if (options.assignments) {
+  if (options.assignments && !options.cardId) {
     // 索引壞掉只會停用「卡片被刪除」偵測；任務結果同步不受影響。
     try {
       result.missing = findMissing(
@@ -181,7 +183,17 @@ export function syncCards(options: {
     }
   }
   if (!store) return result;
-  for (const { card } of store.list().cards) {
+  const cards = options.cardId
+    ? (() => {
+        const read = store.read(options.cardId);
+        if (!read.ok) {
+          if (read.code !== "not_found") result.problems.push(read.error);
+          return [];
+        }
+        return [read.card];
+      })()
+    : store.list().cards.map(({ card }) => card);
+  for (const card of cards) {
     if (card.status !== "in_progress" || !card.tasks?.length) continue;
     try {
       if (syncCard(store, card, options.tasks, options.now, result.problems))

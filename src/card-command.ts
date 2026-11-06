@@ -111,6 +111,10 @@ export interface CardCommandDeps {
   notify?: (text: string) => Promise<void>;
   /** `card pr`：push 卡片分支並開 PR（或更新已開著的 PR）；不符合前提要丟出說明原因的錯誤。 */
   openPullRequest: (card: Card) => Promise<PrOutcome>;
+  /** `card pr` 讀卡片前，嘗試同步指定卡片的 task 結果。 */
+  syncCard?: (
+    cardId: string,
+  ) => { problems: string[] } | Promise<{ problems: string[] }>;
   /** `card commit`：把通過 review 與驗證的版本 commit 到卡片的分支（不 push）；不符合前提要丟出說明原因的錯誤。 */
   commitVerified?: (card: Card) => Promise<CommitOutcome>;
   /** 專案政策（唯讀）：`<config dir>/policy.yml` 的載入結果。 */
@@ -498,6 +502,11 @@ async function pullRequestForCard(
   if (args.length !== 1) throw new Error("usage: card pr <id>");
   const id = args[0];
   if (!isCardId(id)) throw new Error(`${id} 不是合法的卡片 id`);
+  try {
+    await deps.syncCard?.(id);
+  } catch {
+    // 同步是盡力而為；仍由既有卡片讀取與 done 守門回報拒絕原因。
+  }
   return (await pushStep(id, deps)).text;
 }
 
