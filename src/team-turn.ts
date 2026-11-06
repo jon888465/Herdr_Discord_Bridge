@@ -53,8 +53,12 @@ export async function runTeamTurn(
   state: "done" | "blocked";
   text: string;
   terminal: boolean;
-  /** 只在 `context.observeSession` 且 Agent 是 codex 時填入；找不到或不唯一則 undefined。 */
-  session?: { kind: "id"; value: string };
+  /**
+   * 只在 `context.observeSession` 時填入。codex：用 nonce 從 rollout 找出的實際 session（找不到或不唯一則
+   * undefined）。其他 CLI（ISSUE-107，如 agy 處理完第一個 prompt 才被登記 session）：回合內經過核對
+   * （pane／terminal／workspace／種類沒變、session 全程一致）的 Herdr session；沒有則 undefined。
+   */
+  session?: { kind: string; value: string };
 }> {
   const signal = context?.signal;
   const check = () => signal?.throwIfAborted();
@@ -98,8 +102,22 @@ export async function runTeamTurn(
   check();
   const since = Date.now();
   const isCodex = Boolean(agent.agent?.toLowerCase().includes("codex"));
-  const observedSession = async () => {
-    if (!context?.observeSession || !isCodex) return undefined;
+  // ISSUE-066：剛啟動的 Agent 派工時還沒有 session，處理完第一個 prompt 後才被 Herdr 登記。
+  // 允許 session「第一次出現」（其餘身份欄位都沒變時），並記住它；之後換成別的值或消失仍是身份改變。
+  let expectedSession = agent.agent_session;
+  const observedSession = async (): Promise<
+    { kind: string; value: string } | undefined
+  > => {
+    if (!context?.observeSession) return undefined;
+    if (!isCodex) {
+      // ISSUE-107：expectedSession 每次等待後都核對過，所以是回合內一致的 session。
+      if (!hasAgentSession(expectedSession)) return undefined;
+      const { kind, value } = expectedSession as {
+        kind: string;
+        value: string;
+      };
+      return { kind, value };
+    }
     const match = await findCodexRolloutByNonce(nonce, since);
     return match ? { kind: "id" as const, value: match.value } : undefined;
   };
@@ -143,9 +161,6 @@ export async function runTeamTurn(
   // agent.prompt(wait=...) already waited for this request. Reusing its
   // settled record avoids spending a second timeout on agent.wait.
   let current = promptSettled;
-  // ISSUE-066：剛啟動的 Agent 派工時還沒有 session，處理完第一個 prompt 後才被 Herdr 登記。
-  // 允許 session「第一次出現」（其餘身份欄位都沒變時），並記住它；之後換成別的值或消失仍是身份改變。
-  let expectedSession = agent.agent_session;
   do {
     check();
     // atomic prompt 已回傳 settled record 時不再重複消耗另一個完整 wait timeout。

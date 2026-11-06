@@ -125,6 +125,14 @@ export interface TeamTaskInput {
   acquireWorker?: (
     worker: AgentRecord,
   ) => Promise<{ agent: AgentRecord; continuity: string }>;
+  /**
+   * ISSUE-107：Worker 的回合完成、且回合內驗證過它的 session（例如 agy 處理完第一個 prompt 才被登記）。
+   * profile Worker 用它更新 pool 的綁定；codex 的 rollout session 不是 Herdr session，不會呼叫。
+   */
+  onWorkerSession?: (
+    worker: AgentRecord,
+    session: { kind: string; value: string },
+  ) => Promise<void> | void;
 }
 
 export interface TeamTaskResult {
@@ -534,7 +542,7 @@ async function runAssignment(
         signal: input.signal,
         beforeComplete: input.beforeTurnComplete,
         hookFinal: input.hookFinal,
-        observeSession: input.coding === true,
+        observeSession: input.coding === true || Boolean(input.onWorkerSession),
         beforeDispatch: () =>
           emit({
             type: "turn_dispatched",
@@ -558,6 +566,12 @@ async function runAssignment(
       turnState: settled.state,
     });
     const observed = bounded(settled.text, reportMaxChars);
+    if (
+      settled.state !== "blocked" &&
+      settled.session &&
+      !worker.agent?.toLowerCase().includes("codex")
+    )
+      await input.onWorkerSession?.(worker, settled.session);
     if (settled.state !== "blocked")
       input.codingHooks?.onAssignmentDone(
         assignment,
