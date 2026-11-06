@@ -49,6 +49,7 @@
 ## Pending feature index
 
 - [ADR-0002 營運卡片放 plugin 狀態目錄並記錄流程](docs/adr/0002-operational-cards-in-plugin-state.md)：**已採納（決策），尚未實作。** 營運卡片是 bridge 的流程帳本，放 `<stateDirectory>/cards/`、不進 git；記錄進度、結果與異動專案；部分取代 ADR-0001。`docs/cards/` 與 `docs/card-examples/` 只放範例與設計文件。
+- [卡片處理記錄：agy 加入 agent pool](docs/card-runs/REQ-20261106-agy-pool.md)：保留一張卡從寫法（指定做法 vs 目標導向）到 Lead 處理流程與結果的樣本，供日後改進 card 自動化處理流程。含六次嘗試的時間線、修出來的缺口、兩種寫法的差異與 Lead 的診斷報告（[診斷報告](docs/card-runs/REQ-20261106-agy-pool-diagnoses.md)）。
 - [Card-to-Merge 追蹤清單](docs/card-to-merge-tracker.md)：**剩餘工作的唯一權威來源**（2026-11-02 建立）。把散在規劃卡、兩份 ADR、兩張需求卡與 ISSUE-052 到 056 的未完成項目編號、排依賴與階段，含驗收債與事件模板提議。清單是規劃，不代表尚未實作的能力可用。
 - [ADR-0001 可攜 Markdown 卡片格式](docs/adr/0001-portable-md-cards.md)：**已採納；純函式 `parseCard`、`importCard`、`serializeCard` 與檔案層 `CardStore`（`src/card*.ts`）已實作，但 `CardStore` 尚無呼叫端，bridge 不讀寫卡片；Mantis 匯出／bridge 狀態寫入／Discord 指令尚未實作。** 一卡一檔、受限 frontmatter 子集（不引入 YAML 套件）、匯入強制 `draft`、執行態不進卡片、Mantis 匯出（不呼叫 API）。
 - [卡片範例與 Mantis 轉換指引](docs/card-examples/README.md)：三張範例卡（需求、Mantis 單、最小卡）與請 Agent 轉換的規則；範例由測試檢查。另有單檔驗證指令 `scripts/herdr-card-check`（待驗收，ISSUE-054）；bridge 尚不讀取卡片。

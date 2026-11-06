@@ -3446,7 +3446,7 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 ## ISSUE-101：自動撿卡把成功的合併誤報成「停下來等人」（H2 L2 第四次嘗試）
 
-更新日期：2026-11-06。狀態：已修正、待驗收（根因已確認；原始碼與自動化檢查完成；**尚未 merge、尚未重啟 bridge、尚未實機驗證**）。
+更新日期：2026-11-06。狀態：已驗收（2026-11-06 實機：自動撿卡成功 merge 後 runner 不再誤報，Lead workspace 自動關閉）。
 
 使用者可見症狀：H2 自動撿卡 L2 第四次嘗試（卡 `REQ-20261106-auto5`）：bridge 已經把 PR #128 squash merge 進 `main`（`94f92aa`，卡片也記了 `merged` 與 `cleanup_done`），console 卻同時印出「自動撿卡 REQ-20261106-auto5（local:Herdr_Discord_Bridge，L2）：停下來等人，停在 loop：review 完成…」，卡片流程紀錄多了一筆 `failed`（code `autopick_stopped`），而且 bridge 為這張卡開的 Lead workspace 沒有關閉（成功收尾才會關）。
 
@@ -3460,9 +3460,11 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 未驗證：實機（merge 後 runner 回報「完成到 loop」、不寫 `failed`、關閉 Lead workspace）；這次誤報留下的殘留（Lead workspace `autopick-REQ-20261106-auto5`、卡片上的 `failed` 事件、遠端分支 `card/REQ-20261106-auto5`）需手動清理，卡片事件是事實紀錄不改寫。
 
+**實機驗收（2026-11-06，本機 macOS，政策 L2，bridge 載入含 PR #129 的 main）：**卡 `REQ-20261106-plan-rounds`（PR #132）於 07:06:27Z 由 bridge 自己 squash merge（`dc9e15e`），之後同一張卡的流程紀錄只有 `merged` 與 `cleanup_done`，**沒有新增 `failed`／`autopick_stopped` 事件**，console 沒有「停下來等人」，該卡的 Lead workspace 與 worktree 都已自動關閉。其後 PR #133、#134、#137、#138、#139 的卡同樣如此。對照：修正前 `REQ-20261106-auto5`（PR #128）合併成功卻被誤報、Lead workspace 殘留。
+
 ## ISSUE-102：`SPEC.md` 在敏感路徑清單內，導致功能類的卡片在 L2 幾乎都退回人工 merge（H2 自動撿卡觀察）
 
-更新日期：2026-11-06。狀態：已修正、待驗收（原始碼與自動化檢查完成；**尚未 merge、尚未重啟 bridge、尚未實機驗證**）。
+更新日期：2026-11-06。狀態：已驗收（2026-11-06 實機：改動 `SPEC.md` 的 PR 由 bridge 自己 merge）。
 
 使用者可見症狀：自動撿卡 L2 跑 ISSUE-095 的卡（`REQ-20261106-issue095`，PR #130）：獨立 review 第 2 輪 `pass`、CI 全綠，`card merge` 卻拒絕：「這個 PR 動到敏感路徑：SPEC.md。這類 PR 一律由人 merge」，runner 停在 merge、卡片記 `failed`／`autopick_stopped`、Lead workspace 保留。使用者 2026-11-06 手動 merge（`1e66fc4`）。
 
@@ -3476,9 +3478,11 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 未驗證：實機——merge 並重啟 bridge 後，一張會改 `SPEC.md` 的卡在 L2 能由 bridge 自己 merge。因為這個 PR 動到 `src/sensitive-paths.ts`（仍在清單內），本身必須由人 merge。
 
+**實機驗收（2026-11-06）：**修正前，PR #130（改了 `SPEC.md`）在 05:53:27Z 被 `card merge` 以「動到敏感路徑：SPEC.md」擋下，停在 merge，由使用者手動 merge。修正（PR #131）後重啟 bridge，PR #132（`SPEC.md` +2 行，另改 `src/` 與測試）於 07:06:27Z 由 bridge 自己 merge，沒有被敏感路徑擋下；`src/sensitive-paths.ts` 等仍在清單內的檔案未動。限制不變：PR #131 本身因為改了 `src/sensitive-paths.ts` 仍由使用者手動 merge。
+
 ## ISSUE-103：規劃提示未說明實作前的唯讀工作須先排在沒有 writer 的獨立回合
 
-更新日期：2026-11-06。狀態：已修正、待驗收（原始碼與自動化檢查完成；**尚未在實機執行流程驗證、尚未重啟或部署 bridge**）。
+更新日期：2026-11-06。狀態：已驗收（2026-11-06 實機：Lead 把實作前診斷排成沒有 writer 的獨立回合並通過驗證）。
 
 使用者可見症狀／重現環境：2026-11-06 的卡 `REQ-20261106-agy-pool`，約 30 秒內連續兩次，Lead 將 `diagnose-agy`、`critique-plan`（唯讀）→ `implement-agy`（writer，依賴前兩者）→ `review-impl` 排在同一回合。整個計畫被 `read-only coding assignments in a writer round must depend on that writer` 拒絕，task 直接 failed，Worker 未開始實作。
 
@@ -3492,9 +3496,11 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 未驗證與下一步：**尚未實機驗證** Lead 是否會將「先診斷、後實作」拆成兩回合；卡 `REQ-20261106-agy-pool` 是第一個驗證對象。此工作樹尚未 commit／push，執行中的 bridge 未重啟；自動化測試通過不能當作 live 驗收。
 
+**實機驗收（2026-11-06）：**修正（PR #132，`dc9e15e`）合併並重啟 bridge（07:09:11Z）後，卡 `REQ-20261106-agy-pool` 的三次嘗試（task `task-544ae3b7-5cdc-4086-b97f-7315def8ca39`、`task-4cf4eab3-0449-4dd3-af75-d4c2c26a39fd`、`task-e9cb8674-b86c-42b0-b639-544054c2632f`）第一回合都是只有診斷的計畫（無 writer）並通過 `plan_validated`，診斷完成後才在下一回合規劃 writer。修正前同一張卡兩次（`task-06eb2e97…`、`task-f10f36ba…`）都在約 30 秒內因為「read-only coding assignments in a writer round must depend on that writer」失敗。
+
 ## ISSUE-104：規劃提示未說明 review 只審已完成的實作，實作前批評應用 diagnose
 
-更新日期：2026-11-06。狀態：已修正、待驗收（原始碼與自動化檢查完成；**尚未實機驗證、尚未重啟或部署 bridge**）。
+更新日期：2026-11-06。狀態：已驗收（2026-11-06 實機：實作前的批評用 diagnose 角色並完成）。
 
 使用者可見症狀／重現環境：2026-11-06，卡 `REQ-20261106-agy-pool` 第四次嘗試，task `task-544ae3b7-5cdc-4086-b97f-7315def8ca39`。兩個平行唯讀診斷 `diag-adapter`、`diag-session` 都完成後，Lead 將批評診斷結論的 `critique` 指派給 reviewer profile，角色填成 `review`；07:12:59 開始時被引擎以 `coding review has no implementation artifact` 退回，task failed，前兩個診斷成果也跟著作廢。
 
@@ -3508,9 +3514,11 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 未驗證與下一步：**尚未實機驗證** Lead 之後是否會把實作前批評排成 `diagnose`；`REQ-20261106-agy-pool` 下一次嘗試是第一個驗證對象。原始碼與 build 已更新，但執行中的 bridge 未重啟、未部署，既有失敗 task 與診斷成果不會因此自動恢復；未 commit／push。自動化通過不代表 Discord／Herdr／CLI 端到端驗收完成。
 
+**實機驗收（2026-11-06）：**修正（PR #133，`be728e1`）合併並重啟 bridge（07:23:56Z）後，task `task-4cf4eab3-0449-4dd3-af75-d4c2c26a39fd` 的 `d3-critique`（交給 reviewer profile、依賴兩個診斷）用 `diagnose` 角色，07:28:57Z 完成，沒有再出現「coding review has no implementation artifact」。修正前 task `task-544ae3b7-5cdc-4086-b97f-7315def8ca39` 的 `critique` 用 `review` 角色，在 07:12:59Z 被引擎退回。
+
 ## ISSUE-105：規劃提示未說明 findingRefs 只能引用 review 登記的 finding，診斷成果應用 artifactRefs
 
-更新日期：2026-11-06。狀態：已修正、待驗收（原始碼與自動化檢查完成；**尚未實機驗證、尚未重啟或部署 bridge**）。
+更新日期：2026-11-06。狀態：已驗收（2026-11-06 實機：診斷之後的 writer 回合計畫通過驗證）。
 
 使用者可見症狀／重現環境：2026-11-06，卡 `REQ-20261106-agy-pool` 第五次嘗試，task `task-4cf4eab3-0449-4dd3-af75-d4c2c26a39fd`。第一回合三個唯讀診斷完成，artifacts 為 `a-d1-adapter-flow-1`、`a-d2-roster-pool-2`、`a-d3-critique-3`，task 的 `coding.findings` 為空；第二回合 Lead 排 writer 時把 diagnose 報告的 finding id `d2-optin-roster` 放進 `findingRefs`，計畫被以 `references unknown finding` 拒絕，task 失敗，約 4 分鐘診斷成果作廢。
 
@@ -3523,6 +3531,8 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 測試（2026-11-06，本機 macOS，非 CI）：初次 `npm run build` 因缺少 `tsc` 失敗（exit 127），`npm ci` 成功後，`npm run build && node --test --test-name-pattern 'ISSUE-105' dist/test/coding-workflow.test.js` 在提示修正前 **0/1 通過**（exit 1，紅，缺少引用說明）。提示修正後 `npm run build` 成功（exit 0）；`node --test --test-name-pattern 'ISSUE-105' dist/test/coding-workflow.test.js` **1/1 通過**（exit 0）；`node --test --test-timeout=60000 dist/test/coding-workflow.test.js` **26/26 通過、0 fail**（exit 0）；`npm run lint` 成功（exit 0，174 個 TypeScript 檔）。
 
 未驗證與下一步：**尚未實機驗證** Lead 之後是否會改用 `artifactRefs` 交接診斷成果；`REQ-20261106-agy-pool` 下一次嘗試為第一個驗證對象。原始碼與 build 已更新，但執行中的 bridge 未重啟、未部署；既有失敗 task 與診斷成果不會自動恢復，未 commit／push。自動化通過不代表 Discord／Herdr／CLI 端到端驗收完成。
+
+**實機驗收（2026-11-06）：**修正（PR #134，`495969f`）合併並於 07:57:34Z 重啟 bridge 後，task `task-e9cb8674-b86c-42b0-b639-544054c2632f` 在三個診斷完成後，08:03:56Z 的第二回合（writer `impl-agy-pool`）計畫通過 `plan_validated` 並完成實作與 review。修正前 task `task-4cf4eab3-0449-4dd3-af75-d4c2c26a39fd` 的同一步因 `references unknown finding d2-optin-roster` 失敗。注意：我沒有逐項檢查該計畫的 `artifactRefs`，只確認計畫通過了引擎驗證。
 
 ## ISSUE-106：coding 計畫驗證失敗沒有回饋 Lead 重排，直接令 task 失敗
 
@@ -3543,6 +3553,8 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 測試（2026-11-06，本機，非 CI）：初次 `npm run build` 因缺少依賴（`tsc`）失敗（exit 127），`npm ci` 成功。暫時停用新回饋、恢復遇錯即 throw，以 `npm run build` 與 `node --test --test-name-pattern ISSUE-106 dist/test/coding-workflow.test.js` 驗證紅燈：4 項中 3 fail、1 pass（一般任務仍立即失敗），隨後恢復實作。最終 `npm run build`、`npm run lint` 成功（exit 0，174 個 TypeScript 檔）。`node --test --test-timeout=60000 dist/test/coding-workflow.test.js dist/test/team-orchestration.test.js dist/test/team-task-engine.test.js` → 73/73 pass、0 fail（exit 0；含 store 的 journal 與重啟測試）。涵蓋新增 6 項：writer 計畫被拒後修正完成且未重複派工、journal 事件與重啟載入、第三次拒絕失敗、一般任務直接失敗、跨回合成果保留與輪數上限、解析拒絕、數量上限拒絕；既有 ISSUE-093 gate 回饋測試通過。
 
 未驗證與下一步：**尚未實機驗證**；`REQ-20261106-agy-pool` 下一次嘗試是第一個驗證對象，觀察 Lead 被告知錯誤後是否真的修正計畫、被拒計畫未派工、已完成成果保留。原始碼／build 的檢查不代表執行中的 bridge 已更新；未重啟、未部署、未 commit／push，舊 failed task 不會自動恢復。既有輪數上限可能先於回饋額度用完而終止任務，這是保留的限制。
+
+**2026-11-06 實機觀察：**修正（PR #135，`a64b4ff`）合併並重啟 bridge（07:57:34Z）後，task `task-e9cb8674-b86c-42b0-b639-544054c2632f` 的 journal 沒有任何 `plan_rejected` 事件（Lead 的計畫都一次通過），所以這個重排機制**還沒有被實機觸發**，狀態維持「已修正、待驗收」。下一次 Lead 計畫被引擎拒絕時才能驗證：要看 `plan_rejected` 是否記錄、Lead 是否真的依回饋修正。
 
 ## ISSUE-107：agy 作為 `--coding` Worker／Reviewer 的支援（分三部分）
 
@@ -3591,3 +3603,55 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 測試命令與結果（2026-11-06，本機 macOS，非 CI）：初次工作樹缺依賴，`npx tsc --noEmit` 嘗試查 registry 遇 ENOTFOUND；`npm ci` 成功（exit 0）後，重跑 `npx tsc --noEmit` 成功（exit 0），`npm run build` 成功（exit 0），`node --test --test-timeout=60000 dist/test/team-task-engine.test.js` 39/39 pass、0 fail、0 skip（exit 0；含本卡新增 8 項測試），`git diff --check` 成功（exit 0）。
 
 未驗證與交接：第 1、2 部分已在 main 合併，本卡第 3 部分交由 Lead／bridge 合併；三部分合併後仍為「已修正、待驗收」，**agy Worker／Reviewer `--coding` 全流程尚未實機驗證**，使用者須自行加入上述 profile capability 才會啟用。沒有部署／重啟 bridge，執行中程序未確認載入新版本，舊 failed task／訊息不會補送；未 commit／push。依本卡三檔限制未修改 SPEC／README，其中舊的第 1／2 部分進度敘述須由 Lead 後續整合同步；本節不把未合併改動或自動化結果宣稱為已部署或實機可用。
+
+**2026-11-06 合併狀況：**因為第一次的完整實作（PR #136，diff 73638 字元）超過 review 上限 60000，bridge 的獨立 review 沒有執行（見 ISSUE-111），改拆成三個 PR，各自由 bridge 自己 review 並 merge：#137（`a96fda5`，選用機制）、#138（`fc7398c`，session 登記）、#139（`4e8a1d7`，reviewer 獨立性判斷）；bridge 已於 2026-11-06 09:23:02Z 重啟載入。**agy 作為 Worker 或 Reviewer 的 `--coding` 全流程仍未實機驗證**（從沒真的讓 agy 擔任過）；要驗證需使用者在 `config.json` 的 agy profile 加上 `implementation` 或 `review`，再用一張無害的卡跑一輪。PR #136 仍開著、等使用者決定關閉。
+
+## ISSUE-108：同一個 workspace 有多個 Agent pane 時，Lead／Worker pane 只剩約 6 行，replan 的 prompt 沒有被 Lead 處理
+
+更新日期：2026-11-06。狀態：待調查（根因未確認；使用者建議：pane 太小時改開新 tab）。
+
+使用者可見症狀：卡 `REQ-20261106-plan-rounds` 第一次嘗試（task `task-2204c0af-69e9-41d3-b2a4-e2cff7bec906`）：3 個指派 06:37:07Z 完成後，bridge 在 06:37:08Z 把 replan 的 prompt 派給 Lead（`w37:p1`，journal 記為 `dispatched`），之後 Lead 畫面是空的輸入列、狀態 `idle`，沒有新的 Stop hook，約 15 分鐘後 06:52:13Z 逾時，task 變成 `blocked`：`Timed out waiting for current response from w37:p1 (last state: idle); no verified completion`。同一個 workspace 有 4 個 pane，Lead 與 claude Worker 的可視高度各只有 6 行（codex 兩個分別是 13 與 29 行），claude Worker 的畫面停在「Teach auto mode about your environment?」選單（我在 06:51 手動選了 Not now 才消失）。
+
+預期行為：pane 太小時不要繼續分割，改開新 tab；prompt 送出後如果 Lead 沒有開始處理要能偵測並重送或明確失敗，不要等到 15 分鐘逾時。
+
+已確認：pane 高度如上；逾時由既有機制產生。**未確認：**Lead 沒有處理 replan prompt 的直接原因（小 pane 吞掉輸入、被選單遮住、或其他）；我試過放大 Lead pane 查看，但該 workspace 不在聚焦狀態、放大沒生效，沒有取得 Lead 當時的完整畫面。重跑同一張卡（06:57:37Z）沒有再發生，不能確定是小 pane 造成。
+
+修正範圍：無。候選：（1）`chooseSplitTarget`／`startProfile`（ISSUE-094）加最小高度，不足就開新 tab；（2）派工 prompt 送出後確認 Lead 有開始處理；（3）兩者都做。待使用者決定。
+## ISSUE-109：卡片只有「描述」與「驗收條件」會送給 Lead，其他段落被丟棄且沒有任何提示
+
+更新日期：2026-11-06。狀態：待決定（根因已確認；尚未修正）。
+
+使用者可見症狀：卡 `REQ-20261106-agy-pool` 一開始把流程要求放在「怎麼做」「不可做」兩個 `##` 段落，Lead 收到的 prompt（task `task-06eb2e97-7b7b-496e-b1b7-a10d722c343b` 的 `originalPrompt`）只有 `[描述]` 與 `[驗收條件]`，那兩段（包含「不可修改 config.json／policy.yml」這類護欄）完全沒有送出，也沒有任何警告。另外卡片缺少 `## 描述` 時，`card assign` 直接拒絕（第一次嘗試 06:18:50Z `autopick_failed`）。
+
+預期行為：卡片上額外的段落要嘛送給 Lead，要嘛在 `card check`、assign 時警告「這些段落不會送給 Lead」。
+
+已確認根因：卡片轉成 prompt 時只取描述與驗收條件。暫時的做法：卡片把所有要給 Lead 的內容放在 `## 描述` 底下（用 `###` 子標題）。修正範圍：無。待使用者決定：送出所有段落、或在 `herdr-card-check`／assign 時警告。
+## ISSUE-110：驗收條件含「build／測試通過」時，唯讀 reviewer 無法驗證而判 `inconclusive`，連續兩次後退回人工
+
+更新日期：2026-11-06。狀態：待決定（根因已確認；尚未修正）。
+
+使用者可見症狀：PR #135（ISSUE-106）第 1、2 輪 review 都是 `inconclusive`（07:53:00Z、07:53:55Z）：四條驗收條件中第 1、2、4 條 ✓，第 3 條「新增的單元測試修正前失敗、修正後通過；build、lint 與相關測試全數通過」是 `?`——reviewer 是唯讀的，只能跑 typecheck 與 lint，不能跑會寫檔的 build 與測試。同一個 head 連續兩次 `inconclusive`，`card loop` 依規則退回人工（`autopick_stopped`）；CI（macOS、ubuntu）當時已全綠，使用者讀過 diff 後手動 merge。之前的卡之所以能 pass，是 reviewer 當時接受了文件中記載的結果。
+
+預期行為：測試結果由 verify 與 CI 負責，不該讓 reviewer 的判定卡在它做不到的事。
+
+已確認根因：驗收條件把「測試通過」同時交給 reviewer。修正範圍：無。候選：（1）卡片寫法：驗收條件只放 reviewer 讀 diff 能判斷的，測試／build 另列為 verify 的責任（agy 拆分後的三張卡已這樣寫，三張的 review 都一輪就 pass）；（2）`card loop` 讀 CI 結果補上這一類條件。待使用者決定。
+## ISSUE-111：PR 的 diff 超過 60000 字元時 `card loop` 不執行 review，大型卡片無法自動走完
+
+更新日期：2026-11-06。狀態：待決定（行為是設計上的守門；尚未決定是否要在規劃或開 PR 前事先提示）。
+
+使用者可見症狀：卡 `REQ-20261106-agy-pool`（PR #136，+1297／-22、14 個檔案）task 完成、bridge commit 並開了 PR 後，08:51:49Z `card loop` 停在 review：「PR 的 diff 有 73638 字元，超過 review 上限 60000；請 Lead 把需求重新切分成較小的部分」，共 0 個步驟。此時 task 已花約 50 分鐘。
+
+處理：依訊息把需求拆成三張卡（`REQ-20261106-agy-1-roster`、`agy-2-session`、`agy-3-reviewer`，各要求 diff 小於 40000 字元），各自由 bridge review 並 merge。這個守門本身是合理的（避免未完整審查的大 diff 自動 merge）。
+
+觀察：大小是 PR 開出之後才發現，之前的工作已經做完。待決定：是否在規劃階段就要求 Lead 估計大小並先切分、或在 `card commit` 後、開 PR 前就檢查大小。
+
+附帶觀察：同一個 task 的 verify（codex，`w3N:p3`）在 08:17:02Z 要求在 sandbox 外執行 `npm test > /tmp/…`（原因：sandbox 禁止本機 socket listen），bridge 把這個權限請求暫停等人，使用者在 08:29 選「只這一次」後繼續；請求 15 分鐘後過期。這是設計上的權限流程，不是缺陷，但表示完整測試需要人在場。
+## ISSUE-112：`card cleanup` 在該卡的 worktree workspace 已被關閉時失敗，需手動移除 worktree 並補索引
+
+更新日期：2026-11-06。狀態：待決定（已知限制；尚未修正）。
+
+使用者可見症狀：我（Agent）在重試卡 `REQ-20261106-agy-pool` 前先用 `workspace close` 關掉 worktree 的 workspace `w32`，再下 `card cleanup` 回 `❌ herdr worktree.remove: workspace_not_found workspace w32 not found`；worktree 目錄與索引項目都還在，之後 `card assign` 一直報「已有作用中的 worktree」。需手動用 `git worktree remove`（不加 `--force`）移除，並在 `card-worktrees.json` 補上該項的 `removedAt`，才能重試。
+
+預期行為：workspace 已不存在時，`card cleanup` 仍應能移除 worktree（沒有未提交修改的前提下）並更新索引，或至少給出明確的人工處理步驟。SPEC 目前只寫了「使用者手動移除 worktree 後 cleanup 會失敗」，這次是相反的順序（先關 workspace）。
+
+已確認根因：`card cleanup` 經由 Herdr 的 `worktree.remove`，需要 workspace 還在。修正範圍：無。教訓：要清理時先下 `card cleanup`，再關 Lead workspace。
