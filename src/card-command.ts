@@ -136,6 +136,17 @@ const DECISION_CHARS = 1000;
 const FINDINGS_SHOWN = 10;
 const RECENT_LOG = 5;
 
+// 同一輪 card fix 失敗後可重試、新 pane 可能再次跳過更新；事件 ID 必須含 pane 與時間，否則會被帳本去重吞掉。
+export function updateSkipEventId(
+  kind: "review" | "fix",
+  round: number,
+  paneId: string,
+  time: string,
+): string {
+  const pane = paneId.replace(/[^A-Za-z0-9_-]/g, "-");
+  return `update-skip-${kind}-r${round}-${pane}-${time.replace(/\D/g, "").slice(-9)}`.slice(0, 64);
+}
+
 function shorten(value: string, limit: number): string {
   const chars = Array.from(value);
   return chars.length > limit ? `${chars.slice(0, limit).join("")}…` : value;
@@ -638,6 +649,19 @@ async function reviewStep(
     const today = deps.now().slice(0, 10);
     const recorded = store.recordFindings(id, run.result.batch, today);
     if (!recorded.ok) warnings.push(`Review 發現：${recorded.error}`);
+    const skip = run.result.updateSkip;
+    if (skip) {
+      const skipLogged = store.recordEvent(id, {
+        event: "update_prompt_skipped",
+        cli: skip.kind,
+        paneId: skip.paneId,
+        key: skip.key,
+        time: deps.now(),
+        eventId: updateSkipEventId("review", round, skip.paneId, deps.now()),
+      });
+      if (!skipLogged.ok)
+        warnings.push(`紀錄 update_prompt_skipped：${skipLogged.error}`);
+    }
     const logged = store.recordEvent(id, {
       event: "review_verdict",
       role: "reviewer",
@@ -742,14 +766,35 @@ async function fixStep(
       throw new Error(
         `修正沒有進行（${result.stage}）：${result.error}${result.closeNote ? `（${result.closeNote}）` : ""}`,
       );
+    const warnings: string[] = [];
+    const skip = result.updateSkip;
+    if (skip) {
+      const skipLogged = store.recordEvent(id, {
+        event: "update_prompt_skipped",
+        cli: skip.kind,
+        paneId: skip.paneId,
+        key: skip.key,
+        time: deps.now(),
+        eventId: updateSkipEventId(
+          "fix",
+          check.reviewRound,
+          skip.paneId,
+          deps.now(),
+        ),
+      });
+      if (!skipLogged.ok)
+        warnings.push(`紀錄 update_prompt_skipped：${skipLogged.error}`);
+    }
     const outcome = result.outcome;
     if (outcome.kind === "failed")
       return {
         kind: "failed",
-        text: formatFixReply(id, check.reviewRound, result, undefined),
+        text: [
+          formatFixReply(id, check.reviewRound, result, undefined),
+          ...warnings.map((warning) => `⚠️ 卡片更新失敗：${warning}`),
+        ].join("\n"),
       };
 
-    const warnings: string[] = [];
     const today = deps.now().slice(0, 10);
     const marked: string[] = [];
     for (const findingId of outcome.fixed) {

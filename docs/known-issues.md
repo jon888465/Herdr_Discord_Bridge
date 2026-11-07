@@ -2882,7 +2882,7 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 使用者可見症狀：`card review REQ-20261104-rev-accept --agent codex` 回「判定：inconclusive；inconclusive 的原因：reviewer 沒有就緒（狀態 working；常見原因：新資料夾的信任提示，bridge 不會替人確認）」。reviewer 其實只是還在初始化，並沒有任何信任提示；上一輪（第 1 輪）的 `blocked` 則是 codex 的更新提示，原因文字同樣說成信任提示。
 
-預期行為：Agent 啟動後短暫是 `working`（初始化中）要等它變成 `idle` 再送提示；真的 `blocked`（在等人，例如更新或信任提示）才立刻放棄；原因文字要依實際狀態說明，不要一律推測是信任提示。
+當時預期行為（2026-11-04，ISSUE-118 前）：Agent 啟動後短暫是 `working`（初始化中）要等它變成 `idle` 再送提示；真的 `blocked`（在等人，例如更新或信任提示）才立刻放棄；原因文字要依實際狀態說明，不要一律推測是信任提示。
 
 重現方式／環境（2026-11-04，本機 macOS，main `f77c77e`，codex-cli 0.165.0，Herdr 0.9.1）：`card review <id> --agent codex`；第 1 輪 codex 彈出更新提示（`blocked`），在 worktree 手動處理掉後第 2 輪重現「`working` 就放棄」。
 
@@ -2892,9 +2892,11 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 
 測試（2026-11-04，本機 macOS、Node v26.12.0，非 CI）：`test/card-review-flow.test.ts` 新增 7 項（`working` 等到 `idle` 後繼續並用新的紀錄、`unknown` 同樣等待、已經 `idle` 不輪詢、等待中變 `blocked` 立刻放棄並說明啟動提示、逾時並寫出實際狀態而不是信任提示、等待中 pane 消失、讀取清單失敗仍關閉 pane）。先寫測試：6 項為紅（「已經 idle 不輪詢」本來就通過）；修正後全綠。全套 981 項，980 通過、0 失敗、1 略過（原 974 項）；`lint` 通過。**沒有**對真實 codex 的測試。
 
-未驗證（待重跑 live 驗收，需先 merge 並重啟 bridge）：真實 codex 啟動後 `working` 到 `idle` 的實際時間（30 秒夠不夠）；Agent 自己的更新提示或信任提示仍會讓 review 停在 `inconclusive`（bridge 不會替人按，這是設計），所以**每種要當 reviewer 的 Agent 都要先在目標 worktree 的路徑處理過一次這些提示**；因為每張卡的 worktree 路徑都是新的，**新路徑的信任提示是否每次都會出現尚未確認**（這次 codex 在新 worktree 沒有出現信任提示，原因不明）。
+當時未驗證（2026-11-04，ISSUE-118 前的歷史限制與待重跑 live 驗收紀錄，需先 merge 並重啟 bridge）：真實 codex 啟動後 `working` 到 `idle` 的實際時間（30 秒夠不夠）；Agent 自己的更新提示或信任提示仍會讓 review 停在 `inconclusive`（bridge 不會替人按，這是設計），所以**每種要當 reviewer 的 Agent 都要先在目標 worktree 的路徑處理過一次這些提示**；因為每張卡的 worktree 路徑都是新的，**新路徑的信任提示是否每次都會出現尚未確認**（這次 codex 在新 worktree 沒有出現信任提示，原因不明）。
 
-限制：等待上限 30 秒是暫定值；更新提示與信任提示只能由人處理。
+當時限制（ISSUE-118 前）：等待上限 30 秒是暫定值；更新提示與信任提示只能由人處理。
+
+現行例外（2026-11-07，ISSUE-118，狀態「已修正、待驗收」，尚未實機驗證）：上述 blocked 立即放棄、更新提示必須人工處理與關閉 pane 的描述保留為 ISSUE-079 的歷史行為／驗證紀錄，不代表現行已知更新提示的契約。共用 `waitUntilReady` 在 blocked 時，只有成功讀取 pane 畫面、種類與 `src/update-prompts.ts` 清單相符且無信任／權限／approval／登入字樣，才自動送跳過鍵。目前清單僅 codex：同時含 `Update available` 與 `Skip until next version`，按 `3`；每個 bridge port 下的同一 pane 最多嘗試一次，並記錄含 CLI、pane、按鍵的 log，再讀畫面、繼續等待就緒。信任、權限／approval、登入及未知畫面絕不自動確認，仍交由人處理；讀取失敗、混有上述敏感字樣或送一次後同一提示仍在時，沿用 `BLOCKED_AT_START` 失敗並保留 pane，不再送鍵。claude、agy 與其他 CLI 更新提示未涵蓋，不能沿用此例外。ISSUE-079 原驗收狀態及以下歷史下一步不變；ISSUE-118 的部署與實機驗收仍待完成。
 
 下一步：merge、重啟 bridge 後，用同一個測試 PR #73 重跑 `card review`（第 3 輪）。
 
@@ -3800,6 +3802,8 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 未驗證：pane 變大後是否變成 `blocked`；其他 CLI（claude、codex）在小 pane 的信任提示是否也被偵測成 `idle`。
 
+關聯（2026-11-07）：ISSUE-118 僅讓共用 `waitUntilReady` 跳過已知更新提示，不自動處理信任／權限，也未修正本 issue 的偵測／接線問題；本 issue 狀態不變。
+
 ## ISSUE-117：自動撿卡的 Lead 設成 codex 時，`startLead` 一定失敗（只看 `agent.start` 當下的狀態，codex 啟動後先是 working）
 
 更新日期：2026-11-07。狀態：待決定（根因已由讀碼確認、尚未修正；目前不要把 `autopick_lead` 設成 codex）。
@@ -3815,3 +3819,21 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 修正範圍：無（只記錄）。建議：`startLead` 改用 `waitUntilReady`（同 `agent start`），`blocked` 或逾時才失敗並說明，並加測試涵蓋「回傳 working 後變 idle 成功、blocked 失敗、逾時失敗」。要先把 `autopick_lead` 改回 `claude` 才能用自動撿卡跑這張修正卡。
 
 未驗證：其他 Lead 種類（agy、pi 目前不被政策接受）；修好後 codex 當 Lead 的完整卡片流程（規劃、`card review` 改用 claude 當 reviewer）仍沒有實機證據。
+
+關聯（2026-11-07）：ISSUE-118 僅讓共用 `waitUntilReady` 跳過已知更新提示，不自動處理信任／權限，也未修正本 issue 的偵測／接線問題；本 issue 狀態不變。
+
+## ISSUE-118：Agent 啟動時被已知 CLI 更新提示擋住（REQ-20261107-skip-update-prompt）
+
+更新日期：2026-11-07。狀態：已修正、待驗收。
+
+使用者可見症狀／重現環境：卡片提供的 2026-11-07 本機重現紀錄中，codex 0.166.0 → 0.167.0 的 `Update available`／`Skip until next version` 選單讓 `card review` reviewer 連續 blocked／inconclusive；人工按 `3` 後可啟動。本輪沒有實機重現或驗證。
+
+預期行為：只跳過已知更新提示，信任、權限、approval、登入與未知畫面仍留給人；blocked 失敗沿用原訊息並保留 pane。
+
+已確認根因（2026-11-07 讀碼）：共用 `waitUntilReady` 對 blocked 一律立即失敗，未辨識更新選單。此原因符合卡片描述的 reviewer 症狀；與 ISSUE-117 的實際因果關係尚未證實。
+
+修正範圍：`src/update-prompts.ts` 宣告種類、必須同時出現的字樣與跳過鍵，通用 matcher 不寫死 codex。清單目前僅 codex 一筆（`Update available` + `Skip until next version` → `3`）；claude、agy、其他 CLI 未驗證，其清單項目留空。`src/agent-ready.ts` 僅在 blocked 且成功讀畫面、命中清單、無敏感提示文字時送一次按鍵；同 port／pane 跨等待呼叫也不重送，送達不確定不重試。送後以 bridge console log 記錄「已自動跳過 <CLI> 的更新提示（pane、按鍵）」，再讀畫面；提示仍在或讀不到即回原 blocked。`waitUntilReady` 本身沒有卡片事件上下文，所以不直接寫卡片；它把跳過資訊（CLI、pane、按鍵）放在回傳的 `updateSkip`，由呼叫端 `card review`／`card fix` 在 `src/card-command.ts` 寫入卡片事件 `update_prompt_skipped`（事件 ID 含輪次、pane 與時間，避免同輪重試被帳本去重）。`card-events` 因此新增 `update_prompt_skipped` 事件型別。
+
+測試（2026-11-07，本機 sandbox，假 port）：先新增成功路徑測試，`npm run build && node --test dist/test/agent-ready.test.js` 得到預期 red（1 fail，原實作回 blocked）；實作後相關測試 21/21 pass，0 fail。涵蓋成功後就緒、提示持續與同 pane 重入不重送、輪詢中 blocked、agy／claude 信任、權限／未知、讀取失敗與無效資料、更新混合敏感字樣、種類不符、送達不確定、送後讀取失敗，以及直接掃清單無信任／權限／登入字樣。最終檢查命令：`npm run typecheck`、`npm run build`、`node --test dist/test/agent-ready.test.js dist/test/update-prompts.test.js`。完整套件未執行，因 Unix-socket 測試在 sandbox 會 EPERM（ISSUE-115）。最初 build 因未安裝依賴而找不到 tsc，`npm ci --ignore-scripts` 後解除。
+
+未驗證／下一步：**尚未實機驗證** Discord／Herdr／codex；claude、agy 與其他 CLI 更新提示皆未涵蓋／未驗證，不得猜畫面或按鍵。autopick `startLead` 與 profile pool 使用獨立等待流程，未接線此共用函式，本輪不擴大範圍，ISSUE-117 仍待處理；ISSUE-116 的 idle 誤判也未修正。尚未部署或重啟執行中的 bridge；build 通過不代表 runtime 已更新，舊的失敗任務／訊息不會補送。Lead 應安排重啟後的真實更新選單與信任提示驗收。
