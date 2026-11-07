@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { waitUntilReady } from "../src/agent-ready.js";
 import type { AgentStartPort } from "../src/agent-start.js";
@@ -16,6 +16,10 @@ function agent(kind = "codex", status = "blocked"): AgentRecord {
     agent: kind,
     agent_status: status,
   };
+}
+// 自動跳過會 console.log；測試輸出不要混進 node:test 子行程的 stdout。
+function quiet(t: TestContext) {
+  return t.mock.method(console, "log", () => {});
 }
 function fixture(screens: unknown[], statuses = [agent("codex", "idle")]) {
   const calls: {
@@ -43,7 +47,7 @@ function fixture(screens: unknown[], statuses = [agent("codex", "idle")]) {
 }
 
 test("known update is skipped once and then readiness succeeds", async (t) => {
-  const log = t.mock.method(console, "log", () => {});
+  const log = quiet(t);
   const { deps, calls } = fixture([
     { read: { text: update } },
     { read: { text: "Ready" } },
@@ -70,7 +74,8 @@ test("known update is skipped once and then readiness succeeds", async (t) => {
 const blockedReason =
   "reviewer 卡在啟動提示（blocked）。常見原因：Agent 自己的更新提示或新資料夾的信任提示；bridge 不會替人確認，請先在要用的種類上處理一次";
 
-test("persistent update fails blocked and never sends again for that pane", async () => {
+test("persistent update fails blocked and never sends again for that pane", async (t) => {
+  quiet(t);
   const { deps, calls } = fixture([{ text: update }]);
   assert.deepEqual(await waitUntilReady(deps, pane, agent()), {
     ok: false,
@@ -88,7 +93,7 @@ test("persistent update fails blocked and never sends again for that pane", asyn
   );
 });
 
-for (const [kind, screen] of [
+const guardedScreens: [string, string][] = [
   ["agy", "Do you trust the contents of this project?"],
   ["claude", "Yes, I trust this folder"],
   ["codex", "Permission required: approve or allow this command"],
@@ -101,8 +106,10 @@ for (const [kind, screen] of [
   ["codex", update + "\nLogin required"],
   ["claude", update],
   ["codex", "Update available\n2. Skip"],
-]) {
-  test(`${kind} guarded or unknown screen sends no keys: ${screen}`, async () => {
+];
+for (const [index, [kind, screen]] of guardedScreens.entries()) {
+  test(`guarded or unknown screen #${index} (${kind}) sends no keys`, async (t) => {
+    quiet(t);
     const { deps, calls } = fixture([{ read: { text: screen } }]);
     assert.deepEqual(await waitUntilReady(deps, pane, agent(kind)), {
       ok: false,
@@ -115,8 +122,14 @@ for (const [kind, screen] of [
   });
 }
 
-for (const screen of [new Error("read failed"), {}, { read: { text: 123 } }]) {
-  test(`failed or invalid screen read keeps original blocked behavior: ${String(screen)}`, async () => {
+const badReads: unknown[] = [
+  new Error("read failed"),
+  {},
+  { read: { text: 123 } },
+];
+for (const [index, screen] of badReads.entries()) {
+  test(`failed or invalid screen read #${index} keeps original blocked behavior`, async (t) => {
+    quiet(t);
     const { deps, calls } = fixture([screen]);
     const outcome = await waitUntilReady(deps, pane, agent());
     assert.equal(outcome.ok, false);
@@ -128,7 +141,8 @@ for (const screen of [new Error("read failed"), {}, { read: { text: 123 } }]) {
   });
 }
 
-test("update encountered during startup polling is skipped too", async () => {
+test("update encountered during startup polling is skipped too", async (t) => {
+  quiet(t);
   const { deps, calls } = fixture([{ text: update }, { text: "Ready" }]);
   let polls = 0;
   deps.panePort.listAgentsWithWorkspaceNames = async () => [
@@ -150,7 +164,8 @@ test("idle returns without reading or sending input", async () => {
   assert.deepEqual(calls, []);
 });
 
-test("uncertain key delivery and failed post-send read are never retried", async () => {
+test("uncertain key delivery and failed post-send read are never retried", async (t) => {
+  quiet(t);
   for (const failSend of [true, false]) {
     const { deps, calls } = fixture([
       { text: update },
@@ -171,7 +186,8 @@ test("uncertain key delivery and failed post-send read are never retried", async
   }
 });
 
-test("a skipped update prompt is returned so callers can record it", async () => {
+test("a skipped update prompt is returned so callers can record it", async (t) => {
+  quiet(t);
   const { deps } = fixture([{ text: update }, { text: "ready" }]);
   const result = await waitUntilReady(deps, pane, agent());
   assert.equal(result.ok, true);

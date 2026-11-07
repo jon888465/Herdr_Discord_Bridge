@@ -3832,7 +3832,7 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 已確認根因（2026-11-07 讀碼）：共用 `waitUntilReady` 對 blocked 一律立即失敗，未辨識更新選單。此原因符合卡片描述的 reviewer 症狀；與 ISSUE-117 的實際因果關係尚未證實。
 
-修正範圍：`src/update-prompts.ts` 宣告種類、必須同時出現的字樣與跳過鍵，通用 matcher 不寫死 codex。清單目前僅 codex 一筆（`Update available` + `Skip until next version` → `3`）；claude、agy、其他 CLI 未驗證，其清單項目留空。`src/agent-ready.ts` 僅在 blocked 且成功讀畫面、命中清單、無敏感提示文字時送一次按鍵；同 port／pane 跨等待呼叫也不重送，送達不確定不重試。送後以 bridge console log 記錄「已自動跳過 <CLI> 的更新提示（pane、按鍵）」，再讀畫面；提示仍在或讀不到即回原 blocked。沒有修改卡片流程紀錄 API，這個共用函式沒有卡片事件上下文。
+修正範圍：`src/update-prompts.ts` 宣告種類、必須同時出現的字樣與跳過鍵，通用 matcher 不寫死 codex。清單目前僅 codex 一筆（`Update available` + `Skip until next version` → `3`）；claude、agy、其他 CLI 未驗證，其清單項目留空。`src/agent-ready.ts` 僅在 blocked 且成功讀畫面、命中清單、無敏感提示文字時送一次按鍵；同 port／pane 跨等待呼叫也不重送，送達不確定不重試。送後以 bridge console log 記錄「已自動跳過 <CLI> 的更新提示（pane、按鍵）」，再讀畫面；提示仍在或讀不到即回原 blocked。`waitUntilReady` 本身沒有卡片事件上下文，所以不直接寫卡片；它把跳過資訊（CLI、pane、按鍵）放在回傳的 `updateSkip`，由呼叫端 `card review`／`card fix` 在 `src/card-command.ts` 寫入卡片事件 `update_prompt_skipped`（事件 ID 含輪次、pane 與時間，避免同輪重試被帳本去重）。`card-events` 因此新增 `update_prompt_skipped` 事件型別。
 
 測試（2026-11-07，本機 sandbox，假 port）：先新增成功路徑測試，`npm run build && node --test dist/test/agent-ready.test.js` 得到預期 red（1 fail，原實作回 blocked）；實作後相關測試 21/21 pass，0 fail。涵蓋成功後就緒、提示持續與同 pane 重入不重送、輪詢中 blocked、agy／claude 信任、權限／未知、讀取失敗與無效資料、更新混合敏感字樣、種類不符、送達不確定、送後讀取失敗，以及直接掃清單無信任／權限／登入字樣。最終檢查命令：`npm run typecheck`、`npm run build`、`node --test dist/test/agent-ready.test.js dist/test/update-prompts.test.js`。完整套件未執行，因 Unix-socket 測試在 sandbox 會 EPERM（ISSUE-115）。最初 build 因未安裝依賴而找不到 tsc，`npm ci --ignore-scripts` 後解除。
 

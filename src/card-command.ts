@@ -136,6 +136,17 @@ const DECISION_CHARS = 1000;
 const FINDINGS_SHOWN = 10;
 const RECENT_LOG = 5;
 
+// 同一輪 card fix 失敗後可重試、新 pane 可能再次跳過更新；事件 ID 必須含 pane 與時間，否則會被帳本去重吞掉。
+export function updateSkipEventId(
+  kind: "review" | "fix",
+  round: number,
+  paneId: string,
+  time: string,
+): string {
+  const pane = paneId.replace(/[^A-Za-z0-9_-]/g, "-");
+  return `update-skip-${kind}-r${round}-${pane}-${time.replace(/\D/g, "").slice(-9)}`.slice(0, 64);
+}
+
 function shorten(value: string, limit: number): string {
   const chars = Array.from(value);
   return chars.length > limit ? `${chars.slice(0, limit).join("")}…` : value;
@@ -646,7 +657,7 @@ async function reviewStep(
         paneId: skip.paneId,
         key: skip.key,
         time: deps.now(),
-        eventId: `update-skip-review-r${round}`,
+        eventId: updateSkipEventId("review", round, skip.paneId, deps.now()),
       });
       if (!skipLogged.ok)
         warnings.push(`紀錄 update_prompt_skipped：${skipLogged.error}`);
@@ -764,7 +775,12 @@ async function fixStep(
         paneId: skip.paneId,
         key: skip.key,
         time: deps.now(),
-        eventId: `update-skip-fix-r${check.reviewRound}`,
+        eventId: updateSkipEventId(
+          "fix",
+          check.reviewRound,
+          skip.paneId,
+          deps.now(),
+        ),
       });
       if (!skipLogged.ok)
         warnings.push(`紀錄 update_prompt_skipped：${skipLogged.error}`);
