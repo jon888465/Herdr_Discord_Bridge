@@ -114,3 +114,34 @@ test("--ledger may appear after the files and is mentioned in the usage text", (
   assert.equal(result.code, 0, result.stderr);
   assert.match(runCardCheck(["--help"], () => "").stdout, /--ledger/);
 });
+
+test("a ready card without notify warns on stderr but still exits 0; with notify or in draft it does not", () => {
+  const ready = valid.replace("status: draft", "status: ready");
+  const withNotify = ready.replace(
+    "updated: 2026-10-30\n",
+    "updated: 2026-10-30\nnotify: discord:1550807543910105181\n",
+  );
+  // 檔名必須等於卡片 id，所以用不同資料夾區分。
+  const read = reader({
+    "ready/REQ-20261030-example.md": ready,
+    "notify/REQ-20261030-example.md": withNotify,
+    "draft/REQ-20261030-example.md": valid,
+  });
+
+  const warned = runCardCheck(["ready/REQ-20261030-example.md"], read);
+  assert.equal(warned.code, 0);
+  assert.match(warned.stdout, /^OK +ready\/REQ-20261030-example\.md/m);
+  assert.match(
+    warned.stderr,
+    /^WARN +ready\/REQ-20261030-example\.md.*notify/m,
+  );
+
+  for (const file of [
+    "notify/REQ-20261030-example.md",
+    "draft/REQ-20261030-example.md",
+  ]) {
+    const quiet = runCardCheck([file], read);
+    assert.equal(quiet.code, 0);
+    assert.equal(quiet.stderr, "", file);
+  }
+});

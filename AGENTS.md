@@ -37,6 +37,14 @@
 - 需要說明連結用途時，在文字後面附上完整網址，例如 `Open WebUI：https://example.com/path`。
 - 要把訊息、網址或檔案傳給 Discord 時，優先執行 `herdr-discord-send "文字"` 或 `herdr-discord-send --file 路徑`（檔案須在目前專案目錄內、≤ 8 MiB、每次至多 10 個；ISSUE-034／037）。指令不存在時才在最終回覆輸出標記：單獨一行 `[[discord-attach: /絕對路徑]]`，或 `[[discord-send]]`、文字、`[[/discord-send]]` 各佔一行。
 
+## 建立任務卡片
+
+- Agent 自己寫任務卡片檔時，bridge 不知道任務是誰下的，所以**必須自己填 `notify`**；沒填的卡，自動撿卡、PR、review、CI、merge 的進度不會通知任何人，而且已經處理過的事件之後補填也不會補發（ISSUE-121）。
+- 對話來自 Discord thread：填 `notify: discord:<thread id>`。thread id 取自 bridge state 目錄 `routing.json` 的 `threadRoutes`，目前這個 pane 的 `discordThreadId`；只讀這個欄位，不要輸出其他內容。
+- 不是從 Discord 來的（直接在 Herdr 或終端機下指令）：填 `notify: agent:<pane id>:<terminal id>:<agent>`，數值用 `herdr pane get` 取得，通知會送進該 pane，且只在該 Agent 閒置時送。
+- 狀態轉成 `ready` **之前**先填好 `notify`，並執行 `scripts/herdr-card-check` 確認；看到 `WARN` 表示 `ready` 的卡沒有 `notify`，要先補上再放行，不可忽略。
+- 從 Discord 的 `card` 指令建立或指派的卡，bridge 會自動記下 thread，不需要手動填。
+
 ## 交付前
 
 - 執行與變更相關的檢查；程式變更依 `SPEC.md` 完成所需驗證。純文件更新檢查內容、連結與差異，不必重跑程式測試。
