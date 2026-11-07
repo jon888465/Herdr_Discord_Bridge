@@ -18,7 +18,7 @@ const skippedPanes = new WeakMap<AgentStartPort, Set<string>>();
 const READY_TIMEOUT_MS = 30_000;
 const READY_POLL_MS = 1_000;
 
-const BLOCKED_AT_START =
+export const BLOCKED_AT_START =
   "reviewer 卡在啟動提示（blocked）。常見原因：Agent 自己的更新提示或新資料夾的信任提示；bridge 不會替人確認，請先在要用的種類上處理一次";
 
 async function skipKnownUpdate(

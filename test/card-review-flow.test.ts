@@ -247,14 +247,15 @@ test("when the Agent cannot start the pane is closed and the failure is reported
   assert.ok(log.includes("pane.close"));
 });
 
-test("a reviewer that is not ready (for example waiting at a trust prompt) gives inconclusive and its pane is closed; nobody confirms the prompt", async () => {
+test("a reviewer that is not ready (for example waiting at a trust prompt) gives inconclusive and its pane is kept for a human; nobody confirms the prompt", async () => {
   const { deps, log } = setup({ start: () => reviewer({ agent_status: "blocked" }) });
   const result = await runCardReview(deps, input());
   assert.ok(result.ok);
   assert.equal(result.ok && result.batch.verdict, "inconclusive");
   assert.match(result.ok ? (result.inconclusiveReason ?? "") : "", /blocked/);
   assert.equal(log.includes("runTurn"), false);
-  assert.ok(log.includes("pane.close"));
+  assert.equal(log.includes("pane.close"), false);
+  assert.equal(result.ok && result.closed, false);
 });
 
 test("a turn that fails, gets blocked, or returns something unusable gives inconclusive with the reason, and the pane is still closed", async () => {
@@ -363,7 +364,7 @@ test("an Agent that turns out to be blocked while starting stops the wait at onc
   assert.match(reason, /blocked/);
   assert.match(reason, /更新|信任/);
   assert.equal(log.includes("runTurn"), false);
-  assert.ok(log.includes("pane.close"));
+  assert.equal(log.includes("pane.close"), false);
 });
 
 test("an Agent that never becomes idle in time gives inconclusive with its last status, not a guess about trust prompts", async () => {

@@ -26,7 +26,7 @@ import {
   closeReviewerPane,
   openReviewerPane,
 } from "./review-pane.js";
-import { waitUntilReady } from "./agent-ready.js";
+import { BLOCKED_AT_START, waitUntilReady } from "./agent-ready.js";
 import type { AgentRecord } from "./types.js";
 
 export interface ReviewFlowDeps {
@@ -168,8 +168,10 @@ export async function runCardReview(
   });
 
   // 從這裡開始，pane 已經存在：不論發生什麼（含未預期的例外）都要關閉。
+  // 例外：啟動時 blocked（BLOCKED_AT_START）要保留 pane 給人處理信任／權限提示。
   let outcome: Outcome;
   let closed: { closed: boolean; note?: string } = { closed: false };
+  let keepPane = false;
   try {
     outcome = await reviewInPane(deps, input, {
       pane,
@@ -179,13 +181,15 @@ export async function runCardReview(
       before,
       context,
     });
+    keepPane = outcome.kind === "inconclusive" && outcome.keepPane === true;
   } finally {
-    closed = await closeReviewerPane(deps.panePort, {
-      paneId: pane.paneId,
-      terminalId: pane.terminalId,
-    });
+    if (!keepPane)
+      closed = await closeReviewerPane(deps.panePort, {
+        paneId: pane.paneId,
+        terminalId: pane.terminalId,
+      });
   }
-  const closeNote = closed.note;
+  const closeNote = keepPane ? "reviewer 卡在啟動提示，已保留 pane 供人處理" : closed.note;
   if (outcome.kind === "failed")
     return {
       ok: false,
@@ -208,7 +212,7 @@ export async function runCardReview(
 
 type Outcome =
   | { kind: "failed"; error: string }
-  | { kind: "inconclusive"; reason: string }
+  | { kind: "inconclusive"; reason: string; keepPane?: true }
   | {
       kind: "parsed";
       parsed: Extract<ReturnType<typeof parseReviewReply>, { ok: true }>;
@@ -238,7 +242,12 @@ async function reviewInPane(
     return { kind: "failed", error: message(error) };
   }
   const ready = await waitUntilReady(deps, run.pane, agent);
-  if (!ready.ok) return { kind: "inconclusive", reason: ready.reason };
+  if (!ready.ok)
+    return {
+      kind: "inconclusive",
+      reason: ready.reason,
+      ...(ready.reason === BLOCKED_AT_START ? { keepPane: true as const } : {}),
+    };
   agent = ready.agent;
 
   let outcome: Outcome;
