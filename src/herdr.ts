@@ -1,6 +1,6 @@
 import net from "node:net";
 import type { AgentProfile } from "./agent-pool.js";
-import { chooseSplitTarget } from "./pane-split.js";
+import { createAgentPane } from "./pane-split.js";
 import os from "node:os";
 import path from "node:path";
 import type {
@@ -227,40 +227,22 @@ export class HerdrClient {
       throw new Error(
         "Lead cwd unavailable; refusing to start Worker in an unrelated directory",
       );
-    const layout = await this.request<{
-      layout: {
-        panes: Array<{
-          pane_id: string;
-          rect: { width: number; height: number };
-        }>;
-      };
-    }>("pane.layout", { pane_id: liveLead.pane_id });
-    if (!layout.layout?.panes.some((p) => p.pane_id === liveLead.pane_id))
-      throw new Error("Lead pane geometry unavailable");
-    // ISSUE-094：Lead pane 被前面的 profile Worker 一路切小時，改從同一個版面裡夠大的 pane 分割。
-    const split = chooseSplitTarget(layout.layout.panes, liveLead.pane_id);
-    if (!split)
-      throw new Error(
-        "Lead pane is too small to split; arrange the workspace or bind an existing session",
-      );
-    const direction = split.direction;
-    onStarting?.();
-    const result = await this.request<{
-      pane: { pane_id: string; workspace_id: string };
-    }>(
-      "pane.split",
+    const result = await createAgentPane(
+      this,
       {
-        target_pane_id: split.paneId,
-        workspace_id: liveLead.workspace_id,
-        direction,
+        basePaneId: liveLead.pane_id,
+        workspaceId: liveLead.workspace_id,
         cwd,
-        focus: false,
       },
-      { retries: 0 },
+      onStarting,
     );
     const pane = result.pane;
-    if (!pane?.pane_id || pane.workspace_id !== lead.workspace_id)
-      throw new Error("pane split returned unexpected workspace/identity");
+    if (
+      typeof pane?.pane_id !== "string" ||
+      !pane.pane_id ||
+      pane.workspace_id !== lead.workspace_id
+    )
+      throw new Error("pane creation returned unexpected workspace/identity");
     onPane(pane.pane_id);
     // ISSUE-098：剛分割出來的 pane，shell 可能還沒初始化完，Herdr 會以 agent_pane_busy 拒絕
     // （「target pane … is not an available shell」，與 ISSUE-067 同一個錯誤）。這個錯誤代表什麼都還沒

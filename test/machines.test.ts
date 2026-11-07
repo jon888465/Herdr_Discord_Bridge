@@ -60,6 +60,14 @@ test("hub routes unprefixed ids to local and prefixed ids to the machine", async
   });
   const remote = await fake(join(dir, "agy.sock"), (method, params) => {
     seen.push(`remote:${method}:${JSON.stringify(params)}`);
+    if (method === "tab.create")
+      return {
+        root_pane: {
+          pane_id: "w2:p7",
+          workspace_id: "w2",
+          terminal_id: "term_new",
+        },
+      };
     return {
       agents: [
         {
@@ -98,6 +106,23 @@ test("hub routes unprefixed ids to local and prefixed ids to the machine", async
       'local:agent.read:{"target":"w2:p1"}',
       'remote:agent.read:{"target":"w2:p1"}',
     ]);
+    const tab = await hub.request<{
+      root_pane: { pane_id: string; workspace_id: string; terminal_id: string };
+    }>(
+      "tab.create",
+      { workspace_id: "agy:w2", cwd: "/repo", focus: false },
+      { retries: 0 },
+    );
+    assert.deepEqual(tab.root_pane, {
+      pane_id: "agy:w2:p7",
+      workspace_id: "agy:w2",
+      terminal_id: "agy:term_new",
+      machine: "agy",
+    });
+    assert.equal(
+      seen.at(-1),
+      'remote:tab.create:{"workspace_id":"w2","cwd":"/repo","focus":false}',
+    );
     await assert.rejects(
       hub.request("pane.split", {
         target_pane_id: "agy:w2:p1",

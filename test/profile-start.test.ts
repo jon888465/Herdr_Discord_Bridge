@@ -168,3 +168,68 @@ test("ISSUE-098: only agent_pane_busy is retried; every other start error fails 
   );
   assert.equal(other.starts.length, 1);
 });
+
+test("ISSUE-108: crowded profile startup opens a tab and registers it before starting the Worker", async () => {
+  const calls: string[] = [];
+  const worker = { ...lead, pane_id: "w1:p7", terminal_id: "worker" };
+  class Fake extends HerdrClient {
+    override async listAgents() {
+      return [lead];
+    }
+    override async listAgentsWithWorkspaceNames() {
+      return [lead, worker];
+    }
+    override async request<T>(
+      method: string,
+      params: Record<string, unknown> = {},
+      options: { retries?: number } = {},
+    ): Promise<T> {
+      calls.push(method);
+      if (method === "pane.layout")
+        return {
+          layout: {
+            panes: [{ pane_id: lead.pane_id, rect: { width: 200, height: 7 } }],
+          },
+        } as T;
+      if (method === "tab.create") {
+        assert.deepEqual(params, {
+          workspace_id: lead.workspace_id,
+          cwd: lead.cwd,
+          focus: false,
+        });
+        assert.equal(options.retries, 0);
+        return {
+          root_pane: {
+            pane_id: worker.pane_id,
+            workspace_id: worker.workspace_id,
+            terminal_id: worker.terminal_id,
+          },
+        } as T;
+      }
+      assert.equal(method, "agent.start");
+      assert.equal(params.pane_id, worker.pane_id);
+      assert.equal(options.retries, 0);
+      return {} as T;
+    }
+  }
+  const agent = await new Fake().startProfile(
+    lead,
+    { id: "helper", kind: "codex" },
+    "worker",
+    (id) => {
+      assert.equal(id, worker.pane_id);
+      calls.push("registered");
+    },
+    () => {
+      calls.push("starting");
+    },
+  );
+  assert.equal(agent.pane_id, worker.pane_id);
+  assert.deepEqual(calls, [
+    "pane.layout",
+    "starting",
+    "tab.create",
+    "registered",
+    "agent.start",
+  ]);
+});

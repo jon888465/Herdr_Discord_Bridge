@@ -5,12 +5,12 @@
 // - 只關「自己開的」pane：開啟時記下 terminal id，關閉前重新讀 pane、確認還是同一個 terminal 才關；
 //   pane 已經不在就當成已關閉；其他任何情況都回報原因，**不丟錯誤**（呼叫端要告訴使用者，不能因為關閉失敗
 //   而吞掉 review 的結果）。
-// - 新 pane 是從作者的 pane 分割出來的，所以關掉它不會關掉 workspace 或 tab。
+// - 新 pane 可能在獨立 tab；只對核對過的 pane 呼叫 pane.close，不關整個 tab。
 // - 開啟時拿不到 terminal id 就拒絕：之後無法安全關閉。
 
 import { HerdrError } from "./herdr.js";
 import type { AgentStartPort } from "./agent-start.js";
-import { chooseSplitTarget } from "./pane-split.js";
+import { createAgentPane } from "./pane-split.js";
 
 /** 沒有指定種類時的偏好順序；預設選第一個「和作者不同」的。 */
 export const REVIEWER_KINDS: readonly string[] = ["claude", "codex", "agy"];
@@ -25,7 +25,8 @@ const KIND = /^[a-z][a-z0-9_-]{0,31}$/;
 export function chooseReviewerKind(input: {
   authorKind?: string;
   requested?: string;
-}): { ok: true; kind: string; sameKind: boolean } | { ok: false; error: string } {
+}):
+  { ok: true; kind: string; sameKind: boolean } | { ok: false; error: string } {
   if (input.requested !== undefined) {
     if (!KIND.test(input.requested))
       return {
@@ -44,45 +45,12 @@ export function chooseReviewerKind(input: {
   return { ok: true, kind, sameKind: kind === input.authorKind };
 }
 
-/** 從 `basePaneId`（作者的 pane）分割出一個新 pane，工作目錄設為 `cwd`，不搶焦點。 */
+/** 開新 pane；版面不足時改開同 workspace 的 tab，cwd 不變、不搶焦點。 */
 export async function openReviewerPane(
   port: AgentStartPort,
   input: { basePaneId: string; workspaceId: string; cwd: string },
 ): Promise<{ paneId: string; terminalId: string }> {
-  const layout = (await port.request("pane.layout", {
-    pane_id: input.basePaneId,
-  })) as {
-    layout?: {
-      panes?: Array<{
-        pane_id: string;
-        rect: { width: number; height: number };
-      }>;
-    };
-  };
-  const panes = layout.layout?.panes ?? [];
-  if (!panes.some((pane) => pane.pane_id === input.basePaneId))
-    throw new Error("基底 pane 的版面資訊不可用");
-  // ISSUE-094：基底 pane 被 profile Worker 一路切小時，改從同一個版面裡夠大的 pane 分割。
-  const target = chooseSplitTarget(panes, input.basePaneId);
-  if (!target)
-    throw new Error(
-      "基底 pane 太小，無法分割出 reviewer 的 pane（too small to split）；同一個版面裡也沒有夠大的 pane",
-    );
-  const direction = target.direction;
-
-  const result = (await port.request(
-    "pane.split",
-    {
-      target_pane_id: target.paneId,
-      workspace_id: input.workspaceId,
-      direction,
-      cwd: input.cwd,
-      focus: false,
-    },
-    { retries: 0 },
-  )) as {
-    pane?: { pane_id?: unknown; workspace_id?: unknown; terminal_id?: unknown };
-  };
+  const result = await createAgentPane(port, input);
   const pane = result.pane;
   if (
     !pane ||
@@ -93,7 +61,7 @@ export async function openReviewerPane(
     pane.terminal_id === ""
   )
     throw new Error(
-      "pane split returned unexpected workspace/identity; 不會使用這個 pane，請手動檢查",
+      "pane creation returned unexpected workspace/identity; 不會使用這個 pane，請手動檢查",
     );
   return { paneId: pane.pane_id, terminalId: pane.terminal_id };
 }

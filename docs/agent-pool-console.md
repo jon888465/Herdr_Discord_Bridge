@@ -11,7 +11,7 @@
 | Team／Profile    | workspace 可使用的設定清單；尚未啟動的成員也可勾選          |
 | Lead             | 決定零或多個 Worker、相依關係、後續工作與最終驗證           |
 | AgentPool        | acquire/release、租用互斥、持久化 session 綁定與 continuity |
-| Herdr            | 依實際 pane 尺寸分割、啟動長駐 CLI、送 prompt／等待／讀取   |
+| Herdr            | 依 pane 尺寸分割或開新 tab、啟動長駐 CLI、送 prompt／等待／讀取 |
 
 `src/agent-pool.ts` 封裝 profile 授權與 session lifecycle；`src/team-orchestration.ts` 驗證 Lead 計畫並排程；`src/team-turn.ts` 關聯本次回覆。既有 Discord 單 Agent streaming 保留。
 
@@ -64,7 +64,7 @@ Lead 只可使用凍結 roster 中的 live pane 或 `profile:<id>`，角色自�
 
 Acquire 回報 `new-session`、`same-session` 或 `unknown`。同 pane 不代表同 context；既有綁定須核對 terminal、workspace、kind 與 session kind/value。缺少 metadata 不聲稱延續。新 session prompt 包含原任務、Assignment 與已完成的有界報告，並要求核對實際 repository 狀態；不會複製完整 context 或 hidden reasoning。
 
-Release 保留 CLI 與 pane。Team 勾選與綁定寫入 state directory 的 agent-pool.json，重啟後重新核對；Task persistence 與保守 restart reconciliation 見 [Phase 1](durable-task-engine.md)，不自動 resume。啟動前先持久記錄 uncertain，split/start 不盲目重試；送達不明時先檢查 pane，再 `team bind`。失敗建立的 pane 留下供檢查，不自動關閉。版面太小則拒絕新增，可調整版面或 bind 現有 pane。
+Release 保留 CLI 與 pane。Team 勾選與綁定寫入 state directory 的 agent-pool.json，重啟後重新核對；Task persistence 與保守 restart reconciliation 見 [Phase 1](durable-task-engine.md)，不自動 resume。啟動前先持久記錄 uncertain，split/tab create/start 不盲目重試；送達不明時先檢查 pane，再 `team bind`。失敗建立的 pane 留下供檢查，不自動關閉。版面不足以安全分割時，改在同 workspace／cwd 開不搶焦點的新 tab（ISSUE-108，2026-11-06，待實機驗收）。只有分割後兩邊 rect 都至少 60 欄、18 列（含框線，分隔線預留 1 格）才繼續分割；基底 layout 缺失仍拒絕，既有小 pane 不會自動放大。
 
 ## Console
 
