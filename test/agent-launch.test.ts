@@ -15,6 +15,8 @@ import { handleCommand } from "../src/main.js";
 import { createConsoleContext } from "../src/console.js";
 import type { AgentRecord } from "../src/types.js";
 
+// 固定用非 git 的暫存資料夾；process.cwd() 在 linked worktree 內會讓 codex 多出 --add-dir（ISSUE-115）。
+const PLAIN_DIR = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "hdb-plain-")));
 const selected = { machine: "local", kind: "claude" };
 function resolve(
   spec: string,
@@ -113,7 +115,7 @@ const agent = (patch: Partial<AgentRecord> = {}): AgentRecord => ({
   tab_id: "w1:t1",
   agent: "claude",
   agent_status: "idle",
-  cwd: process.cwd(),
+  cwd: PLAIN_DIR,
   ...patch,
 });
 
@@ -147,7 +149,7 @@ function fakePort(
 const baseDeps = (port: AgentStartPort): AgentStartDeps => ({
   port,
   selected: agent(),
-  workspacePath: process.cwd(),
+  workspacePath: PLAIN_DIR,
   machineIds: ["agy-pod", "pod"],
   allowedWorkspaceIds: [],
   readyTimeoutMs: 50,
@@ -303,7 +305,7 @@ test("handleCommand runs agent start", async () => {
       workspaceActiveTarget: () => undefined,
     },
     herdr: Object.assign(port, {
-      listWorkspaces: async () => [{ workspace_id: "w1", path: process.cwd() }],
+      listWorkspaces: async () => [{ workspace_id: "w1", path: PLAIN_DIR }],
     }),
   } as unknown as Parameters<typeof handleCommand>[3];
   const start = (spec: string) =>
@@ -318,4 +320,17 @@ test("handleCommand runs agent start", async () => {
     "model_reasoning_effort=high",
   ]);
   await assert.rejects(start(":agy::high"), /沒有已確認的推理強度/);
+});
+
+// ISSUE-115
+import { makeLinkedWorktree } from "./cli-adapter.test.js";
+
+test("agent start codex --cwd <linked worktree> adds one --add-dir; claude does not", async () => {
+  const { wt, gitDir } = makeLinkedWorktree();
+  const a = fakePort();
+  await runAgentStart(baseDeps(a.port), { spec: ":codex:gpt-6.1-sol", cwd: wt });
+  assert.deepEqual(startParams(a.calls).args, ["-m", "gpt-6.1-sol", "--add-dir", gitDir]);
+  const b = fakePort("idle", { agent: "claude" });
+  await runAgentStart(baseDeps(b.port), { spec: ":claude", cwd: wt });
+  assert.equal("args" in startParams(b.calls), false);
 });

@@ -167,3 +167,56 @@ test("an Agent that never shows up in the list is an error that says to inspect 
   );
   await assert.rejects(startAgentInPane(p, input, c), /not visible in w19:p1/);
 });
+
+// ISSUE-115：所有入口（reviewer／fixer／autopick Lead／agent start）都經 startAgentInPane。
+import { makeLinkedWorktree } from "./cli-adapter.test.js";
+import { CODEX_ADD_DIR_IGNORED } from "../src/cli-adapter.js";
+
+test("startAgentInPane adds the worktree git dir for codex and leaves other launches byte-identical", async () => {
+  const { wt, gitDir } = makeLinkedWorktree();
+  const codexPort = port(() => {}, () => [record({ agent: "codex" })]);
+  await startAgentInPane(codexPort, { ...input, kind: "codex", cwd: wt, args: ["-m", "x"] }, clock());
+  assert.deepEqual((codexPort.starts[0]!.params as { args: string[] }).args, [
+    "-m",
+    "x",
+    "--add-dir",
+    gitDir,
+  ]);
+  const claudePort = port(() => {}, () => [record()]);
+  await startAgentInPane(claudePort, { ...input, cwd: wt }, clock());
+  assert.ok(!("args" in (claudePort.starts[0]!.params as object)));
+  const noCwd = port(() => {}, () => [record({ agent: "codex" })]);
+  await startAgentInPane(noCwd, { ...input, kind: "codex" }, clock());
+  assert.ok(!("args" in (noCwd.starts[0]!.params as object)));
+});
+
+test("codex ignoring --add-dir gives an explicit error, with no retry without the flag", async () => {
+  const { wt } = makeLinkedWorktree();
+  const ignored = "Error adding directories: Ignoring --add-dir /x because the effective permissions do not allow additional writable roots.";
+  // 情況一：agent.start 自己失敗並帶出輸出。
+  const failing = port(() => {
+    throw new Error(ignored);
+  }, () => []);
+  await assert.rejects(
+    startAgentInPane(failing, { ...input, kind: "codex", cwd: wt }, clock()),
+    (e: Error) => e.message.includes("--add-dir 被忽略，有效沙箱不是 workspace-write"),
+  );
+  assert.equal(failing.starts.length, 1);
+  // 情況二：start 回來但 codex 已結束、偵測不到 Agent，pane 輸出有該訊息。
+  const reads: unknown[] = [];
+  const exited: AgentStartPort = {
+    async request(method, params) {
+      if (method === "agent.read") {
+        reads.push(params);
+        return { read: { text: ignored } };
+      }
+      return {};
+    },
+    listAgentsWithWorkspaceNames: async () => [],
+  };
+  await assert.rejects(
+    startAgentInPane(exited, { ...input, kind: "codex", cwd: wt }, clock()),
+    (e: Error) => e.message.includes(CODEX_ADD_DIR_IGNORED),
+  );
+  assert.equal(reads.length, 1);
+});

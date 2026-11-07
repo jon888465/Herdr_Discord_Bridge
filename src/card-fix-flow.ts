@@ -30,6 +30,7 @@ export interface FixFlowDeps {
     paneId: string;
     kind: string;
     name: string;
+    cwd?: string;
   }): Promise<AgentRecord>;
   /** 送出提示並讀回覆（正式環境包 `runTeamTurn`）；逾時、身份改變等問題以丟錯誤表示。 */
   runTurn(
@@ -235,6 +236,7 @@ async function fixInPane(
       paneId: run.pane.paneId,
       kind: run.kind,
       name: fixerAgentName(input.card.id, input.round),
+      cwd: input.worktreePath,
     });
   } catch (error) {
     return { kind: "start-failed", error: message(error) };

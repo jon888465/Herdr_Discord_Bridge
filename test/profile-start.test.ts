@@ -246,3 +246,49 @@ test("ISSUE-108: crowded profile startup opens a tab and registers it before sta
     "agent.start",
   ]);
 });
+
+// ISSUE-115
+import { makeLinkedWorktree } from "./cli-adapter.test.js";
+
+test("profile Worker for codex in a linked worktree gets one --add-dir; failure to honour it is an explicit error", async () => {
+  const { wt, gitDir } = makeLinkedWorktree();
+  const wtLead: AgentRecord = { ...lead, cwd: wt };
+  const worker = { ...wtLead, pane_id: "w1:p7", terminal_id: "worker" };
+  const starts: Array<Record<string, unknown>> = [];
+  let visible = true;
+  class Fake extends HerdrClient {
+    override async listAgents() {
+      return [wtLead];
+    }
+    override async listAgentsWithWorkspaceNames() {
+      return visible ? [wtLead, worker] : [wtLead];
+    }
+    override async readAgent() {
+      return "Error adding directories: Ignoring --add-dir x because the effective permissions do not allow additional writable roots";
+    }
+    override async request<T>(
+      method: string,
+      params: Record<string, unknown> = {},
+    ): Promise<T> {
+      if (method === "agent.start") starts.push(params);
+      return (
+        method === "pane.layout"
+          ? { layout: { panes: [{ pane_id: wtLead.pane_id, rect: { width: 160, height: 40 } }] } }
+          : method === "pane.split"
+            ? { pane: { pane_id: worker.pane_id, workspace_id: worker.workspace_id } }
+            : {}
+      ) as T;
+    }
+  }
+  const profile = { id: "h", kind: "codex", args: ["--x"] };
+  await new Fake().startProfile(wtLead, profile, "n", () => {});
+  const args = starts[0]!.args as string[];
+  assert.deepEqual(args, ["--x", "--add-dir", gitDir]);
+  for (const flag of ["--dangerously-bypass-approvals-and-sandbox", "-a", "--ask-for-approval", "--approve-for-me", "-s", "danger-full-access"])
+    assert.ok(!args.includes(flag), flag);
+  visible = false;
+  await assert.rejects(
+    new Fake().startProfile(wtLead, profile, "n", () => {}),
+    /--add-dir 被忽略，有效沙箱不是 workspace-write/,
+  );
+});

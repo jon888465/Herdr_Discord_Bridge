@@ -154,6 +154,8 @@ export async function runAgentStart(
       kind: spec.kind,
       name: `hdb-start-${randomUUID().slice(0, 8)}`,
       args: spec.args,
+      // 只有本機 cwd 才能在本機解析 git 目錄；遠端不加。
+      ...(spec.machine === LOCAL_MACHINE ? { cwd } : {}),
     });
   } catch (error) {
     const closed = await closeReviewerPane(deps.port, pane);

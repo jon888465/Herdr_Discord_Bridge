@@ -587,3 +587,112 @@ test("display names use the adapter's existing CLI identity and preserve roles",
   );
   assert.equal(agentDisplayName({ kind: "pi", role: "agent" }), "pi·agent");
 });
+
+// ISSUE-115：codex 在 linked worktree 要能寫自己的 git 目錄；只加這一個 --add-dir。
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
+import {
+  CODEX_ADD_DIR_IGNORED,
+  detectIgnoredAddDir,
+  extraLaunchArgsFor,
+  type GitDirs,
+} from "../src/cli-adapter.js";
+
+const RELAXING = [
+  "--dangerously-bypass-approvals-and-sandbox",
+  "-a",
+  "--ask-for-approval",
+  "--approve-for-me",
+  "-s",
+  "--sandbox",
+  "danger-full-access",
+];
+
+function realTmp(name: string): string {
+  return fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), name)));
+}
+function git(cwd: string, ...args: string[]): void {
+  execFileSync("git", args, {
+    cwd,
+    stdio: "ignore",
+    env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null" },
+  });
+}
+/** 拋棄式 repo＋linked worktree；回傳各路徑（全部 realpath）。 */
+export function makeLinkedWorktree() {
+  const root = realTmp("hdb-wt-");
+  const repo = path.join(root, "repo");
+  fs.mkdirSync(repo);
+  git(repo, "init", "-q");
+  git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "i");
+  const wt = path.join(root, "wt");
+  git(repo, "worktree", "add", "-q", wt, "-b", "side");
+  return { root, repo, wt, gitDir: path.join(repo, ".git", "worktrees", "wt") };
+}
+
+test("codex in a real linked worktree gets exactly one --add-dir with that worktree's git dir", () => {
+  const { wt, gitDir } = makeLinkedWorktree();
+  const args = extraLaunchArgsFor("codex", wt);
+  assert.deepEqual(args, ["--add-dir", gitDir]);
+  assert.equal(args.filter((a) => a === "--add-dir").length, 1);
+  assert.ok(!args.some((a) => RELAXING.includes(a)));
+});
+
+test("non-codex kinds never get extra args, even in a linked worktree", () => {
+  const { wt } = makeLinkedWorktree();
+  for (const kind of ["claude", "agy", "pi", "opencode", "grok", "unknown", ""])
+    assert.deepEqual(extraLaunchArgsFor(kind, wt), [], kind);
+});
+
+test("codex in a normal repo, a non-git dir or a missing dir adds nothing", () => {
+  const { repo } = makeLinkedWorktree();
+  assert.deepEqual(extraLaunchArgsFor("codex", repo), []);
+  assert.deepEqual(extraLaunchArgsFor("codex", realTmp("hdb-nogit-")), []);
+  assert.deepEqual(extraLaunchArgsFor("codex", "/nonexistent/hdb-x"), []);
+  assert.deepEqual(extraLaunchArgsFor("codex", undefined), []);
+});
+
+test("a git dir whose realpath leaves <repo>/.git/worktrees/ adds nothing", () => {
+  const { root, wt, gitDir } = makeLinkedWorktree();
+  // 把 worktrees/wt 換成指向別處的 symlink（內容複製過去，git 仍可解析）。
+  const elsewhere = path.join(root, "elsewhere");
+  fs.cpSync(gitDir, elsewhere, { recursive: true });
+  fs.rmSync(gitDir, { recursive: true });
+  fs.symlinkSync(elsewhere, gitDir);
+  assert.deepEqual(extraLaunchArgsFor("codex", wt), []);
+});
+
+test("injected resolver: only a dir directly under <common>/worktrees/ is accepted; failures add nothing", () => {
+  const dir = realTmp("hdb-inj-");
+  const common = path.join(dir, "main", ".git");
+  const inside = path.join(common, "worktrees", "a");
+  fs.mkdirSync(inside, { recursive: true });
+  const ok: GitDirs = { gitDir: inside, commonDir: common };
+  assert.deepEqual(extraLaunchArgsFor("codex", dir, () => ok), ["--add-dir", inside]);
+  const cases: Array<GitDirs | undefined> = [
+    undefined,
+    { gitDir: common, commonDir: common },
+    { gitDir: path.join(common, "worktrees"), commonDir: common },
+    { gitDir: path.join(common, "worktrees", "a", "b"), commonDir: common },
+    { gitDir: path.join(dir, "main"), commonDir: common },
+    { gitDir: os.homedir(), commonDir: common },
+    { gitDir: path.join(common, "worktrees", "missing"), commonDir: common },
+  ];
+  for (const bad of cases)
+    assert.deepEqual(extraLaunchArgsFor("codex", dir, () => bad), [], JSON.stringify(bad));
+  assert.deepEqual(
+    extraLaunchArgsFor("codex", dir, () => {
+      throw new Error("boom");
+    }),
+    [],
+  );
+});
+
+test("detectIgnoredAddDir recognises codex refusing --add-dir and nothing else", () => {
+  assert.ok(detectIgnoredAddDir("Error adding directories: Ignoring --add-dir /x because ..."));
+  assert.ok(detectIgnoredAddDir("the effective permissions do not allow additional writable roots"));
+  assert.ok(!detectIgnoredAddDir("Trust this folder?"));
+  assert.ok(CODEX_ADD_DIR_IGNORED.includes("--add-dir 被忽略，有效沙箱不是 workspace-write"));
+});

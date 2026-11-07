@@ -1,3 +1,6 @@
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { stripAnsi } from "./format.js";
 
 export interface CliOutputAdapter {
@@ -573,6 +576,68 @@ export function levelArgsFor(
       reason: `${agentKind} 沒有已確認的推理強度（level）參數，不猜`,
     };
   return { ok: true, args: adapter.levelArgs(level) };
+}
+
+export interface GitDirs {
+  gitDir: string;
+  commonDir: string;
+}
+export type GitDirResolver = (cwd: string) => GitDirs | undefined;
+
+/** 在 cwd 執行 `git rev-parse`；任何失敗都回 undefined（呼叫端不加參數）。 */
+const defaultGitDirResolver: GitDirResolver = (cwd) => {
+  try {
+    const out = execFileSync(
+      "git",
+      ["rev-parse", "--git-dir", "--git-common-dir"],
+      { cwd, encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"] },
+    )
+      .split("\n")
+      .filter(Boolean);
+    if (out.length !== 2) return undefined;
+    return {
+      gitDir: path.resolve(cwd, out[0]!),
+      commonDir: path.resolve(cwd, out[1]!),
+    };
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * ISSUE-115：codex 的 workspace-write 沙箱只能寫 cwd；linked worktree 的 index／HEAD 在
+ * `<主 repo>/.git/worktrees/<名稱>/`，在沙箱外，`git add` 等寫入會被擋。
+ * 只有「codex、cwd 是 linked worktree、git 目錄 realpath 直接位於主 repo `.git/worktrees/` 底下」時，
+ * 回傳 `--add-dir <該 git 目錄>`（只這一個目錄）。其他情況一律回空陣列，啟動參數維持不變。
+ * 不放寬 approval／sandbox，也不加其他路徑。所有 codex 啟動入口都要經過這個函式。
+ */
+export function extraLaunchArgsFor(
+  agentKind: string | undefined,
+  cwd: string | undefined,
+  resolve: GitDirResolver = defaultGitDirResolver,
+): string[] {
+  if (identifyCli(agentKind).kind !== "codex" || !cwd) return [];
+  try {
+    const dirs = resolve(cwd);
+    if (!dirs) return [];
+    const gitDir = fs.realpathSync(dirs.gitDir);
+    const worktrees = path.join(fs.realpathSync(dirs.commonDir), "worktrees");
+    if (path.dirname(gitDir) !== worktrees) return [];
+    return ["--add-dir", gitDir];
+  } catch {
+    return [];
+  }
+}
+
+export const CODEX_ADD_DIR_IGNORED =
+  "codex 忽略了 --add-dir：--add-dir 被忽略，有效沙箱不是 workspace-write；bridge 不會改用更寬鬆的模式、不會退回成沒有該參數的啟動，也不會替人確認提示。請檢查 codex 的 sandbox 設定";
+
+/** codex 因有效權限不允許額外可寫目錄而拒絕 `--add-dir` 時印出的訊息。 */
+export function detectIgnoredAddDir(text: string): boolean {
+  return (
+    /Ignoring --add-dir/i.test(text) ||
+    /do not allow additional writable roots/i.test(text)
+  );
 }
 
 function identifyCli(agentKind: string | undefined): {

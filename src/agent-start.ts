@@ -6,6 +6,11 @@
 // 這一個錯誤碼短暫重試（有上限）；其他任何錯誤都立刻失敗，不重試。
 
 import { HerdrError } from "./herdr.js";
+import {
+  CODEX_ADD_DIR_IGNORED,
+  detectIgnoredAddDir,
+  extraLaunchArgsFor,
+} from "./cli-adapter.js";
 import type { AgentRecord } from "./types.js";
 
 export interface AgentStartPort {
@@ -36,14 +41,23 @@ const SETTLE_INTERVAL_MS = 1_000;
 
 export async function startAgentInPane(
   port: AgentStartPort,
-  input: { paneId: string; kind: string; name: string; args?: string[] },
+  input: {
+    paneId: string;
+    kind: string;
+    name: string;
+    args?: string[];
+    /** Agent 的工作目錄；codex 在 linked worktree 時據此加 `--add-dir`（ISSUE-115）。 */
+    cwd?: string;
+  },
   clock: Clock = realClock,
 ): Promise<AgentRecord> {
+  const extra = extraLaunchArgsFor(input.kind, input.cwd);
+  const args = [...(input.args ?? []), ...extra];
   const params = {
     pane_id: input.paneId,
     name: input.name,
     kind: input.kind,
-    ...(input.args?.length ? { args: input.args } : {}),
+    ...(args.length ? { args } : {}),
     timeout_ms: 30000,
   };
   const retryDeadline = clock.now() + BUSY_RETRY_MS;
@@ -57,8 +71,14 @@ export async function startAgentInPane(
     } catch (error) {
       const busy =
         error instanceof HerdrError && error.code === "agent_pane_busy";
-      if (!busy || clock.now() + BUSY_RETRY_INTERVAL_MS > retryDeadline)
+      if (!busy || clock.now() + BUSY_RETRY_INTERVAL_MS > retryDeadline) {
+        if (
+          extra.length &&
+          detectIgnoredAddDir(error instanceof Error ? error.message : "")
+        )
+          throw new Error(CODEX_ADD_DIR_IGNORED);
         throw error;
+      }
       await clock.sleep(BUSY_RETRY_INTERVAL_MS);
     }
   }
@@ -75,9 +95,31 @@ export async function startAgentInPane(
     if (clock.now() >= deadline) break;
     await clock.sleep(SETTLE_INTERVAL_MS);
   }
+  if (extra.length && !agent?.agent) {
+    // codex 拒絕 --add-dir 時會直接結束；讀 pane 輸出確認原因，不退回成沒有該參數的啟動。
+    const text = await readPaneText(port, input.paneId);
+    if (detectIgnoredAddDir(text)) throw new Error(CODEX_ADD_DIR_IGNORED);
+  }
   if (!agent)
     throw new Error(
       `started Agent not visible in ${input.paneId}; inspect the pane before retrying`,
     );
   return agent;
+}
+
+async function readPaneText(
+  port: AgentStartPort,
+  paneId: string,
+): Promise<string> {
+  try {
+    const result = (await port.request("agent.read", {
+      target: paneId,
+      source: "recent_unwrapped",
+      lines: 80,
+    })) as { read?: { text?: unknown }; text?: unknown } | undefined;
+    const text = result?.read?.text ?? result?.text;
+    return typeof text === "string" ? text : "";
+  } catch {
+    return "";
+  }
 }

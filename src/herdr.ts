@@ -1,5 +1,10 @@
 import net from "node:net";
 import type { AgentProfile } from "./agent-pool.js";
+import {
+  CODEX_ADD_DIR_IGNORED,
+  detectIgnoredAddDir,
+  extraLaunchArgsFor,
+} from "./cli-adapter.js";
 import { createAgentPane, nameAgentPane } from "./pane-split.js";
 import os from "node:os";
 import path from "node:path";
@@ -253,6 +258,7 @@ export class HerdrClient {
     // （「target pane … is not an available shell」，與 ISSUE-067 同一個錯誤）。這個錯誤代表什麼都還沒
     // 啟動，所以只對它短暫重試（有上限）；其他任何錯誤都立刻失敗，不重試。
     const retryDeadline = Date.now() + PROFILE_BUSY_RETRY_MS;
+    const extra = extraLaunchArgsFor(profile.kind, cwd);
     for (;;) {
       try {
         await this.request(
@@ -264,6 +270,7 @@ export class HerdrClient {
             args: [
               ...(profile.args || []),
               ...(profile.model ? [profile.modelFlag!, profile.model] : []),
+              ...extra,
             ],
             timeout_ms: 30000,
           },
@@ -273,8 +280,14 @@ export class HerdrClient {
       } catch (error) {
         const busy =
           error instanceof HerdrError && error.code === "agent_pane_busy";
-        if (!busy || Date.now() + PROFILE_BUSY_INTERVAL_MS > retryDeadline)
+        if (!busy || Date.now() + PROFILE_BUSY_INTERVAL_MS > retryDeadline) {
+          if (
+            extra.length &&
+            detectIgnoredAddDir(error instanceof Error ? error.message : "")
+          )
+            throw new Error(CODEX_ADD_DIR_IGNORED);
           throw error;
+        }
         await new Promise((resolve) =>
           setTimeout(resolve, PROFILE_BUSY_INTERVAL_MS),
         );
@@ -283,6 +296,11 @@ export class HerdrClient {
     const agent = (await this.listAgentsWithWorkspaceNames()).find(
       (a) => a.pane_id === pane.pane_id,
     );
+    if (extra.length && !agent?.agent) {
+      // codex 拒絕 --add-dir 時直接結束；不退回成沒有該參數的啟動。
+      const text = await this.readAgent(pane.pane_id).catch(() => "");
+      if (detectIgnoredAddDir(text)) throw new Error(CODEX_ADD_DIR_IGNORED);
+    }
     if (!agent)
       throw new Error(
         `started Agent not visible in ${pane.pane_id}; inspect before retrying`,
