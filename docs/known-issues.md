@@ -1,5 +1,31 @@
 # Known Issues
 
+## ISSUE-126：bridge 重啟後進行中的 Discord 串流被靜默丟掉，最後回覆沒有送到 Discord（REQ-20261108-discord-reply-lost）
+
+2026-11-08。狀態：待調查（根因只是假設，尚未修正）。
+
+**症狀：**使用者從 Discord 下指令，Agent 在**同一個回合內重啟 bridge**（`scripts/run.sh -r`）後，最後一則回覆沒有出現在 Discord；使用者在手機的 Herdr 畫面看得到它（附圖：`.herdr-discord-bridge/attachments/message-xbhkZw/1.png`，畫面文字有重疊亂碼，像同一段文字被重繪兩次交疊，**與遺失是否相關未確認**）。
+
+**已確認的事實（讀碼與狀態檔，2026-11-08）：**重啟後 console 只有 `hook Stop … chars=896`（最後回覆的 hook 事件有到），沒有前幾次重啟都有的 `Resuming stream …`；`src/main.ts` 的 `resumeStreams` 在 agent 或進度訊息（`discord.fetchMessage`）抓不到時直接 `store.remove()`，**不寫任何 log**，也不區分「訊息真的被刪」與「Gateway 未就緒等暫時性失敗」；串流被移除後沒有補送機制，`active-streams.json` 之後的 `baselineOutput` 也已含這則回覆，不會當成新內容。
+
+**未確認：**重啟當下 `fetchMessage` 實際回傳什麼、為什麼。已開卡 `REQ-20261108-discord-reply-lost`：先以假 port 重現，再加 log、暫時性失敗的有限重試與「受信任的最後回覆補送」。在修好前，Agent 若在 Discord 驅動的回合內重啟 bridge，請重啟後再用 `herdr-discord-send` 補送最後結果。
+
+## ISSUE-125：codex Worker 反覆停在 `npm test` 的權限提示逾時失敗，改為 helper 暫時最大權限（需提醒：目前仍在 VM）
+
+2026-11-08。狀態：已處理（設定，使用者決定）、待驗收；**需要提醒使用者重新評估**。
+
+**症狀：**2026-11-07 至 11-08，codex Worker 在卡片 worktree 內跑完整 `npm test` 時，沙箱擋測試用的 Unix socket（`listen EPERM`），跳權限提示，沒人處理就逾時，整張卡失敗，至少 5 次（`flow-notify`、`agy-worktree-trust`、`role-agents` 等，與 ISSUE-115 同一類）。卡片文字要求「只跑相關測試檔」不可靠。
+
+**已確認根因：**codex 的 workspace-write 沙箱不允許測試用的 Unix socket；每個 Worker 都是新開的 codex，先前「允許一次」的授權不會延續，所以每次都會再問。
+
+**決定（使用者 2026-11-08）：**`agentProfiles` 中 `helper`（codex，實作與驗證的 Worker）的 `args` 設為 `["--dangerously-bypass-approvals-and-sandbox"]`（無沙箱、不問批准）。`reviewer` 這個 codex profile 與 Lead、`agent start`、其他 Agent 種類**都沒有改**。設定在使用者的 `config.json`（備份 `config.json.bak-codexperm-20261108`，旁邊有註解提醒）；沒有改程式。
+
+**實測（2026-11-08，本機，探針 tab，已關閉）：**以該旗標啟動 codex，直接 `idle`、`interactive_ready: true`，沒有多出確認畫面；請它在 `/tmp` 建立並關閉一個 Unix socket 監聽，回報 `listening`，沒有任何權限提示，沒有殘留檔案。
+
+**風險與提醒：**這些 agent 目前還跑在這台 VM 上，最大權限的風險（可任意改檔、刪檔、連網）由這台機器承擔。使用者預期之後 agent 會跑在 pod 內，屆時才合理放寬。**移到 pod 之前與之後都要重新評估；VM 上若不需要就改回 `"args": []`。**Agent 的專案記憶已記下這個提醒。
+
+**未驗證：**設定要重啟 bridge 才會載入（2026-11-08 寫下時尚未重啟）；真實 Team 任務中 `helper` 不再卡在 `npm test` 尚未驗證。
+
 ## ISSUE-124：Worker 做完但超過 15 分鐘等待上限，整張卡被判失敗（REQ-20261107-attach-pr）
 
 2026-11-07。狀態：已修正、待驗收。**尚未實機驗證**（沒有在真實 Herdr／Discord 讓 Worker 逾時確認新訊息與通知；bridge 尚未重啟載入）。要放寬 Worker 單一回合上限請改 `config.json` 的 `teamTurnTimeoutMs`，**不要**改 `approvalTimeoutMs`。
