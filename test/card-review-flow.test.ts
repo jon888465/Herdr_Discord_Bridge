@@ -415,7 +415,9 @@ test("a failing agent listing while waiting is inconclusive with the reason, and
   assert.ok(log.includes("pane.close"));
 });
 
-test("a skipped update prompt is reported in the review result; a pane still blocked afterwards is kept and marked as kept, not as a failed close", async () => {
+test("a skipped update prompt is reported in the review result; a pane still blocked afterwards is kept and marked as kept, not as a failed close", async (t) => {
+  // 自動跳過會 console.log；不要讓測試輸出混進 node:test 子行程的 stdout。
+  t.mock.method(console, "log", () => {});
   const update = "Update available · 0.166.0 → 0.167.0\n3. Skip until next version";
   const done = setup({
     start: () => reviewer({ agent: "codex", agent_status: "blocked" }),

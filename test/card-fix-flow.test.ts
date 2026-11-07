@@ -314,7 +314,9 @@ test("a pane that cannot be closed is reported but does not change the outcome",
 
 const CODEX_UPDATE = "Update available · 0.166.0 → 0.167.0\n1. Update now\n2. Skip\n3. Skip until next version";
 
-test("a skipped update prompt is reported in the fix result, and a pane still blocked afterwards is kept", async () => {
+test("a skipped update prompt is reported in the fix result, and a pane still blocked afterwards is kept", async (t) => {
+  // 自動跳過會 console.log；不要讓測試輸出混進 node:test 子行程的 stdout。
+  t.mock.method(console, "log", () => {});
   const done = setup({
     start: () => fixer({ agent: "codex", agent_status: "blocked" }),
     listing: [[fixer({ agent: "codex", agent_status: "idle" })]],
