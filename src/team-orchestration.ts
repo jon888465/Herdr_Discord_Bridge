@@ -150,6 +150,31 @@ export interface TeamTaskResult {
 }
 
 const PLAN_TIMEOUT_MS = 120000;
+/** ISSUE-124：回合逾時造成的失敗一律帶這個標記，讓紀錄與通知能分類為「等待逾時」。 */
+const TIMEOUT_MARK = "等待逾時";
+const WORKTREE_HINT =
+  "Worker 的產出可能仍留在卡片 worktree，請先檢查再決定重跑或接手";
+
+function formatDuration(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 100) / 10);
+  if (seconds < 60) return `${seconds} 秒`;
+  const whole = Math.round(seconds);
+  const minutes = Math.floor(whole / 60);
+  return whole % 60 ? `${minutes} 分 ${whole % 60} 秒` : `${minutes} 分鐘`;
+}
+
+function isTimeoutError(error: unknown): boolean {
+  return error instanceof Error && /timed?\s?out|timeout/i.test(error.message);
+}
+
+function timeoutDetail(
+  who: string,
+  error: Error,
+  startedAt: number,
+  limitMs: number,
+): string {
+  return `${who} ${TIMEOUT_MARK}（已等待 ${formatDuration(Date.now() - startedAt)}，上限 ${formatDuration(limitMs)}）：${error.message}`;
+}
 const DEFAULT_REPORT_LINES = 120;
 const DEFAULT_REPORT_MAX_CHARS = 6000;
 
@@ -165,6 +190,7 @@ export async function runTeamTask(
     phase: "planning" | "synthesis",
   ) => {
     check();
+    const startedAt = Date.now();
     const result = await runTeamTurn(
       agent,
       instruction,
@@ -183,7 +209,12 @@ export async function runTeamTask(
       input.onQuestion
         ? (current) => input.onQuestion!(current, phase)
         : undefined,
-    );
+    ).catch((error: unknown) => {
+      if (input.signal?.aborted || !isTimeoutError(error)) throw error;
+      throw new Error(
+        timeoutDetail(`Lead ${phase}`, error as Error, startedAt, timeoutMs),
+      );
+    });
     check();
     emit({
       type: "turn_settled",
@@ -408,7 +439,13 @@ export async function runTeamTask(
               workerPaneId: assignment.workerPaneId,
               state: "failed" as const,
               report: "",
-              blocker: `dependency ${failedDependency} did not complete`,
+              blocker: `dependency ${failedDependency} did not complete${
+                reports
+                  .find((r) => r.assignmentId === failedDependency)
+                  ?.blocker?.includes(TIMEOUT_MARK)
+                  ? `（${failedDependency} ${TIMEOUT_MARK}；${WORKTREE_HINT}）`
+                  : ""
+              }`,
             };
             reports.push(report);
             emit({
@@ -452,6 +489,10 @@ export async function runTeamTask(
     considerGate();
     const blocked = reports.some((report) => report.state === "blocked");
     const failed = reports.some((report) => report.state === "failed");
+    const timedOut = reports.filter(
+      (report) =>
+        report.state === "failed" && report.blocker?.includes(TIMEOUT_MARK),
+    );
     const gateFailed = input.coding === true && (gate?.reasons.length ?? 1) > 0;
     const outcome =
       failed || (gateFailed && !blocked)
@@ -470,7 +511,7 @@ export async function runTeamTask(
       report: synthesis,
       paneId: input.lead.pane_id,
       detail: failed
-        ? `one or more Assignments failed; synthesis is partial${gate?.reasons.length ? `; ${gate.reasons.join("; ")}` : ""}`
+        ? `one or more Assignments failed; synthesis is partial${gate?.reasons.length ? `; ${gate.reasons.join("; ")}` : ""}${timedOut.map((report) => `; ${report.blocker!.split("：")[0]}`).join("")}`
         : blocked
           ? "one or more Assignments require input"
           : gateFailed
@@ -504,6 +545,7 @@ async function runAssignment(
   reportMaxChars: number,
   previousReports: TeamTaskResult["reports"],
 ): Promise<TeamTaskResult["reports"][number]> {
+  let startedAt = Date.now();
   try {
     input.signal?.throwIfAborted();
     const acquired = input.acquireWorker
@@ -527,6 +569,7 @@ async function runAssignment(
     if (!["idle", "done"].includes(worker.agent_status))
       throw new Error(`Worker is ${worker.agent_status}`);
     input.codingHooks?.onAssignmentStart(assignment, worker);
+    startedAt = Date.now();
     const settled = await runTeamTurn(
       worker,
       assignmentInstruction(input, assignment) +
@@ -610,7 +653,17 @@ async function runAssignment(
     };
   } catch (error) {
     if (input.signal?.aborted) throw error;
-    const detail = error instanceof Error ? error.message : "Worker failed";
+    const detail =
+      error instanceof Error
+        ? isTimeoutError(error)
+          ? timeoutDetail(
+              `Assignment ${assignment.id}`,
+              error,
+              startedAt,
+              timeoutMs,
+            )
+          : error.message
+        : "Worker failed";
     emit({
       type: "assignment_failed",
       taskId: input.taskId,

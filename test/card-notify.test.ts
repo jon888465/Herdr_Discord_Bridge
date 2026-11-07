@@ -295,3 +295,40 @@ test("claim write failure bound", async (t) => {
   assert.equal(s.discord.length, 0);
   assert.equal(claims, 3);
 });
+
+test("ISSUE-124 逾時失敗分類為等待逾時，不含流程紀錄原文", async (t) => {
+  const s = setup(t, "discord:12345");
+  s.store.appendLog(id, [
+    {
+      event: "failed",
+      eventId: "timeout-1",
+      time: s.deps.now(),
+      text: "task 沒有完成：blocked：one or more Assignments failed; Assignment impl 等待逾時（已等待 15 分 30 秒，上限 15 分鐘）私密原文-ZZZ",
+    },
+  ]);
+  await s.notifier.tick();
+  const msg = s.discord
+    .map(([, text]) => text)
+    .find((text) => text.includes("failed"))!;
+  assert.ok(msg.includes("failed · 等待逾時"));
+  assert.ok(!msg.includes("等待人工處理"));
+  for (const forbidden of ["私密原文-ZZZ", "Assignment impl", "15 分"])
+    assert.ok(!msg.includes(forbidden));
+});
+
+test("ISSUE-124 非逾時失敗的分類不變", async (t) => {
+  const s = setup(t, "discord:12345");
+  s.store.appendLog(id, [
+    {
+      event: "failed",
+      eventId: "blocked-1",
+      time: s.deps.now(),
+      text: "task 沒有完成：blocked：one or more Assignments failed; no passing review",
+    },
+  ]);
+  await s.notifier.tick();
+  const msg = s.discord
+    .map(([, text]) => text)
+    .find((text) => text.includes("failed"))!;
+  assert.ok(msg.includes("review 條件、等待人工處理未滿足"));
+});

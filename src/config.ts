@@ -35,6 +35,8 @@ export interface Config {
   requestTimeoutMs: number;
   reconnectBaseMs: number;
   approvalTimeoutMs: number;
+  /** Team 任務 Lead 規劃、每個 Worker、Lead 彙整單一回合的等待上限（ISSUE-124）；與批准提示有效期分開。 */
+  teamTurnTimeoutMs: number;
   outputLines: number;
   handoffLines: number;
   handoffMaxChars: number;
@@ -52,8 +54,9 @@ const DEFAULTS: Config = {
   pollIntervalMs: 2000,
   requestTimeoutMs: 5000,
   reconnectBaseMs: 250,
-  // Team planning、Worker assignment、Lead synthesis 共用的單階段等待上限：15 分鐘。
+  // 批准提示的有效期：15 分鐘（ISSUE-124 之前也被 Team 回合共用，現已改用 teamTurnTimeoutMs）。
   approvalTimeoutMs: 900000,
+  teamTurnTimeoutMs: 1800000,
   outputLines: 500,
   handoffLines: 40,
   handoffMaxChars: 6000,
@@ -137,6 +140,13 @@ function stripJsonComments(input: string): string {
     }
   }
   return output.replace(/,\s*([}\]])/g, "$1");
+}
+
+/** Team 任務 Lead 規劃、每個 Worker、Lead 彙整的單一回合等待上限（不是批准提示的有效期）。 */
+export function teamTaskTimeoutMs(
+  config: Pick<Config, "teamTurnTimeoutMs">,
+): number {
+  return config.teamTurnTimeoutMs;
 }
 
 function positiveInt(value: unknown, fallback: number, max: number): number {
@@ -223,6 +233,11 @@ export function loadConfig(): Config {
     approvalTimeoutMs: positiveInt(
       source.approvalTimeoutMs,
       DEFAULTS.approvalTimeoutMs,
+      86400000,
+    ),
+    teamTurnTimeoutMs: positiveInt(
+      source.teamTurnTimeoutMs,
+      DEFAULTS.teamTurnTimeoutMs,
       86400000,
     ),
     outputLines: positiveInt(source.outputLines, DEFAULTS.outputLines, 500),

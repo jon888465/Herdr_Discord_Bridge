@@ -2,15 +2,25 @@
 
 ## ISSUE-124：Worker 做完但超過 15 分鐘的等待上限，整張卡被判失敗（REQ-20261107-attach-pr）
 
-2026-11-07。狀態：待調查（已確認發生原因，尚未修正）。
+2026-11-07。狀態：已修正、待驗收。**尚未實機驗證**（沒有在真實 Herdr／Discord 讓超過上限的 Worker 逾時，確認新訊息與通知；bridge 尚未重啟載入）。使用者要放寬 Worker 單一回合上限時，請改 `config.json` 的 `teamTurnTimeoutMs`，**不要**為此改 `approvalTimeoutMs`。
 
 **症狀：**`REQ-20261107-attach-pr` 的 claude Worker 把實作做完（build、lint 通過，整套測試 1454／1455 通過），但整張卡仍被判失敗：`task 沒有完成：blocked：one or more Assignments failed; synthesis is partial; no passing review for the current version; no successful verification for the current version`（14:07:53Z）。使用者收到的失敗通知（ISSUE-120）沒有說明這其實是逾時。
 
 **已確認事實（讀 `team-tasks/task-8a2d6d0c-…json`，2026-11-07）：**三個 assignment 都是 `failed`。第一個 `impl` 的 `blocker` 是 `herdr agent.prompt: timeout timed out waiting for agent status`，建立 13:52:28Z、失敗 14:07:34Z（約 15 分 06 秒）；Worker 自己的畫面顯示它做了 `15m 30s`，也就是**比等待上限多約 30 秒**。`review`、`verify` 兩個 assignment 的 `blocker` 都是 `dependency impl did not complete`，是連帶失敗，所以才會出現「沒有 review、沒有 verification」。Worker 的產出完整留在 worktree（11 個檔案修改、2 個新檔）。
 
-**已確認的上限來源（讀碼，2026-11-07）：**Team 任務的 Lead 規劃、每個 Worker、Lead 彙整三種回合，等待上限都傳 `runtime.config.approvalTimeoutMs`（`src/main.ts`，註解「將設定的 timeout 傳給 Lead planning、每個 Worker 與 Lead synthesis」），預設 `900000` 毫秒 = 15 分鐘（`src/config.ts`）。也就是「批准提示多久過期」和「Worker 單一回合最多做多久」共用同一個設定，這是設計上的混用；它在 `config.json` 可設定，但調高會連批准提示的有效期一起改。整張卡另有自己的上限：自動撿卡的任務逾時是 45 分鐘（`src/autopick-wiring.ts`）。**未確認：**Worker 在狀態仍是 `working` 時被判逾時是否合理（設計取捨，待使用者決定）。
+**修正前的上限來源（pre-fix history，讀碼，2026-11-07；以下不是目前行為，目前行為見「修正與測試」）：**Team 任務的 Lead 規劃、每個 Worker、Lead 彙整三種回合，等待上限都傳 `runtime.config.approvalTimeoutMs`（`src/main.ts`，註解「將設定的 timeout 傳給 Lead planning、每個 Worker 與 Lead synthesis」），預設 `900000` 毫秒 = 15 分鐘（`src/config.ts`）。也就是「批准提示多久過期」和「Worker 單一回合最多做多久」共用同一個設定，這是設計上的混用；它在 `config.json` 可設定，但調高會連批准提示的有效期一起改。整張卡另有自己的上限：自動撿卡的任務逾時是 45 分鐘（`src/autopick-wiring.ts`）。**未確認：**Worker 在狀態仍是 `working` 時被判逾時是否合理（設計取捨，待使用者決定）。
 
-**影響與暫行處理：**卡片只要一個 Worker assignment 超過約 15 分鐘就整張失敗，大卡（多檔案、需跑完整測試）特別容易碰到；目前靠人工接手完成（有 worktree 產出時不會丟）。可能的修法（尚未決定）：讓逾時可設定、狀態仍在 `working` 時延長等待、或把大卡拆小。
+**影響與暫行處理：**卡片只要一個 Worker assignment 超過約 15 分鐘就整張失敗，大卡（多檔案、需跑完整測試）特別容易碰到；目前靠人工接手完成（有 worktree 產出時不會丟）。修正前可能的修法：讓逾時可設定（已由 `teamTurnTimeoutMs` 實作）、狀態仍在 `working` 時延長等待（未做，設計取捨仍待使用者決定）、或把大卡拆小。
+
+**修正與測試（2026-11-07，原始碼層）：**
+
+- `src/config.ts` 新增 `teamTurnTimeoutMs`（預設 `1800000` = 30 分鐘，小於自動撿卡整張卡的 45 分鐘；沿用 `approvalTimeoutMs` 同一個 `positiveInt`：負數、0、`NaN`、無法轉成數字的字串、`null`、物件回到預設且不拋出；可轉成數字的字串被接受並向下取整，上限 86400000，與 `approvalTimeoutMs` 完全一致）。`src/main.ts` 的 Team 任務 `timeoutMs` 改用它（Lead 規劃、每個 Worker、Lead 彙整）；批准提示仍用 `approvalTimeoutMs`，含義與預設 `900000` 不變。
+- `src/team-orchestration.ts`：回合逾時的失敗原因改為 `Assignment <id> 等待逾時（已等待 …，上限 …）：<原始錯誤>`（Lead 為 `Lead planning／synthesis 等待逾時…`）；依賴它的 assignment 為 `dependency <id> did not complete（<id> 等待逾時；Worker 的產出可能仍留在卡片 worktree，請先檢查再決定重跑或接手）`；整張任務的失敗訊息附上逾時的 assignment。非逾時失敗訊息不變。
+- `src/card-notify.ts`：`failed` 事件含「等待逾時」時，通知原因為「等待逾時」（不再被 `blocked` 蓋成「等待人工處理」），仍只放一句分類原因、不含流程紀錄原文。
+- 測試：`test/config-team-turn-timeout.test.ts`、`test/team-orchestration.test.ts`、`test/card-notify.test.ts` 新增案例。另有行為測試用假 port 斷言 Lead 規劃、每個 Worker、Lead 彙整收到的等待上限都是 `timeoutMs`，並有 Lead synthesis 逾時案例；`src/config.ts` 的 `teamTaskTimeoutMs`（`src/main.ts` 傳給 Team 任務的值）測試 `teamTurnTimeoutMs` 與 `approvalTimeoutMs` 互不影響。批准提示本身（`DiscordAdapter` 等）仍直接讀 `approvalTimeoutMs`，沒有另寫端到端測試。
+- **測試紀錄（2026-11-07，原始碼與自動化檢查，非實機驗收）：**第一次 `npm test`／build 因 worktree 沒有 `node_modules`、找不到 `tsc` 失敗，執行 `npm ci --ignore-scripts` 後重跑；新加測試有 4 個初次失敗（把 `true` 當無效值，但 `positiveInt` 會轉成 1；通知分類順序假設錯誤；測試用 Lead mock 分不出規劃與彙整、兩個測試受影響），已修正測試後重跑通過。review（`r124-tests`、`r124-docs`）後補上行為測試與文件修正。最後一輪指令：`npm run build`、`npm run lint`、`npm test`，結果（2026-11-07，本機 sandbox）：`npm run build` 成功、`npm run lint` ok（186 個 TypeScript 檔）、`npm test` 1470 項、1469 通過、0 失敗、1 skipped。這只是原始碼與自動化檢查；真實 Herdr／Discord 驗證與 bridge 重啟都尚未做。
+- **接手紀錄（2026-11-08，人工）：**這張卡的 Team 任務於 2026-11-07 23:38（台北）被判失敗，原因是 bridge 的寫入範圍守門：`changes outside the writer scope: config.example.jsonc`——Worker 改了卡片明寫要求更新的 `config.example.jsonc`，但 Lead 規劃 Worker 的工作範圍時沒有列入。同時有一個 codex Worker 反覆停在 `npm test` 的權限提示（沙箱擋測試用的 Unix socket，ISSUE-115），人工允許過一次，之後再次詢問而未處理。Worker 的產出完整，由人工接手：未修改程式，重新 `npm run build`、`npm run lint`、prettier 檢查，並在沙箱外執行 `node --test dist/test/*.test.js`（2026-11-08，本機非 sandbox，Node 26.12）：1470 項，1469 pass、0 fail、1 skipped，輸出沒有多餘 stdout。
+- 不做：Worker 仍在 `working` 時自動延長或重送（設計取捨仍待使用者決定）；未放寬任何權限、review、CI、`card merge` 守門。
 
 ## ISSUE-123：任務失敗後人工接手開的 PR 無法登記回卡片，bridge 不追蹤 CI／merge、不通知、不能走 card review／merge（REQ-20261107-attach-pr）
 

@@ -96,6 +96,7 @@ import {
   loadConfig,
   statePath,
   stateDirectory,
+  teamTaskTimeoutMs,
   type Config,
 } from "./config.js";
 import { StreamResumeStore } from "./stream-resume.js";
@@ -1905,8 +1906,9 @@ async function startTeamTask(
           console.error(safeError(error));
         }
       },
-      // 將設定的 timeout 傳給 Lead planning、每個 Worker 與 Lead synthesis。
-      timeoutMs: runtime.config.approvalTimeoutMs,
+      // ISSUE-124：Lead planning、每個 Worker 與 Lead synthesis 的單一回合上限用 teamTurnTimeoutMs；
+      // approvalTimeoutMs 只管批准提示的有效期。
+      timeoutMs: teamTaskTimeoutMs(runtime.config),
     },
     (event) => {
       void reportOrchestrationEvent(event, context, runtime).catch((error) =>

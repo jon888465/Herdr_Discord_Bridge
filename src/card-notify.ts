@@ -57,6 +57,9 @@ export function notificationReason(event: LogEntry): string {
   if (event.event === "autopick_picked") return "bridge 已撿起卡片";
   if (event.event === "pr_opened") return "PR 已開出";
   if (event.event === "merged") return "PR 已合併";
+  // ISSUE-124：回合逾時導致的失敗（文字同時含 blocked 等字樣）要明確分類為等待逾時。
+  if (event.event === "failed" && event.text.includes("等待逾時"))
+    return "等待逾時";
   const categories: string[] = [];
   for (const [pattern, label] of [
     [/敏感|sensitive/, "敏感路徑"],
