@@ -71,11 +71,16 @@ export async function openReviewerPane(
       "pane creation returned unexpected workspace/identity; 不會使用這個 pane，請手動檢查",
     );
   if (input.kind)
-    await nameAgentPane(port, pane.pane_id, {
-      kind: input.kind,
-      role: input.role ?? "reviewer",
-      model: input.model,
-    });
+    await nameAgentPane(
+      port,
+      pane.pane_id,
+      {
+        kind: input.kind,
+        role: input.role ?? "reviewer",
+        model: input.model,
+      },
+      result.tabId,
+    );
   return { paneId: pane.pane_id, terminalId: pane.terminal_id };
 }
 

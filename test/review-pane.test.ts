@@ -202,6 +202,11 @@ test("reviewer label is display-only: renamed pane closes only with the original
     pane_id: "w5:p9",
     label: "codex·reviewer",
   });
+  // 分割出的 pane 不命名任何 tab。
+  assert.equal(
+    calls.some((c) => c.method === "tab.rename"),
+    false,
+  );
   assert.deepEqual(await closeReviewerPane(port, pane), { closed: true });
   assert.deepEqual(calls.at(-1), {
     method: "pane.close",
@@ -209,7 +214,8 @@ test("reviewer label is display-only: renamed pane closes only with the original
   });
 });
 
-test("a label failure leaves launch identity available for safe cleanup", async () => {
+test("a label failure leaves launch identity available for safe cleanup", async (t) => {
+  t.mock.method(console, "warn", () => {});
   const { port, calls } = fakePort({
     "pane.layout": () => wide,
     "pane.split": () => split(),
@@ -232,4 +238,56 @@ test("a label failure leaves launch identity available for safe cleanup", async 
     calls.some((c) => c.method === "pane.close"),
     false,
   );
+});
+
+test("a new tab shares the pane label, only the returned tab id is renamed, and cleanup stays id based", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  for (const failRename of [false, true]) {
+    const { port, calls } = fakePort({
+      "pane.layout": () => tiny,
+      "tab.create": () => ({
+        tab: { tab_id: "w5:t9" },
+        root_pane: split().pane,
+      }),
+      "tab.rename": () => {
+        if (failRename) throw new Error("unsupported");
+        return {};
+      },
+      "pane.rename": () => ({}),
+      "pane.get": () => ({
+        pane: { terminal_id: "term_new", label: "human changed" },
+      }),
+      "pane.close": () => ({}),
+    });
+    const opened = await openReviewerPane(port, {
+      basePaneId: "w5:p1",
+      workspaceId: "w5",
+      cwd: "/x",
+      kind: "codex",
+      role: "agent",
+      model: "chosen",
+    });
+    assert.deepEqual(opened, { paneId: "w5:p9", terminalId: "term_new" });
+    // 新 tab 與 pane 用同一個名稱；只命名這次建立回傳的 tab id。
+    assert.deepEqual(
+      calls.filter((c) => c.method === "tab.rename").map((c) => c.params),
+      [{ tab_id: "w5:t9", label: "codex·agent·chosen" }],
+    );
+    assert.equal(
+      calls.find((c) => c.method === "pane.rename")?.params?.label,
+      "codex·agent·chosen",
+    );
+    assert.deepEqual(
+      calls
+        .filter((c) => c.params && "tab_id" in c.params)
+        .map((c) => c.params?.tab_id),
+      ["w5:t9"],
+    );
+    // 關閉只靠 pane id 與 terminal id，不依名稱，也不關 tab。
+    assert.deepEqual(await closeReviewerPane(port, opened), { closed: true });
+    assert.deepEqual(calls.at(-1), {
+      method: "pane.close",
+      params: { pane_id: "w5:p9" },
+    });
+  }
 });
