@@ -104,6 +104,7 @@ const guardedScreens: [string, string][] = [
   ["codex", update + "\nApprove this action"],
   ["codex", update + "\nAllow this action"],
   ["codex", update + "\nLogin required"],
+  ["codex", update + "\nYes, proceed (y)\nNo (esc)"],
   ["claude", update],
   ["codex", "Update available\n2. Skip"],
 ];
