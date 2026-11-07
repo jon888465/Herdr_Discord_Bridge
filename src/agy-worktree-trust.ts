@@ -126,11 +126,34 @@ export class AgyWorktreeTrust {
       if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
     }
   }
-  private edit(target: string, add: boolean): boolean {
-    // rename 會把 symlink 換成一般檔案；使用者的設定若是 symlink 就不動它。
+  private assertNotSymlink(): void {
     if (fs.lstatSync(this.settings).isSymbolicLink())
       throw new Error("settings.json is a symlink; leaving it unchanged");
+  }
+  /** 每次修改前把驗證過的原內容備份到 state 目錄（只留最新 5 份、權限 600）。 */
+  private backup(content: string): void {
+    const dir = path.join(this.options.stateDirectory, "agy-settings-backups");
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const digest = createHash("sha256")
+      .update(content)
+      .digest("hex")
+      .slice(0, 8);
+    const name = `settings-${Date.now()}-${digest}-${randomUUID().slice(0, 4)}.json`;
+    fs.writeFileSync(path.join(dir, name), content, {
+      flag: "wx",
+      mode: 0o600,
+    });
+    const kept = fs
+      .readdirSync(dir)
+      .filter((n) => n.startsWith("settings-"))
+      .sort();
+    for (const old of kept.slice(0, Math.max(0, kept.length - 5)))
+      fs.rmSync(path.join(dir, old), { force: true });
+  }
+  private edit(target: string, add: boolean): boolean {
     for (let attempt = 0; attempt < 8; attempt++) {
+      // rename 會把 symlink 換成一般檔案：每次重試與最後 rename 之前都要檢查，不能只檢查一次。
+      this.assertNotSymlink();
       const stat = fs.statSync(this.settings);
       const original = fs.readFileSync(this.settings, "utf8");
       const parsed = JSON.parse(original);
@@ -193,6 +216,9 @@ export class AgyWorktreeTrust {
           fs.readFileSync(this.settings, "utf8") !== original
         )
           continue;
+        this.assertNotSymlink();
+        // agy 可能同時寫設定檔，rename 與核對之間無法互斥；先把驗證過的原內容備份，使用者才能還原。
+        this.backup(original);
         fs.renameSync(tmp, this.settings);
         return true;
       } finally {
@@ -229,6 +255,12 @@ export class AgyWorktreeTrust {
       }
       if (!entry) return;
       target = fs.realpathSync(cwd);
+      // 已登記的路徑本身必須是正規路徑：登記的是 symlink（目標即使也在 worktree 根目錄底下）也不信任，
+      // 否則已登記的 card-req-A 被換成指向未登記 card-req-B 的 symlink，就會信任到不是 bridge 建立的目錄。
+      if (target !== path.resolve(cwd))
+        throw new Error(
+          "registered worktree path is a symlink; not trusting it",
+        );
       const root = path.join(this.home, ".herdr/worktrees");
       const relative = path.relative(root, target).split(path.sep);
       if (

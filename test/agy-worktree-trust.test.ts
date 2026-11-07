@@ -383,18 +383,27 @@ test("remote agy outside local index still reports manual handling without setti
   assert.deepEqual(f.read(), f.original);
 });
 
-test("cleanup also finds the bridge-owned canonical entry after an internal symlink is removed", () => {
+// review：已登記的路徑本身必須是正規路徑；登記的是 symlink（即使目標也在 worktree 根目錄底下）就不信任，
+// 否則已登記的 card-req-A 被換成指向未登記 card-req-B 的 symlink，就會信任到不是 bridge 建立的目錄。
+test("a registered path that is a symlink is never trusted, even when its target is another card directory", () => {
   const f = fixture();
+  const other = path.join(path.dirname(f.cwd), "card-req-other");
+  fs.mkdirSync(other);
   const alias = path.join(path.dirname(f.cwd), "card-req-alias");
-  fs.symlinkSync(f.cwd, alias);
+  fs.symlinkSync(other, alias);
   const indexPath = path.join(f.state, "card-worktrees.json");
   const index = JSON.parse(fs.readFileSync(indexPath, "utf8"));
   index.worktrees[0].path = alias;
   fs.writeFileSync(indexPath, JSON.stringify(index));
   f.trust.beforeLaunch("agy", "w1:p1", alias);
-  assert.ok(f.read().trustedWorkspaces.includes(f.cwd));
-  fs.unlinkSync(alias);
-  f.trust.cleanup("REQ-20261107-test", alias);
+  assert.deepEqual(f.read(), f.original);
+  assert.ok(!fs.existsSync(path.join(f.state, "agy-worktree-trust.json")));
+  // 原本登記的目錄被換成 symlink 的情況也一樣。
+  index.worktrees[0].path = f.cwd;
+  fs.writeFileSync(indexPath, JSON.stringify(index));
+  fs.rmSync(f.cwd, { recursive: true });
+  fs.symlinkSync(other, f.cwd);
+  f.trust.beforeLaunch("agy", "w1:p1", f.cwd);
   assert.deepEqual(f.read(), f.original);
 });
 
@@ -431,4 +440,41 @@ test("a settings.json that is a symlink is left alone and reported", () => {
   assert.ok(fs.lstatSync(f.settings).isSymbolicLink());
   assert.equal(fs.readFileSync(real, "utf8"), before);
   assert.ok(f.logs.some((line) => /symlink/.test(line)));
+});
+
+// review：symlink 檢查要在每次重試與最後 rename 之前都做；設定檔被換成 symlink（即使指向同一個檔案）不能被覆蓋成一般檔案。
+test("settings.json swapped for a symlink to itself while editing is detected and never replaced", () => {
+  const f = fixture();
+  const real = path.join(f.root, "elsewhere.json");
+  let swapped = false;
+  const trust = new AgyWorktreeTrust({
+    ...f.options,
+    beforeRecheck: () => {
+      if (swapped) return;
+      swapped = true;
+      fs.renameSync(f.settings, real);
+      fs.symlinkSync(real, f.settings);
+    },
+  });
+  trust.beforeLaunch("agy", "w1:p1", f.cwd);
+  assert.ok(fs.lstatSync(f.settings).isSymbolicLink());
+  assert.deepEqual(JSON.parse(fs.readFileSync(real, "utf8")), f.original);
+  assert.ok(f.logs.some((line) => /symlink/.test(line)));
+});
+
+// review：agy 可能同時寫設定檔，rename 之間無法互斥；每次修改前把驗證過的原內容備份到 state 目錄，使用者能還原。
+test("each edit keeps a private backup of the verified original in the state directory, newest five only", () => {
+  const f = fixture();
+  const backups = path.join(f.state, "agy-settings-backups");
+  const before = fs.readFileSync(f.settings, "utf8");
+  f.trust.beforeLaunch("agy", "w1:p1", f.cwd);
+  const first = fs.readdirSync(backups);
+  assert.equal(first.length, 1);
+  assert.equal(fs.readFileSync(path.join(backups, first[0]), "utf8"), before);
+  assert.equal(fs.statSync(path.join(backups, first[0])).mode & 0o777, 0o600);
+  for (let n = 0; n < 8; n++) {
+    new AgyWorktreeTrust(f.options).cleanup("REQ-20261107-test", f.cwd);
+    f.trust.beforeLaunch("agy", "w1:p1", f.cwd);
+  }
+  assert.equal(fs.readdirSync(backups).length, 5);
 });
