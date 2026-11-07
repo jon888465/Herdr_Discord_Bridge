@@ -150,6 +150,7 @@ export async function runCardReview(
       basePaneId: input.author.paneId,
       workspaceId: input.author.workspaceId,
       cwd: input.worktreePath,
+      kind: chosen.kind,
     });
   } catch (error) {
     return { ok: false, stage: "open", error: message(error) };

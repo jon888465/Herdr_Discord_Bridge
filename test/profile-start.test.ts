@@ -71,12 +71,16 @@ test("profile startup uses explicit official socket IDs, literal argv and no mut
   assert.equal(recorded, "w1:p7");
   assert.deepEqual(
     calls.map((c) => c.method),
-    ["pane.layout", "pane.split", "agent.start"],
+    ["pane.layout", "pane.split", "pane.rename", "agent.start"],
   );
   assert.equal(calls[1].params.focus, false);
   assert.equal(calls[1].params.cwd, "/repo with spaces");
   assert.equal(calls[1].params.target_pane_id, lead.pane_id);
-  assert.deepEqual(calls[2].params.args, [
+  assert.deepEqual(calls[2].params, {
+    pane_id: "w1:p7",
+    label: "codex·worker·chosen-model",
+  });
+  assert.deepEqual(calls[3].params.args, [
     "--literal-argument",
     "-m",
     "chosen-model",
@@ -206,6 +210,14 @@ test("ISSUE-108: crowded profile startup opens a tab and registers it before sta
           },
         } as T;
       }
+      if (method === "pane.rename") {
+        assert.deepEqual(params, {
+          pane_id: worker.pane_id,
+          label: "codex·worker",
+        });
+        assert.equal(options.retries, 0);
+        return {} as T;
+      }
       assert.equal(method, "agent.start");
       assert.equal(params.pane_id, worker.pane_id);
       assert.equal(options.retries, 0);
@@ -230,6 +242,7 @@ test("ISSUE-108: crowded profile startup opens a tab and registers it before sta
     "starting",
     "tab.create",
     "registered",
+    "pane.rename",
     "agent.start",
   ]);
 });

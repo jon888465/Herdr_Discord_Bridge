@@ -108,7 +108,10 @@ test("a restricted workspace allowlist or a missing repo path is refused before 
 test("a Lead that is not ready (for example blocked on a prompt) leaves no empty workspace behind", async () => {
   const { steps, requests, commands } = harness({}, "blocked");
   await assert.rejects(steps.startLead(job()), /沒有就緒/);
-  assert.equal(requests.at(-1)?.method, "workspace.close");
+  assert.deepEqual(requests.at(-1), {
+    method: "workspace.close",
+    params: { workspace_id: "w9" },
+  });
   assert.deepEqual(commands, []);
 });
 
@@ -209,7 +212,8 @@ test("ISSUE-101: a merge is recognised even when progress lines come before the 
 
   // 進度裡出現「已 merge」，但 loop 沒有以「結束…已 merge」收尾（例如 merge 後的清理步驟出錯）→ 不算。
   const noFinalLine = harness({
-    command: async () => `${progress}\nloop 停下來了：REQ-20261105-x（停在 merge）。`,
+    command: async () =>
+      `${progress}\nloop 停下來了：REQ-20261105-x（停在 merge）。`,
   });
   assert.equal(
     (await noFinalLine.steps.loop("REQ-20261105-x", "codex")).merged,
@@ -226,3 +230,28 @@ test("ISSUE-101: a merge is recognised even when progress lines come before the 
     false,
   );
 });
+
+for (const kind of ["codex", "claude"] as const) {
+  test(`autopick ${kind} label preserves kind, prefix and card head within 60 characters`, async () => {
+    for (const id of ["REQ-short", "REQ-" + "x".repeat(100) + "-TAIL"]) {
+      const { steps, requests } = harness();
+      const lead = await steps.startLead(
+        job({ lead: kind, card: { id } as Card }),
+      );
+      const label = requests.find((r) => r.method === "workspace.create")
+        ?.params?.label;
+      assert.equal(typeof label, "string");
+      assert.ok((label as string).startsWith(`autopick-${kind}-REQ-`));
+      assert.ok((label as string).length <= 60);
+      if (id.length > 60) {
+        assert.equal((label as string).length, 60);
+        assert.ok(!(label as string).includes("TAIL"));
+      } else assert.equal(label, `autopick-${kind}-REQ-short`);
+      await lead.close();
+      assert.deepEqual(requests.at(-1), {
+        method: "workspace.close",
+        params: { workspace_id: "w9" },
+      });
+    }
+  });
+}

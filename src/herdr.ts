@@ -1,6 +1,6 @@
 import net from "node:net";
 import type { AgentProfile } from "./agent-pool.js";
-import { createAgentPane } from "./pane-split.js";
+import { createAgentPane, nameAgentPane } from "./pane-split.js";
 import os from "node:os";
 import path from "node:path";
 import type {
@@ -244,6 +244,11 @@ export class HerdrClient {
     )
       throw new Error("pane creation returned unexpected workspace/identity");
     onPane(pane.pane_id);
+    await nameAgentPane(this, pane.pane_id, {
+      kind: profile.kind,
+      role: "worker",
+      model: profile.model,
+    });
     // ISSUE-098：剛分割出來的 pane，shell 可能還沒初始化完，Herdr 會以 agent_pane_busy 拒絕
     // （「target pane … is not an available shell」，與 ISSUE-067 同一個錯誤）。這個錯誤代表什麼都還沒
     // 啟動，所以只對它短暫重試（有上限）；其他任何錯誤都立刻失敗，不重試。

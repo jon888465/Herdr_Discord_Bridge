@@ -165,6 +165,10 @@ test("opens a pane, passes args, reports", async () => {
   const { port, calls } = fakePort();
   const spec = ":codex:gpt-6.1-sol:medium";
   const text = await runAgentStart(baseDeps(port), { spec });
+  assert.deepEqual(calls.find((c) => c.method === "pane.rename")?.params, {
+    pane_id: "w1:p2",
+    label: "codex·agent·gpt-6.1-sol",
+  });
   assert.equal(startParams(calls).pane_id, "w1:p2");
   assert.deepEqual(startParams(calls).args, [
     "-m",

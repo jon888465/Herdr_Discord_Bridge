@@ -1,3 +1,4 @@
+import { agentDisplayName } from "./cli-adapter.js";
 // Agent pane 的版面選擇與建立（ISSUE-094／108）。
 
 export interface PaneRect {
@@ -99,4 +100,26 @@ export async function createAgentPane(
   };
   // tab.create 的官方回傳是 root_pane，pane.split 則是 pane。
   return { pane: target ? result.pane : result.root_pane };
+}
+
+/** Labels are cosmetic: an older server/remote must not change launch or cleanup behavior. */
+export async function nameAgentPane(
+  port: PaneCreationPort,
+  paneId: string,
+  input: Parameters<typeof agentDisplayName>[0],
+): Promise<void> {
+  try {
+    await port.request(
+      "pane.rename",
+      {
+        pane_id: paneId,
+        label: agentDisplayName(input),
+      },
+      { retries: 0 },
+    );
+  } catch (error) {
+    console.warn(
+      `Agent pane label unavailable (${paneId}): ${error instanceof Error ? error.message : "unknown error"}`,
+    );
+  }
 }

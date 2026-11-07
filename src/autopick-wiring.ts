@@ -4,6 +4,7 @@
 // 為什麼用 console 指令：`card assign／commit／pr／loop` 的每個守門都在指令裡，自動流程走同一條路，
 // 不另開後門。為了不動到使用者自己的 console 路由，自動流程用另一個使用者 id（`autopick`）。
 
+import { agentDisplayName } from "./cli-adapter.js";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import { startAgentInPane, type AgentStartPort } from "./agent-start.js";
@@ -65,7 +66,11 @@ export function createAutopickSteps(deps: AutopickWiringDeps): AutopickSteps {
 
       const created = (await deps.port.request("workspace.create", {
         cwd: job.repoPath,
-        label: `autopick-${job.card.id}`.slice(0, 60),
+        label: agentDisplayName({
+          kind: job.lead,
+          role: "autopick",
+          cardId: job.card.id,
+        }),
         focus: false,
       })) as {
         workspace?: { workspace_id?: string };
