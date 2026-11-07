@@ -14,6 +14,7 @@ import {
 import type { AgentRecord } from "./types.js";
 
 export interface AgentStartPort {
+  prepareWorkspaceTrust?(kind: string, paneId: string, cwd?: string): void;
   request(
     method: string,
     params?: Record<string, unknown>,
@@ -48,9 +49,12 @@ export async function startAgentInPane(
     args?: string[];
     /** Agent 的工作目錄；codex 在 linked worktree 時據此加 `--add-dir`（ISSUE-115）。 */
     cwd?: string;
+    skipWorkspaceTrust?: boolean;
   },
   clock: Clock = realClock,
 ): Promise<AgentRecord> {
+  if (!input.skipWorkspaceTrust)
+    port.prepareWorkspaceTrust?.(input.kind, input.paneId, input.cwd);
   const extra = extraLaunchArgsFor(input.kind, input.cwd);
   const args = [...(input.args ?? []), ...extra];
   const params = {

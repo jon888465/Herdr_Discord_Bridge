@@ -43,6 +43,7 @@ export interface PrepareDeps {
     paneId: string;
     kind: string;
     name: string;
+    cwd?: string;
   }): Promise<AgentRecord>;
   worktrees: Pick<CardWorktreeStore, "active" | "record">;
   authorize(workspaceId: string): void;
@@ -118,6 +119,7 @@ export async function prepareCardWorktree(
       paneId: created.rootPaneId,
       kind,
       name: agentNameForCard(cardId),
+      cwd: created.path,
     });
   } catch (error) {
     throw new WorktreePartialError(
@@ -158,7 +160,7 @@ export function agentNameForCard(cardId: string): string {
 }
 
 export interface CleanupDeps {
-  port: WorktreePort;
+  port: WorktreePort & { cleanupWorkspaceTrust?(cardId: string, cwd: string): void };
   worktrees: Pick<CardWorktreeStore, "active" | "markRemoved">;
   deauthorize(workspaceId: string): void;
   now(): string;
@@ -196,6 +198,7 @@ export async function cleanupCardWorktree(
   };
   const result = await removeWorktree(deps.port, entry.workspaceId);
   if (!result.ok) return { removed: false, reason: result.reason, ...info };
+  deps.port.cleanupWorkspaceTrust?.(cardId, entry.path);
   deps.worktrees.markRemoved(cardId, deps.now());
   deps.deauthorize(entry.workspaceId);
   return { removed: true, ...info };

@@ -190,6 +190,8 @@ Agent 完成後，回覆會更新原本的 progress message；預設不會另外
 
 臨時啟動 Agent：`agent start <machine:agent:model:level> [--cwd <路徑>]`（Discord 加 `/herdr`）。省略的 `machine`／`agent` 沿用目前 Agent，省略的 `model`／`level` 用 CLI 預設，例如 `agent start :codex:gpt-6.1-sol:medium`。不自動 `agent use`、不自動確認信任提示。見 `SPEC.md`、ISSUE-114（尚未實機驗證）。
 
+agy 的信任提示（ISSUE-113，已實作、待實機驗收；使用者預先授權）：bridge 啟動本機 agy 前，會把**自己建立的卡片 worktree** 的完整路徑加入 agy 的 `trustedWorkspaces`，卡片清理時只移除它自己加的那一筆；不信任 `agent start --cwd` 或其他路徑，遠端 agy 仍需人工處理，bridge 不對 pane 送按鍵。
+
 ### 選擇 Agent
 
 選擇 workspace 與選擇 Agent 是兩個不同動作。要把 Discord thread 導向

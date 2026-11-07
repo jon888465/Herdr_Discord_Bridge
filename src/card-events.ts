@@ -58,6 +58,12 @@ export type CardEvent = { time: string; eventId: string } & (
       branch: string;
       baseSha: string;
     }
+  | {
+      event: "agy_worktree_trust";
+      path: string;
+      action: "add" | "remove";
+      result: "added" | "removed" | "unchanged" | "error" | "remote";
+    }
   | { event: "started"; taskId: string }
   | { event: "completed"; taskId: string }
   | {
@@ -150,6 +156,11 @@ function render(fields: Fields): { text: string; suspicious: boolean } {
         suspicious: false,
       };
     }
+    case "agy_worktree_trust":
+      return {
+        text: `agy trust ${oneOf(fields, "action", ["add", "remove"])} ${oneOf(fields, "result", ["added", "removed", "unchanged", "error", "remote"])} ${absolutePath(fields, "path")}`,
+        suspicious: false,
+      };
     case "started":
       return {
         text: `開始執行 task ${text(fields, "taskId", TASK_ID, "letters, digits, . _ -")}`,

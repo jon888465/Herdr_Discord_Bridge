@@ -3810,7 +3810,7 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 ## ISSUE-113：agy 在新的 worktree 資料夾會停在「信任資料夾」提示，profile 啟動不就緒，錯誤訊息沒指出要去哪個 pane 處理
 
-更新日期：2026-11-06。狀態：待決定（已知限制；尚未修正，目前靠使用者手動確認）。
+更新日期：2026-11-08。狀態：已修正、待驗收（選項 (b)，使用者 2026-11-07 明確決定的預先授權）；**尚未實機驗證**；先前：待決定（已知限制，靠使用者手動確認）。
 
 使用者可見症狀：agy 驗證卡 `REQ-20261106-agy-verify` 第一次執行時，Lead 的計畫正確（`implement` 給 `profile:agy`），但 agy pane `w3X:p2` 停在 Antigravity CLI 的選單 `Do you trust the contents of this project? > Yes, I trust this folder / No, exit`。bridge 的 `waitUntilReady` 等約 30 秒後回報 `started Agent does not match requested profile/workspace or is not ready`（09:44:19Z），implement 失敗，review、verify 因依賴它也失敗，task 在 09:44:31Z 失敗。訊息沒有提到是信任提示，也沒有指出是哪個 pane。
 
@@ -3824,7 +3824,11 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 修正範圍：無。可能的方向（未決定）：(a) 不就緒時抓畫面辨識信任提示並在訊息中指出 pane；(b) 建 worktree 時預先把路徑寫進 agy 的 `trustedWorkspaces`（會代替使用者做信任決定，需使用者同意）；(c) 先接受現狀，把「agy 每張卡要手動信任一次」寫進使用說明。
 
-未驗證：其他 profile（pi、opencode）有沒有類似的提示；agy 是否有設定可以改成信任子資料夾。
+**修正（2026-11-08，`REQ-20261107-agy-worktree-trust`；使用者預先授權，範圍僅限 bridge 自己建立的卡片 worktree 的完整路徑）：**`src/agy-worktree-trust.ts`——bridge 啟動 agy 前，把該卡片 worktree 加入 `trustedWorkspaces`。只在「agy、本機、路徑在 `card-worktrees.json` 有效記錄、realpath 恰為 `~/.herdr/worktrees/<repo>/card-req-…`」時動；上層目錄、使用者資料夾、主 repo、symlink 導出一律不加；`agent start --cwd` 明確不授權；遠端 agy 只回報需人工處理，不碰本機設定。寫入只在最後一筆後多一行（沿用縮排），原子寫入、保留權限與其他欄位，解析失敗或結構不符、設定檔是 symlink 都不修改，寫前重核對檔案沒被改過；已存在的路徑不重複加也不記所有權，`card cleanup` 只移除 bridge 自己加的那一筆（所有權記在 state 目錄 `agy-worktree-trust.json`）；每次加入與移除寫 console log 與卡片事件 `agy_worktree_trust`；**不對 pane 送任何按鍵**，agy 的其他提示不變。`herdr.ts` 只 import 型別，實作由 `main.ts` 注入本機 hub，避免循環載入。
+
+**測試（2026-11-08，本機非 sandbox，Node 26.12）：**17 個新測試，全用暫存目錄與可注入的設定檔路徑；人工接手時補上「symlink 設定檔不動」與「多行縮排只多一行、cleanup 後逐位元組還原」（先確認紅燈；Worker 版本的加入格式會讓移除後少一段空白）。**Worker 沒有跑過整套**（`npm test` 被權限提示擋住），接手時整套有 29 個檔案失敗：`herdr.ts` 載入時 import 實作造成循環 import（`Cannot access 'HerdrClient' before initialization`），已改為注入。最後整套 1494 項，1493 pass、0 fail、1 skipped，輸出無多餘 stdout；測試期間真實 `~/.gemini/antigravity-cli/settings.json` 內容與修改時間不變（37 行、mtime 1793962840）。
+
+**未驗證：**①**agy 啟動時是否重新讀取 `settings.json`（最大未知數；若否，預先加入無效）**，要以 agy 當 Worker 的測試卡實測；②遠端 agy（`agy-pod`）不在範圍；③agy 的其他 profile（pi、opencode）有沒有類似提示；agy 是否有設定可改成信任子資料夾。
 
 ## ISSUE-114：新增 `agent start <machine:agent:model:level>`，臨時指定機器、Agent、model 與推理強度（level）
 
