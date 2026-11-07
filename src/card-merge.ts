@@ -11,6 +11,8 @@ import type { ChecksConclusion, MergeMethod } from "./github.js";
 export interface MergeFacts {
   level: "L0" | "L1" | "L2";
   cardStatus: string;
+  /** 卡片有登記開著的 PR；in_progress 的卡片要有它才能 merge。 */
+  prRegistered?: boolean;
   /** 卡片最新一輪整體 review（來自 `## Review 發現`）。 */
   review: {
     verdict?: "pass" | "changes_requested" | "inconclusive";
@@ -51,8 +53,14 @@ export function checkMergeable(facts: MergeFacts): MergeCheck {
     reasons.push(
       `專案政策是 ${facts.level}，只有 L2 才允許 bridge 自己 merge（政策檔由你手寫，bridge 不會改它；用 \`card policy\` 查看）`,
     );
-  if (facts.cardStatus !== "done")
-    reasons.push(`卡片的狀態是 ${facts.cardStatus}，要是 done 才能 merge`);
+  // ISSUE-123：人工接手的卡片停在 in_progress，PR 已登記即可；其他條件不變。
+  if (
+    facts.cardStatus !== "done" &&
+    !(facts.cardStatus === "in_progress" && facts.prRegistered)
+  )
+    reasons.push(
+      `卡片的狀態是 ${facts.cardStatus}，要是 done（或 in_progress 且已登記 PR）才能 merge`,
+    );
 
   const { review } = facts;
   if (review.verdict === undefined)
