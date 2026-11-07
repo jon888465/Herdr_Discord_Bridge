@@ -163,8 +163,32 @@ function formatDuration(ms: number): string {
   return whole % 60 ? `${minutes} 分 ${whole % 60} 秒` : `${minutes} 分鐘`;
 }
 
-function isTimeoutError(error: unknown): boolean {
-  return error instanceof Error && /timed?\s?out|timeout/i.test(error.message);
+/**
+ * 只認 `runTeamTurn` 自己的「回合期限」錯誤（review F7）：
+ * - Herdr 端 agent.prompt／agent.wait 等待 Agent 狀態逾時（HerdrError，訊息 `herdr <method>: timeout …`）；
+ * - bridge 端對這兩個呼叫的 request 逾時（`herdr agent.prompt timed out`）；
+ * - `runTeamTurn` 等不到本次回應的期限（`Timed out waiting for current response …`）。
+ * 回合裡面其他短 RPC（agent.read、agent.list…）的逾時不是回合期限，不能套用回合上限與 worktree 提示。
+ */
+function isTurnDeadlineError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message;
+  return (
+    /^herdr agent\.(prompt|wait): timeout\b/.test(message) ||
+    /^herdr agent\.(prompt|wait) timed out$/.test(message) ||
+    /^Timed out waiting for current response from /.test(message)
+  );
+}
+
+/** 已知的 Worker 逾時摘要，放在失敗原因最前面（卡片只保留前 200 字元；review F4、F6）。 */
+function timedOutPrefix(reports: TeamTaskResult["reports"]): string {
+  return reports
+    .filter(
+      (report) =>
+        report.state === "failed" && report.blocker?.includes(TIMEOUT_MARK),
+    )
+    .map((report) => `${report.blocker!.split("：")[0]}; `)
+    .join("");
 }
 
 function timeoutDetail(
@@ -210,7 +234,7 @@ export async function runTeamTask(
         ? (current) => input.onQuestion!(current, phase)
         : undefined,
     ).catch((error: unknown) => {
-      if (input.signal?.aborted || !isTimeoutError(error)) throw error;
+      if (input.signal?.aborted || !isTurnDeadlineError(error)) throw error;
       throw new Error(
         timeoutDetail(`Lead ${phase}`, error as Error, startedAt, timeoutMs),
       );
@@ -480,7 +504,7 @@ export async function runTeamTask(
       emit({
         type: "task_blocked",
         taskId: input.taskId,
-        detail: "Lead is blocked during synthesis",
+        detail: `${timedOutPrefix(reports)}Lead is blocked during synthesis`,
       });
       return { taskId: input.taskId, state: "blocked", plan, reports };
     }
@@ -489,10 +513,6 @@ export async function runTeamTask(
     considerGate();
     const blocked = reports.some((report) => report.state === "blocked");
     const failed = reports.some((report) => report.state === "failed");
-    const timedOut = reports.filter(
-      (report) =>
-        report.state === "failed" && report.blocker?.includes(TIMEOUT_MARK),
-    );
     const gateFailed = input.coding === true && (gate?.reasons.length ?? 1) > 0;
     const outcome =
       failed || (gateFailed && !blocked)
@@ -512,7 +532,7 @@ export async function runTeamTask(
       paneId: input.lead.pane_id,
       detail: failed
         ? // 卡片的失敗原因只保留前 200 字元：逾時資訊放最前面，才不會被後面很長的 gate 原因截掉（review F4）。
-          `${timedOut.map((report) => `${report.blocker!.split("：")[0]}; `).join("")}one or more Assignments failed; synthesis is partial${gate?.reasons.length ? `; ${gate.reasons.join("; ")}` : ""}`
+          `${timedOutPrefix(reports)}one or more Assignments failed; synthesis is partial${gate?.reasons.length ? `; ${gate.reasons.join("; ")}` : ""}`
         : blocked
           ? "one or more Assignments require input"
           : gateFailed
@@ -527,8 +547,10 @@ export async function runTeamTask(
       synthesis,
     };
   } catch (error) {
-    const detail =
-      error instanceof Error ? error.message : "orchestration failed";
+    // 已經有 Worker 逾時時，之後不論哪個步驟失敗，原因都要保留逾時摘要（review F6）。
+    const detail = `${timedOutPrefix(reports)}${
+      error instanceof Error ? error.message : "orchestration failed"
+    }`;
     if (!input.signal?.aborted)
       emit({ type: "task_failed", taskId: input.taskId, detail });
     throw error;
@@ -660,7 +682,7 @@ async function runAssignment(
     if (input.signal?.aborted) throw error;
     const detail =
       error instanceof Error
-        ? inTurn && isTimeoutError(error)
+        ? inTurn && isTurnDeadlineError(error)
           ? timeoutDetail(
               `Assignment ${assignment.id}`,
               error,

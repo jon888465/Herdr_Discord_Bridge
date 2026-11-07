@@ -863,6 +863,120 @@ test("ISSUE-124 取得 Worker 時的 RPC 逾時不被當成 Worker 回合逾時"
   assert.ok(!/等待逾時|worktree/.test(failed?.detail ?? ""));
 });
 
+// review F7：回合裡面的短 RPC（例如 onQuestion 呼叫 readAgent）逾時不是「回合期限」；
+// 只有 runTeamTurn 自己的期限錯誤（agent.prompt／agent.wait 的逾時、Timed out waiting for current response）才算。
+test("ISSUE-124 只有真正的回合期限錯誤才被當成回合逾時，回合內的短 RPC 逾時不是", async () => {
+  const cases: Array<[string, boolean]> = [
+    ["herdr agent.prompt: timeout timed out waiting for agent status", true],
+    ["herdr agent.wait: timeout timed out waiting for agent status", true],
+    ["herdr agent.prompt timed out", true],
+    ["herdr agent.wait timed out", true],
+    [
+      "Timed out waiting for current response from w2:p6 (last state: working); no verified completion",
+      true,
+    ],
+    ["herdr agent.read timed out", false],
+    ["herdr agent.list timed out", false],
+    ["herdr request agent.list timed out after 5000ms", false],
+    ["connection timeout while reading the pane", false],
+  ];
+  for (const [message, isDeadline] of cases) {
+    const port = timeoutPort([], []);
+    port.waitAgent = async (target, _until, _timeout) => {
+      if (target === workerA.pane_id) throw new Error(message);
+      return {
+        ...(target === lead.pane_id ? lead : workerA),
+        agent_status: "idle",
+      };
+    };
+    const result = await runTeamTask(
+      {
+        taskId: "t124f7",
+        prompt: "x",
+        lead,
+        workers: [workerA, workerB],
+        timeoutMs: 1500,
+      },
+      port,
+      () => {},
+    );
+    const impl = result.reports.find((r) => r.assignmentId === "impl")!;
+    assert.equal(impl.state, "failed", message);
+    if (isDeadline) {
+      assert.match(impl.blocker ?? "", /等待逾時/, message);
+      assert.match(impl.blocker ?? "", /上限 1\.5 秒/, message);
+    } else {
+      assert.equal(impl.blocker, message);
+      const dependent = result.reports.find(
+        (r) => r.assignmentId === "review",
+      )!;
+      assert.equal(dependent.blocker, "dependency impl did not complete");
+    }
+  }
+});
+
+// review F6：Worker 已逾時，之後 Lead 彙整才失敗（非逾時錯誤）或受阻：卡片的失敗原因不能只剩彙整的錯誤。
+test("ISSUE-124 Worker 逾時後 Lead 彙整失敗或受阻，原因仍保留 Worker 逾時摘要", async () => {
+  // 彙整丟出非逾時錯誤
+  {
+    const events: OrchestrationEvent[] = [];
+    const port = timeoutPort([workerA.pane_id], []);
+    const original = port.waitAgent.bind(port);
+    let leadWaits = 0;
+    port.waitAgent = async (target, until, timeoutMs) => {
+      if (target === lead.pane_id && ++leadWaits >= 2)
+        throw new Error("Lead synthesis exploded");
+      return original(target, until, timeoutMs);
+    };
+    await assert.rejects(
+      runTeamTask(
+        {
+          taskId: "t124f6a",
+          prompt: "x",
+          lead,
+          workers: [workerA, workerB],
+          timeoutMs: 1500,
+        },
+        port,
+        (event) => events.push(event),
+      ),
+      /Lead synthesis exploded/,
+    );
+    const failed = events.find((e) => e.type === "task_failed");
+    const detail = failed?.detail ?? "";
+    assert.match(detail, /Lead synthesis exploded/);
+    assert.match(detail, /Assignment impl 等待逾時/);
+    assert.ok(detail.indexOf("等待逾時") < 60, detail);
+  }
+  // 彙整受阻（blocked）
+  {
+    const events: OrchestrationEvent[] = [];
+    const port = timeoutPort([workerA.pane_id], []);
+    // Lead 的第二個回合（彙整）在原子 prompt 就回報 blocked，這是 runTeamTurn 回傳 blocked 的路徑。
+    let leadPrompts = 0;
+    port.promptAgentAndWait = async (target, text) => {
+      await port.promptAgent(target, text);
+      if (target === lead.pane_id && ++leadPrompts >= 2)
+        return { ...lead, agent_status: "blocked" };
+      return undefined;
+    };
+    const result = await runTeamTask(
+      {
+        taskId: "t124f6b",
+        prompt: "x",
+        lead,
+        workers: [workerA, workerB],
+        timeoutMs: 1500,
+      },
+      port,
+      (event) => events.push(event),
+    );
+    assert.equal(result.state, "blocked");
+    const blocked = events.find((e) => e.type === "task_blocked");
+    assert.match(blocked?.detail ?? "", /Assignment impl 等待逾時/);
+  }
+});
+
 test("ISSUE-124 Lead 規劃回合逾時也明寫逾時", async () => {
   const events: OrchestrationEvent[] = [];
   await assert.rejects(
