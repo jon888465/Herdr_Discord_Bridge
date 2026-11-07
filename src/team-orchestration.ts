@@ -546,6 +546,9 @@ async function runAssignment(
   previousReports: TeamTaskResult["reports"],
 ): Promise<TeamTaskResult["reports"][number]> {
   let startedAt = Date.now();
+  // 只有真正進入 Worker 回合（runTeamTurn）之後的逾時才算「回合逾時」；
+  // 派工前取得 Worker 的 RPC（例如 agent.list）逾時不是，原樣回報，不套用回合上限與 worktree 提示。
+  let inTurn = false;
   try {
     input.signal?.throwIfAborted();
     const acquired = input.acquireWorker
@@ -570,6 +573,7 @@ async function runAssignment(
       throw new Error(`Worker is ${worker.agent_status}`);
     input.codingHooks?.onAssignmentStart(assignment, worker);
     startedAt = Date.now();
+    inTurn = true;
     const settled = await runTeamTurn(
       worker,
       assignmentInstruction(input, assignment) +
@@ -655,7 +659,7 @@ async function runAssignment(
     if (input.signal?.aborted) throw error;
     const detail =
       error instanceof Error
-        ? isTimeoutError(error)
+        ? inTurn && isTimeoutError(error)
           ? timeoutDetail(
               `Assignment ${assignment.id}`,
               error,

@@ -825,6 +825,36 @@ test("ISSUE-124 非逾時的 Worker 失敗訊息原樣不變", async () => {
   assert.ok(!/逾時/.test(failed?.detail ?? ""));
 });
 
+// review F2：派工前取得 Worker（例如 agent.list RPC）逾時不是「Worker 回合逾時」，
+// 不能被寫成上限 30 分鐘，也不能提示 worktree 產出。
+test("ISSUE-124 取得 Worker 時的 RPC 逾時不被當成 Worker 回合逾時", async () => {
+  const events: OrchestrationEvent[] = [];
+  const result = await runTeamTask(
+    {
+      taskId: "t124c",
+      prompt: "x",
+      lead,
+      workers: [workerA, workerB],
+      timeoutMs: 1500,
+      acquireWorker: async (worker) => {
+        if (worker.pane_id === workerA.pane_id)
+          throw new Error("herdr request agent.list timed out after 5000ms");
+        return { agent: worker, continuity: "new-session" };
+      },
+    },
+    timeoutPort([], []),
+    (event) => events.push(event),
+  );
+  const impl = result.reports.find((r) => r.assignmentId === "impl")!;
+  assert.equal(impl.state, "failed");
+  assert.equal(impl.blocker, "herdr request agent.list timed out after 5000ms");
+  assert.ok(!/等待逾時/.test(impl.blocker ?? ""));
+  const dependent = result.reports.find((r) => r.assignmentId === "review")!;
+  assert.equal(dependent.blocker, "dependency impl did not complete");
+  const failed = events.find((e) => e.type === "task_failed");
+  assert.ok(!/等待逾時|worktree/.test(failed?.detail ?? ""));
+});
+
 test("ISSUE-124 Lead 規劃回合逾時也明寫逾時", async () => {
   const events: OrchestrationEvent[] = [];
   await assert.rejects(

@@ -150,7 +150,13 @@ export function teamTaskTimeoutMs(
 }
 
 function positiveInt(value: unknown, fallback: number, max: number): number {
-  const parsed = typeof value === "number" ? value : Number(value);
+  let parsed: number;
+  try {
+    parsed = typeof value === "number" ? value : Number(value);
+  } catch {
+    // JSON 物件的 toString 不是函式時 Number() 會拋 TypeError；設定值不可讓 bridge 無法啟動。
+    return fallback;
+  }
   if (!Number.isFinite(parsed) || parsed < 1) return fallback;
   return Math.min(Math.floor(parsed), max);
 }

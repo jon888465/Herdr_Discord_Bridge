@@ -41,6 +41,18 @@ test("ISSUE-124 teamTurnTimeoutMs 無效值回到預設且不拋出", () => {
   }
 });
 
+// review F1：JSON 物件的 toString 不是函式時，Number() 會拋 TypeError；設定值不可讓 bridge 無法啟動。
+// positiveInt 是所有數值設定共用的，approvalTimeoutMs 也要一樣安全。
+test("ISSUE-124 物件值（toString 不是函式）回到預設，不會讓 loadConfig 拋出", () => {
+  for (const value of ['{"toString": null}', '{"valueOf": 1, "toString": 2}']) {
+    const config = withConfig(
+      `{"teamTurnTimeoutMs": ${value}, "approvalTimeoutMs": ${value}}`,
+    );
+    assert.equal(config.teamTurnTimeoutMs, 1800000, value);
+    assert.equal(config.approvalTimeoutMs, 900000, value);
+  }
+});
+
 test("ISSUE-124 Team 回合上限取自 teamTurnTimeoutMs，與 approvalTimeoutMs 互不影響", () => {
   const a = withConfig(
     '{"teamTurnTimeoutMs": 4000, "approvalTimeoutMs": 9000}',
