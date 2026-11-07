@@ -78,6 +78,10 @@ export function formatReviewReply(
   } else lines.push("", "⚠️ 這次的結果沒有寫入卡片。");
 
   if (result.closed) lines.push("reviewer 的 pane 已關閉。");
+  else if (result.paneKept)
+    lines.push(
+      `reviewer 的 pane 已保留${result.closeNote ? `（${result.closeNote}）` : ""}；請到 pane 處理提示後自行關閉。`,
+    );
   else
     lines.push(
       `⚠️ reviewer 的 pane 未能關閉${result.closeNote ? `：${result.closeNote}` : ""}；請手動關閉它。`,

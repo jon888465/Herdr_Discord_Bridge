@@ -63,6 +63,8 @@ interface Options {
   split?: () => unknown;
   closeFails?: boolean;
   listing?: AgentRecord[][];
+    /** agent.read 依序回傳的畫面（用完重複最後一筆）。 */
+    screens?: string[];
 }
 
 function setup(options: Options = {}) {
@@ -77,6 +79,12 @@ function setup(options: Options = {}) {
       if (method === "pane.split")
         return options.split?.() ?? { pane: { pane_id: "w5:p9", workspace_id: "w5", terminal_id: "term_new" } };
       if (method === "pane.get") return { pane: { pane_id: "w5:p9", terminal_id: "term_new" } };
+      if (method === "agent.read") {
+        const queue = options.screens ?? [""];
+        const text = queue.length > 1 ? (queue.shift() as string) : queue[0];
+        return { read: { text } };
+      }
+      if (method === "pane.send_keys") return {};
       if (method === "pane.close") {
         if (options.closeFails) throw new Error("close refused");
         return {};
@@ -204,14 +212,16 @@ test("when the pane cannot be opened nothing is started, and when the Agent cann
   assert.ok(start.log.includes("pane.close"));
 });
 
-test("an Agent that stays blocked or never gets ready fails the round, the pane is closed, and nothing is changed", async () => {
+test("an Agent that stays blocked keeps its pane for a human, one that never gets ready has its pane closed, and nothing is changed", async () => {
   const blocked = setup({ start: () => fixer({ agent_status: "blocked" }) });
   const a = await runCardFix(blocked.deps, input());
   assert.ok(a.ok);
   assert.equal(a.ok && a.outcome.kind, "failed");
   assert.match(a.ok && a.outcome.kind === "failed" ? a.outcome.reason : "", /blocked/);
   assert.equal(blocked.log.includes("runTurn"), false);
-  assert.ok(blocked.log.includes("pane.close"));
+  assert.equal(blocked.log.includes("pane.close"), false);
+  assert.equal(a.ok && a.closed, false);
+  assert.equal(a.ok && a.paneKept, true);
 
   const slow = setup({ start: () => fixer({ agent_status: "working" }), listing: [[fixer({ agent_status: "working" })]] });
   const b = await runCardFix(slow.deps, input());
@@ -300,4 +310,28 @@ test("a pane that cannot be closed is reported but does not change the outcome",
   assert.equal(result.ok && result.outcome.kind, "fixed");
   assert.equal(result.ok && result.closed, false);
   assert.match(result.ok ? (result.closeNote ?? "") : "", /close refused/);
+});
+
+const CODEX_UPDATE = "Update available · 0.166.0 → 0.167.0\n1. Update now\n2. Skip\n3. Skip until next version";
+
+test("a skipped update prompt is reported in the fix result, and a pane still blocked afterwards is kept", async () => {
+  const done = setup({
+    start: () => fixer({ agent: "codex", agent_status: "blocked" }),
+    listing: [[fixer({ agent: "codex", agent_status: "idle" })]],
+    screens: [CODEX_UPDATE, "ready"],
+  });
+  const ok = await runCardFix(done.deps, input({ requestedKind: "codex" }));
+  assert.ok(ok.ok);
+  assert.deepEqual(ok.ok && ok.updateSkip, { kind: "codex", paneId: "w5:p9", key: "3" });
+  assert.ok(done.log.includes("pane.close"));
+
+  const stuck = setup({
+    start: () => fixer({ agent: "codex", agent_status: "blocked" }),
+    screens: [CODEX_UPDATE],
+  });
+  const kept = await runCardFix(stuck.deps, input({ requestedKind: "codex" }));
+  assert.ok(kept.ok);
+  assert.equal(kept.ok && kept.paneKept, true);
+  assert.equal(kept.ok && kept.updateSkip?.key, "3");
+  assert.equal(stuck.log.includes("pane.close"), false);
 });

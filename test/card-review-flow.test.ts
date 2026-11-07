@@ -84,6 +84,8 @@ function setup(
     closeFails?: boolean;
     /** 啟動後輪詢用的 Agent 清單（每次呼叫回傳一次；用完後重複最後一筆）。 */
     listing?: Array<AgentRecord[]>;
+    /** agent.read 依序回傳的畫面（用完重複最後一筆）。 */
+    screens?: string[];
   } = {},
 ): Setup {
   const log: string[] = [];
@@ -114,6 +116,12 @@ function setup(
         );
       if (method === "pane.get")
         return { pane: { pane_id: "w5:p9", terminal_id: "term_new" } };
+      if (method === "agent.read") {
+        const queue = options.screens ?? [""];
+        const text = queue.length > 1 ? (queue.shift() as string) : queue[0];
+        return { read: { text } };
+      }
+      if (method === "pane.send_keys") return {};
       if (method === "pane.close") {
         if (options.closeFails) throw new Error("close refused");
         return {};
@@ -405,4 +413,27 @@ test("a failing agent listing while waiting is inconclusive with the reason, and
   assert.equal(result.ok && result.batch.verdict, "inconclusive");
   assert.match(result.ok ? (result.inconclusiveReason ?? "") : "", /socket closed/);
   assert.ok(log.includes("pane.close"));
+});
+
+test("a skipped update prompt is reported in the review result; a pane still blocked afterwards is kept and marked as kept, not as a failed close", async () => {
+  const update = "Update available · 0.166.0 → 0.167.0\n3. Skip until next version";
+  const done = setup({
+    start: () => reviewer({ agent: "codex", agent_status: "blocked" }),
+    listing: [[reviewer({ agent: "codex", agent_status: "idle" })]],
+    screens: [update, "ready"],
+  });
+  const ok = await runCardReview(done.deps, input({ requestedKind: "codex" }));
+  assert.ok(ok.ok);
+  assert.deepEqual(ok.ok && ok.updateSkip, { kind: "codex", paneId: "w5:p9", key: "3" });
+
+  const stuck = setup({
+    start: () => reviewer({ agent: "codex", agent_status: "blocked" }),
+    screens: [update],
+  });
+  const kept = await runCardReview(stuck.deps, input({ requestedKind: "codex" }));
+  assert.ok(kept.ok);
+  assert.equal(kept.ok && kept.paneKept, true);
+  assert.match(kept.ok ? (kept.closeNote ?? "") : "", /保留/);
+  assert.equal(kept.ok && kept.updateSkip?.key, "3");
+  assert.equal(stuck.log.includes("pane.close"), false);
 });

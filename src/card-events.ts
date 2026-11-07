@@ -99,6 +99,13 @@ export type CardEvent = { time: string; eventId: string } & (
   | { event: "failed"; code: string; reason?: string }
   | { event: "cancelled"; by: "user" | "bridge" }
   | { event: "cleanup_done"; result: "removed" | "kept" }
+  | {
+      /** 啟動時自動跳過 CLI 的已知更新提示（只限更新提示）。 */
+      event: "update_prompt_skipped";
+      cli: string;
+      paneId: string;
+      key: string;
+    }
   | { event: "cleanup_pending"; reason: (typeof CLEANUP_PENDING)[number] }
 );
 
@@ -249,6 +256,15 @@ function render(fields: Fields): { text: string; suspicious: boolean } {
         text: `清理完成：${oneOf(fields, "result", ["removed", "kept"] as const)}`,
         suspicious: false,
       };
+    case "update_prompt_skipped": {
+      const cli = text(fields, "cli", AGENT, "agent kind");
+      const pane = text(fields, "paneId", /^[A-Za-z0-9:._-]{1,40}$/, "pane id");
+      const key = text(fields, "key", /^[A-Za-z0-9]{1,8}$/, "key");
+      return {
+        text: `已自動跳過 ${cli} 的更新提示（pane ${pane}、按鍵 ${key}）`,
+        suspicious: false,
+      };
+    }
     case "cleanup_pending":
       return {
         text: `清理待處理：${oneOf(fields, "reason", CLEANUP_PENDING)}`,

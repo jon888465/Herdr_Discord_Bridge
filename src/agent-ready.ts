@@ -13,6 +13,16 @@ export interface ReadyDeps {
 }
 
 // Shared across calls on the same bridge port, including concurrent waits.
+export interface UpdateSkip {
+  kind: string;
+  paneId: string;
+  key: string;
+}
+
+export type ReadyResult =
+  | { ok: true; agent: AgentRecord; updateSkip?: UpdateSkip }
+  | { ok: false; reason: string; updateSkip?: UpdateSkip };
+
 const skippedPanes = new WeakMap<AgentStartPort, Set<string>>();
 
 const READY_TIMEOUT_MS = 30_000;
@@ -25,9 +35,9 @@ async function skipKnownUpdate(
   deps: ReadyDeps,
   paneId: string,
   kind: string | undefined,
-): Promise<boolean> {
+): Promise<{ proceed: boolean; skip?: UpdateSkip }> {
   let sent = skippedPanes.get(deps.panePort);
-  if (sent?.has(paneId)) return false;
+  if (sent?.has(paneId)) return { proceed: false };
   const readScreen = async (): Promise<string | undefined> => {
     const result = await deps.panePort.request("agent.read", {
       target: paneId,
@@ -39,17 +49,18 @@ async function skipKnownUpdate(
     const text = record.read?.text ?? record.text;
     return typeof text === "string" ? text : undefined;
   };
+  let skip: UpdateSkip | undefined;
   try {
     const screen = await readScreen();
     const entry =
       screen === undefined ? undefined : matchUpdatePrompt(kind, screen);
-    if (!entry) return false;
+    if (!entry) return { proceed: false };
     // Recheck after the read: another wait may have sent while we awaited it.
     if (!sent) {
       sent = skippedPanes.get(deps.panePort) ?? new Set<string>();
       skippedPanes.set(deps.panePort, sent);
     }
-    if (sent.has(paneId)) return false;
+    if (sent.has(paneId)) return { proceed: false };
     sent.add(paneId); // Uncertain delivery must never be retried.
     await deps.panePort.request(
       "pane.send_keys",
@@ -62,12 +73,16 @@ async function skipKnownUpdate(
     console.log(
       `已自動跳過 ${entry.kind} 的更新提示（pane ${paneId}、按鍵 ${entry.skipKey}）`,
     );
+    skip = { kind: entry.kind, paneId, key: entry.skipKey };
     const after = await readScreen();
-    return (
-      after !== undefined && !entry.match.every((text) => after.includes(text))
-    );
+    return {
+      proceed:
+        after !== undefined &&
+        !entry.match.every((text) => after.includes(text)),
+      skip,
+    };
   } catch {
-    return false;
+    return { proceed: false, ...(skip ? { skip } : {}) };
   }
 }
 
@@ -80,48 +95,53 @@ export async function waitUntilReady(
   deps: ReadyDeps,
   pane: { paneId: string; terminalId: string },
   started: AgentRecord,
-): Promise<{ ok: true; agent: AgentRecord } | { ok: false; reason: string }> {
+): Promise<ReadyResult> {
   let agent = started;
+  let updateSkip: UpdateSkip | undefined;
+  const withSkip = <T extends object>(result: T) =>
+    updateSkip ? { ...result, updateSkip } : result;
   if (agent.agent_status === "idle") return { ok: true, agent };
-  if (
-    agent.agent_status === "blocked" &&
-    !(await skipKnownUpdate(deps, pane.paneId, agent.agent))
-  )
-    return { ok: false, reason: BLOCKED_AT_START };
+  if (agent.agent_status === "blocked") {
+    const handled = await skipKnownUpdate(deps, pane.paneId, agent.agent);
+    updateSkip = handled.skip ?? updateSkip;
+    if (!handled.proceed)
+      return withSkip({ ok: false as const, reason: BLOCKED_AT_START });
+  }
   const timeout = deps.readyTimeoutMs ?? READY_TIMEOUT_MS;
   const poll = deps.readyPollMs ?? READY_POLL_MS;
   const deadline = Date.now() + timeout;
   for (;;) {
     if (Date.now() >= deadline)
-      return {
-        ok: false,
+      return withSkip({
+        ok: false as const,
         reason: `reviewer 在 ${Math.round(timeout / 1000)} 秒內沒有就緒（狀態 ${agent.agent_status}）`,
-      };
+      });
     await new Promise((resolve) => setTimeout(resolve, poll));
     let listed: AgentRecord[];
     try {
       listed = await deps.panePort.listAgentsWithWorkspaceNames();
     } catch (error) {
-      return {
-        ok: false,
+      return withSkip({
+        ok: false as const,
         reason: `等待 reviewer 就緒時讀取 Agent 清單失敗：${error instanceof Error ? error.message : "unknown error"}`,
-      };
+      });
     }
     const current = listed.find(
       (item) =>
         item.pane_id === pane.paneId && item.terminal_id === pane.terminalId,
     );
     if (!current)
-      return {
-        ok: false,
+      return withSkip({
+        ok: false as const,
         reason: "等待 reviewer 就緒時，它的 pane 不見了（消失或被換掉）",
-      };
+      });
     agent = current;
-    if (agent.agent_status === "idle") return { ok: true, agent };
-    if (
-      agent.agent_status === "blocked" &&
-      !(await skipKnownUpdate(deps, pane.paneId, agent.agent))
-    )
-      return { ok: false, reason: BLOCKED_AT_START };
+    if (agent.agent_status === "idle") return withSkip({ ok: true as const, agent });
+    if (agent.agent_status === "blocked") {
+      const handled = await skipKnownUpdate(deps, pane.paneId, agent.agent);
+      updateSkip = handled.skip ?? updateSkip;
+      if (!handled.proceed)
+        return withSkip({ ok: false as const, reason: BLOCKED_AT_START });
+    }
   }
 }

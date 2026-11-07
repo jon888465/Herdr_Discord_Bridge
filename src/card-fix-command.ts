@@ -17,7 +17,9 @@ export function formatFixReply(
   const outcome = result.outcome;
   const closing = result.closed
     ? "作者的 pane 已關閉。"
-    : `⚠️ 作者的 pane 未能關閉${result.closeNote ? `：${result.closeNote}` : ""}；請手動關閉它。`;
+    : result.paneKept
+      ? `作者的 pane 已保留${result.closeNote ? `（${result.closeNote}）` : ""}；請到 pane 處理提示後自行關閉。`
+      : `⚠️ 作者的 pane 未能關閉${result.closeNote ? `：${result.closeNote}` : ""}；請手動關閉它。`;
   const skippedLines = (skipped: Array<{ id: string; reason: string }>) =>
     skipped.length > 0
       ? [

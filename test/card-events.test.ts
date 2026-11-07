@@ -95,6 +95,10 @@ const templates: Array<[CardEvent, string]> = [
   [{ ...base, event: "cancelled", by: "user" }, "已取消（user）"],
   [{ ...base, event: "cleanup_done", result: "removed" }, "清理完成：removed"],
   [
+    { ...base, event: "update_prompt_skipped", cli: "codex", paneId: "w5:p9", key: "3" },
+    "已自動跳過 codex 的更新提示（pane w5:p9、按鍵 3）",
+  ],
+  [
     { ...base, event: "cleanup_pending", reason: "dirty_worktree" },
     "清理待處理：dirty_worktree",
   ],

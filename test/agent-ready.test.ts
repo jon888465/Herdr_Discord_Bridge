@@ -75,6 +75,7 @@ test("persistent update fails blocked and never sends again for that pane", asyn
   assert.deepEqual(await waitUntilReady(deps, pane, agent()), {
     ok: false,
     reason: blockedReason,
+    updateSkip: { kind: "codex", paneId: pane.paneId, key: "3" },
   });
   assert.deepEqual(await waitUntilReady(deps, pane, agent()), {
     ok: false,
@@ -117,10 +118,9 @@ for (const [kind, screen] of [
 for (const screen of [new Error("read failed"), {}, { read: { text: 123 } }]) {
   test(`failed or invalid screen read keeps original blocked behavior: ${String(screen)}`, async () => {
     const { deps, calls } = fixture([screen]);
-    assert.deepEqual(await waitUntilReady(deps, pane, agent()), {
-      ok: false,
-      reason: blockedReason,
-    });
+    const outcome = await waitUntilReady(deps, pane, agent());
+    assert.equal(outcome.ok, false);
+    assert.equal(!outcome.ok && outcome.reason, blockedReason);
     assert.deepEqual(
       calls.map((c) => c.method),
       ["agent.read"],
@@ -163,11 +163,21 @@ test("uncertain key delivery and failed post-send read are never retried", async
         throw new Error("delivery unknown");
       return result;
     };
-    assert.deepEqual(await waitUntilReady(deps, pane, agent()), {
-      ok: false,
-      reason: blockedReason,
-    });
+    const outcome = await waitUntilReady(deps, pane, agent());
+    assert.equal(outcome.ok, false);
+    assert.equal(!outcome.ok && outcome.reason, blockedReason);
     await waitUntilReady(deps, pane, agent());
     assert.equal(calls.filter((c) => c.method === "pane.send_keys").length, 1);
   }
+});
+
+test("a skipped update prompt is returned so callers can record it", async () => {
+  const { deps } = fixture([{ text: update }, { text: "ready" }]);
+  const result = await waitUntilReady(deps, pane, agent());
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.updateSkip, {
+    kind: "codex",
+    paneId: pane.paneId,
+    key: "3",
+  });
 });
