@@ -3770,7 +3770,7 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 ## ISSUE-115：Team 的 verify 在 sandbox 內跑 `npm test` 一定撞 socket 限制，權限請求過期會讓整個 task 失敗
 
-更新日期：2026-11-06。狀態：待決定（已知限制；尚未修正）。
+更新日期：2026-11-07。狀態：已修正、待驗收（僅限下方「2026-11-07 補充：codex 在卡片 worktree 寫 git」面向）；原本的 verify 逾時面向仍為待決定（已知限制；尚未修正）。
 
 使用者可見症狀：卡片 `REQ-20261106-agent-launch-spec`（task `task-f1480af3-308c-412f-85d8-caf25adc194d`）的 verify 由 codex（`profile:helper`）執行，`npm test` 在 sandbox 內因禁止 Unix socket listen 失敗（`EPERM`），codex 要求在 sandbox 外重跑，bridge 把它轉成權限請求。12:25 開出第一次請求，使用者選「1」（只允許這一次）；12:43 第二回合 `verify2` 再問一次，等到 12:58 逾時（約 15 分鐘），`verify2` 回報 `Timed out waiting for current response from w41:p4 (last state: blocked)`，task 失敗（`autopick_stopped`），**即使實作與兩輪 review（第 2 輪 pass）都已完成**。更早的 `REQ-20261106-agy-pool` 也問過同一個請求。
 
@@ -3783,6 +3783,20 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 修正範圍：無。可能的方向（未決定）：(a) 使用者選「以後都不問」（放寬 sandbox 範圍，由使用者決定）；(b) verify 的提示改成「`npm test` 的 socket 測試在 sandbox 內會失敗，改請求權限前先說明」，或讓 verify 只跑 build 與相關測試，完整測試交 CI；(c) 權限請求過期時把指派標為 blocked 等人，而不是令 task 失敗，並可重新發出；(d) 請求等待超過一半時間時由 bridge 再通知一次。
 
 未驗證：codex 以外的 verify Worker（claude）是否也會撞同一個限制；(c) 的行為牽涉 `src/team-orchestration.ts`，修改前需確認不影響其他逾時語意。
+
+### 2026-11-07 補充：codex 在卡片 worktree 寫 git 會卡在權限提示（REQ-20261107-codex-worktree-git）
+
+**症狀：**卡片 Worker 若是 codex，執行 `git add`、`git add -N`、`git reset`、`git stash` 等寫 git 的指令會跳權限提示，約 15 分鐘沒人處理即逾時，Worker 任務失敗、整張卡失敗。2026-11-07 連續兩張卡（`REQ-20261107-flow-notify`、`REQ-20261107-tab-naming`）因此失敗；`flow-notify` 已寫完近乎全部程式，只差量 patch 大小用的 `git add -N`／`git reset`。
+
+**已確認根因：**卡片的 worktree 是 git linked worktree，它的 index 與 HEAD 放在**主 repo 底下**的 `<repo>/.git/worktrees/<名稱>/`，在 codex workspace-write 沙箱可寫範圍（只有 worktree 目錄本身）之外。
+
+**2026-11-07 實測（本機，拋棄式 repo 加 linked worktree）：**(1) 在 `codex sandbox` 內執行 `git add -N new.txt` 失敗：`fatal: Unable to create '…/.git/worktrees/wt/index.lock': Operation not permitted`；(2) `codex --add-dir <DIR>` 只有在有效沙箱是 workspace-write（或 danger-full-access）時才生效，否則 codex 印 `Error adding directories: Ignoring --add-dir … because the effective permissions do not allow additional writable roots` 並直接結束、不啟動（在未信任的測試資料夾實測；該資料夾另會先跳「Trust this folder」，不在本項範圍，bridge 仍不替人確認信任）。
+
+**修正（原始碼，2026-11-07）：**`src/cli-adapter.ts` 新增 `extraLaunchArgsFor`（per-kind 設計旁，可注入 git 目錄解析函式），為唯一組裝點：只有 codex、cwd 是 linked worktree、`git rev-parse --git-dir` 的 realpath 直接位於主 repo `.git/worktrees/` 底下時，加**一個** `--add-dir <該 worktree 的 git 目錄>`；非 codex、一般 repo、非 git 目錄、解析失敗、路徑不符（如 symlink 指到別處）都不加、參數不變。入口：`src/agent-start.ts` 的 `startAgentInPane` 吃新的 `cwd`（`card review`／`card fix` 的 reviewer 與修正者經 `card-review-flow.ts`／`card-fix-flow.ts` 傳 `worktreePath`；autopick Lead 傳 `repoPath`；`agent start` 只在本機傳 `--cwd`），profile Worker 在 `src/herdr.ts` 直接呼叫同一函式。**沒有**加任何放寬旗標（`--dangerously-bypass-approvals-and-sandbox`、`-a never`、`--approve-for-me`、`-s danger-full-access`），沒有改 `~/.codex/config.toml`、`config.json`、`policy.yml`，沒有自動確認提示，approval 政策不變；其他指令（寫 worktree 外、網路、`herdr`）仍會問。codex 因忽略 `--add-dir` 而結束時（`agent.start` 錯誤，或啟動後偵測不到 Agent 且 pane 輸出含 `Ignoring --add-dir`／`do not allow additional writable roots`），呼叫端得到含「--add-dir 被忽略，有效沙箱不是 workspace-write」的錯誤；不退回無參數啟動、不改更寬鬆模式。`SPEC.md` 已同步。
+
+**測試（2026-11-07，本機，非 sandbox；假 port，拋棄式 git repo／worktree，不呼叫真 codex）：**先寫測試，`npm run build` 得到預期 red（9 個 TS 錯誤，新匯出尚不存在）；實作後 `npm run build` 通過，`node --test dist/test/*.test.js`：1425 項，1424 pass、0 fail、1 skipped（既有的略過）。新增涵蓋：codex＋真實 linked worktree 恰一個 `--add-dir`；非 codex 不變；一般 repo／非 git／不存在的目錄不加；git 目錄被 symlink 導出 `.git/worktrees/` 外不加、注入解析結果的各種不符情形不加；參數清單直接掃無放寬旗標；profile Worker、`startAgentInPane`、`agent start` 的啟動參數；忽略 `--add-dir` 的明確錯誤（`agent.start` 失敗與啟動後結束兩條路徑，且只啟動一次）。為避免環境耦合，`test/agent-launch.test.ts` 原本以 `process.cwd()`（在本 worktree 內是 linked worktree）當 cwd 的夾具改成非 git 暫存資料夾，斷言沒有改動或刪除。
+
+**狀態分開記錄：**原始碼已改、build 與上述自動化測試通過；**執行中的 bridge 尚未重啟或部署**，舊的執行檔不含此修正；舊的卡片失敗不會補送。**尚未實機驗證：**`--add-dir` 在已信任的卡片 worktree、有效模式為 workspace-write 時，是否真的讓 `git add -N` 不再跳提示，沒有驗證過；`--add-dir` 被忽略的錯誤路徑只以假 port 測過，沒有用真實 codex 測。下一步：重啟 bridge 後以 codex 當 Worker 跑一張會 `git add -N` 的卡片並記錄結果。在此之前不可標「已驗收」。
 
 ## ISSUE-116：`agent start` 在很小的 pane 啟動 agy 時，agy 停在信任提示卻被回報「已啟動」
 

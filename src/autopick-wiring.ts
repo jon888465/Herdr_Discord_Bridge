@@ -90,6 +90,7 @@ export function createAutopickSteps(deps: AutopickWiringDeps): AutopickSteps {
           paneId,
           kind: job.lead,
           name: `hdb-autopick-${randomUUID().slice(0, 8)}`,
+          cwd: job.repoPath,
         });
         if (!["idle", "done"].includes(lead.agent_status))
           throw new Error(
