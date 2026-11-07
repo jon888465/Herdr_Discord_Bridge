@@ -795,6 +795,14 @@ test("ISSUE-124 Worker 回合逾時：失敗原因寫出逾時、assignment、�
   const failed = events.find((e) => e.type === "task_failed");
   assert.match(failed?.detail ?? "", /one or more Assignments failed/);
   assert.match(failed?.detail ?? "", /等待逾時/);
+  // review F4：卡片的失敗原因只保留前 200 字元，逾時資訊必須排在通用說明與 gate 原因之前。
+  const detail = failed?.detail ?? "";
+  assert.ok(
+    detail.indexOf("等待逾時") <
+      detail.indexOf("one or more Assignments failed"),
+    detail,
+  );
+  assert.ok(detail.indexOf("等待逾時") < 60, detail);
 });
 
 test("ISSUE-124 非逾時的 Worker 失敗訊息原樣不變", async () => {

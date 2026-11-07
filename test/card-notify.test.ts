@@ -316,6 +316,42 @@ test("ISSUE-124 逾時失敗分類為等待逾時，不含流程紀錄原文", a
     assert.ok(!msg.includes(forbidden));
 });
 
+// review F4：真實的卡片紀錄流程（recordEvent）會把失敗原因截到 200 字元；
+// 逾時資訊在詳情最前面時，截斷之後通知仍要分類為等待逾時。
+test("ISSUE-124 經真實紀錄流程截斷到 200 字元後，通知仍分類為等待逾時", async (t) => {
+  const s = setup(t, "discord:12345");
+  const detail = [
+    "Assignment impl 等待逾時（已等待 15 分 6 秒，上限 15 分鐘）",
+    "one or more Assignments failed",
+    "synthesis is partial",
+    "changes outside the writer scope: config.example.jsonc, src/a.ts, src/b.ts",
+    "no passing review for the current version",
+    "unhandled findings",
+    "no successful verification for the current version",
+  ].join("; ");
+  const reason = `task：task 沒有完成：blocked：${detail}`;
+  assert.ok(reason.length > 200, "測試前提：原因要比 200 字元長");
+  const recorded = s.store.recordEvent(id, {
+    event: "failed",
+    code: "autopick_stopped",
+    reason,
+    time: s.deps.now(),
+    eventId: "timeout-real",
+  });
+  assert.ok(recorded.ok);
+  const log = s.store.readLog(id);
+  assert.ok(log.ok);
+  const entry = log.entries.find((e) => e.eventId === "timeout-real");
+  assert.ok(entry && entry.text.includes("等待逾時"), entry?.text);
+  await s.notifier.tick();
+  const msg = s.discord
+    .map(([, text]) => text)
+    .find((text) => text.includes("autopick_stopped"))!;
+  assert.ok(msg.includes("autopick_stopped · 等待逾時"), msg);
+  assert.ok(!msg.includes("等待人工處理"));
+  assert.ok(!msg.includes("config.example.jsonc"));
+});
+
 test("ISSUE-124 非逾時失敗的分類不變", async (t) => {
   const s = setup(t, "discord:12345");
   s.store.appendLog(id, [

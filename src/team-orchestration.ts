@@ -511,7 +511,8 @@ export async function runTeamTask(
       report: synthesis,
       paneId: input.lead.pane_id,
       detail: failed
-        ? `one or more Assignments failed; synthesis is partial${gate?.reasons.length ? `; ${gate.reasons.join("; ")}` : ""}${timedOut.map((report) => `; ${report.blocker!.split("：")[0]}`).join("")}`
+        ? // 卡片的失敗原因只保留前 200 字元：逾時資訊放最前面，才不會被後面很長的 gate 原因截掉（review F4）。
+          `${timedOut.map((report) => `${report.blocker!.split("：")[0]}; `).join("")}one or more Assignments failed; synthesis is partial${gate?.reasons.length ? `; ${gate.reasons.join("; ")}` : ""}`
         : blocked
           ? "one or more Assignments require input"
           : gateFailed
