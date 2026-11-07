@@ -290,6 +290,7 @@ export class DiscordAdapter {
   async postToOrigin(
     origin: { channelId: string; threadId?: string },
     text: string,
+    options?: { threadOnly?: boolean },
   ): Promise<void> {
     const channel = await this.client.channels.fetch(
       origin.threadId || origin.channelId,
@@ -299,6 +300,8 @@ export class DiscordAdapter {
       (!(channel instanceof TextChannel) && !(channel instanceof ThreadChannel))
     )
       throw new Error("the originating Discord destination is not available");
+    if (options?.threadOnly && !(channel instanceof ThreadChannel))
+      throw new Error("the originating Discord thread is not available");
     for (const chunk of splitDiscordText(text))
       await channel.send({ content: chunk, allowedMentions: { parse: [] } });
   }

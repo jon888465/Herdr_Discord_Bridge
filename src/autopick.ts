@@ -174,6 +174,7 @@ export async function runAutopick(
 }
 
 export interface AutopickerDeps {
+  onPicked?(job: AutopickJob): void | Promise<void>;
   policy(): LoadedPolicy;
   readyCards(): Card[];
   steps: AutopickSteps;
@@ -202,6 +203,11 @@ export function createAutopicker(deps: AutopickerDeps) {
       attempted.add(job.card.id);
       running = (async () => {
         try {
+          try {
+            await deps.onPicked?.(job);
+          } catch {
+            /* notification failure cannot stop work */
+          }
           await deps.onReport(await runAutopick(job, deps.steps));
         } catch (error) {
           deps.onError?.(error);

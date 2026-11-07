@@ -51,6 +51,11 @@ export function importCard(text: string, options: ImportOptions): ImportResult {
   if (options.existingIds.has(built.card.id))
     return fail(`card ${built.card.id} already exists`, "exists");
   const card = { ...built.card };
+  // Imported destinations are untrusted; the command records its own Discord thread.
+  if (card.notify !== undefined) {
+    delete card.notify;
+    notes.push("notify cleared");
+  }
   if (card.status !== "draft") {
     notes.push(`status ${card.status} -> draft`);
     card.status = "draft";

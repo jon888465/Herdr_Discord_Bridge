@@ -1,3 +1,4 @@
+import { createCardNotifier } from "./card-notify.js";
 import { commitVerifiedVersion } from "./card-commit.js";
 import { hookReplyTrusted } from "./codex-session.js";
 import { hookModeFor, hookStatusText } from "./hook-status.js";
@@ -495,6 +496,7 @@ async function startBridge(
   restoreWorktreeAuthorization(config.allowedWorkspaceIds);
   reportProjectPolicy();
   const stopCardSync = startCardSync(tasks, discord);
+  const stopCardNotifications = startCardNotifications(herdr, discord);
   // H2 自動撿卡（ISSUE-096）：政策檔沒有 `autopick:` 時每次掃描都立刻返回，什麼都不做。
   const stopAutopick = startAutopick({
     config,
@@ -528,6 +530,7 @@ async function startBridge(
   installShutdown(() => {
     stopCleanup();
     stopCardSync();
+    stopCardNotifications();
     stopAutopick();
     stopPullRequestSync();
     herdr.stopTunnels();
@@ -680,6 +683,10 @@ export async function handleCommand(
         today: () => new Date().toISOString().slice(0, 10),
         now: () => new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
         source: context.source === "console" ? "console" : "discord",
+        notifyThread:
+          context.source !== "console" && context.message.channel.isThread()
+            ? context.message.channel.id
+            : undefined,
         attachments: [...context.message.attachments.values()],
         download: downloadDiscordText,
         readLocalFile: readLocalCardFile,
@@ -2404,6 +2411,15 @@ function startPullRequestSync(
       });
       for (const report of result.reports) {
         try {
+          const card = new CardStore(rootDir, {
+            maxFileBytes: LEDGER_MAX_FILE_BYTES,
+          }).read(report.cardId);
+          // 卡片有記錄通知對象時，CI／merge 結果由卡片通知（card-notify）送出，這裡只留 console，避免重複；
+          // 沒有記錄的舊卡維持原本的行為（送回原 thread）。
+          if (card.ok && card.card.notify && report.kind !== "closed") {
+            console.log(report.text);
+            continue;
+          }
           if (report.origin)
             await discord.postToOrigin(report.origin, report.text);
           else console.log(report.text);
@@ -2629,6 +2645,19 @@ function startAutopick(runtime: Runtime): () => void {
       sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
       now: () => Date.now(),
     }),
+    onPicked: (job) => {
+      new CardStore(rootDir, { maxFileBytes: LEDGER_MAX_FILE_BYTES }).appendLog(
+        job.card.id,
+        [
+          {
+            event: "autopick_picked",
+            time: nowSeconds(),
+            eventId: `picked-${randomBytes(12).toString("hex")}`,
+            text: "bridge 已撿起卡片",
+          },
+        ],
+      );
+    },
     onReport: report,
     onError: (error) => console.error(`自動撿卡失敗：${safeError(error)}`),
   });
@@ -3990,4 +4019,43 @@ async function writeCaptureDiagnostic(info: {
   } catch (error) {
     console.error(`Capture diagnostic failed: ${safeError(error)}`);
   }
+}
+
+function startCardNotifications(
+  herdr: HerdrClient,
+  discord: DiscordAdapter,
+): () => void {
+  const notifier = createCardNotifier({
+    store: new CardStore(join(stateDirectory(), "cards"), {
+      maxFileBytes: LEDGER_MAX_FILE_BYTES,
+    }),
+    now: nowSeconds,
+    startedAt: nowSeconds(),
+    prUrl: (id) => lazyCardPullRequests().forCard(id).at(-1)?.url,
+    discord: (thread, text) =>
+      discord.postToOrigin({ channelId: thread, threadId: thread }, text, {
+        threadOnly: true,
+      }),
+    pane: async (id) => {
+      const pane = (await herdr.listAgents()).find((p) => p.pane_id === id);
+      if (!pane) return undefined;
+      if (pane.agent_status === "idle" || pane.agent_status === "done") {
+        // ISSUE-116: clipped prompts can appear idle.
+        const screen = await herdr.readAgent(id, "visible", 80);
+        if (
+          /trust|permission|approval|allow once|skip until next version|Do you want|是否允許|信任|選擇.*選項/i.test(
+            screen,
+          )
+        )
+          return { ...pane, agent_status: "blocked" };
+      }
+      return pane;
+    },
+    agent: (pane, text) => herdr.promptAgent(pane, text),
+    log: (text) => console.log(text),
+  });
+  void notifier.tick();
+  const timer = setInterval(() => void notifier.tick(), 5000);
+  timer.unref();
+  return () => clearInterval(timer);
 }
