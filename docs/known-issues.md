@@ -3799,3 +3799,19 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 修正範圍：無。可能的方向（未決定）：(a) 與 ISSUE-108 一起處理，pane 太小時改開 tab；(b) 就緒後額外讀畫面，看到已知的信任／更新提示字樣就視為 blocked（不替人確認）。
 
 未驗證：pane 變大後是否變成 `blocked`；其他 CLI（claude、codex）在小 pane 的信任提示是否也被偵測成 `idle`。
+
+## ISSUE-117：自動撿卡的 Lead 設成 codex 時，`startLead` 一定失敗（只看 `agent.start` 當下的狀態，codex 啟動後先是 working）
+
+更新日期：2026-11-07。狀態：待決定（根因已由讀碼確認、尚未修正；目前不要把 `autopick_lead` 設成 codex）。
+
+使用者可見症狀：2026-11-06，使用者要求把 `policy.yml` 的 `autopick_lead` 從 `claude` 改成 `codex`（備份 `policy.yml.bak-lead-20261106`），bridge 重啟後 `card policy` 顯示「Lead：codex」。ready 的卡 `REQ-20261107-small-pane-tab` 在 16:27:28Z 被撿起，立刻失敗（`autopick_failed`）：`lead：Lead（codex）沒有就緒，狀態是 working；可能卡在信任資料夾或登入提示`。bridge 依設計在失敗時關掉剛開的 workspace，所以事後沒有現場可看，無法確認當時是否真的有提示；卡片留在 `ready`。
+
+預期行為：Lead 為 codex 時，等 codex 完成初始化（`working` → `idle`）再開始，與 `agent start`、`card review` 的 reviewer 一致；真的卡在信任或登入提示（`blocked`）時才失敗。
+
+已確認根因（讀碼，2026-11-07）：`src/autopick-wiring.ts` 的 `startLead` 呼叫 `startAgentInPane` 後，只檢查它**回傳的** `lead.agent_status` 是否為 `idle` 或 `done`，不輪詢；codex 啟動後先是 `working`（ISSUE-079 已記錄「`agent.start` 回來時 Agent 常常還在初始化，實測 codex 啟動後先是 working」，`src/agent-ready.ts` 的 `waitUntilReady` 就是為此寫的，但 `startLead` 沒用它）。claude 啟動即 `idle`，所以只有 claude 當 Lead 能過。**尚未做的驗證：**沒有用 codex 重跑一次並保存當時的 pane 畫面，無法排除「同時也真的有提示」；也沒有用測試重現。
+
+影響：`autopick_lead: codex` 目前不可用；測試 `Lead 為 codex 時 reviewer 為 claude`（`test/autopick.test.ts`）只用假 steps，沒有涵蓋 `startLead` 對 `working` 的處理，所以單元測試沒抓到。
+
+修正範圍：無（只記錄）。建議：`startLead` 改用 `waitUntilReady`（同 `agent start`），`blocked` 或逾時才失敗並說明，並加測試涵蓋「回傳 working 後變 idle 成功、blocked 失敗、逾時失敗」。要先把 `autopick_lead` 改回 `claude` 才能用自動撿卡跑這張修正卡。
+
+未驗證：其他 Lead 種類（agy、pi 目前不被政策接受）；修好後 codex 當 Lead 的完整卡片流程（規劃、`card review` 改用 claude 當 reviewer）仍沒有實機證據。
