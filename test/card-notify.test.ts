@@ -316,8 +316,7 @@ test("ISSUE-124 逾時失敗分類為等待逾時，不含流程紀錄原文", a
     assert.ok(!msg.includes(forbidden));
 });
 
-// review F4：真實的卡片紀錄流程（recordEvent）會把失敗原因截到 200 字元；
-// 逾時資訊在詳情最前面時，截斷之後通知仍要分類為等待逾時。
+// F4：recordEvent 會把失敗原因截到 200 字元，截斷後通知仍要分類為等待逾時。
 test("ISSUE-124 經真實紀錄流程截斷到 200 字元後，通知仍分類為等待逾時", async (t) => {
   const s = setup(t, "discord:12345");
   const detail = [

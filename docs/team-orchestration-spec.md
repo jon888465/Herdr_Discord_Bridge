@@ -126,11 +126,10 @@ partial synthesis 必須明確標示未完成工作。
 
 ### Timeout、重試與送達
 
-- 目前實作使用設定的 `teamTurnTimeoutMs`（預設 1800000 ms，ISSUE-124）作為 Lead
+- 目前實作用 `teamTurnTimeoutMs`（預設 1800000 ms，ISSUE-124）作為 Lead
   planning、Worker execution 與 Lead synthesis 的單一回合 wait timeout；
   `approvalTimeoutMs`（預設 900000 ms）只管批准提示的有效期。後續可再拆成
-  planning、assignment、synthesis 與 task timeout。回合逾時的失敗原因明寫逾時、
-  assignment id、等待時間與上限。
+  planning、assignment、synthesis 與 task timeout。
 - `agent.wait` 使用 bounded request，不因 timeout 自動重送 prompt。未確認送達
   的 prompt 不得盲目 replay，避免 Worker 重複執行。
 - `agent.read` 只提供 bounded observed output，不代表完整 terminal history；

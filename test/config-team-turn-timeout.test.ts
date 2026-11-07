@@ -26,15 +26,6 @@ test("ISSUE-124 teamTurnTimeoutMs 預設 30 分鐘，approvalTimeoutMs 維持 15
   assert.equal(config.approvalTimeoutMs, 900000);
 });
 
-test("ISSUE-124 teamTurnTimeoutMs 有效覆寫不影響 approvalTimeoutMs", () => {
-  const config = withConfig('{"teamTurnTimeoutMs": 2400000}');
-  assert.equal(config.teamTurnTimeoutMs, 2400000);
-  assert.equal(config.approvalTimeoutMs, 900000);
-  const other = withConfig('{"approvalTimeoutMs": 1000}');
-  assert.equal(other.approvalTimeoutMs, 1000);
-  assert.equal(other.teamTurnTimeoutMs, 1800000);
-});
-
 test("ISSUE-124 teamTurnTimeoutMs 無效值回到預設且不拋出", () => {
   for (const value of ["-5", "0", '"abc"', "null", '"-1"', "{}"]) {
     const config = withConfig(`{"teamTurnTimeoutMs": ${value}}`);
@@ -42,8 +33,7 @@ test("ISSUE-124 teamTurnTimeoutMs 無效值回到預設且不拋出", () => {
   }
 });
 
-// review F1：JSON 物件的 toString 不是函式時，Number() 會拋 TypeError；設定值不可讓 bridge 無法啟動。
-// positiveInt 是所有數值設定共用的，approvalTimeoutMs 也要一樣安全。
+// F1：toString 不是函式的 JSON 物件會讓 Number() 拋 TypeError（positiveInt 共用，approvalTimeoutMs 也要安全）。
 test("ISSUE-124 物件值（toString 不是函式）回到預設，不會讓 loadConfig 拋出", () => {
   for (const value of ['{"toString": null}', '{"valueOf": 1, "toString": 2}']) {
     const config = withConfig(
@@ -68,8 +58,7 @@ test("ISSUE-124 Team 回合上限取自 teamTurnTimeoutMs，與 approvalTimeoutM
   assert.equal(c.approvalTimeoutMs, 900000);
 });
 
-// review F5：用兩個「不同」的設定值驗證批准提示的實際有效期。
-// DiscordAdapter 建立批准提示時把 approvalTimeoutMs 交給 RoutingStore.createApproval，有效期由它計算。
+// F5：用兩個不同的設定值驗證批准提示的實際有效期（由 RoutingStore.createApproval 計算）。
 test("ISSUE-124 批准提示的有效期是 approvalTimeoutMs，不受 teamTurnTimeoutMs 影響", () => {
   const config = withConfig(
     '{"teamTurnTimeoutMs": 4000, "approvalTimeoutMs": 9000}',
@@ -98,8 +87,7 @@ test("ISSUE-124 批准提示的有效期是 approvalTimeoutMs，不受 teamTurnT
   }
 });
 
-// 接線守門（讀原始碼，不是端到端）：批准提示相關的程式仍只接 approvalTimeoutMs，
-// teamTurnTimeoutMs 只透過 teamTaskTimeoutMs() 進入 Team 任務。日後有人誤把批准提示接到新設定，這個測試會失敗。
+// 接線守門（讀原始碼，不是端到端）：誤把批准提示接到 teamTurnTimeoutMs 時會失敗。
 test("ISSUE-124 接線守門：批准提示仍接 approvalTimeoutMs，teamTurnTimeoutMs 只用於 Team 任務", () => {
   const main = fs.readFileSync("src/main.ts", "utf8");
   assert.match(

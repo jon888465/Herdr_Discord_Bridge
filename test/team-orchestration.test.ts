@@ -833,8 +833,7 @@ test("ISSUE-124 非逾時的 Worker 失敗訊息原樣不變", async () => {
   assert.ok(!/逾時/.test(failed?.detail ?? ""));
 });
 
-// review F2：派工前取得 Worker（例如 agent.list RPC）逾時不是「Worker 回合逾時」，
-// 不能被寫成上限 30 分鐘，也不能提示 worktree 產出。
+// F2：派工前取得 Worker 的 RPC 逾時不是回合逾時。
 test("ISSUE-124 取得 Worker 時的 RPC 逾時不被當成 Worker 回合逾時", async () => {
   const events: OrchestrationEvent[] = [];
   const result = await runTeamTask(
@@ -863,18 +862,18 @@ test("ISSUE-124 取得 Worker 時的 RPC 逾時不被當成 Worker 回合逾時"
   assert.ok(!/等待逾時|worktree/.test(failed?.detail ?? ""));
 });
 
-// review F7：回合裡面的短 RPC（例如 onQuestion 呼叫 readAgent）逾時不是「回合期限」；
-// 只有 runTeamTurn 自己的期限錯誤（agent.prompt／agent.wait 的逾時、Timed out waiting for current response）才算。
+// F7：只有 runTeamTurn 自己的期限錯誤才算回合逾時，回合內的短 RPC 逾時不算。
 test("ISSUE-124 只有真正的回合期限錯誤才被當成回合逾時，回合內的短 RPC 逾時不是", async () => {
   const cases: Array<[string, boolean]> = [
     ["herdr agent.prompt: timeout timed out waiting for agent status", true],
     ["herdr agent.wait: timeout timed out waiting for agent status", true],
-    ["herdr agent.prompt timed out", true],
-    ["herdr agent.wait timed out", true],
     [
       "Timed out waiting for current response from w2:p6 (last state: working); no verified completion",
       true,
     ],
+    // F9：bridge 端 request 逾時（`… timed out`）分不出回合等待或短 RPC，一律不算。
+    ["herdr agent.prompt timed out", false],
+    ["herdr agent.wait timed out", false],
     ["herdr agent.read timed out", false],
     ["herdr agent.list timed out", false],
     ["herdr request agent.list timed out after 5000ms", false],
@@ -913,9 +912,31 @@ test("ISSUE-124 只有真正的回合期限錯誤才被當成回合逾時，回�
       assert.equal(dependent.blocker, "dependency impl did not complete");
     }
   }
+  // 相容路徑：沒有 promptAgentAndWait（舊版 Herdr），送出 prompt 的 promptAgent RPC 逾時。
+  const compat = timeoutPort([], []);
+  assert.equal(compat.promptAgentAndWait, undefined);
+  const sent = compat.promptAgent.bind(compat);
+  compat.promptAgent = async (target, text) => {
+    if (target === workerA.pane_id)
+      throw new Error("herdr agent.prompt timed out");
+    return sent(target, text);
+  };
+  const viaCompat = await runTeamTask(
+    {
+      taskId: "t124f9",
+      prompt: "x",
+      lead,
+      workers: [workerA, workerB],
+      timeoutMs: 1500,
+    },
+    compat,
+    () => {},
+  );
+  const impl = viaCompat.reports.find((r) => r.assignmentId === "impl")!;
+  assert.equal(impl.blocker, "herdr agent.prompt timed out");
 });
 
-// review F6：Worker 已逾時，之後 Lead 彙整才失敗（非逾時錯誤）或受阻：卡片的失敗原因不能只剩彙整的錯誤。
+// F6：Worker 已逾時、之後 Lead 彙整才失敗或受阻，原因仍要保留逾時摘要。
 test("ISSUE-124 Worker 逾時後 Lead 彙整失敗或受阻，原因仍保留 Worker 逾時摘要", async () => {
   // 彙整丟出非逾時錯誤
   {

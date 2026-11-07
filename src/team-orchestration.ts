@@ -166,16 +166,16 @@ function formatDuration(ms: number): string {
 /**
  * 只認 `runTeamTurn` 自己的「回合期限」錯誤（review F7）：
  * - Herdr 端 agent.prompt／agent.wait 等待 Agent 狀態逾時（HerdrError，訊息 `herdr <method>: timeout …`）；
- * - bridge 端對這兩個呼叫的 request 逾時（`herdr agent.prompt timed out`）；
  * - `runTeamTurn` 等不到本次回應的期限（`Timed out waiting for current response …`）。
  * 回合裡面其他短 RPC（agent.read、agent.list…）的逾時不是回合期限，不能套用回合上限與 worktree 提示。
  */
 function isTurnDeadlineError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const message = error.message;
+  // bridge 端 request 逾時（`herdr agent.prompt timed out`）刻意不收：舊版 Herdr 沒有原子 prompt 時，
+  // 送出 prompt 的 promptAgent 只有預設約 5 秒，訊息與它相同，分不出來（review F9）。
   return (
     /^herdr agent\.(prompt|wait): timeout\b/.test(message) ||
-    /^herdr agent\.(prompt|wait) timed out$/.test(message) ||
     /^Timed out waiting for current response from /.test(message)
   );
 }
@@ -554,8 +554,7 @@ export async function runTeamTask(
     }`;
     if (!input.signal?.aborted)
       emit({ type: "task_failed", taskId: input.taskId, detail });
-    // 向外丟出的錯誤也要帶摘要（review F8）：TeamTaskEngine 的 catch 會用它的 message 再記錄一次 task_failed，
-    // 蓋掉上面事件的詳情，而自動撿卡讀的就是持久化後的詳情。取消中（signal aborted）維持原錯誤。
+    // 丟出的錯誤也要帶摘要：TeamTaskEngine 會用它的 message 再記錄 task_failed 覆蓋詳情（F8）。取消中維持原錯誤。
     if (prefix && error instanceof Error && !input.signal?.aborted) {
       const wrapped = new Error(detail, { cause: error });
       wrapped.name = error.name;

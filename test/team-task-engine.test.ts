@@ -161,8 +161,7 @@ test("task state machine rejects terminal resurrection and invalid completion", 
     assert.doesNotThrow(() => assertTaskTransition(a, b));
 });
 
-// review F8：Worker 逾時之後 Lead 彙整丟出非逾時錯誤。引擎的 catch 會用「被丟出的錯誤」再記錄一次 task_failed，
-// 所以最後持久化的任務原因（自動撿卡讀的就是它）必須仍帶 Worker 逾時摘要，而不只是原始的彙整錯誤。
+// F8：引擎會用丟出的錯誤再記錄 task_failed；最後持久化的原因（自動撿卡讀的）必須仍帶 Worker 逾時摘要。
 test("ISSUE-124 Worker 逾時後 Lead 彙整丟出非逾時錯誤，引擎最後持久化的原因仍帶逾時摘要", async () => {
   const f = fixture();
   try {

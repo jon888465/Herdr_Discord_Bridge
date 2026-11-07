@@ -28,7 +28,7 @@ herdr plugin config-dir herdr-discord-bridge
 cp config.example.jsonc <confiig-dr>/config.json
 ```
 
-在 `config.json` 填入 Discord bot token，以及明確的 guild/channel/user allowlist。也可以使用 `HERDR_DISCORD_BOT_TOKEN` 或 `DISCORD_BOT_TOKEN` 環境變數。不要把真實設定檔或 token commit 進 Git。等待上限有兩個獨立設定（ISSUE-124，已修正、待驗收、尚未實機驗證）：`approvalTimeoutMs`（預設 900000 毫秒）只管批准提示的有效期；`teamTurnTimeoutMs`（預設 1800000 毫秒 = 30 分鐘）是 Team 任務 Lead 規劃、每個 Worker、Lead 彙整單一回合的等待上限，大卡跑不完時請調整它，不要改 `approvalTimeoutMs`。必須在 Discord Developer Portal 開啟 Message Content Intent。若要讓沒有其他 bot 在線的已綁定 thread 免 mention，另需開啟 Server Members Intent 與 Presence Intent，並設定 `discord.soloThreadNoMention: true`。
+在 `config.json` 填入 Discord bot token，以及明確的 guild/channel/user allowlist。也可以使用 `HERDR_DISCORD_BOT_TOKEN` 或 `DISCORD_BOT_TOKEN` 環境變數。不要把真實設定檔或 token commit 進 Git。等待上限有兩個獨立設定（ISSUE-124）：`approvalTimeoutMs`（預設 900000 毫秒）只管批准提示的有效期；`teamTurnTimeoutMs`（預設 1800000 毫秒）是 Team 任務每個回合的等待上限，大卡跑不完請調它。必須在 Discord Developer Portal 開啟 Message Content Intent。若要讓沒有其他 bot 在線的已綁定 thread 免 mention，另需開啟 Server Members Intent 與 Presence Intent，並設定 `discord.soloThreadNoMention: true`。
 
 啟動 bridge：
 
@@ -292,6 +292,7 @@ Agent 可在最終回覆中單獨一行寫 `[[discord-attach: /絕對路徑]]`�
 ### Hook 通道（Claude、Codex）— ISSUE-045
 
 單 Agent 的自動觀察只讀可見畫面（ISSUE-050），包含回答完成後的標記掃描；畫面外內容依賴 hook／transcript，檔案與訊息回送優先使用 `herdr-discord-send`。沒有正式 final 時可能只能送出不完整擷取，明確的 `read` 操作仍可讀歷史。
+
 
 預設 bridge 從終端畫面解析回覆（parser）。CLI hook 能直接提供回覆內容與權限請求，比較可靠。**hook 優先，parser 永遠保留為備用**，hook 沒裝或事件遺失時會退回畫面擷取；若回答邊界已捲出畫面，結果可能不完整。pi 擴充須在每台執行 pi 的機器各自安裝，複製後在該 pi 執行 `/reload` 或重開 pi；只重啟 bridge 不會載入 pi 擴充（ISSUE-045／033）。
 
