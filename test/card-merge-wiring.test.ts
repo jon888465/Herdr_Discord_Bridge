@@ -170,7 +170,7 @@ test("without a worktree record or an open pull request the merge is refused", a
 test("each failing condition refuses the merge, lists every reason, and never calls merge", async () => {
   const cases: Array<[string, Partial<MergeWiringDeps["github"]>, Partial<MergeWiringDeps>, Partial<Card>, RegExp]> = [
     ["policy L1", {}, { policy: () => l1 }, {}, /L2/],
-    ["card not done", {}, {}, { status: "in_progress" }, /done/],
+    ["card not done", {}, {}, { status: "ready" }, /done/],
     ["review of an older head", {}, {}, { body: passedBody("e".repeat(40)) }, /review 通過的是 head eeeeeeeeeeee/],
     ["red CI", { checks: async () => ({ conclusion: "failure" }) }, {}, {}, /CI/],
     ["pending CI", { checks: async () => ({ conclusion: "pending" }) }, {}, {}, /還在跑/],
@@ -192,7 +192,7 @@ test("several failing conditions are all named in one refusal", async () => {
     { checks: async () => ({ conclusion: "failure" }), files: async () => ({ files: ["AGENTS.md"], complete: true }) },
     { policy: () => l1 },
   );
-  await assert.rejects(mergeCardPullRequest(deps, card({ status: "in_progress" }), {}), (error: unknown) => {
+  await assert.rejects(mergeCardPullRequest(deps, card({ status: "ready" }), {}), (error: unknown) => {
     const text = error instanceof Error ? error.message : "";
     return /L2/.test(text) && /done/.test(text) && /CI/.test(text) && /AGENTS\.md/.test(text);
   });

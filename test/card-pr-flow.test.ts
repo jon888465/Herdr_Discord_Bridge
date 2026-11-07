@@ -536,3 +536,62 @@ test("pushing more commits to an existing PR checks its files again", async () =
   assert.deepEqual(result.sensitivePaths, ["package.json"]);
   assert.ok(log.some((line) => line.includes("pulls/7/files")));
 });
+
+// ISSUE-123：`card attach-pr` 接手的 in_progress 卡片只能更新 GitHub 上仍開著的 PR，不能因此開新的 PR。
+const takeover = { status: "in_progress" } as const;
+
+test("an in_progress card with no registered PR cannot open one", async () => {
+  const { deps, log } = setup();
+  await assert.rejects(
+    openCardPullRequest(deps, { card: card(takeover), worktree }),
+    /done/,
+  );
+  assert.equal(
+    log.some((l) => l.includes(" push ") || l.includes("pr create")),
+    false,
+  );
+});
+
+test("an in_progress card whose registered PR is closed cannot open or push", async () => {
+  const { deps, log } = setup({ existing: [existing("CLOSED")] });
+  await assert.rejects(
+    openCardPullRequest(deps, { card: card(takeover), worktree }),
+    /done/,
+  );
+  assert.equal(
+    log.some((l) => l.includes(" push ") || l.includes("pr create")),
+    false,
+  );
+});
+
+test("an in_progress card with a registered open PR that GitHub no longer shows as open opens nothing and pushes nothing", async () => {
+  // 登記資料過期（GitHub 上的 PR 已不存在）：不能因此走到「開新 PR」。
+  const { deps, log } = setup({ existing: [existing("OPEN")] });
+  await assert.rejects(
+    openCardPullRequest(deps, { card: card(takeover), worktree }),
+    /沒有這個分支開著的 PR/,
+  );
+  assert.equal(
+    log.some((l) => l.includes(" push ") || l.includes("pr create")),
+    false,
+  );
+});
+
+test("an in_progress card with a registered open PR that is open on GitHub is updated by pushing, never duplicated", async () => {
+  const { deps, log, recorded, heads } = setup({
+    exec: prListReply("OPEN"),
+    existing: [existing("OPEN")],
+  });
+  const result = await openCardPullRequest(deps, {
+    card: card(takeover),
+    worktree,
+  });
+  assert.equal(result.created, false);
+  assert.equal(
+    log.some((l) => l.includes("pr create")),
+    false,
+  );
+  assert.ok(log.some((l) => l.includes(" push ")));
+  assert.deepEqual(recorded, []);
+  assert.deepEqual(heads, [HEAD]);
+});

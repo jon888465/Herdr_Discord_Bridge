@@ -20,6 +20,7 @@ import type { Card } from "./card.js";
 import type { CommitOutcome } from "./card-commit.js";
 import type { CleanupResult, PreparedWorktree } from "./card-worktree-flow.js";
 import type { PrOutcome } from "./card-pr-flow.js";
+import type { AttachOutcome } from "./card-attach-pr.js";
 import { parseFindings, summarizeFindings } from "./card-findings.js";
 import type { MergeRun } from "./card-merge-wiring.js";
 import { checkFixable, type OpenFinding } from "./card-fix.js";
@@ -114,6 +115,12 @@ export interface CardCommandDeps {
   notify?: (text: string) => Promise<void>;
   /** `card pr`：push 卡片分支並開 PR（或更新已開著的 PR）；不符合前提要丟出說明原因的錯誤。 */
   openPullRequest: (card: Card) => Promise<PrOutcome>;
+  /** `card attach-pr`：登記既有 PR（只讀 GitHub）。`busy` 是「卡片有工作在跑」的原因；前提不成立要丟出列出所有原因的錯誤。 */
+  attachPullRequest?: (
+    card: Card,
+    ref: string,
+    busy: string[],
+  ) => Promise<AttachOutcome>;
   /** `card pr` 讀卡片前，嘗試同步指定卡片的 task 結果。 */
   syncCard?: (
     cardId: string,
@@ -129,7 +136,7 @@ export interface CardCommandDeps {
 }
 
 const USAGE =
-  "usage: card list [status] | card show <id> | card import [--slug <名稱>] [<本機路徑，僅 console>]（Discord 請附上 .md 檔） | card assign <id> [--coding] [--worktree] | card commit <id> | card cleanup <id> | card policy [專案] | card pr <id> | card review <id> [--agent <種類>] | card fix <id> [--agent <種類>] | card loop <id> [--agent <種類>] [--fix-agent <種類>] [--merge] | card loop stop <id> | card merge <id> [--method squash|merge|rebase] | card recreate <id>（從任務紀錄重建被刪除的卡片）";
+  "usage: card list [status] | card show <id> | card import [--slug <名稱>] [<本機路徑，僅 console>]（Discord 請附上 .md 檔） | card assign <id> [--coding] [--worktree] | card commit <id> | card cleanup <id> | card policy [專案] | card pr <id> | card attach-pr <id> <PR 編號或網址> | card review <id> [--agent <種類>] | card fix <id> [--agent <種類>] | card loop <id> [--agent <種類>] [--fix-agent <種類>] [--merge] | card loop stop <id> | card merge <id> [--method squash|merge|rebase] | card recreate <id>（從任務紀錄重建被刪除的卡片）";
 const MAX_LIST_LINES = 30;
 const MAX_LIST_ERRORS = 5;
 const TITLE_CHARS = 50;
@@ -569,6 +576,77 @@ async function pullRequestForCard(
     // 同步是盡力而為；仍由既有卡片讀取與 done 守門回報拒絕原因。
   }
   return (await pushStep(id, deps)).text;
+}
+
+/** `card attach-pr <id> <PR 編號或完整網址>`（ISSUE-123）：把人工接手開的既有 PR 登記回卡片；只讀 GitHub，不改卡片狀態。 */
+async function attachPullRequestToCard(
+  args: string[],
+  deps: CardCommandDeps,
+): Promise<string> {
+  if (args.length !== 2)
+    throw new Error("usage: card attach-pr <id> <PR 編號或完整 PR 網址>");
+  const [id, ref] = args;
+  if (!isCardId(id)) throw new Error(`${id} 不是合法的卡片 id`);
+  if (!deps.attachPullRequest) throw new Error("card attach-pr 目前無法使用");
+  const store = openDirectory(deps);
+  const read = store?.read(id);
+  if (!store || !read || (!read.ok && read.code === "not_found"))
+    throw new Error(`找不到卡片 ${id}`);
+  if (!read.ok) throw new Error(read.error);
+
+  const busy: string[] = [];
+  const known = deps.assignments.forCard(id);
+  const latest = known[known.length - 1];
+  const info = latest ? deps.taskInfo(latest.taskId) : undefined;
+  if (latest && info && !CLEANUP_READY_STATES.has(info.state))
+    busy.push(`任務 ${latest.taskId}（${info.state}）還在跑`);
+  if (reviewing.has(id))
+    busy.push(`卡片 ${id} 正在 review、修正、loop 或 merge 中`);
+  if (busy.length === 0) reviewing.add(id);
+  let outcome: AttachOutcome;
+  try {
+    outcome = await deps.attachPullRequest(read.card, ref, busy);
+  } finally {
+    if (busy.length === 0) reviewing.delete(id);
+  }
+
+  // 登記已完成：之後的卡片更新失敗只警告，不丟錯誤。
+  const warnings: string[] = [];
+  if (outcome.created) {
+    const project = store.recordProject(
+      id,
+      {
+        machine: "local",
+        repoPath: outcome.repoPath,
+        branch: outcome.branch,
+        prUrl: outcome.url,
+        headSha: outcome.headSha,
+      },
+      deps.now().slice(0, 10),
+    );
+    if (!project.ok) warnings.push(`異動專案：${project.error}`);
+    const logged = store.recordEvent(id, {
+      event: "pr_opened",
+      url: outcome.url,
+      number: outcome.number,
+      headSha: outcome.headSha,
+      time: deps.now(),
+      eventId: `pr-${outcome.number}-opened`,
+    });
+    if (!logged.ok) warnings.push(`紀錄 pr_opened：${logged.error}`);
+  }
+  const lines = outcome.created
+    ? [
+        `已把 PR #${outcome.number} 登記到 ${id}：${outcome.url}`,
+        `head ${outcome.headSha.slice(0, 12)}，目標分支 ${outcome.base}；卡片狀態沒有改變（仍是 ${read.card.status}）。`,
+        "bridge 會每分鐘檢查 CI 與 merge；可用 card review、card merge、card loop，card merge 的條件完全不變。",
+      ]
+    : [
+        `PR #${outcome.number} 已登記在 ${id}：${outcome.url}`,
+        "沒有重複寫入。",
+      ];
+  for (const warning of warnings) lines.push(`⚠️ 卡片更新失敗：${warning}`);
+  return lines.join("\n");
 }
 
 /** push 並開 PR（或把新 commit 推到既有的 PR）：`card pr` 與 `card loop` 共用。 */
@@ -1311,6 +1389,9 @@ export async function runCardCommand(
       break;
     case "pr":
       text = await pullRequestForCard(rest, deps);
+      break;
+    case "attach-pr":
+      text = await attachPullRequestToCard(rest, deps);
       break;
     case "review":
       text = await reviewCard(rest, deps);

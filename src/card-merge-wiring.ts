@@ -124,6 +124,7 @@ export async function mergeCardPullRequest(
   const verdict = checkMergeable({
     level,
     cardStatus: card.status,
+    prRegistered: true,
     review: {
       ...(latest
         ? {

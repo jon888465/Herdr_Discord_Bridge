@@ -1,5 +1,33 @@
 # Known Issues
 
+## ISSUE-124：Worker 做完但超過 15 分鐘的等待上限，整張卡被判失敗（REQ-20261107-attach-pr）
+
+2026-11-07。狀態：待調查（已確認發生原因，尚未修正）。
+
+**症狀：**`REQ-20261107-attach-pr` 的 claude Worker 把實作做完（build、lint 通過，整套測試 1454／1455 通過），但整張卡仍被判失敗：`task 沒有完成：blocked：one or more Assignments failed; synthesis is partial; no passing review for the current version; no successful verification for the current version`（14:07:53Z）。使用者收到的失敗通知（ISSUE-120）沒有說明這其實是逾時。
+
+**已確認事實（讀 `team-tasks/task-8a2d6d0c-…json`，2026-11-07）：**三個 assignment 都是 `failed`。第一個 `impl` 的 `blocker` 是 `herdr agent.prompt: timeout timed out waiting for agent status`，建立 13:52:28Z、失敗 14:07:34Z（約 15 分 06 秒）；Worker 自己的畫面顯示它做了 `15m 30s`，也就是**比等待上限多約 30 秒**。`review`、`verify` 兩個 assignment 的 `blocker` 都是 `dependency impl did not complete`，是連帶失敗，所以才會出現「沒有 review、沒有 verification」。Worker 的產出完整留在 worktree（11 個檔案修改、2 個新檔）。
+
+**未確認：**15 分鐘的等待上限定義在哪個設定或常數（可能與 `approvalTimeoutMs` 預設 900000 有關，**未驗證**）；是否可設定；Worker 在狀態仍是 `working` 時被判逾時是否合理。
+
+**影響與暫行處理：**卡片只要一個 Worker assignment 超過約 15 分鐘就整張失敗，大卡（多檔案、需跑完整測試）特別容易碰到；目前靠人工接手完成（有 worktree 產出時不會丟）。可能的修法（尚未決定）：讓逾時可設定、狀態仍在 `working` 時延長等待、或把大卡拆小。
+
+## ISSUE-123：任務失敗後人工接手開的 PR 無法登記回卡片，bridge 不追蹤 CI／merge、不通知、不能走 card review／merge（REQ-20261107-attach-pr）
+
+2026-11-07。狀態：已修正、待驗收。**尚未實機驗證**（沒有對真實 GitHub／Herdr／Discord 執行過 `card attach-pr`）；bridge 尚未重啟載入。
+
+**症狀：**卡片的 Team 任務失敗（ISSUE-113、ISSUE-115）後停在 `in_progress`，由人或 Agent 接手開 PR。`card pr` 只接受 `done`，所以沒有 `card-prs.json` 登記與 `pr_opened`／`ci_result`／`merged` 事件，ISSUE-120 不通知（使用者 2026-11-07 回報 CI 結束沒有通知），`card review`／`card merge`／`card loop` 也找不到 PR。
+
+**已確認根因（讀碼）：**登記只由 `card pr`（`openCardPullRequest`）寫入且要求 `done`；`checkMergeable` 也要求 `done`；沒有登記「已存在的 PR」的路徑。
+
+**修正（2026-11-07）：**新增 `card attach-pr <卡片 id> <PR 編號或完整網址>`（console 與 Discord `/herdr`）。**這是「任務失敗後人工接手」的補洞，不是讓任意 PR 都能登記。**任何一項不成立就拒絕、列出所有原因、什麼都不寫（條件見 SPEC.md：卡片 `in_progress`／`done` 且無工作在跑、政策至少 L1、PR 開著且非 fork、head 分支 `card/<卡片 id>`、base 為預設分支；重複登記冪等）。寫入只有同一份 `card-prs.json` 的一筆登記、`## 異動專案` 的 PR／head、`pr_opened` 事件（`pr-<編號>-opened`）；只讀 GitHub，不 push／merge／強制／改 PR，不改卡片狀態。放寬的只有「卡片必須 done」：`card merge` 改為 done 或（in_progress 且 PR 已登記），其餘守門（L2、review 通過在目前 head、CI 全綠、PR 乾淨且最新、無敏感路徑）完全不變；`card loop` 的 push 對 in_progress 且已登記開著 PR 的卡可 push。
+
+**測試（2026-11-07，本機）：**先寫 `test/card-attach-pr.test.ts`（假 GitHub、假 port，不輸出 stdout），實作前無法編譯（red）；涵蓋合法登記、各拒絕條件、冪等、登記後 `card merge` 守門不放寬、ISSUE-120 通知、無寫入類呼叫。既有測試未刪：`test/card-merge-wiring.test.ts` 兩處以 `in_progress` 代表「非 done」，改以 `ready`（同樣斷言拒絕）。完整套件結果見本輪回報，不等同端到端驗收。
+
+**接手時補充（2026-11-07）：**Worker 的實作完整，但任務因逾時被判失敗（見 ISSUE-124），由人工接手檢查。檢查發現並修正一處漏洞：Worker 讓 `openCardPullRequest` 對 `in_progress` 卡片只看本機登記的 PR 狀態，登記資料過期（GitHub 上實際沒有開著的 PR）時會走到 `pr create` 開出**新的** PR，等於繞過「只有 done 才能開新 PR」；Worker 自己的測試只斷言「不丟錯」，反而把這個行為當成預期。現在 `in_progress` 的卡片必須在 GitHub 上找得到這個分支開著的 PR 才會 push，否則在 push 與 `pr create` 之前就拒絕。已先確認新增測試在沒有這個檢查時會失敗（red），有檢查時通過。測試（2026-11-07，本機非 sandbox，Node 26.12）：`npm run build`、`npm run lint` 通過；`node --test dist/test/*.test.js` 1458 項，1457 pass、0 fail、1 skipped（既有的略過），輸出沒有多餘 stdout。
+
+**未驗證／限制：**尚未實機驗證、bridge 未重啟、舊事件不補發；需卡片有 worktree 紀錄（同 `card pr`）；卡片沒有 `notify` 仍不通知（ISSUE-121）；動到 `src/github.ts` 等敏感路徑的 PR，`card merge` 仍拒絕，需人處理。下一步：用真實卡片與真實 `card/<id>` PR 驗收登記、通知與 `card merge`。
+
 ## ISSUE-122：自動建立的 pane 讓一個 tab 擠進超過 2 個 pane，新 tab 也沒有名稱（REQ-20261107-tab-layout）
 
 2026-11-07。狀態：已修正、待驗收。**尚未在真正的新 tab 退路情境實機驗證**；bridge 尚未重啟載入。

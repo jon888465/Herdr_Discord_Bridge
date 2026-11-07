@@ -99,7 +99,14 @@ export async function openCardPullRequest(
   input: PrFlowInput,
 ): Promise<PrOutcome> {
   const { card, worktree } = input;
-  if (card.status !== "done")
+  // ISSUE-123：`card attach-pr` 接手的 in_progress 卡片，已登記開著的 PR 時 `card loop` 可 push 修正。
+  const registeredOpen = deps.prs
+    .forCard(card.id)
+    .some((pr) => pr.state === "OPEN");
+  if (
+    card.status !== "done" &&
+    !(card.status === "in_progress" && registeredOpen)
+  )
     throw new Error(
       `卡片 ${card.id} 的狀態是 ${card.status}；只有 done 的卡片可以開 PR`,
     );
@@ -141,6 +148,11 @@ export async function openCardPullRequest(
 
   const found = await findPullRequests(deps.exec, repo, worktree.branch);
   const open = found.find((pr) => pr.state === "OPEN");
+  // in_progress（人工接手）的卡片只能更新 GitHub 上仍開著的 PR；登記資料可能過期，不能因此開新的 PR。
+  if (card.status !== "done" && !open)
+    throw new Error(
+      `卡片 ${card.id} 的狀態是 ${card.status}；GitHub 上沒有這個分支開著的 PR，只有 done 的卡片可以開新的 PR`,
+    );
   if (!open && found.length > 0) {
     const last = found[0];
     throw new Error(

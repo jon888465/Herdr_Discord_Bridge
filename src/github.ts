@@ -492,6 +492,63 @@ export async function pullRequestState(
   };
 }
 
+export interface PullRequestAttachFacts {
+  number: number;
+  url: string;
+  state: PullRequestInfo["state"];
+  headSha: string;
+  headBranch: string;
+  base: string;
+  /** 來源是別的 repo（fork）。 */
+  isCrossRepository: boolean;
+}
+
+/** 唯讀：`card attach-pr` 檢查既有 PR 能不能登記。 */
+export async function pullRequestAttachFacts(
+  exec: Exec,
+  repo: GithubRepo,
+  number: number,
+): Promise<PullRequestAttachFacts> {
+  assertNumber(number);
+  const data = parseJson(
+    await run(
+      exec,
+      "gh",
+      [
+        "pr",
+        "view",
+        String(number),
+        "--repo",
+        slug(repo),
+        "--json",
+        "number,url,state,headRefOid,headRefName,baseRefName,isCrossRepository",
+      ],
+      "gh_failed",
+    ),
+  ) as Record<string, unknown>;
+  if (
+    !data ||
+    data.number !== number ||
+    typeof data.url !== "string" ||
+    !isState(data.state) ||
+    typeof data.headRefOid !== "string" ||
+    !/^[0-9a-f]{40}$/.test(data.headRefOid) ||
+    typeof data.headRefName !== "string" ||
+    typeof data.baseRefName !== "string" ||
+    typeof data.isCrossRepository !== "boolean"
+  )
+    throw new GithubError("unexpected", "unexpected gh pr view output");
+  return {
+    number,
+    url: data.url,
+    state: data.state,
+    headSha: data.headRefOid,
+    headBranch: data.headRefName,
+    base: data.baseRefName,
+    isCrossRepository: data.isCrossRepository,
+  };
+}
+
 export type MergeMethod = "merge" | "squash" | "rebase";
 
 /**
