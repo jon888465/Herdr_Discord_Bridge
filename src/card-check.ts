@@ -9,6 +9,8 @@ Checks that each Markdown card file is valid under the card format
 (docs/adr/0001-portable-md-cards.md). Prints OK or FAIL per file.
 Files larger than 512 KiB are refused; --ledger raises the limit to 1 MiB
 for operational (ledger) cards (docs/adr/0002-operational-cards-in-plugin-state.md).
+A ready card without a notify field gets a WARN line (stderr, exit status unchanged):
+the bridge only notifies a Discord thread or Agent that the card records.
 Exit status: 0 all valid, 1 at least one invalid or unreadable, 2 usage error.`;
 
 export interface CheckOutput {
@@ -41,6 +43,7 @@ export function runCardCheck(
 
   const ok: string[] = [];
   const failed: string[] = [];
+  const warned: string[] = [];
   for (const file of files) {
     try {
       const result = parseCard(readFile(file, maxFileBytes), file, {
@@ -49,6 +52,11 @@ export function runCardCheck(
       if (result.ok) {
         const { id, type, status, title } = result.card;
         ok.push(`OK    ${file}  ${id} ${type} ${status} "${title}"`);
+        // ready 的卡會被 bridge 撿起；沒有 notify 就不知道要通知誰（ISSUE-121）。
+        if (status === "ready" && !result.card.notify)
+          warned.push(
+            `WARN  ${file}: ready 的卡片沒有 notify 欄位，bridge 不會通知任何人（Discord 來源填 notify: discord:<thread id>；Agent 來源填 notify: agent:<pane>:<terminal>:<agent>）`,
+          );
       } else {
         failed.push(`FAIL  ${file}: ${result.error}`);
       }
@@ -60,6 +68,6 @@ export function runCardCheck(
   return {
     code: failed.length ? 1 : 0,
     stdout: lines(ok),
-    stderr: lines(failed),
+    stderr: lines([...failed, ...warned]),
   };
 }

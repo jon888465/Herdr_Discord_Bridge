@@ -1,8 +1,22 @@
 # Known Issues
 
+## ISSUE-121：Agent 自己寫的任務卡片沒有 `notify`，進度不會通知任何人
+
+2026-11-07。狀態：已修正、待驗收（規則與警告；尚未實機驗證）。
+
+**症狀：**使用者從 Discord 對話要求的任務，由 Agent 寫成卡片檔後，卡片沒有 `notify` 欄位，bridge 不知道任務來自哪個 Discord thread（自動撿卡沒有原 thread），所以 PR、review、CI、merge、失敗等事件都不會通知（2026-11-07 使用者回報：「我是透過 discord 問的就應該要通知」）。ISSUE-120 的通知功能只對有記錄通知對象的卡有效。
+
+**已確認根因：**`notify` 只有兩個來源：從 Discord 的 `card` 指令建立或指派時 bridge 自動記下 thread，或寫卡的 Agent 自己填。Agent 直接寫檔時沒有任何規則或檢查要求填它，實際上我（Agent）建的 `flow-notify`、`tab-layout` 等卡都漏了。補填也有損失：已經被判定為「沒有通知對象」的事件（例如 `autopick_picked`）不會回頭補發，這是 ISSUE-120 的設計（不猜、不重送）。
+
+**修正（2026-11-07）：**(1) `AGENTS.md` 新增「建立任務卡片」：Agent 寫卡必須填 `notify`（Discord 來源填 `discord:<thread id>`，thread id 取自 `routing.json` 的 `threadRoutes`；其他填 `agent:<pane>:<terminal>:<agent>`），轉 `ready` 之前先填；(2) `herdr-card-check` 對**狀態為 `ready` 且沒有 `notify`** 的卡在 stderr 印 `WARN`，結束碼不變（`draft` 不警告）。
+
+**測試（2026-11-07，本機）：**新增 `test/card-check.test.ts` 案例：ready 沒有 notify → exit 0 且 stderr 有 WARN；有 notify 或 draft → stderr 為空。
+
+**未驗證／限制：**這只是規則加警告，不是強制：Agent 不跑檢查或忽略 WARN，仍然會產生沒有通知對象的卡。曾考慮由 bridge 在撿卡時用「目前選中的 Agent」的 Discord 路由自動補，但那個 Agent 不一定是寫卡的人，可能通知錯對象，所以沒做。
+
 ## ISSUE-120：卡片來源通知（REQ-20261107-flow-notify）
 
-2026-11-07。狀態：已修正、待驗收。**尚未實機驗證**，未部署／重啟。症狀：進度僅在 console；預期通知原 thread／pane。macOS sandbox 假 port 重現；根因為缺來源。修正來源、帳本派送／去重、排隊／身分檢查、有限重試與事件；SPEC.md、README.zh-TW.md 同步。
+2026-11-07。狀態：已修正、待驗收。**尚未實機驗證**。bridge 已於 2026-11-07 重啟並載入此功能（PR #156，`fd5bce0`）。症狀：進度僅在 console；預期通知原 thread／pane。macOS sandbox 假 port 重現；根因為缺來源。修正來源、帳本派送／去重、排隊／身分檢查、有限重試與事件；SPEC.md、README.zh-TW.md 同步。
 
 歷史：初版 red 6 fail，整合 733 項／7 fail 修正後 737 pass。Review 重新開啟 f1–f3（重送、互斥漏紀錄、故障測試缺注入）；本輪 red 126 項／3 fail，已修正並補測試。2026-11-07：Worker 因 codex 權限提示逾時而任務失敗（ISSUE-115），產出存成 WIP commit，由人工接手檢查後修正三處：(1) 沒有通知對象的舊卡，每次掃描會把所有歷史事件都寫一筆「沒有通知對象」進卡片紀錄——改為只處理 notifier 啟動（`startedAt`）之後的事件，並補測試；(2) `card loop` 的 `notify` 被改成只有 console 才回覆 Discord——還原為原行為；(3) PR 監看對所有卡改成只印 console——收窄為只有「卡片有記錄通知對象」才只印 console，沒有記錄的舊卡維持回報到原 thread。另把新增檔案整理成專案的 prettier 格式。測試（2026-11-07，本機非 sandbox，Node 26.12）：`npm run build` 通過，`node --test dist/test/*.test.js` 1442 項，1441 pass、0 fail、1 skipped（既有的略過），輸出沒有多餘 stdout；`herdr-card-check` 實測接受 `notify: discord:123456789`、拒絕 `notify: agent:w4:p2`。
 

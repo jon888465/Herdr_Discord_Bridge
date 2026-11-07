@@ -6,7 +6,7 @@
 
 每 5 秒掃帳本，通知撿卡、PR、review、CI、merged、failed／autopick_stopped、merge_blocked、loop_stopped；event id 去重、凍結對象。Discord 僅原 thread，沿用分段／速率限制，最多三次；先持久化 sending，只有明確 failed 才重試，結果不明不重送。認領寫失敗不送，同程序最多試三次（無法寫盤的計數不能跨重啟保存）。Agent 僅原 pane，working／blocked／unknown 排隊；idle／done 送前雙查 pane／terminal／Agent，權限／選單不送，身分不符放棄。兩路當機皆寧可漏送、不重送。
 
-`[bridge 通知]` 僅含 id、引用標題、事件、已有的完整純文字 PR 網址、固定分類原因，不含描述／finding／credentials。通知失敗不改流程，互斥 merge 仍拒絕並記事件；不做停滯提醒。未部署／重啟／實機驗證。
+`[bridge 通知]` 僅含 id、引用標題、事件、已有的完整純文字 PR 網址、固定分類原因，不含描述／finding／credentials。通知失敗不改流程，互斥 merge 仍拒絕並記事件；不做停滯提醒。已部署（bridge 2026-11-07 重啟載入），尚未實機驗證。Agent 寫的卡片要自己填 `notify`（AGENTS.md「建立任務卡片」，ISSUE-121）。
 
 ## 1. 範圍與架構
 
