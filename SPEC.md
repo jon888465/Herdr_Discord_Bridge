@@ -452,6 +452,8 @@ Lead 仍由已選取的 live Agent 擔任。可不委派而直接完成工作；
 
 **ISSUE-108 更新（2026-11-06，原始碼已修正、待實機驗收；取代 ISSUE-094 的舊分割門檻及「不足就拒絕」規則）：** Worker、reviewer／修正者與 `agent start` 共用 `createAgentPane`。只有分割後兩邊 rect 都至少 60 欄、18 列（含框線，分隔線另預留 1 格）才分割；優先往右，否則往下。基底不夠大時選同版面面積最大且可安全分割的 pane；全部不足則以 `tab.create` 在同 workspace、指定 cwd 開新 tab，`focus=false`。基底不在 layout 時拒絕。`pane.split`／`tab.create` 都不重試，建立失敗或送達不明後不換另一種方式；沿用回傳的 pane/workspace/terminal 身分檢查。reviewer／修正者只核對並關閉自己的 pane，不呼叫 `tab.close`；profile release 仍保留 CLI 與 pane。新 tab root pane 的實際清理待驗收。不放大既有小 pane，不保證視窗縮小後仍達門檻，不自動確認啟動提示或重送 prompt。
 
+**一個 tab 最多 2 個 pane（ISSUE-122，2026-11-07，原始碼已修正、待實機驗收）：** `createAgentPane` 先數基底 pane 所在 tab（`pane.layout` 回傳的就是這個 tab）內的 pane 總數，**含 Lead、使用者自己的與其他 Agent 的 pane**；已有 2 個以上就不分割，不論尺寸是否夠大都直接 `tab.create`；只剩基底一個 pane 時才套用上面的尺寸規則。每個溢出的新 tab 只放這一個新 pane，第一版不重用先前建立的 tab 去湊成兩個。因此上面「改選同版面別的 pane」的退路實際上只剩基底一個 pane 時才可能走到。不放大、搬動或關閉任何既有 pane／tab；`pane.layout` 讀不到或基底不在其中時沿用原本的錯誤，不改走 tab。`createAgentPane` 只在這次**自己建立**了新 tab 時回傳 `tabId`，呼叫端把它交給 `nameAgentPane`，用與 pane 同一個 `agentDisplayName` 結果以 `tab.rename`（參數 `tab_id`、`label`）替新 tab 命名；分割出的 pane 不命名任何 tab。命名失敗只 `console.warn`，不影響啟動與關閉；關閉仍只靠 id 與 terminal id，不依名稱判斷。
+
 重用前核對 workspace、pane、terminal、kind 與 session identity；busy/blocked、identity 改變、profile 設定變更均拒絕。
 已消失的綁定 session 可另建新 pane；同 pane 被替換則需明確 bind。缺少 session metadata 時回報 unknown，不能聲稱 context 延續。
 新 Worker prompt 包含原任務、當前 Assignment、過往有界報告與 continuity；不複製 hidden reasoning，也不保證重建完整 context。

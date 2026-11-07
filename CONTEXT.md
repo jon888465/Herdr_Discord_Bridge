@@ -173,5 +173,6 @@ The second fix still requires runtime deployment and live acceptance.
 ISSUE-108（2026-11-06）：`src/pane-split.ts` 共用建立規則已修正、待實機驗收。
 Worker、reviewer／修正者與 `agent start` 只在分割後兩邊 rect 都至少 60 欄、18 列時分割；
 同版面無可用 pane 就在同 workspace／cwd 開不搶焦點的新 tab，建立不重試。
+一個 tab 最多 2 個 pane（ISSUE-122，2026-11-07，待實機驗收）：tab 內已有 2 個以上 pane（含 Lead、使用者的）就直接開新 tab，並以同一個名稱替新 tab 命名。
 不放大既有 pane；Lead 漏處理 prompt 的直接原因仍未確認，亦未增加自動重送。
 驗證、部署與剩餘驗收見 `docs/known-issues.md` 的 ISSUE-108。

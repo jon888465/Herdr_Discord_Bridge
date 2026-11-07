@@ -1,5 +1,17 @@
 # Known Issues
 
+## ISSUE-122：自動建立的 pane 讓一個 tab 擠進超過 2 個 pane，新 tab 也沒有名稱（REQ-20261107-tab-layout）
+
+2026-11-07。狀態：已修正、待驗收。**尚未在真正的新 tab 退路情境實機驗證**；bridge 尚未重啟載入。
+
+**症狀：**`chooseSplitTarget` 只看尺寸（ISSUE-108），一個 tab 仍可能被連續分割成 3、4 個 pane（2026-11-07 的 `flow-notify` 卡，一個 workspace 同時有 Lead 加 3 個 Worker），Lead 與 Worker 的畫面被擠小；PR #151 的新 tab 退路建出的 tab 標籤是 Herdr 預設的數字（實測 `label: "3"`），從 tab 列看不出是哪個 reviewer／Worker（使用者 2026-11-07 的要求）。
+
+**修正（2026-11-07）：**`createAgentPane`（`src/pane-split.ts`）先數基底 pane 所在 tab 的 pane 總數（含 Lead、使用者的與其他 Agent 的），已有 2 個以上就不分割、直接 `tab.create`；只剩基底時才套用 ISSUE-108 的尺寸規則。只有這次自己建立新 tab 時才回傳 `tabId`，呼叫端（profile Worker、`openReviewerPane`、`agent start`）把它傳給 `nameAgentPane`，以 `tab.rename` 用與 pane 同一個 `agentDisplayName` 結果替新 tab 命名；分割出的 pane 不命名任何 tab，也不命名 Lead 或使用者的 tab。命名失敗只警告；關閉仍只靠 id 與 terminal id。
+
+**測試與實測（2026-11-07，本機非 sandbox，Node 26.12）：**`npm run build`、`npm run lint` 通過；`node --test dist/test/*.test.js` 1446 項，1445 pass、0 fail、1 skipped（既有的略過），輸出沒有多餘 stdout。新增涵蓋：tab 內已有 2 個 pane（含使用者的）即使尺寸夠大也直接開 tab；連續建立 3 個 pane（第 1 個分割、第 2、3 個各開新 tab，沒有任何 tab 超過 2 個 pane）；只有自己建立的 tab 才被命名、分割時不命名、命名失敗不影響；`tabId` 在 workspace 不符或沒有 tab id 時不回傳；關閉流程不依名稱。因規則改變，`test/pane-split.test.ts` 原本「作者的 pane 太小就改從同版面別的 pane 分割」的測試改為「已有 2 個 pane 就開新 tab」，其餘既有測試未刪或弱化。**`tab.rename` 實測（人工，Worker 以外）：**2026-11-07 在真實 Herdr，對自己開的探針 tab 呼叫 socket `tab.rename`，參數 `tab_id`、`label`，回傳 `type: "tab_info"`，`tab.label` 為新名稱，探針已關閉。
+
+**未驗證／限制：**「真正因為 tab 已滿而開新 tab、tab 列上名稱是否正確出現」沒有實機驗證；新 tab 的 root pane 關閉後 Herdr 是否自動移除空 tab 沿用 ISSUE-108 的待驗收；每個溢出的新 tab 只放一個 pane，不重用舊 tab，所以 tab 數會變多；執行中的 bridge 尚未重啟載入。這張卡的 Worker 因要求矛盾（同時禁止並要求 socket 探針實測）而權限提示逾時失敗（ISSUE-115），產出由人工接手完成。
+
 ## ISSUE-121：Agent 自己寫的任務卡片沒有 `notify`，進度不會通知任何人
 
 2026-11-07。狀態：已修正、待驗收（規則與警告；尚未實機驗證）。
@@ -13,6 +25,7 @@
 **測試（2026-11-07，本機）：**新增 `test/card-check.test.ts` 案例：ready 沒有 notify → exit 0 且 stderr 有 WARN；有 notify 或 draft → stderr 為空。
 
 **未驗證／限制：**這只是規則加警告，不是強制：Agent 不跑檢查或忽略 WARN，仍然會產生沒有通知對象的卡。曾考慮由 bridge 在撿卡時用「目前選中的 Agent」的 Discord 路由自動補，但那個 Agent 不一定是寫卡的人，可能通知錯對象，所以沒做。
+
 
 ## ISSUE-120：卡片來源通知（REQ-20261107-flow-notify）
 
