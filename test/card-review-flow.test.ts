@@ -98,6 +98,7 @@ function setup(
           ? `pane.split:${JSON.stringify(params)}`
           : method,
       );
+      if (method === "pane.rename") return {};
       if (method === "pane.layout")
         return {
           layout: {
@@ -180,6 +181,7 @@ test("a clean review opens a fresh pane, starts a different kind, runs one turn,
       "fingerprint",
       "pane.layout",
       "pane.split",
+      "pane.rename",
       "startAgent",
       "runTurn",
       "fingerprint",

@@ -3837,3 +3837,20 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 測試（2026-11-07，本機 sandbox，假 port）：先新增成功路徑測試，`npm run build && node --test dist/test/agent-ready.test.js` 得到預期 red（1 fail，原實作回 blocked）；實作後相關測試 21/21 pass，0 fail。涵蓋成功後就緒、提示持續與同 pane 重入不重送、輪詢中 blocked、agy／claude 信任、權限／未知、讀取失敗與無效資料、更新混合敏感字樣、種類不符、送達不確定、送後讀取失敗，以及直接掃清單無信任／權限／登入字樣。最終檢查命令：`npm run typecheck`、`npm run build`、`node --test dist/test/agent-ready.test.js dist/test/update-prompts.test.js`。完整套件未執行，因 Unix-socket 測試在 sandbox 會 EPERM（ISSUE-115）。最初 build 因未安裝依賴而找不到 tsc，`npm ci --ignore-scripts` 後解除。
 
 未驗證／下一步：**尚未實機驗證** Discord／Herdr／codex；claude、agy 與其他 CLI 更新提示皆未涵蓋／未驗證，不得猜畫面或按鍵。autopick `startLead` 與 profile pool 使用獨立等待流程，未接線此共用函式，本輪不擴大範圍，ISSUE-117 仍待處理；ISSUE-116 的 idle 誤判也未修正。尚未部署或重啟執行中的 bridge；build 通過不代表 runtime 已更新，舊的失敗任務／訊息不會補送。Lead 應安排重啟後的真實更新選單與信任提示驗收。
+
+
+## ISSUE-119：自動建立的 workspace／pane 未顯示實際 Agent 種類（REQ-20261107-agent-naming）
+
+更新日期：2026-11-07。狀態：已修正、待驗收。
+
+使用者可見症狀：autopick Lead workspace 原本只有 `autopick-<卡片 id>`；reviewer、profile Worker、`agent start` pane 未標示種類與角色，側欄難以辨認。預期名稱包含實際種類，workspace 保留卡片及 `autopick-` 前綴、最多 60 字元；名稱不作為關閉身分。
+
+重現／環境：2026-11-07，本機 macOS sandbox、Herdr CLI 0.9.1，使用假 port 重現舊 workspace label 缺少 codex／claude；尚未在實機 Herdr 側欄驗證。已確認根因（讀碼）：workspace.create label 固定只拼卡片 id，相關 pane 建立入口未呼叫命名 API。`herdr pane --help`、`herdr pane rename --help` 確認 rename 支援；`herdr api schema --json` 的 `PaneRenameParams` 確認參數為 `pane_id`／`label`，沿用現有 port.request socket 呼叫方式，沒有為能力探測修改任何 live pane。
+
+修正範圍：`src/cli-adapter.ts` 共用 `agentDisplayName`，共用原有 adapter 種類辨識而非另建對照表。workspace 使用 `autopick-<種類>-<卡片 id>` 並維持 `slice(0, 60)`，超長只截卡片尾端；reviewer、Worker、agent start pane 顯示 `<種類>·<角色>`，Worker／agent start 有 model 時附加 model。pane.rename 以 retries: 0 呼叫，失敗記錄警告，保留既有啟動與清理流程。Agent 啟動名稱、關閉 workspace／pane 的 id／terminal id 守門、card cleanup 與 console 的既有 label 查找沒有變更；config.json、policy.yml 未修改。
+
+測試（2026-11-07）：先新增 workspace 假 port 測試，`npm run build && node --test dist/test/autopick-wiring.test.js` 得到預期 red：8 pass、2 fail（codex／claude label 缺少種類）；修正後 10/10 pass。pane 新增斷言先得到預期 red：`npm run build && node --test dist/test/agent-launch.test.js dist/test/profile-start.test.js dist/test/review-pane.test.js` 為 29 pass、3 fail（缺少 rename）。接線後第一輪相關檢查為 61 pass、2 fail（既有呼叫順序斷言尚未加入 rename），已補上新操作斷言、保留既有驗證。最初 build 找不到 tsc，`npm ci --ignore-scripts` 後解除。
+
+最終檢查（2026-11-07）：`npm run typecheck`、`npm run build`；`node --test dist/test/autopick-wiring.test.js dist/test/agent-launch.test.js dist/test/profile-start.test.js dist/test/review-pane.test.js dist/test/card-review-flow.test.js dist/test/cli-adapter.test.js dist/test/pane-split.test.js`，101/101 pass、0 fail。涵蓋 codex／claude、長 id 與 60 字元上限、前綴、種類 alias、角色及 model、改名後仍用 id 關閉、terminal 被替換時拒絕關閉、命名不支援時不改清理行為。未跑完整套件：sandbox Unix socket listen 會 EPERM（既有限制 ISSUE-115），本輪只跑相關測試檔。`git diff --check` 通過。
+
+未驗證／下一步：**尚未在實機 Herdr 側欄驗證**；本機／遠端的 pane.rename 實際顯示、CLI 啟動後 label 是否保留、人工改名後的實機清理仍需 Lead 安排驗收。舊版遠端 server 可能不支援 rename，會記警告並沿用未命名 pane。原始碼與 build 已完成，執行中的 bridge 未部署、未重啟；既有 workspace／pane 不會補改名，舊訊息不會補送。不代表 ISSUE-117 的 codex Lead 就緒問題已修正（該 issue 狀態不變）。未 commit、未 push。

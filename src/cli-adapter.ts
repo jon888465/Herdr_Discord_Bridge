@@ -575,15 +575,38 @@ export function levelArgsFor(
   return { ok: true, args: adapter.levelArgs(level) };
 }
 
-function adapterFor(agentKind: string | undefined): CliOutputAdapter {
+function identifyCli(agentKind: string | undefined): {
+  kind: string;
+  adapter: CliOutputAdapter;
+} {
   const kind = (agentKind || "").toLowerCase();
-  if (kind === "grok") return grokAdapter;
-  if (kind === "pi") return piAdapter;
-  if (kind.includes("claude")) return claudeAdapter;
-  if (kind.includes("opencode")) return opencodeAdapter;
-  if (kind.includes("antigravity") || kind === "agy") return antigravityAdapter;
-  if (kind.includes("codex")) return codexAdapter;
-  return genericAdapter;
+  if (kind === "grok") return { kind: "grok", adapter: grokAdapter };
+  if (kind === "pi") return { kind: "pi", adapter: piAdapter };
+  if (kind.includes("claude"))
+    return { kind: "claude", adapter: claudeAdapter };
+  if (kind.includes("opencode"))
+    return { kind: "opencode", adapter: opencodeAdapter };
+  if (kind.includes("antigravity") || kind === "agy")
+    return { kind: "agy", adapter: antigravityAdapter };
+  if (kind.includes("codex")) return { kind: "codex", adapter: codexAdapter };
+  return { kind, adapter: genericAdapter };
+}
+
+function adapterFor(agentKind: string | undefined): CliOutputAdapter {
+  return identifyCli(agentKind).adapter;
+}
+
+/** Display-only names; identity and cleanup must continue to use IDs. */
+export function agentDisplayName(input: {
+  kind: string;
+  role: "autopick" | "reviewer" | "worker" | "agent";
+  cardId?: string;
+  model?: string;
+}): string {
+  const kind = identifyCli(input.kind).kind;
+  if (input.role === "autopick")
+    return `autopick-${kind}-${input.cardId ?? ""}`.slice(0, 60);
+  return `${kind}·${input.role}${input.model ? `·${input.model}` : ""}`;
 }
 
 function stripCliChrome(value: string): string {

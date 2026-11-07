@@ -10,7 +10,7 @@
 
 import { HerdrError } from "./herdr.js";
 import type { AgentStartPort } from "./agent-start.js";
-import { createAgentPane } from "./pane-split.js";
+import { createAgentPane, nameAgentPane } from "./pane-split.js";
 
 /** 沒有指定種類時的偏好順序；預設選第一個「和作者不同」的。 */
 export const REVIEWER_KINDS: readonly string[] = ["claude", "codex", "agy"];
@@ -48,7 +48,14 @@ export function chooseReviewerKind(input: {
 /** 開新 pane；版面不足時改開同 workspace 的 tab，cwd 不變、不搶焦點。 */
 export async function openReviewerPane(
   port: AgentStartPort,
-  input: { basePaneId: string; workspaceId: string; cwd: string },
+  input: {
+    basePaneId: string;
+    workspaceId: string;
+    cwd: string;
+    kind?: string;
+    role?: "reviewer" | "agent";
+    model?: string;
+  },
 ): Promise<{ paneId: string; terminalId: string }> {
   const result = await createAgentPane(port, input);
   const pane = result.pane;
@@ -63,6 +70,12 @@ export async function openReviewerPane(
     throw new Error(
       "pane creation returned unexpected workspace/identity; 不會使用這個 pane，請手動檢查",
     );
+  if (input.kind)
+    await nameAgentPane(port, pane.pane_id, {
+      kind: input.kind,
+      role: input.role ?? "reviewer",
+      model: input.model,
+    });
   return { paneId: pane.pane_id, terminalId: pane.terminal_id };
 }
 

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  agentDisplayName,
   latestAgentResponse,
   modelCommandFor,
   modelOptionsFor,
@@ -573,4 +574,16 @@ test("claude turn footer followed by a recap line still counts as complete (ISSU
   const done = `❯ 問題\n\n⏺ 答案\n\n✻ Brewed for 22s · done 上午9:46\n\n※ recap: 目標是讓 Herdr 同時顯示與轉傳\n${box}`;
   assert.equal(claudeTurnComplete(done), true);
   assert.doesNotMatch(latestAgentResponse("claude", "問題", done, ""), /recap/);
+});
+
+test("display names use the adapter's existing CLI identity and preserve roles", () => {
+  assert.equal(
+    agentDisplayName({ kind: "Claude Code", role: "reviewer" }),
+    "claude·reviewer",
+  );
+  assert.equal(
+    agentDisplayName({ kind: "antigravity", role: "worker" }),
+    "agy·worker",
+  );
+  assert.equal(agentDisplayName({ kind: "pi", role: "agent" }), "pi·agent");
 });

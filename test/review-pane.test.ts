@@ -180,3 +180,56 @@ test("closing refuses an empty pane id or terminal id instead of closing somethi
   assert.equal((await closeReviewerPane(port, { paneId: "w5:p9", terminalId: "" })).closed, false);
   assert.equal(calls.length, 0);
 });
+
+test("reviewer label is display-only: renamed pane closes only with the original terminal id", async () => {
+  const { port, calls } = fakePort({
+    "pane.layout": () => wide,
+    "pane.split": () => split(),
+    "pane.rename": () => ({}),
+    "pane.get": () => ({
+      pane: { terminal_id: "term_new", label: "human renamed" },
+    }),
+    "pane.close": () => ({}),
+  });
+  const input = {
+    basePaneId: "w5:p1",
+    workspaceId: "w5",
+    cwd: "/repo",
+    kind: "codex",
+  };
+  const pane = await openReviewerPane(port, input);
+  assert.deepEqual(calls.find((c) => c.method === "pane.rename")?.params, {
+    pane_id: "w5:p9",
+    label: "codex·reviewer",
+  });
+  assert.deepEqual(await closeReviewerPane(port, pane), { closed: true });
+  assert.deepEqual(calls.at(-1), {
+    method: "pane.close",
+    params: { pane_id: "w5:p9" },
+  });
+});
+
+test("a label failure leaves launch identity available for safe cleanup", async () => {
+  const { port, calls } = fakePort({
+    "pane.layout": () => wide,
+    "pane.split": () => split(),
+    "pane.rename": () => {
+      throw new Error("method unavailable");
+    },
+    "pane.get": () => ({
+      pane: { terminal_id: "replacement", label: "codex·reviewer" },
+    }),
+  });
+  const pane = await openReviewerPane(port, {
+    basePaneId: "w5:p1",
+    workspaceId: "w5",
+    cwd: "/repo",
+    kind: "codex",
+  });
+  assert.deepEqual(pane, { paneId: "w5:p9", terminalId: "term_new" });
+  assert.equal((await closeReviewerPane(port, pane)).closed, false);
+  assert.equal(
+    calls.some((c) => c.method === "pane.close"),
+    false,
+  );
+});

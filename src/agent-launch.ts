@@ -140,6 +140,9 @@ export async function runAgentStart(
   const cwd = await resolveCwd(deps, spec.machine, input.cwd);
 
   const pane = await openReviewerPane(deps.port, {
+    kind: spec.kind,
+    role: "agent",
+    model: spec.model,
     basePaneId: selected.pane_id,
     workspaceId: selected.workspace_id,
     cwd,
