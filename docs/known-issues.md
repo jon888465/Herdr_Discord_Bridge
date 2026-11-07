@@ -8,7 +8,7 @@
 
 **已確認事實（讀 `team-tasks/task-8a2d6d0c-…json`，2026-11-07）：**三個 assignment 都是 `failed`。第一個 `impl` 的 `blocker` 是 `herdr agent.prompt: timeout timed out waiting for agent status`，建立 13:52:28Z、失敗 14:07:34Z（約 15 分 06 秒）；Worker 自己的畫面顯示它做了 `15m 30s`，也就是**比等待上限多約 30 秒**。`review`、`verify` 兩個 assignment 的 `blocker` 都是 `dependency impl did not complete`，是連帶失敗，所以才會出現「沒有 review、沒有 verification」。Worker 的產出完整留在 worktree（11 個檔案修改、2 個新檔）。
 
-**未確認：**15 分鐘的等待上限定義在哪個設定或常數（可能與 `approvalTimeoutMs` 預設 900000 有關，**未驗證**）；是否可設定；Worker 在狀態仍是 `working` 時被判逾時是否合理。
+**已確認的上限來源（讀碼，2026-11-07）：**Team 任務的 Lead 規劃、每個 Worker、Lead 彙整三種回合，等待上限都傳 `runtime.config.approvalTimeoutMs`（`src/main.ts`，註解「將設定的 timeout 傳給 Lead planning、每個 Worker 與 Lead synthesis」），預設 `900000` 毫秒 = 15 分鐘（`src/config.ts`）。也就是「批准提示多久過期」和「Worker 單一回合最多做多久」共用同一個設定，這是設計上的混用；它在 `config.json` 可設定，但調高會連批准提示的有效期一起改。整張卡另有自己的上限：自動撿卡的任務逾時是 45 分鐘（`src/autopick-wiring.ts`）。**未確認：**Worker 在狀態仍是 `working` 時被判逾時是否合理（設計取捨，待使用者決定）。
 
 **影響與暫行處理：**卡片只要一個 Worker assignment 超過約 15 分鐘就整張失敗，大卡（多檔案、需跑完整測試）特別容易碰到；目前靠人工接手完成（有 worktree 產出時不會丟）。可能的修法（尚未決定）：讓逾時可設定、狀態仍在 `working` 時延長等待、或把大卡拆小。
 
