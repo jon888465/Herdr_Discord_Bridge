@@ -296,3 +296,11 @@ test("a policy that is missing, invalid or unsafe picks nothing", () => {
     assert.equal(picker.tick(), undefined, status);
   }
 });
+
+test("a failed picked notification never prevents autopick execution", async () => {
+  let commands=0,picked=0;const reports:AutopickReport[]=[];
+  const picker=createAutopicker({policy:()=>({status:"loaded",policy:policyFor("L0"),file:"/policy"}),readyCards:()=>[card("REQ-20261107-notify")],
+    onPicked:async()=>{picked++;throw Error("notification unavailable");},
+    steps:{startLead:async()=>({close:async()=>{}}),command:async()=>{commands++;return "";},waitTask:async()=>({completed:true,detail:""}),waitCardDone:async()=>true,loop:async()=>({merged:true,text:""})},onReport:r=>{reports.push(r);}});
+  await picker.tick();assert.equal(picked,1);assert.equal(commands,2);assert.equal(reports[0].outcome,"reached");
+});

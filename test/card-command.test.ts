@@ -1,3 +1,6 @@
+import { createCardNotifier } from "../src/card-notify.js";
+import { appendLogEntries } from "../src/card-ledger.js";
+import { serializeCard } from "../src/card-serialize.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -2162,18 +2165,34 @@ test("card merge passes --method through", async () => {
   assert.match(reply, /rebase/);
 });
 
-test("a refusal lists the reasons and the card is left exactly as it was", async () => {
+test("a refusal lists the reasons and only appends its bounded merge-blocked flow record", async () => {
   const { store, run } = mergeSetup({
     mergePullRequest: async () => {
-      throw new Error("不 merge PR #42（2 項條件不成立）：\n- 專案政策是 L1\n- CI 有檢查失敗");
+      throw new Error(
+        "不 merge PR #42（2 項條件不成立）：\n- 專案政策是 L1\n- CI 有檢查失敗",
+      );
     },
   });
   const before = store.read("REQ-20261102-work");
-  await assert.rejects(run("merge", "REQ-20261102-work"), /2 項條件不成立.*L1.*CI/s);
+  await assert.rejects(
+    run("merge", "REQ-20261102-work"),
+    /2 項條件不成立.*L1.*CI/s,
+  );
   const after = store.read("REQ-20261102-work");
-  assert.ok(before.ok && after.ok && before.hash === after.hash);
+  assert.ok(before.ok && after.ok);
   const log = store.readLog("REQ-20261102-work");
-  assert.deepEqual(log.ok && log.entries, []);
+  assert.ok(log.ok);
+  assert.equal(log.entries.length, 1);
+  assert.equal(log.entries[0].event, "merge_blocked");
+  assert.equal(log.entries[0].text, "專案政策、CI 條件未滿足");
+  assert.match(log.entries[0].eventId, /^merge_blocked-/);
+  const expected = appendLogEntries(before.card.body, log.entries);
+  assert.ok(expected.ok);
+  assert.deepEqual(after.card, {
+    ...before.card,
+    updated: "2026-11-02",
+    body: expected.body,
+  });
 });
 
 test("a merge never runs while a review, a fix or a loop of the same card is running, and not twice at once", async () => {
@@ -2249,4 +2268,55 @@ test("card commit validates its arguments and the card", async () => {
   await assert.rejects(run("commit"), /usage: card commit <id>/);
   await assert.rejects(run("commit", "nope"), /不是合法的卡片 id/);
   await assert.rejects(run("commit", "REQ-20261102-missing"), /找不到卡片/);
+});
+
+test("Discord import and assignment persist only their explicit originating thread",async()=>{
+  const id="REQ-20261107-origin";
+  const s=setup({source:"console",readLocalFile:()=>{const out=serializeCard(card(id,{notify:"agent:w4:p2:term:codex"}));assert.ok(out.ok);return out.text;}});
+  await s.run("import","/tmp/card.md");s.deps.source="discord";s.deps.notifyThread="12345";
+  const current=s.store.read(id);assert.ok(current.ok);s.store.update(id,current.hash,c=>({...c,status:"ready"}));
+  s.deps.startTask=async()=>({taskId:"task-notify",lead:{agent:"codex",machine:"local"}});
+  await s.run("assign",id);const read=s.store.read(id);assert.ok(read.ok);assert.equal(read.card.notify,"discord:12345");
+});
+
+test("notification failure cannot change card loop or card merge results", async () => {
+  const loop = loopMergeSetup(["pass"], { ci: "failure" });
+  loop.deps.notify = async () => {
+    throw Error("Discord down");
+  };
+  const reply = await loop.run("loop", "REQ-20261102-work", "--merge");
+  assert.match(reply, /loop 停/);
+  assert.deepEqual(loop.calls, ["review", "waitCi"]);
+  const history = loop.store.readLog("REQ-20261102-work");
+  assert.ok(history.ok);
+  assert.ok(history.entries.some((e) => e.event === "loop_stopped"));
+  for (const target of ["discord:12345", "agent:w4:p2:term:codex"]) {
+    const merge = mergeSetup(); let failures=0;
+    const notifier = commandNotifier(merge.store,target,async()=>{failures++;throw Error("notification down");});
+    const original=merge.deps.mergePullRequest;
+    merge.deps.mergePullRequest=async(...args)=>{await notifier.tick();return original(...args);};
+    const out = await merge.run("merge", "REQ-20261102-work");
+    assert.match(out, /已 merge/); assert.equal(failures,1); assert.equal(merge.calls.length,1);
+  }
+});
+
+function commandNotifier(store: CardStore,target: string,fail:()=>Promise<void>,send?: (text:string)=>void) {
+  const id="REQ-20261102-work",read=store.read(id);assert.ok(read.ok);
+  store.update(id,read.hash,c=>({...c,notify:target}));
+  store.appendLog(id,[{event:"pr_opened",eventId:"notify-pr",time:"2026-11-02T08:15:00Z",text:"PR opened"}]);
+  return createCardNotifier({store,now:()=>"2026-11-02T08:15:00Z",startedAt:"2026-11-02T00:00:00Z",prUrl:()=>undefined,
+    discord:async(_id,text)=>{if(send)send(text);else await fail();},pane:async()=>{await fail();return undefined;},agent:fail,log:()=>{}});
+}
+
+test("mutual exclusion logs and notifies merge_blocked while preserving refusal",async()=>{
+  const s=mergeSetup();const sent:string[]=[];const notifier=commandNotifier(s.store,"discord:12345",async()=>{},t=>sent.push(t));
+  await notifier.tick();sent.length=0;
+  let release!:()=>void;const wait=new Promise<void>(r=>{release=r;});const original=s.deps.mergePullRequest;
+  s.deps.mergePullRequest=async(...args)=>{await wait;return original(...args);};
+  const running=s.run("merge","REQ-20261102-work");
+  try {
+    await assert.rejects(s.run("merge","REQ-20261102-work"),{message:"卡片 REQ-20261102-work 正在 review、修正或 merge 中"});
+    const log=s.store.readLog("REQ-20261102-work");assert.ok(log.ok);assert.equal(log.entries.filter(e=>e.event==="merge_blocked").length,1);
+    await notifier.tick();assert.equal(sent.length,1);assert.match(sent[0],/merge_blocked/);
+  } finally {release();await running;}
 });

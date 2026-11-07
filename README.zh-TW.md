@@ -1,5 +1,7 @@
 # Herdr Discord Bridge（繁體中文）
 
+卡片通知（2026-11-07，待實機驗收）：有記錄通知對象的卡，CI／merge 結果改由卡片通知送出；沒有記錄的卡維持原本回報到原 thread。選填 `notify: discord:<thread id>` 或 `notify: agent:<pane id>:<terminal id>:<agent>`；Discord thread import／assign 自動記錄，Agent 自填，匯入不信任來源。無來源舊卡不通知、不猜。重要節點只送原 thread／pane；working／blocked 排隊、送前核對身分。先認領，當機寧漏不重送，Discord 明確失敗最多三次。只傳 id、標題、事件、完整 PR 網址、分類原因，失敗不改流程。未重啟；不做停滯提醒。見 SPEC.md。
+
 從 Discord 控制已在 Herdr pane 中執行的 coding agent。Bridge 使用 Discord outbound Gateway WebSocket 與 Herdr local socket，不提供公開 HTTP endpoint，也不會取代 Herdr 的 PTY/runtime。
 
 [English](README.md) | 繁體中文

@@ -1,5 +1,13 @@
 # Herdr Discord Bridge 規格
 
+### 卡片通知（2026-11-07，REQ-20261107-flow-notify，待驗收）
+
+有記錄通知對象的卡，CI／merge 結果由卡片通知送出（PR 監看對這些卡只印 console，避免重複）；沒有記錄通知對象的舊卡、PR 關閉與刪卡維持原本回報到原 thread；`card loop` 在 Discord 的進度回覆不變。通知只處理 notifier 啟動之後的事件，沒有通知對象的舊卡歷史事件不回溯、不寫入紀錄。選填 `notify: discord:<thread id>` 或 `notify: agent:<pane id>:<terminal id>:<agent>`，parser／serializer／check 共用驗證。匯入清空不可信來源，Discord thread import／assign 記來源，Agent 自填。無來源不猜，console／帳本記「沒有通知對象」，舊卡不通知 Agent。
+
+每 5 秒掃帳本，通知撿卡、PR、review、CI、merged、failed／autopick_stopped、merge_blocked、loop_stopped；event id 去重、凍結對象。Discord 僅原 thread，沿用分段／速率限制，最多三次；先持久化 sending，只有明確 failed 才重試，結果不明不重送。認領寫失敗不送，同程序最多試三次（無法寫盤的計數不能跨重啟保存）。Agent 僅原 pane，working／blocked／unknown 排隊；idle／done 送前雙查 pane／terminal／Agent，權限／選單不送，身分不符放棄。兩路當機皆寧可漏送、不重送。
+
+`[bridge 通知]` 僅含 id、引用標題、事件、已有的完整純文字 PR 網址、固定分類原因，不含描述／finding／credentials。通知失敗不改流程，互斥 merge 仍拒絕並記事件；不做停滯提醒。未部署／重啟／實機驗證。
+
 ## 1. 範圍與架構
 
 此 plugin 是本機 Herdr 控制端，以 Discord 作為人類使用者介面。程式 CLI

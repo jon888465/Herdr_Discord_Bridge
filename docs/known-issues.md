@@ -1,5 +1,13 @@
 # Known Issues
 
+## ISSUE-120：卡片來源通知（REQ-20261107-flow-notify）
+
+2026-11-07。狀態：已修正、待驗收。**尚未實機驗證**，未部署／重啟。症狀：進度僅在 console；預期通知原 thread／pane。macOS sandbox 假 port 重現；根因為缺來源。修正來源、帳本派送／去重、排隊／身分檢查、有限重試與事件；SPEC.md、README.zh-TW.md 同步。
+
+歷史：初版 red 6 fail，整合 733 項／7 fail 修正後 737 pass。Review 重新開啟 f1–f3（重送、互斥漏紀錄、故障測試缺注入）；本輪 red 126 項／3 fail，已修正並補測試。2026-11-07：Worker 因 codex 權限提示逾時而任務失敗（ISSUE-115），產出存成 WIP commit，由人工接手檢查後修正三處：(1) 沒有通知對象的舊卡，每次掃描會把所有歷史事件都寫一筆「沒有通知對象」進卡片紀錄——改為只處理 notifier 啟動（`startedAt`）之後的事件，並補測試；(2) `card loop` 的 `notify` 被改成只有 console 才回覆 Discord——還原為原行為；(3) PR 監看對所有卡改成只印 console——收窄為只有「卡片有記錄通知對象」才只印 console，沒有記錄的舊卡維持回報到原 thread。另把新增檔案整理成專案的 prettier 格式。測試（2026-11-07，本機非 sandbox，Node 26.12）：`npm run build` 通過，`node --test dist/test/*.test.js` 1442 項，1441 pass、0 fail、1 skipped（既有的略過），輸出沒有多餘 stdout；`herdr-card-check` 實測接受 `notify: discord:123456789`、拒絕 `notify: agent:w4:p2`。
+
+限制：當機寧可漏送、不重送；僅明確 failed 可重試，認領寫失敗不送，同程序最多三次（計數不能在寫盤失敗時跨重啟保存）。無來源舊卡不通知 Agent。Lead 重啟後驗證來源隔離、排隊、身分替換與失敗。未改 config.json／policy.yml。**尚未實機驗證**：Discord 來源與 Agent 來源的真實通知、排隊與身分核對都只用假 port 測過；bridge 尚未重啟載入此功能。
+
 維護規則見 [AGENTS.md](../AGENTS.md)。最後整理：2026-11-02（ISSUE-052 到 056 的索引列與 Card-to-Merge 追蹤清單；更早的條目未重新整理）。
 
 | ID        | 問題                                                                            | 狀態             | 下一步                                                                                                                                    |

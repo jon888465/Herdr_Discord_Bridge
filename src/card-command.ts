@@ -3,6 +3,8 @@
 // 只有 assign 會啟動 Team 任務，且只接受 ready 的卡片。
 
 import fs from "node:fs";
+import { randomUUID } from "node:crypto";
+import { notificationReason } from "./card-notify.js";
 import {
   CARD_STATUSES,
   PROJECT_NAME,
@@ -44,6 +46,7 @@ export interface CardCommandDeps {
   rootDir: string;
   today: () => string;
   source: "console" | "discord";
+  notifyThread?: string;
   attachments: Array<{ url: string; size: number; name?: string | null }>;
   /** 下載 Discord 附件並當成文字讀取，上限由呼叫端指定。 */
   download: (
@@ -325,6 +328,52 @@ export function readLocalCardFile(file: string): string {
 // 沒有這個保護時同時兩次 assign 都會看到 ready 而各啟動一個任務。
 const assigning = new Set<string>();
 
+/** 從 Discord thread 下的卡片記下通知對象；記錄失敗只寫 console，不影響流程。 */
+function rememberThread(
+  store: CardStore,
+  id: string,
+  deps: CardCommandDeps,
+): void {
+  if (deps.source !== "discord" || !deps.notifyThread) return;
+  try {
+    const read = store.read(id);
+    if (!read.ok) return;
+    const updated = store.update(id, read.hash, (c) => ({
+      ...c,
+      notify: `discord:${deps.notifyThread}`,
+    }));
+    if (updated.ok) return;
+  } catch {
+    /* diagnostic below */
+  }
+  console.error(`卡片 ${id} 通知來源記錄失敗`);
+}
+
+/** 把「merge 被擋下」「loop 停止」寫進卡片流程紀錄，之後由 card-notify 通知；寫入失敗不影響流程。 */
+function flowNotice(
+  id: string,
+  event: "merge_blocked" | "loop_stopped",
+  reason: string,
+  deps: CardCommandDeps,
+): void {
+  try {
+    const entry = {
+      time: deps.now(),
+      event,
+      eventId: `${event}-${randomUUID()}`,
+      text: reason,
+    };
+    const store = new CardStore(deps.rootDir, {
+      maxFileBytes: LEDGER_MAX_FILE_BYTES,
+    });
+    if (store.appendLog(id, [{ ...entry, text: notificationReason(entry) }]).ok)
+      return;
+  } catch {
+    /* diagnostic below */
+  }
+  console.error(`卡片 ${id} 流程通知紀錄失敗`);
+}
+
 async function assignCard(
   args: string[],
   deps: CardCommandDeps,
@@ -349,6 +398,7 @@ async function assignCard(
       throw new Error(
         `卡片 ${id} 的狀態是 ${card.status}；只有 ready 的卡片可以指派${card.status === "in_progress" ? "（已在進行中）" : ""}`,
       );
+    rememberThread(store, id, deps);
     const built = buildAssignmentPrompt(card);
     if (!built.ok) throw new Error(built.error);
 
@@ -935,6 +985,7 @@ async function loopCardCommand(
         `loop 結束：${id} 的 review 已通過（共 ${result.steps} 個步驟）。`,
         "CI 的結果由 bridge 另行通知；merge 由你決定（bridge 不會自動 merge；要自動 merge 請加 `--merge`）。",
       ].join("\n");
+    flowNotice(id, "loop_stopped", `${result.step}：${result.reason}`, deps);
     return [
       `loop 停下來了：${id}（共 ${result.steps} 個步驟，停在 ${result.step}）。`,
       `原因：${result.reason}`,
@@ -971,7 +1022,11 @@ async function mergeCardCommand(
   if (!store || !read || (!read.ok && read.code === "not_found"))
     throw new Error(`找不到卡片 ${id}`);
   if (!read.ok) throw new Error(read.error);
-  if (reviewing.has(id)) throw new Error(`卡片 ${id} 正在 review、修正或 merge 中`);
+  if (reviewing.has(id)) {
+    const reason = `卡片 ${id} 正在 review、修正或 merge 中`;
+    flowNotice(id, "merge_blocked", reason, deps);
+    throw new Error(reason);
+  }
   reviewing.add(id);
   try {
     return await mergeStep(read.card, method, deps);
@@ -986,9 +1041,20 @@ async function mergeStep(
   method: string | undefined,
   deps: CardCommandDeps,
 ): Promise<string> {
-  const run = await deps.mergePullRequest(card, {
-    ...(method !== undefined ? { method } : {}),
-  });
+  let run: MergeRun;
+  try {
+    run = await deps.mergePullRequest(card, {
+      ...(method !== undefined ? { method } : {}),
+    });
+  } catch (error) {
+    flowNotice(
+      card.id,
+      "merge_blocked",
+      error instanceof Error ? error.message : "merge unavailable",
+      deps,
+    );
+    throw error;
+  }
   return [
     `已 merge：${card.id} · PR #${run.pr.number}（${run.method}，head ${run.pr.headSha.slice(0, 12)}）`,
     run.pr.url,
@@ -1218,6 +1284,7 @@ async function importCardText(
       throw new Error(`匯入失敗：卡片已存在（${result.error}），不會覆蓋`);
     throw new Error(`匯入失敗：${result.error}`);
   }
+  rememberThread(store, result.card.id, deps);
   const lines = [`已匯入 ${result.card.id}（draft）`];
   if (result.notes.length) lines.push(`調整：${result.notes.join("；")}`);
   lines.push(

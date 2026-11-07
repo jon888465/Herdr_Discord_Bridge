@@ -23,6 +23,7 @@ export interface Card {
   created: string;
   updated: string;
   source?: string;
+  notify?: string;
   project?: string;
   /** `<機器 id>:<repo 目錄名>`，由 bridge 寫入（ADR-0002 決定 4）。 */
   projects?: string[];
@@ -49,6 +50,7 @@ const REQUIRED_KEYS = [
 const KNOWN_KEYS = new Set<string>([
   ...REQUIRED_KEYS,
   "source",
+  "notify",
   "project",
   "projects",
   "tasks",
@@ -465,6 +467,11 @@ export function buildCard(
       ...checkRequired(fields, filename),
       body: document.body,
     };
+    if (fields.has("notify")) {
+      const value = asString("notify", fields.get("notify"));
+      if (!parseNotifyTarget(value)) reject("invalid notify destination");
+      card.notify = value;
+    }
     if (fields.has("source"))
       card.source = asString("source", fields.get("source"));
     if (fields.has("project"))
@@ -490,4 +497,27 @@ export function parseCard(
   const read = readCardDocument(text, options);
   if (!read.ok) return read;
   return buildCard(read.document, filename);
+}
+
+/** Colon-separated pane identities may include a machine prefix; terminal and kind cannot. */
+export function parseNotifyTarget(
+  value: string,
+):
+  | { kind: "discord"; thread: string }
+  | { kind: "agent"; pane: string; terminal: string; agent: string }
+  | undefined {
+  const discord = /^discord:([0-9]{1,24})$/.exec(value);
+  if (discord) return { kind: "discord", thread: discord[1] };
+  const agent =
+    /^agent:((?:[A-Za-z0-9_.-]{1,64}:){1,2}[A-Za-z0-9_.-]{1,64}):([A-Za-z0-9_.-]{1,128}):([A-Za-z0-9_.-]{1,40})$/.exec(
+      value,
+    );
+  if (agent)
+    return {
+      kind: "agent",
+      pane: agent[1],
+      terminal: agent[2],
+      agent: agent[3],
+    };
+  return undefined;
 }
