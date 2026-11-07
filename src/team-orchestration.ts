@@ -548,11 +548,20 @@ export async function runTeamTask(
     };
   } catch (error) {
     // 已經有 Worker 逾時時，之後不論哪個步驟失敗，原因都要保留逾時摘要（review F6）。
-    const detail = `${timedOutPrefix(reports)}${
+    const prefix = timedOutPrefix(reports);
+    const detail = `${prefix}${
       error instanceof Error ? error.message : "orchestration failed"
     }`;
     if (!input.signal?.aborted)
       emit({ type: "task_failed", taskId: input.taskId, detail });
+    // 向外丟出的錯誤也要帶摘要（review F8）：TeamTaskEngine 的 catch 會用它的 message 再記錄一次 task_failed，
+    // 蓋掉上面事件的詳情，而自動撿卡讀的就是持久化後的詳情。取消中（signal aborted）維持原錯誤。
+    if (prefix && error instanceof Error && !input.signal?.aborted) {
+      const wrapped = new Error(detail, { cause: error });
+      wrapped.name = error.name;
+      wrapped.stack = error.stack;
+      throw wrapped;
+    }
     throw error;
   }
 }

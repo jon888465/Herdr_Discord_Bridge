@@ -161,6 +161,35 @@ test("task state machine rejects terminal resurrection and invalid completion", 
     assert.doesNotThrow(() => assertTaskTransition(a, b));
 });
 
+// review F8：Worker 逾時之後 Lead 彙整丟出非逾時錯誤。引擎的 catch 會用「被丟出的錯誤」再記錄一次 task_failed，
+// 所以最後持久化的任務原因（自動撿卡讀的就是它）必須仍帶 Worker 逾時摘要，而不只是原始的彙整錯誤。
+test("ISSUE-124 Worker 逾時後 Lead 彙整丟出非逾時錯誤，引擎最後持久化的原因仍帶逾時摘要", async () => {
+  const f = fixture();
+  try {
+    const original = f.port.waitAgent;
+    let leadWaits = 0;
+    f.port.waitAgent = async (target: string) => {
+      if (target === worker.pane_id)
+        throw new Error(
+          "herdr agent.prompt: timeout timed out waiting for agent status",
+        );
+      if (target === lead.pane_id && ++leadWaits >= 2)
+        throw new Error("Lead synthesis exploded");
+      return original(target);
+    };
+    const result = await f.engine.run({ ...input, replan: false });
+    const detail = String(result.detail);
+    assert.match(detail, /Assignment .+ 等待逾時/);
+    assert.match(detail, /Lead synthesis exploded/);
+    // 卡片只保留失敗原因前 200 字元：逾時摘要必須在最前面。
+    assert.ok(detail.indexOf("等待逾時") < 60, detail);
+    const loaded = new TeamTaskStore(join(f.dir, "tasks")).get(input.taskId);
+    assert.equal(loaded.detail, result.detail);
+  } finally {
+    f.close();
+  }
+});
+
 test("durable dynamic multi-round task persists plans, reports, journal and frozen identity", async () => {
   const f = fixture();
   try {
