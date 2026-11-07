@@ -1,16 +1,20 @@
 # Known Issues
 
-## ISSUE-124：Worker 做完但超過 15 分鐘的等待上限，整張卡被判失敗（REQ-20261107-attach-pr）
+## ISSUE-124：Worker 做完但超過 15 分鐘等待上限，整張卡被判失敗（REQ-20261107-attach-pr）
 
-2026-11-07。狀態：待調查（已確認發生原因，尚未修正）。
+2026-11-07。狀態：已修正、待驗收。**尚未實機驗證**（沒有在真實 Herdr／Discord 讓 Worker 逾時確認新訊息與通知；bridge 尚未重啟載入）。要放寬 Worker 單一回合上限請改 `config.json` 的 `teamTurnTimeoutMs`，**不要**改 `approvalTimeoutMs`。
 
-**症狀：**`REQ-20261107-attach-pr` 的 claude Worker 把實作做完（build、lint 通過，整套測試 1454／1455 通過），但整張卡仍被判失敗：`task 沒有完成：blocked：one or more Assignments failed; synthesis is partial; no passing review for the current version; no successful verification for the current version`（14:07:53Z）。使用者收到的失敗通知（ISSUE-120）沒有說明這其實是逾時。
+**症狀與確認的事實：**`REQ-20261107-attach-pr` 的 claude Worker 做完實作（整套測試 1454／1455 通過），做了約 15 分 30 秒，整張卡仍被判失敗，訊息只有「沒有通過的 review、沒有成功的 verification」，沒說是逾時。`team-tasks/<task id>.json`（2026-11-07）：`impl` 的 `blocker` 是 `herdr agent.prompt: timeout timed out waiting for agent status`（13:52:28Z 到 14:07:34Z，約 15 分 06 秒）；`review`、`verify` 是 `dependency impl did not complete`，連帶失敗。Worker 產出完整留在 worktree。
 
-**已確認事實（讀 `team-tasks/task-8a2d6d0c-…json`，2026-11-07）：**三個 assignment 都是 `failed`。第一個 `impl` 的 `blocker` 是 `herdr agent.prompt: timeout timed out waiting for agent status`，建立 13:52:28Z、失敗 14:07:34Z（約 15 分 06 秒）；Worker 自己的畫面顯示它做了 `15m 30s`，也就是**比等待上限多約 30 秒**。`review`、`verify` 兩個 assignment 的 `blocker` 都是 `dependency impl did not complete`，是連帶失敗，所以才會出現「沒有 review、沒有 verification」。Worker 的產出完整留在 worktree（11 個檔案修改、2 個新檔）。
+**根因（讀碼）：**Lead 規劃、每個 Worker、Lead 彙整三種回合的等待上限都傳 `config.approvalTimeoutMs`（預設 900000 毫秒 = 15 分鐘），與「批准提示多久過期」共用一個設定；調高它會連批准有效期一起改。整張卡另有 45 分鐘上限（`src/autopick-wiring.ts`）。
 
-**已確認的上限來源（讀碼，2026-11-07）：**Team 任務的 Lead 規劃、每個 Worker、Lead 彙整三種回合，等待上限都傳 `runtime.config.approvalTimeoutMs`（`src/main.ts`，註解「將設定的 timeout 傳給 Lead planning、每個 Worker 與 Lead synthesis」），預設 `900000` 毫秒 = 15 分鐘（`src/config.ts`）。也就是「批准提示多久過期」和「Worker 單一回合最多做多久」共用同一個設定，這是設計上的混用；它在 `config.json` 可設定，但調高會連批准提示的有效期一起改。整張卡另有自己的上限：自動撿卡的任務逾時是 45 分鐘（`src/autopick-wiring.ts`）。**未確認：**Worker 在狀態仍是 `working` 時被判逾時是否合理（設計取捨，待使用者決定）。
+**修正（2026-11-07 至 11-08）：**`src/config.ts` 新增 `teamTurnTimeoutMs`（預設 1800000 = 30 分鐘，驗證沿用 `positiveInt`），`src/main.ts` 的 Team 任務改用它，批准提示仍用 `approvalTimeoutMs`；`src/team-orchestration.ts` 的回合逾時失敗寫明 assignment、等待時間與上限，依賴它的 assignment 註明被誰連累並提示產出可能在 worktree，且逾時摘要排在失敗原因**最前面**（卡片只保留前 200 字元）；`src/card-notify.ts` 把它分類為「等待逾時」，只放一句分類原因。
 
-**影響與暫行處理：**卡片只要一個 Worker assignment 超過約 15 分鐘就整張失敗，大卡（多檔案、需跑完整測試）特別容易碰到；目前靠人工接手完成（有 worktree 產出時不會丟）。可能的修法（尚未決定）：讓逾時可設定、狀態仍在 `working` 時延長等待、或把大卡拆小。
+**獨立 review（`card review` 第 2 至 6 輪，reviewer codex）抓到並修正：**F1 `positiveInt` 遇 `{"toString": null}` 會拋 `TypeError` 使 bridge 無法啟動（所有數值設定共用，`approvalTimeoutMs` 本來就有）；F2 派工前取得 Worker 的 RPC 逾時被誤報為回合逾時；F4 逾時資訊排在最後會被 200 字元截掉；F5 補批准有效期測試（兩個不同設定值驗證 9000 而非 4000）與接線守門（讀 `main.ts` 原始碼，**不是端到端**，已實際改錯接線確認會紅）；F6 彙整失敗或受阻時漏掉 Worker 逾時摘要；F7 只認 `runTeamTurn` 自己的回合期限錯誤（Herdr 端 `agent.prompt／agent.wait: timeout`、`Timed out waiting for current response`），回合內短 RPC 逾時原樣回報；F8 F6 的修正在真實引擎裡沒生效（引擎用向外丟出的錯誤再記錄一次，覆蓋詳情），現在丟出的錯誤也帶摘要，並補經過 `TeamTaskEngine.run()` 的整合測試；F9 舊版 Herdr 的 `promptAgent`（約 5 秒）逾時訊息與 bridge 端 request 逾時相同，無法區分，**不再當成回合逾時**。多數修正都先確認測試紅燈再修。
+
+**測試（2026-11-08，本機非 sandbox，Node 26.12）：**build、lint、prettier 通過，整套 1477 項，1476 pass、0 fail、1 skipped，輸出無多餘 stdout。
+
+**限制／未驗證：**分類靠錯誤訊息格式比對，Herdr 或 `runTeamTurn` 日後改訊息只會少了逾時標記，不會誤報；批准提示沒有用真實 `DiscordAdapter` 的端到端測試；Worker 仍在 `working` 時是否延長等待、是否自動重送（設計取捨）**沒做**，待使用者決定；沒有放寬任何權限、review、CI、`card merge` 守門。這張卡的 Team 任務曾因寫入範圍守門（`config.example.jsonc` 不在 Lead 列的範圍）被判失敗，另有 codex Worker 停在 `npm test` 的權限提示（ISSUE-115），由人工接手。
 
 ## ISSUE-123：任務失敗後人工接手開的 PR 無法登記回卡片，bridge 不追蹤 CI／merge、不通知、不能走 card review／merge（REQ-20261107-attach-pr）
 

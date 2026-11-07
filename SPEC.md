@@ -50,6 +50,8 @@ Herdr 會注入 `HERDR_SOCKET_PATH` 與 `HERDR_PLUGIN_CONFIG_DIR`；standalone
 `HERDR_PLUGIN_STATE_DIR` 下（或 config directory 的 `state/`）；設定的
 state filename 僅允許單一 basename，以防止 path traversal。
 
+等待上限有兩個獨立設定（ISSUE-124）：`approvalTimeoutMs`（預設 `900000`）只管批准提示的有效期；`teamTurnTimeoutMs`（預設 `1800000`，正整數，無效值回到預設）是 Team 任務每個回合（Lead 規劃、各 Worker、Lead 彙整）的等待上限。回合逾時的失敗原因須寫明逾時、assignment id、等待時間與上限，並分類為「等待逾時」通知；Worker 仍在 working 時不自動延長或重送。
+
 Handoff context 受 `handoffLines`（預設 `40`）與 `handoffMaxChars`（預設
 `6000`）限制。這些限制會在 handoff 發到 Discord 或送往目的 Agent 前套用。
 

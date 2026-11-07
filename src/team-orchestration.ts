@@ -150,6 +150,55 @@ export interface TeamTaskResult {
 }
 
 const PLAN_TIMEOUT_MS = 120000;
+/** ISSUE-124：回合逾時造成的失敗一律帶這個標記，讓紀錄與通知能分類為「等待逾時」。 */
+const TIMEOUT_MARK = "等待逾時";
+const WORKTREE_HINT =
+  "Worker 的產出可能仍留在卡片 worktree，請先檢查再決定重跑或接手";
+
+function formatDuration(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 100) / 10);
+  if (seconds < 60) return `${seconds} 秒`;
+  const whole = Math.round(seconds);
+  const minutes = Math.floor(whole / 60);
+  return whole % 60 ? `${minutes} 分 ${whole % 60} 秒` : `${minutes} 分鐘`;
+}
+
+/**
+ * 只認 `runTeamTurn` 自己的「回合期限」錯誤（review F7）：
+ * - Herdr 端 agent.prompt／agent.wait 等待 Agent 狀態逾時（HerdrError，訊息 `herdr <method>: timeout …`）；
+ * - `runTeamTurn` 等不到本次回應的期限（`Timed out waiting for current response …`）。
+ * 回合裡面其他短 RPC（agent.read、agent.list…）的逾時不是回合期限，不能套用回合上限與 worktree 提示。
+ */
+function isTurnDeadlineError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message;
+  // bridge 端 request 逾時（`herdr agent.prompt timed out`）刻意不收：舊版 Herdr 沒有原子 prompt 時，
+  // 送出 prompt 的 promptAgent 只有預設約 5 秒，訊息與它相同，分不出來（review F9）。
+  return (
+    /^herdr agent\.(prompt|wait): timeout\b/.test(message) ||
+    /^Timed out waiting for current response from /.test(message)
+  );
+}
+
+/** 已知的 Worker 逾時摘要，放在失敗原因最前面（卡片只保留前 200 字元；review F4、F6）。 */
+function timedOutPrefix(reports: TeamTaskResult["reports"]): string {
+  return reports
+    .filter(
+      (report) =>
+        report.state === "failed" && report.blocker?.includes(TIMEOUT_MARK),
+    )
+    .map((report) => `${report.blocker!.split("：")[0]}; `)
+    .join("");
+}
+
+function timeoutDetail(
+  who: string,
+  error: Error,
+  startedAt: number,
+  limitMs: number,
+): string {
+  return `${who} ${TIMEOUT_MARK}（已等待 ${formatDuration(Date.now() - startedAt)}，上限 ${formatDuration(limitMs)}）：${error.message}`;
+}
 const DEFAULT_REPORT_LINES = 120;
 const DEFAULT_REPORT_MAX_CHARS = 6000;
 
@@ -165,6 +214,7 @@ export async function runTeamTask(
     phase: "planning" | "synthesis",
   ) => {
     check();
+    const startedAt = Date.now();
     const result = await runTeamTurn(
       agent,
       instruction,
@@ -183,7 +233,12 @@ export async function runTeamTask(
       input.onQuestion
         ? (current) => input.onQuestion!(current, phase)
         : undefined,
-    );
+    ).catch((error: unknown) => {
+      if (input.signal?.aborted || !isTurnDeadlineError(error)) throw error;
+      throw new Error(
+        timeoutDetail(`Lead ${phase}`, error as Error, startedAt, timeoutMs),
+      );
+    });
     check();
     emit({
       type: "turn_settled",
@@ -408,7 +463,13 @@ export async function runTeamTask(
               workerPaneId: assignment.workerPaneId,
               state: "failed" as const,
               report: "",
-              blocker: `dependency ${failedDependency} did not complete`,
+              blocker: `dependency ${failedDependency} did not complete${
+                reports
+                  .find((r) => r.assignmentId === failedDependency)
+                  ?.blocker?.includes(TIMEOUT_MARK)
+                  ? `（${failedDependency} ${TIMEOUT_MARK}；${WORKTREE_HINT}）`
+                  : ""
+              }`,
             };
             reports.push(report);
             emit({
@@ -443,7 +504,7 @@ export async function runTeamTask(
       emit({
         type: "task_blocked",
         taskId: input.taskId,
-        detail: "Lead is blocked during synthesis",
+        detail: `${timedOutPrefix(reports)}Lead is blocked during synthesis`,
       });
       return { taskId: input.taskId, state: "blocked", plan, reports };
     }
@@ -470,7 +531,8 @@ export async function runTeamTask(
       report: synthesis,
       paneId: input.lead.pane_id,
       detail: failed
-        ? `one or more Assignments failed; synthesis is partial${gate?.reasons.length ? `; ${gate.reasons.join("; ")}` : ""}`
+        ? // 卡片的失敗原因只保留前 200 字元：逾時資訊放最前面，才不會被後面很長的 gate 原因截掉（review F4）。
+          `${timedOutPrefix(reports)}one or more Assignments failed; synthesis is partial${gate?.reasons.length ? `; ${gate.reasons.join("; ")}` : ""}`
         : blocked
           ? "one or more Assignments require input"
           : gateFailed
@@ -485,10 +547,20 @@ export async function runTeamTask(
       synthesis,
     };
   } catch (error) {
-    const detail =
-      error instanceof Error ? error.message : "orchestration failed";
+    // 已經有 Worker 逾時時，之後不論哪個步驟失敗，原因都要保留逾時摘要（review F6）。
+    const prefix = timedOutPrefix(reports);
+    const detail = `${prefix}${
+      error instanceof Error ? error.message : "orchestration failed"
+    }`;
     if (!input.signal?.aborted)
       emit({ type: "task_failed", taskId: input.taskId, detail });
+    // 丟出的錯誤也要帶摘要：TeamTaskEngine 會用它的 message 再記錄 task_failed 覆蓋詳情（F8）。取消中維持原錯誤。
+    if (prefix && error instanceof Error && !input.signal?.aborted) {
+      const wrapped = new Error(detail, { cause: error });
+      wrapped.name = error.name;
+      wrapped.stack = error.stack;
+      throw wrapped;
+    }
     throw error;
   }
 }
@@ -504,6 +576,10 @@ async function runAssignment(
   reportMaxChars: number,
   previousReports: TeamTaskResult["reports"],
 ): Promise<TeamTaskResult["reports"][number]> {
+  let startedAt = Date.now();
+  // 只有真正進入 Worker 回合（runTeamTurn）之後的逾時才算「回合逾時」；
+  // 派工前取得 Worker 的 RPC（例如 agent.list）逾時不是，原樣回報，不套用回合上限與 worktree 提示。
+  let inTurn = false;
   try {
     input.signal?.throwIfAborted();
     const acquired = input.acquireWorker
@@ -527,6 +603,8 @@ async function runAssignment(
     if (!["idle", "done"].includes(worker.agent_status))
       throw new Error(`Worker is ${worker.agent_status}`);
     input.codingHooks?.onAssignmentStart(assignment, worker);
+    startedAt = Date.now();
+    inTurn = true;
     const settled = await runTeamTurn(
       worker,
       assignmentInstruction(input, assignment) +
@@ -610,7 +688,17 @@ async function runAssignment(
     };
   } catch (error) {
     if (input.signal?.aborted) throw error;
-    const detail = error instanceof Error ? error.message : "Worker failed";
+    const detail =
+      error instanceof Error
+        ? inTurn && isTurnDeadlineError(error)
+          ? timeoutDetail(
+              `Assignment ${assignment.id}`,
+              error,
+              startedAt,
+              timeoutMs,
+            )
+          : error.message
+        : "Worker failed";
     emit({
       type: "assignment_failed",
       taskId: input.taskId,

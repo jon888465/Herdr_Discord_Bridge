@@ -718,3 +718,401 @@ test("Lead may perform a task directly with no Worker or pane creation", async (
   assert.equal(prompts.length, 2);
   assert.ok(prompts.every(([target]) => target === lead.pane_id));
 });
+
+function timeoutPort(
+  slow: string[],
+  waits: Array<[string, number | undefined]>,
+): OrchestrationPort {
+  const prompts: Array<[string, string]> = [];
+  let leadPrompts = 0;
+  return {
+    async promptAgent(target, prompt) {
+      if (target === lead.pane_id) leadPrompts += 1;
+      prompts.push([target, prompt]);
+    },
+    async waitAgent(target, _until, timeoutMs) {
+      waits.push([target, timeoutMs]);
+      if (slow.includes(target))
+        throw new Error(
+          "herdr agent.prompt: timeout timed out waiting for agent status",
+        );
+      return {
+        ...(target === lead.pane_id ? lead : workerA),
+        agent_status: "idle",
+      };
+    },
+    async readAgent(target) {
+      const prompt = latestPrompt(prompts, target);
+      if (target === lead.pane_id && leadPrompts > 1)
+        return framed(prompt, "summary");
+      if (target === lead.pane_id)
+        return framed(
+          prompt,
+          JSON.stringify({
+            assignments: [
+              { id: "impl", workerPaneId: workerA.pane_id, instruction: "do" },
+              {
+                id: "review",
+                workerPaneId: workerB.pane_id,
+                instruction: "check",
+                dependsOn: ["impl"],
+              },
+            ],
+          }),
+        );
+      return framed(prompt, "worker report");
+    },
+  };
+}
+
+test("ISSUE-124 Worker 回合逾時：失敗原因寫出逾時、assignment、等待時間與上限，連帶失敗註明來源", async () => {
+  const events: OrchestrationEvent[] = [];
+  const waits: Array<[string, number | undefined]> = [];
+  const result = await runTeamTask(
+    {
+      taskId: "t124",
+      prompt: "x",
+      lead,
+      workers: [workerA, workerB],
+      timeoutMs: 1500,
+    },
+    timeoutPort([workerA.pane_id], waits),
+    (event) => events.push(event),
+  );
+  assert.ok(waits.length > 0);
+  for (const [, limit] of waits) assert.ok(limit! >= 1 && limit! <= 1500);
+  const impl = result.reports.find((r) => r.assignmentId === "impl")!;
+  assert.equal(impl.state, "failed");
+  assert.match(impl.blocker ?? "", /等待逾時/);
+  assert.match(impl.blocker ?? "", /impl/);
+  assert.match(impl.blocker ?? "", /上限 1\.5 秒/);
+  assert.match(impl.blocker ?? "", /已等待/);
+  assert.match(impl.blocker ?? "", /timed out waiting for agent status/);
+  const dependent = result.reports.find((r) => r.assignmentId === "review")!;
+  assert.match(dependent.blocker ?? "", /dependency impl did not complete/);
+  assert.match(dependent.blocker ?? "", /impl 等待逾時/);
+  assert.match(dependent.blocker ?? "", /worktree/);
+  const failed = events.find((e) => e.type === "task_failed");
+  assert.match(failed?.detail ?? "", /one or more Assignments failed/);
+  assert.match(failed?.detail ?? "", /等待逾時/);
+  // review F4：卡片的失敗原因只保留前 200 字元，逾時資訊必須排在通用說明與 gate 原因之前。
+  const detail = failed?.detail ?? "";
+  assert.ok(
+    detail.indexOf("等待逾時") <
+      detail.indexOf("one or more Assignments failed"),
+    detail,
+  );
+  assert.ok(detail.indexOf("等待逾時") < 60, detail);
+});
+
+test("ISSUE-124 非逾時的 Worker 失敗訊息原樣不變", async () => {
+  const events: OrchestrationEvent[] = [];
+  const port = timeoutPort([], []);
+  const original = port.waitAgent.bind(port);
+  port.waitAgent = async (target, until, timeoutMs) => {
+    if (target === workerA.pane_id)
+      throw new Error("Agent identity changed while waiting for w2:p6");
+    return original(target, until, timeoutMs);
+  };
+  const result = await runTeamTask(
+    {
+      taskId: "t124b",
+      prompt: "x",
+      lead,
+      workers: [workerA, workerB],
+      timeoutMs: 1500,
+    },
+    port,
+    (event) => events.push(event),
+  );
+  const impl = result.reports.find((r) => r.assignmentId === "impl")!;
+  assert.equal(impl.blocker, "Agent identity changed while waiting for w2:p6");
+  const dependent = result.reports.find((r) => r.assignmentId === "review")!;
+  assert.equal(dependent.blocker, "dependency impl did not complete");
+  const failed = events.find((e) => e.type === "task_failed");
+  assert.ok(!/逾時/.test(failed?.detail ?? ""));
+});
+
+// F2：派工前取得 Worker 的 RPC 逾時不是回合逾時。
+test("ISSUE-124 取得 Worker 時的 RPC 逾時不被當成 Worker 回合逾時", async () => {
+  const events: OrchestrationEvent[] = [];
+  const result = await runTeamTask(
+    {
+      taskId: "t124c",
+      prompt: "x",
+      lead,
+      workers: [workerA, workerB],
+      timeoutMs: 1500,
+      acquireWorker: async (worker) => {
+        if (worker.pane_id === workerA.pane_id)
+          throw new Error("herdr request agent.list timed out after 5000ms");
+        return { agent: worker, continuity: "new-session" };
+      },
+    },
+    timeoutPort([], []),
+    (event) => events.push(event),
+  );
+  const impl = result.reports.find((r) => r.assignmentId === "impl")!;
+  assert.equal(impl.state, "failed");
+  assert.equal(impl.blocker, "herdr request agent.list timed out after 5000ms");
+  assert.ok(!/等待逾時/.test(impl.blocker ?? ""));
+  const dependent = result.reports.find((r) => r.assignmentId === "review")!;
+  assert.equal(dependent.blocker, "dependency impl did not complete");
+  const failed = events.find((e) => e.type === "task_failed");
+  assert.ok(!/等待逾時|worktree/.test(failed?.detail ?? ""));
+});
+
+// F7：只有 runTeamTurn 自己的期限錯誤才算回合逾時，回合內的短 RPC 逾時不算。
+test("ISSUE-124 只有真正的回合期限錯誤才被當成回合逾時，回合內的短 RPC 逾時不是", async () => {
+  const cases: Array<[string, boolean]> = [
+    ["herdr agent.prompt: timeout timed out waiting for agent status", true],
+    ["herdr agent.wait: timeout timed out waiting for agent status", true],
+    [
+      "Timed out waiting for current response from w2:p6 (last state: working); no verified completion",
+      true,
+    ],
+    // F9：bridge 端 request 逾時（`… timed out`）分不出回合等待或短 RPC，一律不算。
+    ["herdr agent.prompt timed out", false],
+    ["herdr agent.wait timed out", false],
+    ["herdr agent.read timed out", false],
+    ["herdr agent.list timed out", false],
+    ["herdr request agent.list timed out after 5000ms", false],
+    ["connection timeout while reading the pane", false],
+  ];
+  for (const [message, isDeadline] of cases) {
+    const port = timeoutPort([], []);
+    port.waitAgent = async (target, _until, _timeout) => {
+      if (target === workerA.pane_id) throw new Error(message);
+      return {
+        ...(target === lead.pane_id ? lead : workerA),
+        agent_status: "idle",
+      };
+    };
+    const result = await runTeamTask(
+      {
+        taskId: "t124f7",
+        prompt: "x",
+        lead,
+        workers: [workerA, workerB],
+        timeoutMs: 1500,
+      },
+      port,
+      () => {},
+    );
+    const impl = result.reports.find((r) => r.assignmentId === "impl")!;
+    assert.equal(impl.state, "failed", message);
+    if (isDeadline) {
+      assert.match(impl.blocker ?? "", /等待逾時/, message);
+      assert.match(impl.blocker ?? "", /上限 1\.5 秒/, message);
+    } else {
+      assert.equal(impl.blocker, message);
+      const dependent = result.reports.find(
+        (r) => r.assignmentId === "review",
+      )!;
+      assert.equal(dependent.blocker, "dependency impl did not complete");
+    }
+  }
+  // 相容路徑：沒有 promptAgentAndWait（舊版 Herdr），送出 prompt 的 promptAgent RPC 逾時。
+  const compat = timeoutPort([], []);
+  assert.equal(compat.promptAgentAndWait, undefined);
+  const sent = compat.promptAgent.bind(compat);
+  compat.promptAgent = async (target, text) => {
+    if (target === workerA.pane_id)
+      throw new Error("herdr agent.prompt timed out");
+    return sent(target, text);
+  };
+  const viaCompat = await runTeamTask(
+    {
+      taskId: "t124f9",
+      prompt: "x",
+      lead,
+      workers: [workerA, workerB],
+      timeoutMs: 1500,
+    },
+    compat,
+    () => {},
+  );
+  const impl = viaCompat.reports.find((r) => r.assignmentId === "impl")!;
+  assert.equal(impl.blocker, "herdr agent.prompt timed out");
+});
+
+// F6：Worker 已逾時、之後 Lead 彙整才失敗或受阻，原因仍要保留逾時摘要。
+test("ISSUE-124 Worker 逾時後 Lead 彙整失敗或受阻，原因仍保留 Worker 逾時摘要", async () => {
+  // 彙整丟出非逾時錯誤
+  {
+    const events: OrchestrationEvent[] = [];
+    const port = timeoutPort([workerA.pane_id], []);
+    const original = port.waitAgent.bind(port);
+    let leadWaits = 0;
+    port.waitAgent = async (target, until, timeoutMs) => {
+      if (target === lead.pane_id && ++leadWaits >= 2)
+        throw new Error("Lead synthesis exploded");
+      return original(target, until, timeoutMs);
+    };
+    await assert.rejects(
+      runTeamTask(
+        {
+          taskId: "t124f6a",
+          prompt: "x",
+          lead,
+          workers: [workerA, workerB],
+          timeoutMs: 1500,
+        },
+        port,
+        (event) => events.push(event),
+      ),
+      /Lead synthesis exploded/,
+    );
+    const failed = events.find((e) => e.type === "task_failed");
+    const detail = failed?.detail ?? "";
+    assert.match(detail, /Lead synthesis exploded/);
+    assert.match(detail, /Assignment impl 等待逾時/);
+    assert.ok(detail.indexOf("等待逾時") < 60, detail);
+  }
+  // 彙整受阻（blocked）
+  {
+    const events: OrchestrationEvent[] = [];
+    const port = timeoutPort([workerA.pane_id], []);
+    // Lead 的第二個回合（彙整）在原子 prompt 就回報 blocked，這是 runTeamTurn 回傳 blocked 的路徑。
+    let leadPrompts = 0;
+    port.promptAgentAndWait = async (target, text) => {
+      await port.promptAgent(target, text);
+      if (target === lead.pane_id && ++leadPrompts >= 2)
+        return { ...lead, agent_status: "blocked" };
+      return undefined;
+    };
+    const result = await runTeamTask(
+      {
+        taskId: "t124f6b",
+        prompt: "x",
+        lead,
+        workers: [workerA, workerB],
+        timeoutMs: 1500,
+      },
+      port,
+      (event) => events.push(event),
+    );
+    assert.equal(result.state, "blocked");
+    const blocked = events.find((e) => e.type === "task_blocked");
+    assert.match(blocked?.detail ?? "", /Assignment impl 等待逾時/);
+  }
+});
+
+test("ISSUE-124 Lead 規劃回合逾時也明寫逾時", async () => {
+  const events: OrchestrationEvent[] = [];
+  await assert.rejects(
+    runTeamTask(
+      {
+        taskId: "t124c",
+        prompt: "x",
+        lead,
+        workers: [workerA],
+        timeoutMs: 1500,
+      },
+      timeoutPort([lead.pane_id], []),
+      (event) => events.push(event),
+    ),
+    /等待逾時/,
+  );
+  const failed = events.find((e) => e.type === "task_failed");
+  assert.match(failed?.detail ?? "", /Lead planning 等待逾時/);
+});
+
+function atomicPort(
+  waits: Array<[string, number]>,
+  failOn?: (target: string, leadCalls: number) => boolean,
+): OrchestrationPort {
+  const prompts: Array<[string, string]> = [];
+  let leadPrompts = 0;
+  return {
+    async promptAgent() {
+      throw new Error("atomic prompt expected");
+    },
+    async promptAgentAndWait(target, prompt, timeoutMs) {
+      if (target === lead.pane_id) leadPrompts += 1;
+      prompts.push([target, prompt]);
+      waits.push([target, timeoutMs]);
+      if (failOn?.(target, leadPrompts))
+        throw new Error(
+          "herdr agent.prompt: timeout timed out waiting for agent status",
+        );
+      const agent = {
+        ...(target === lead.pane_id ? lead : workerA),
+        agent_status: "idle" as const,
+      };
+      return target === workerB.pane_id
+        ? { ...workerB, agent_status: "idle" as const }
+        : agent;
+    },
+    async waitAgent(target) {
+      return {
+        ...(target === lead.pane_id ? lead : workerA),
+        agent_status: "idle",
+      };
+    },
+    async readAgent(target) {
+      const prompt = latestPrompt(prompts, target);
+      if (target !== lead.pane_id) return framed(prompt, "worker report");
+      return framed(
+        prompt,
+        leadPrompts > 1
+          ? "summary"
+          : JSON.stringify({
+              assignments: [
+                { id: "a", workerPaneId: workerA.pane_id, instruction: "do" },
+                { id: "b", workerPaneId: workerB.pane_id, instruction: "do" },
+              ],
+            }),
+      );
+    },
+  };
+}
+
+test("ISSUE-124 Lead 規劃、每個 Worker、Lead 彙整都以 timeoutMs 為等待上限", async () => {
+  for (const timeoutMs of [1234, 777]) {
+    const waits: Array<[string, number]> = [];
+    const result = await runTeamTask(
+      {
+        taskId: `t124w${timeoutMs}`,
+        prompt: "x",
+        lead,
+        workers: [workerA, workerB],
+        timeoutMs,
+      },
+      atomicPort(waits),
+      () => {},
+    );
+    assert.equal(result.state, "completed");
+    assert.deepEqual(
+      waits.map(([target]) => target).sort(),
+      [lead.pane_id, lead.pane_id, workerA.pane_id, workerB.pane_id].sort(),
+    );
+    for (const [, limit] of waits) assert.equal(limit, timeoutMs);
+  }
+});
+
+test("ISSUE-124 Lead 彙整回合逾時：失敗原因寫出 Lead synthesis 等待逾時與上限", async () => {
+  const events: OrchestrationEvent[] = [];
+  await assert.rejects(
+    runTeamTask(
+      {
+        taskId: "t124s",
+        prompt: "x",
+        lead,
+        workers: [workerA, workerB],
+        timeoutMs: 1500,
+      },
+      atomicPort(
+        [],
+        (target, leadCalls) => target === lead.pane_id && leadCalls === 2,
+      ),
+      (event) => events.push(event),
+    ),
+    /Lead synthesis 等待逾時/,
+  );
+  const failed = events.find((e) => e.type === "task_failed");
+  assert.match(
+    failed?.detail ?? "",
+    /Lead synthesis 等待逾時（已等待 .*，上限 1\.5 秒）/,
+  );
+});
