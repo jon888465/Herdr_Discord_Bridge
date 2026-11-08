@@ -34,6 +34,8 @@
 
 **決定（使用者 2026-11-08）：**`agentProfiles` 中 `helper`（codex，實作與驗證的 Worker）的 `args` 設為 `["--dangerously-bypass-approvals-and-sandbox"]`（無沙箱、不問批准）。`reviewer` 這個 codex profile 與 Lead、`agent start`、其他 Agent 種類**都沒有改**。設定在使用者的 `config.json`（備份 `config.json.bak-codexperm-20261108`，旁邊有註解提醒）；沒有改程式。
 
+**追加（使用者 2026-11-08 稍晚）：**`reviewer`（codex，review／verify）也套用同樣參數。再現：卡片 `REQ-20261106-usage-query` 的 verify 被派到 `reviewer` profile，完整 `npm test` 在沙箱下 `listen EPERM`，pane（`w54:p3`）停在「是否允許在 sandbox 外重跑 npm test」的確認提示，Herdr 狀態 `blocked`，等滿 30 分鐘後 verify 逾時，task 失敗。備份 `config.json.bak-reviewerperm-20261108`，旁邊同樣有註解提醒。Lead 目前是 claude（`policy.yml` 的 `autopick_lead`），沒有 codex Lead profile，所以沒有 Lead 需要改。`agent start` 與其他 Agent 種類仍沒有改。**這次追加尚未驗證**：設定改了，但 bridge 尚未重啟載入，也還沒有以新設定跑過 verify。
+
 **實測（2026-11-08，本機，探針 tab，已關閉）：**以該旗標啟動 codex，直接 `idle`、`interactive_ready: true`，沒有多出確認畫面；請它在 `/tmp` 建立並關閉一個 Unix socket 監聽，回報 `listening`，沒有任何權限提示，沒有殘留檔案。
 
 **風險與提醒：**這些 agent 目前還跑在這台 VM 上，最大權限的風險（可任意改檔、刪檔、連網）由這台機器承擔。使用者預期之後 agent 會跑在 pod 內，屆時才合理放寬。**移到 pod 之前與之後都要重新評估；VM 上若不需要就改回 `"args": []`。**Agent 的專案記憶已記下這個提醒。
