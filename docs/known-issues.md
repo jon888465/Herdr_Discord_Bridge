@@ -13,6 +13,7 @@
 測試（2026-11-08）：先紅後綠；事件／show 新測試先失敗，review／fix 回呼測試先失敗。初始 `npm run build` 因缺少 tsc 失敗，`npm ci --ignore-scripts` 後解除。開發中另修正新增假 port 的 session kind（需 `id`，不是 `session_id`），未放寬產品身分守門。相關五個檔案測試 198/198 pass；**接手後完整檢查（2026-11-08，我接手 Worker 輸出、rebase 到 main `8ac0eb7` 後，在卡片 worktree）：**`npm run build` 通過，完整測試 1510 項、1509 pass、0 fail、1 skipped（原 Worker 因 codex 沙箱與逾時未能跑完整套件）；修正 bridge 獨立 review 第 2 輪的兩個 medium（F1、F2，見冪等／失敗段）後再跑一次：build、lint 通過，完整測試 1512 項、1511 pass、0 fail、1 skipped；F5 修正後再跑一次：1513 項、1512 pass、0 fail、1 skipped。接手時 issue 編號由 Worker 寫的 ISSUE-125 改為 ISSUE-127（main 上 125／126 已被佔用），其餘檔案的引用同步。
 
 未驗證／下一步：原始碼已接線；執行中的 bridge 未部署、未重啟。Lead 應在部署後以新卡驗收 Lead、profile Worker、多輪 review／fix、card show 與重啟去重；舊卡不回填、舊訊息不補送。可選的 card pr／card attach-pr PR 內文角色摘要本輪未加入，PR 內文保持現行行為。權限、review、CI、merge gate、ISSUE-120 通知、config.json、policy.yml 均未變更。接手前 Worker 未 commit、push、merge；PR 與 review 的狀態以卡片流程紀錄為準。
+2026-11-08 實機驗收卡 REQ-20261108-role-ledger-live 已跑過（內容以卡片角色紀錄為準）。
 
 ## ISSUE-126：bridge 重啟後進行中的 Discord 串流被靜默丟掉，最後回覆沒有送到 Discord（REQ-20261108-discord-reply-lost）
 
