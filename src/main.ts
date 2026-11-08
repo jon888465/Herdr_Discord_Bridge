@@ -106,7 +106,7 @@ import {
   teamTaskTimeoutMs,
   type Config,
 } from "./config.js";
-import { StreamResumeStore } from "./stream-resume.js";
+import { StreamResumeStore, type ActiveStreamRecord } from "./stream-resume.js";
 import {
   claudeTurnComplete,
   stableScreen,
@@ -3288,25 +3288,156 @@ export async function relayApprovalFollowup(
   return false;
 }
 
-export async function resumeStreams(runtime: Runtime): Promise<void> {
+export const STREAM_RESUME_FETCH_ATTEMPTS = 3;
+export const STREAM_RESUME_RETRY_MS = 2000;
+
+function missingDiscordMessage(error: unknown): boolean {
+  const e = error as {
+    code?: unknown;
+    status?: unknown;
+    message?: unknown;
+  } | null;
+  return (
+    e?.code === 10008 ||
+    e?.status === 404 ||
+    (typeof e?.message === "string" && /Unknown Message/i.test(e.message))
+  );
+}
+
+function streamOwnershipLost(
+  runtime: Runtime,
+  record: ActiveStreamRecord,
+): boolean {
+  const reason = runtime.activeStreams.has(record.terminalId)
+    ? "stream already running"
+    : !runtime.streamResume?.owns(record)
+      ? "record ownership changed"
+      : undefined;
+  if (!reason) return false;
+  console.warn(
+    `Stream not resumed terminal=${record.terminalId} pane=${record.paneId}: ${reason}`,
+  );
+  return true;
+}
+
+/** Install before fetching progress so a Stop arriving during startup is retained. */
+export async function relayRecoveredStreams(runtime: Runtime): Promise<void> {
   const store = runtime.streamResume;
   if (!store) return;
   for (const record of store.list()) {
-    const agent = (await runtime.herdr.listAgentsWithWorkspaceNames()).find(
-      (a) => a.terminal_id === record.terminalId,
-    );
-    const progress = agent
-      ? await runtime.discord.fetchMessage(
-          record.channelId,
-          record.progressMessageId,
-        )
-      : undefined;
-    if (!agent || !progress || runtime.activeStreams.has(record.terminalId)) {
-      store.remove(record.terminalId);
+    if (record.recovery !== "pending" || streamOwnershipLost(runtime, record))
+      continue;
+    try {
+      const agent = (await runtime.herdr.listAgentsWithWorkspaceNames()).find(
+        (a) =>
+          a.terminal_id === record.terminalId && a.pane_id === record.paneId,
+      );
+      if (streamOwnershipLost(runtime, record)) continue;
+      if (
+        !agent ||
+        hookModeFor(runtime.config.hookTransport, agent.agent) !== "auto" ||
+        !(await hookReplyTrusted(agent))
+      )
+        continue;
+      if (streamOwnershipLost(runtime, record)) continue;
+      const session = agent.agent_session as
+        { kind?: string; value?: string } | undefined;
+      const event = session
+        ? ["id", "path"].includes(session.kind ?? "")
+          ? hookEvents.stopSince(session.value, record.startedAt)
+          : undefined
+        : hookEvents.stopForPane(record.paneId, record.startedAt);
+      if (!event?.message.trim() || record.recovery !== "pending") continue;
+      if (!store.claim(record)) continue;
+      await runtime.discord.postRecoveredOutput(
+        record.channelId,
+        `bridge 重啟後補送\n${event.message.trim()}`,
+      );
+    } catch (error) {
+      console.warn(
+        `Stream recovery failed terminal=${record.terminalId} pane=${record.paneId}: ${safeError(error)}`,
+      );
+    }
+  }
+}
+
+const recoverySubscriptions = new WeakMap<StreamResumeStore, () => void>();
+
+export async function resumeStreams(
+  runtime: Runtime,
+  sleep: (ms: number) => Promise<void> = (ms) =>
+    new Promise((resolve) => setTimeout(resolve, ms)),
+): Promise<void> {
+  const store = runtime.streamResume;
+  if (!store) return;
+  recoverySubscriptions.get(store)?.();
+  recoverySubscriptions.set(
+    store,
+    hookEvents.onStop(() => {
+      void relayRecoveredStreams(runtime);
+    }),
+  );
+  records: for (const record of store.list()) {
+    const log = (reason: string) =>
+      console.warn(
+        `Stream not resumed terminal=${record.terminalId} pane=${record.paneId}: ${reason}`,
+      );
+    if (record.recovery) {
+      log(`recovery ${record.recovery}`);
+      continue;
+    }
+    if (runtime.activeStreams.has(record.terminalId)) {
+      log("stream already running");
+      continue;
+    }
+    let agent: AgentRecord | undefined;
+    let progress: import("discord.js").Message | undefined;
+    let reason = "agent not found";
+    try {
+      agent = (await runtime.herdr.listAgentsWithWorkspaceNames()).find(
+        (a) =>
+          a.terminal_id === record.terminalId && a.pane_id === record.paneId,
+      );
+      if (streamOwnershipLost(runtime, record)) continue;
+      if (agent) {
+        for (
+          let attempt = 1;
+          attempt <= STREAM_RESUME_FETCH_ATTEMPTS;
+          attempt++
+        ) {
+          try {
+            progress = await runtime.discord.fetchMessage(
+              record.channelId,
+              record.progressMessageId,
+            );
+            if (streamOwnershipLost(runtime, record)) continue records;
+            if (progress) break;
+            reason = "progress message unavailable (retry exhausted)";
+          } catch (error) {
+            if (streamOwnershipLost(runtime, record)) continue records;
+            if (missingDiscordMessage(error)) {
+              reason = "progress message missing (Unknown Message/404)";
+              break;
+            }
+            reason = `progress fetch retry exhausted: ${safeError(error)}`;
+          }
+          if (attempt < STREAM_RESUME_FETCH_ATTEMPTS) {
+            await sleep(STREAM_RESUME_RETRY_MS);
+            if (streamOwnershipLost(runtime, record)) continue records;
+          }
+        }
+      }
+    } catch (error) {
+      reason = `agent lookup failed: ${safeError(error)}`;
+    }
+    if (streamOwnershipLost(runtime, record)) continue;
+    if (!agent || !progress) {
+      log(reason);
+      store.add({ ...record, recovery: "pending" });
       continue;
     }
     console.log(
-      `Resuming stream pane=${agent.pane_id} (started ${new Date(record.startedAt).toISOString()})`,
+      `Resuming stream terminal=${record.terminalId} pane=${agent.pane_id} (started ${new Date(record.startedAt).toISOString()})`,
     );
     runtime.activeStreams.add(record.terminalId);
     const transcript = await CodexTranscript.connect(agent, record.prompt);
@@ -3328,6 +3459,7 @@ export async function resumeStreams(runtime: Runtime): Promise<void> {
         runtime.activeStreams.delete(record.terminalId);
       });
   }
+  await relayRecoveredStreams(runtime);
 }
 
 export async function streamAgent(

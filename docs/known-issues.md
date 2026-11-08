@@ -16,13 +16,21 @@
 
 ## ISSUE-126：bridge 重啟後進行中的 Discord 串流被靜默丟掉，最後回覆沒有送到 Discord（REQ-20261108-discord-reply-lost）
 
-2026-11-08。狀態：待調查（根因只是假設，尚未修正）。
+更新日期：2026-11-08。狀態：已修正、待驗收。**尚未實機驗證**。
 
-**症狀：**使用者從 Discord 下指令，Agent 在**同一個回合內重啟 bridge**（`scripts/run.sh -r`）後，最後一則回覆沒有出現在 Discord；使用者在手機的 Herdr 畫面看得到它（附圖：`.herdr-discord-bridge/attachments/message-xbhkZw/1.png`，畫面文字有重疊亂碼，像同一段文字被重繪兩次交疊，**與遺失是否相關未確認**）。
+**症狀／預期：**使用者在 Discord 驅動的同一回合內重啟 bridge 後，Herdr 看得到最後回覆、Discord 沒收到。預期續傳失敗須記原因，之後受信任的 Stop 最後回覆仍可補貼到原 thread。
 
-**已確認的事實（讀碼與狀態檔，2026-11-08）：**重啟後 console 只有 `hook Stop … chars=896`（最後回覆的 hook 事件有到），沒有前幾次重啟都有的 `Resuming stream …`；`src/main.ts` 的 `resumeStreams` 在 agent 或進度訊息（`discord.fetchMessage`）抓不到時直接 `store.remove()`，**不寫任何 log**，也不區分「訊息真的被刪」與「Gateway 未就緒等暫時性失敗」；串流被移除後沒有補送機制，`active-streams.json` 之後的 `baselineOutput` 也已含這則回覆，不會當成新內容。
+**原始證據（2026-11-08）：**重啟後 console 只有 `hook Stop … chars=896`，沒有 `Resuming stream …`；附圖 `.herdr-discord-bridge/attachments/message-xbhkZw/1.png` 的終端文字重疊與 Discord 遺失是否相關仍未確認。
 
-**未確認：**重啟當下 `fetchMessage` 實際回傳什麼、為什麼。已開卡 `REQ-20261108-discord-reply-lost`：先以假 port 重現，再加 log、暫時性失敗的有限重試與「受信任的最後回覆補送」。在修好前，Agent 若在 Discord 驅動的回合內重啟 bridge，請重啟後再用 `herdr-discord-send` 補送最後結果。
+**測試證實的根因（2026-11-08，假 Herdr／Discord port）：**原 resumeStreams 在 fetchMessage 回 undefined 時靜默刪除記錄，後續 Stop 沒有補送路徑；新增重現測試先得到 0 則而非 1 則的預期失敗。adapter 原本吞掉所有 fetch 錯誤，無法區分確定不存在與暫時故障。**真實重啟當下 fetchMessage 實際回傳 undefined 或拋出什麼、其原因仍未確認**；測試只證實此程式路徑可造成遺失，未證實它就是該次實機事件的成因。
+
+**修正範圍：**src/main.ts 記錄所有不續傳分支的 terminal／pane／原因；undefined 與暫時錯誤最多抓取 3 次、間隔 2000ms（匯出常數、可注入 sleep），Unknown Message／404 不重試。src/discord.ts 保留抓取錯誤，補送沿用分段／長度與禁止 mention 的策略。src/hook-events.ts 提供 Stop 訂閱，啟動時已有的事件也查詢；src/stream-resume.ts 在同一 active-streams.json 保留 pending／claimed。放棄續傳後僅對原 terminal／pane、session（或無 session 時的 pane）匹配且通過既有 hookReplyTrusted、auto 模式的非空最後回覆，新貼「bridge 重啟後補送」到原 thread。送前持久化認領，並行、重複事件與再重啟不重送；無回覆／不可信回覆不送，失敗只記 log、不影響其他串流。授權、allowlist、mention 守門、ISSUE-120 通知均未放寬或修改；未修改 config.json、policy.yml。
+
+**測試（2026-11-08，本機，僅假 port）：**首次 build 因未安裝依賴找不到 tsc，以 `npm ci --ignore-scripts` 安裝後解除。先執行 `npm run build && node --test dist/test/stream-resume-lost-reply.test.js` 得預期 red（0 pass／1 fail）；修正後新增測試 8/8 pass。初版相關檢查命令：`npm run build`；`node --test dist/test/stream-resume-lost-reply.test.js dist/test/stream-resume.test.js dist/test/response-delivery.test.js dist/test/response-stream.test.js`，43/43 pass、0 fail。涵蓋重試成功／用盡、undefined、Unknown Message／404 不重試、agent 不見與已有串流 log、信任守門、無最後回覆、重複與再重啟、失敗隔離、分段與 allowedMentions；新測試攔截 console.log／warn／error，既有 response-delivery 測試也攔截，避免應用程式 log 污染 stdout。未跑全套 npm test。
+
+**Review 修正（2026-11-08，f1／f2／f3）：**f1 在 Agent 查詢、fetchMessage（成功或拋錯）、重試 sleep 之後重查 activeStreams 與 store 原紀錄所有權，失去所有權就記 terminal／pane／原因並停止，不覆寫新回合；補送在查詢、信任檢查後同樣重查，防止新 final 貼到舊 thread。f2 補送改用一般 final 的 splitFinalMarkdown，保留標註與禁止 mention，驗證長 code fence 平衡與連續 emoji surrogate pair 完整。f3 清除到期紀錄時記 terminal／pane／「紀錄逾期」，原 24 小時邊界不變。三項均先新增失敗測試：f1 為 43 pass／4 fail，f2 為 47 pass／2 fail，f3 為 49 pass／1 fail；修正後使用上述相同 build 與四檔 node --test 命令，最終 50/50 pass、0 fail（新增檔共 15 項），無應用程式 stdout。過程中一次 build 因所有權檢查誤插位置出現 TS2304／TS1107，已移至正確位置，最終 build 通過。尚未實機驗證，實際 fetchMessage 原因仍未確認。
+
+**限制／下一步：**尚未實機驗證 Discord／Herdr；原始碼與 build 已完成，執行中的 bridge 未部署、未重啟，交 Lead 安排實機重啟續傳／補送驗收。送前認領後若當機或補送失敗（含部分送出），為避免重複不自動再送；寫盤失敗不送。紀錄沿用 24 小時有效期，新回合取代同 terminal 的舊紀錄。bridge 停機期間未收到的 hook 不會憑空恢復；舊版本已刪除的記錄與既有遺失訊息無法追溯補送。未 commit、未 push，未連真實 Discord／GitHub，未執行 herdr 指令。
 
 ## ISSUE-125：codex Worker 反覆停在 `npm test` 的權限提示逾時失敗，改為 helper 暫時最大權限（需提醒：目前仍在 VM）
 

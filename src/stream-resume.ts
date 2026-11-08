@@ -16,6 +16,7 @@ export interface ActiveStreamRecord {
   prompt: string;
   baselineOutput: string;
   startedAt: number;
+  recovery?: "pending" | "claimed";
 }
 
 const MAX_AGE_MS = 86400000;
@@ -51,6 +52,10 @@ export class StreamResumeStore {
     this.save();
   }
 
+  owns(record: ActiveStreamRecord): boolean {
+    return this.records.get(record.terminalId) === record;
+  }
+
   remove(terminalId: string): void {
     if (this.records.delete(terminalId)) this.save();
   }
@@ -60,6 +65,9 @@ export class StreamResumeStore {
     let dropped = false;
     for (const [key, r] of this.records)
       if (now - r.startedAt >= MAX_AGE_MS) {
+        console.warn(
+          `Stream not resumed terminal=${r.terminalId} pane=${r.paneId}: 紀錄逾期 (24h)`,
+        );
         this.records.delete(key);
         dropped = true;
       }
@@ -67,14 +75,30 @@ export class StreamResumeStore {
     return [...this.records.values()];
   }
 
-  private save(): void {
+  /** Claim before sending: uncertain delivery must never be repeated after restart. */
+  claim(record: ActiveStreamRecord): boolean {
+    if (
+      this.records.get(record.terminalId) !== record ||
+      record.recovery !== "pending"
+    )
+      return false;
+    const previous = record.recovery;
+    record.recovery = "claimed";
+    if (this.save()) return true;
+    record.recovery = previous;
+    return false;
+  }
+
+  private save(): boolean {
     try {
       mkdirSync(dirname(this.path), { recursive: true });
       const tmp = `${this.path}.tmp`;
       writeFileSync(tmp, JSON.stringify([...this.records.values()]), "utf8");
       renameSync(tmp, this.path);
+      return true;
     } catch (error) {
       console.error(`Stream resume state write failed: ${String(error)}`);
+      return false;
     }
   }
 }

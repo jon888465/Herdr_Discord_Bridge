@@ -13,6 +13,7 @@ import {
   TextChannel,
   StringSelectMenuBuilder,
 } from "discord.js";
+import { splitFinalMarkdown } from "./final-format.js";
 import type { DiscordConfig } from "./config.js";
 import {
   agentHeader,
@@ -209,13 +210,18 @@ export class DiscordAdapter {
     channelId: string,
     messageId: string,
   ): Promise<Message | undefined> {
-    try {
-      const channel = await this.client.channels.fetch(channelId);
-      if (!channel || !("messages" in channel)) return undefined;
-      return await channel.messages.fetch(messageId);
-    } catch {
-      return undefined;
-    }
+    const channel = await this.client.channels.fetch(channelId);
+    if (!channel || !("messages" in channel)) return undefined;
+    return await channel.messages.fetch(messageId);
+  }
+
+  /** Recovery uses the same chunking and mention policy as ordinary output. */
+  async postRecoveredOutput(channelId: string, content: string): Promise<void> {
+    const channel = await this.client.channels.fetch(channelId);
+    if (!channel || !("send" in channel))
+      throw new Error("Recovery channel unavailable");
+    for (const chunk of splitFinalMarkdown(content))
+      await channel.send({ content: chunk, allowedMentions: { parse: [] } });
   }
 
   async editProgress(message: Message, content: string): Promise<void> {
