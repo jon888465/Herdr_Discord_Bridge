@@ -362,3 +362,5 @@ Agent 可在最終回覆中單獨一行寫 `[[discord-attach: /絕對路徑]]`�
 ### 卡片上的角色紀錄（ISSUE-127，2026-11-08，待實機驗收）
 
 新流程的 `card show <id>` 會以一行「角色紀錄」顯示 Lead、Team 的每個 assignment id、reviewer／fixer 各輪對應的 Agent 種類，以及已知 model。完整 machine／profile／task 或輪次保存在流程紀錄。沒有角色事件的舊卡顯示「沒有角色紀錄」，不回填、不猜模型；重送事件去重，寫入失敗只記 console。尚未部署或在 live bridge 實機驗證。PR 內文角色摘要本輪未加入，通知與 merge／review／CI 守門維持原行為。
+
+`usage`／`usage <確切 pane 或 profile id>`（Discord：`/herdr usage`）以純文字表格列出目前授權 workspace 的 pane、設定 profiles 與不可達的設定遠端，沿用 `quota status` 授權。所有狀態（含 idle/done）只讀畫面，不送指令或按鍵。Codex 僅解析完整底列（如 `5h 35% left · weekly 85% left`），保留原字樣；其他來源不可讀就列 `unknown` 與原因。Profile 必須安全核對綁定 session 才讀 pane。每列含機器、目標、種類、usage、來源與取得時間（本次畫面讀取嘗試，非供應商更新時間）。不估算、不輸出 credentials、不寫 quota observation、不觸發 failover。其他 CLI adapter 與真實 Discord／Herdr／CLI 驗收待完成（ISSUE-128）。

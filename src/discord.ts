@@ -52,6 +52,7 @@ export const SHORT_COMMANDS = new Set([
   "cancel",
   "handoff",
   "quota",
+  "usage",
   "failover",
   "team",
   "card",

@@ -168,6 +168,33 @@ export class AgentPool {
       };
     });
   }
+  /** Read-only profile lookup; uncertain/stale identities must not supply usage. */
+  passiveProfilePane(
+    workspace: string,
+    id: string,
+    live: AgentRecord[],
+  ): AgentRecord | undefined {
+    if (this.allowed.length && !this.allowed.includes(workspace)) return;
+    const profile = this.profiles.find((p) => p.id === id);
+    const binding = this.state.sessions[`${workspace}/${id}`];
+    if (
+      !profile ||
+      !binding?.agent ||
+      !hasAgentSession(binding.agent.agent_session) ||
+      binding.uncertain ||
+      binding.fingerprint !== JSON.stringify(profile)
+    )
+      return;
+    return live.find(
+      (a) =>
+        a.workspace_id === workspace &&
+        a.pane_id === binding.paneId &&
+        a.terminal_id === binding.agent!.terminal_id &&
+        a.agent === profile.kind &&
+        sameAgentSession(a.agent_session, binding.agent!.agent_session),
+    );
+  }
+
   async describe(workspace: string): Promise<string> {
     const selected = this.members(workspace);
     const live = await this.herdr.listAgentsWithWorkspaceNames();

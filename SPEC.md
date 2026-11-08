@@ -8,6 +8,14 @@
 
 `[bridge 通知]` 僅含 id、引用標題、事件、已有的完整純文字 PR 網址、固定分類原因，不含描述／finding／credentials。通知失敗不改流程，互斥 merge 仍拒絕並記事件；不做停滯提醒。已部署（bridge 2026-11-07 重啟載入），尚未實機驗證。Agent 寫的卡片要自己填 `notify`（AGENTS.md「建立任務卡片」，ISSUE-121）。
 
+### Usage 唯讀快照（REQ-20261106-usage-query，2026-11-08，待實機驗收）
+
+Console `usage`／`usage <pane 或 profile id>`，Discord 加 `/herdr` 前綴，沿用 quota status 的 Discord allowlist、目前選定 workspace 與 allowedWorkspaceIds 守門。全部只列該 workspace 的 Agent pane、config.json agentProfiles（可安全核對綁定 session 時讀其 pane，否則 unknown），另列設定遠端的不可達狀態；遠端 pane 仍不得跨目前 workspace。已連線但不在目前 workspace 的遠端不讀畫面。單一目標只接受確切 pane 或 profile id，有歧義、跨 workspace 或未知目標拒絕。
+
+三項預設：授權 workspace＋已設定遠端（不可達 unknown）；所有狀態均只被動讀取，不對 idle/done/working/blocked 送指令或按鍵；純文字表格，無 JSON。每列含 machine、pane/profile、kind、usage、source、fetched-at（本次擷取／嘗試時間，不是供應商更新時間）。不快取 usage、不把遠端快取 pane metadata 當用量；來源明載 CLI freshness unknown，畫面數值不保證供應商即時更新。
+
+Adapter 可選 parseUsage hook：Codex 只接受目前 visible 畫面最後非空列完整 `5h 35% left · weekly 85% left` 類格式，原字樣／單位保留；不輸出其他畫面內容，避免帳號／credentials／API key／billing。claude、agy、pi 與其他未知 CLI 沒有已確認安全被動來源時 unknown；解析失敗、拋錯、不可讀、遠端不可達均逐列 unknown 與原因，不中斷其他列。不估算 token、百分比或 reset；不讀 credentials、不寫 quota report、不觸發 failover。實機底列其他格式留後續 adapter 卡片，不擴大擷取範圍。
+
 ## 1. 範圍與架構
 
 此 plugin 是本機 Herdr 控制端，以 Discord 作為人類使用者介面。程式 CLI

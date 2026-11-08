@@ -69,3 +69,7 @@ Phase 3 的同機、同 canonical Git tree、HEAD/branch/staged/unstaged/untrack
 4. 真實 quota exhaustion／CLI blocked／socket acknowledgement 遺失時 blocked，無重試其他 session；settled 後才 cancel。
 5. 在 checkpointing、verification、accepted、continuation 各時点重啟：觀察 quarantine、reservation、不 replay 與兩個 journal 的對照結果。
 6. Discord 原 thread scope、console workspace scope、active Team／外部 writer 的阻擋；AGY／OpenCode／Codex 的實際版本、adapter coverage 與缺漏逐一記錄。
+
+## 獨立 usage 快照（2026-11-08，ISSUE-128）
+
+`usage [pane-or-profile-id]`（Discord 加 `/herdr`）沿用 quota status 的選定 workspace 授權，但只被動讀目前畫面，不寫 operator observations、不觸發 policy。Codex 完整底列保留原字樣，其他 CLI 尚無安全 adapter 時 unknown；profiles 只有安全相符 session 綁定才讀 pane。設定遠端不可達時 unknown，不以快取當作現在的用量。純文字表格標示來源與本次擷取時間，CLI 資料更新時間未知，不估算。所有 pane 狀態均不送指令／按鍵。真實 Discord／Herdr／CLI 尚未驗收，未部署／重啟。

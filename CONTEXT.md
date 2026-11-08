@@ -181,3 +181,5 @@ Worker、reviewer／修正者與 `agent start` 只在分割後兩邊 rect 都至
 ## Card role ledger
 
 ISSUE-127（2026-11-08，待實機驗收）：新增 role_assigned 固定模板事件，Team 記 Lead 與每個 assignment id 的實際 Worker，card review／fix 記每輪角色身分。card show 依時間顯示完整歷史；舊卡不補寫。契約見 SPEC.md「卡片角色紀錄」，接線設計見 docs/coding-workflow-proposal.md「卡片角色帳本接線」。PR 內文角色摘要未加入；通知與 coding／merge gates 不變。尚未部署或實機驗證。
+
+- Usage v1 (REQ-20261106-usage-query, ISSUE-128): `usage [pane-or-profile-id]`, selected-workspace authorization, passive Codex bottom status row and explicit unknown fallbacks; configured profiles and unreachable machines included. No usage commands, quota writes or failover. Contract: SPEC.md “Usage 唯讀快照”; relation to operator observations: docs/quota-failover-manager.md. Real Discord/Herdr/CLI acceptance pending.
