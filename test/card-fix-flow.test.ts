@@ -337,3 +337,50 @@ test("a skipped update prompt is reported in the fix result, and a pane still bl
   assert.equal(kept.ok && kept.updateSkip?.key, "3");
   assert.equal(stuck.log.includes("pane.close"), false);
 });
+
+test("fix records actual fixer identity for each round without session content", async () => {
+  const records: unknown[] = [];
+  for (const round of [1, 2]) {
+    const { deps } = setup({
+      start: () =>
+        fixer({
+          agent: "antigravity",
+          machine: "local",
+          profileId: "helper",
+          agent_session: "PRIVATE",
+        }),
+    });
+    Object.assign(deps, {
+      onRoleAssigned: (identity: unknown) => records.push(identity),
+    });
+    const result = await runCardFix(deps, input({ round }));
+    assert.ok(result.ok);
+  }
+  assert.deepEqual(
+    records,
+    [1, 2].map((round) => ({
+      role: "fixer",
+      agent: "agy",
+      machine: "local",
+      profileId: "helper",
+      round,
+    })),
+  );
+});
+
+test("role sink failure does not change runCardFix result", async (t) => {
+  const errors: unknown[] = [];
+  t.mock.method(console, "error", (...args: unknown[]) => {
+    errors.push(args);
+  });
+  const { deps } = setup();
+  Object.assign(deps, {
+    onRoleAssigned: () => {
+      throw new Error("PRIVATE");
+    },
+  });
+  const result = await runCardFix(deps, input());
+  assert.ok(result.ok);
+  if (result.ok) assert.equal(result.outcome.kind, "fixed");
+  assert.deepEqual(errors, [["Role ledger write failed"]]);
+});

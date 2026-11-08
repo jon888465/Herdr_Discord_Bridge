@@ -135,3 +135,10 @@ Bridge 提案預設顯示 task event、coding stage、交付版本、review／te
 驗收需涵蓋無 remote repository、未提交修改、untracked 交付、既有 dirty tree 保留、同 session review 拒絕、review 中修改使證據待核對、測試失敗不結案、新 commit／本機整合後重新驗證、取消／重啟不重派，以及流程全程沒有 push／GitHub 操作。
 
 首版已改 Team runtime 與 schema v3，沒有新增 skill，沒有執行 commit、merge、push、部署或重啟。參考 [Team orchestration](team-orchestration-spec.md)、[Durable Task Engine](durable-task-engine.md)與 [ISSUE-025](known-issues.md)。
+
+
+## 卡片角色帳本接線（2026-11-08，ISSUE-127）
+
+已有卡片的 Team 任務透過 TeamTaskInput.onRoleAssigned 觀察 Lead 啟動及 acquire 後的 Worker；此 hook 獨立於 CodingHooks 的證據／獨立審查檢查，不能改變其結果。role 使用 assignment id（不是 coding.role 的固定列舉），metadata 只取種類、已知 model、machine、profile id、task／輪次。main 以卡片 id 明確接線，避免任務啟動時索引尚未寫入的競態；profile Worker 的設定只投影 id／model，不投影 args、session 或指令。review／fix 在實際 Agent 啟動後觸發同一種角色事件；ledger 錯誤隔離，所有既有 coding gate 不變。
+
+事件／顯示契約見 SPEC.md「卡片角色紀錄」。PR 內文摘要本輪未加入。舊卡與舊事件不補寫；原始碼與假 port 測試完成，尚未部署／重啟或實機驗證。

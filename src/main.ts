@@ -1,3 +1,9 @@
+import {
+  roleIdentity,
+  roleEvent,
+  recordRoleSafely,
+  type RoleIdentity,
+} from "./card-events.js";
 import { createCardNotifier } from "./card-notify.js";
 import { commitVerifiedVersion } from "./card-commit.js";
 import { hookReplyTrusted } from "./codex-session.js";
@@ -767,6 +773,7 @@ export async function handleCommand(
               },
               listAgents: () => runtime.herdr.listAgentsWithWorkspaceNames(),
               flow: {
+                onRoleAssigned: options.onRoleAssigned,
                 panePort: runtime.herdr,
                 startAgent: (input) => startAgentInPane(runtime.herdr, input),
                 runTurn: async (agent, prompt, timeoutMs) => {
@@ -805,6 +812,7 @@ export async function handleCommand(
               fetchMaterial: (repo, number) =>
                 fetchReviewMaterial(defaultExec, repo, number),
               flow: {
+                onRoleAssigned: options.onRoleAssigned,
                 panePort: runtime.herdr,
                 startAgent: (input) => startAgentInPane(runtime.herdr, input),
                 runTurn: async (agent, prompt, timeoutMs) => {
@@ -962,6 +970,7 @@ export async function handleCommand(
             options.coding,
             context,
             runtime,
+            options.cardId,
           );
           return {
             taskId: started.taskId,
@@ -1798,6 +1807,7 @@ async function startTeamTask(
   coding: boolean,
   context: CommandContext,
   runtime: Runtime,
+  cardId?: string,
 ): Promise<{
   taskId: string;
   lead: AgentRecord;
@@ -1863,6 +1873,18 @@ async function startTeamTask(
       workers,
       replan: true,
       ...(coding ? { coding: true } : {}),
+      onRoleAssigned: (identity) =>
+        recordRoleSafely(() => {
+          const owner =
+            cardId ??
+            lazyCardAssignments()
+              .list()
+              .find((item) => item.taskId === identity.taskId)?.cardId;
+          if (!owner) return;
+          return new CardStore(join(stateDirectory(), "cards"), {
+            maxFileBytes: LEDGER_MAX_FILE_BYTES,
+          }).recordEvent(owner, roleEvent(identity, nowSeconds()));
+        }),
       acquireWorker: async (target) => {
         const acquired = target.pane_id.startsWith("profile:")
           ? await runtime.pool!.acquire(
@@ -1891,7 +1913,21 @@ async function startTeamTask(
           acquired.agent.workspace_id !== workspaceId
         )
           throw new Error("invalid Worker target");
-        return { agent: acquired.agent, continuity: acquired.continuity };
+        const profile = target.pane_id.startsWith("profile:")
+          ? runtime.pool?.profiles.find((p) => p.id === target.pane_id.slice(8))
+          : undefined;
+        return {
+          agent: {
+            ...acquired.agent,
+            ...(profile
+              ? {
+                  profileId: profile.id,
+                  ...(profile.model ? { model: profile.model } : {}),
+                }
+              : {}),
+          },
+          continuity: acquired.continuity,
+        };
       },
       // ISSUE-107：profile Worker 在第一個回合後才登記 session（agy）時，更新 pool 綁定讓之後還能 acquire。
       // 失敗只記錄：綁定維持原狀，下次 acquire 會因身分不明而拒絕，不會放寬。
@@ -1957,16 +1993,12 @@ async function reportTeamTask(
   );
 }
 
-/** 卡片流程紀錄只接受簡單的 Agent 名稱與機器 id；不符合的值換成安全的預設。 */
-function ledgerLead(agent: AgentRecord): { agent: string; machine: string } {
-  const name = String(agent.agent ?? "agent")
-    .replace(/[^A-Za-z0-9._-]/g, "-")
-    .slice(0, 40);
-  const machine = typeof agent.machine === "string" ? agent.machine : "local";
-  return {
-    agent: name || "agent",
-    machine: /^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(machine) ? machine : "local",
-  };
+/** Reuse CLI identification; the event validator rejects invalid identity facts. */
+function ledgerLead(
+  agent: AgentRecord,
+): Omit<RoleIdentity, "role" | "taskId" | "round"> {
+  const { role: _role, ...identity } = roleIdentity("lead", agent, {});
+  return identity;
 }
 
 async function reportOrchestrationEvent(

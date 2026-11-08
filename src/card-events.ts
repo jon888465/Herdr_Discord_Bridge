@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { agentDisplayName } from "./cli-adapter.js";
+import type { AgentRecord } from "./types.js";
 // 營運卡片「流程紀錄」的事件模板（ADR-0002 決定 11，方案 C）。
 //
 // 紀錄預設只含 bridge 自己產生、有型別的事實，說明文字由固定模板組出。唯一的自由文字是
@@ -50,6 +53,7 @@ const BLOCK_REASONS = [
 const CLEANUP_PENDING = ["dirty_worktree", "unreachable", "error"] as const;
 
 export type CardEvent = { time: string; eventId: string } & (
+  | ({ event: "role_assigned" } & RoleIdentity)
   | { event: "assigned"; machine: string; agent: string }
   | {
       event: "worktree_created";
@@ -115,6 +119,89 @@ export type CardEvent = { time: string; eventId: string } & (
   | { event: "cleanup_pending"; reason: (typeof CLEANUP_PENDING)[number] }
 );
 
+/** Only explicit identity facts; never session history, prompts or output. */
+export interface RoleIdentity {
+  role: string;
+  agent: string;
+  machine: string;
+  model?: string;
+  profileId?: string;
+  taskId?: string;
+  round?: number;
+}
+
+const ROLE = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$/;
+const MODEL = /^[A-Za-z0-9][A-Za-z0-9_./:+-]{0,79}$/;
+
+export function roleIdentity(
+  role: string,
+  actor: AgentRecord,
+  scope: { taskId?: string; round?: number },
+): RoleIdentity {
+  return {
+    role,
+    agent: agentDisplayName({ kind: actor.agent ?? "", role: "agent" }).split(
+      "·",
+    )[0]!,
+    machine: typeof actor.machine === "string" ? actor.machine : "local",
+    ...(typeof actor.model === "string" ? { model: actor.model } : {}),
+    ...(typeof actor.profileId === "string"
+      ? { profileId: actor.profileId }
+      : {}),
+    ...scope,
+  };
+}
+
+/** Stable across replay/restart. The assignment id is the role for Team work. */
+export function roleEvent(identity: RoleIdentity, time: string): CardEvent {
+  const eventId =
+    "role-" +
+    createHash("sha256")
+      .update(
+        JSON.stringify([
+          identity.taskId ?? null,
+          identity.role,
+          identity.round ?? null,
+        ]),
+      )
+      .digest("hex")
+      .slice(0, 48);
+  return { ...identity, event: "role_assigned", time, eventId };
+}
+
+/** A ledger failure must never alter the work result or notification text. */
+export function recordRoleSafely(write: () => { ok: boolean } | void): void {
+  try {
+    const result = write();
+    if (result && typeof result === "object" && !result.ok)
+      console.error("Role ledger write rejected");
+  } catch {
+    console.error("Role ledger write failed");
+  }
+}
+
+/** Read only our validated role template; old/unknown entries are not inferred. */
+export function roleSummary(entries: LogEntry[]): string {
+  return (
+    entries
+      .filter((e) => e.event === "role_assigned")
+      .slice()
+      .sort((a, b) => a.time.localeCompare(b.time))
+      .flatMap((e) => {
+        const match =
+          /^([A-Za-z0-9_][A-Za-z0-9_.-]{0,63})(（第 [0-9]+ 輪）)?：([A-Za-z0-9._-]{1,40})(（[A-Za-z0-9][A-Za-z0-9_./:+-]{0,79}）)?；machine=/.exec(
+            e.text,
+          );
+        return match
+          ? [
+              `${match[1] === "lead" ? "Lead" : match[1]}${match[2] ?? ""}：${match[3]}${match[4] ?? ""}`,
+            ]
+          : [];
+      })
+      .join(" · ") || "沒有角色紀錄"
+  );
+}
+
 export type BuildResult =
   | { ok: true; entry: LogEntry; omitted: boolean }
   | { ok: false; error: string };
@@ -136,6 +223,32 @@ function failureReason(fields: Fields): { text: string; suspicious: boolean } {
 
 function render(fields: Fields): { text: string; suspicious: boolean } {
   switch (fields.event) {
+    case "role_assigned": {
+      const role = text(fields, "role", ROLE, "assignment id or role, max 64");
+      const agent = text(fields, "agent", AGENT, "agent kind");
+      const machine = text(fields, "machine", MACHINE, "machine id");
+      const model =
+        fields.model === undefined
+          ? ""
+          : `（${text(fields, "model", MODEL, "model id, max 80")}）`;
+      const profile =
+        fields.profileId === undefined
+          ? ""
+          : `；profile=${text(fields, "profileId", AGENT, "profile id")}`;
+      const task =
+        fields.taskId === undefined
+          ? ""
+          : `；task=${text(fields, "taskId", TASK_ID, "task id")}`;
+      const round =
+        fields.round === undefined
+          ? ""
+          : `（第 ${integer(fields, "round", 1, 1_000_000)} 輪）`;
+      if (!task && !round) bad("scope", "task id or round");
+      return {
+        text: `${role}${round}：${agent}${model}；machine=${machine}${profile}${task}`,
+        suspicious: false,
+      };
+    }
     case "assigned":
       return {
         text: `指派給 ${text(fields, "agent", AGENT, "letters, digits, . _ -")}（${text(fields, "machine", MACHINE, "machine id")}）`,

@@ -1,4 +1,9 @@
 import {
+  roleIdentity,
+  recordRoleSafely,
+  type RoleIdentity,
+} from "./card-events.js";
+import {
   codingPlanningAddendum,
   codingSynthesisAddendum,
   codingWorkerAddendum,
@@ -99,6 +104,7 @@ export type OrchestrationEvent = {
 };
 
 export interface TeamTaskInput {
+  onRoleAssigned?: (identity: RoleIdentity) => void;
   origin?: { guildId: string; channelId: string; threadId?: string };
   taskId: string;
   signal?: AbortSignal;
@@ -266,6 +272,11 @@ export async function runTeamTask(
         `Lead is ${input.lead.agent_status}; it cannot plan this task`,
       );
 
+    recordRoleSafely(() =>
+      input.onRoleAssigned?.(
+        roleIdentity("lead", input.lead, { taskId: input.taskId }),
+      ),
+    );
     const allAssignments: AssignmentPlan["assignments"] = [];
     let gate: { reasons: string[]; fingerprint: string } | undefined;
     const considerGate = () => {
@@ -602,6 +613,11 @@ async function runAssignment(
     });
     if (!["idle", "done"].includes(worker.agent_status))
       throw new Error(`Worker is ${worker.agent_status}`);
+    recordRoleSafely(() =>
+      input.onRoleAssigned?.(
+        roleIdentity(assignment.id, worker, { taskId: input.taskId }),
+      ),
+    );
     input.codingHooks?.onAssignmentStart(assignment, worker);
     startedAt = Date.now();
     inTurn = true;

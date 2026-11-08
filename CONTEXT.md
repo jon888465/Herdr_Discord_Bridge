@@ -176,3 +176,8 @@ Worker、reviewer／修正者與 `agent start` 只在分割後兩邊 rect 都至
 一個 tab 最多 2 個 pane（ISSUE-122，2026-11-07，待實機驗收）：tab 內已有 2 個以上 pane（含 Lead、使用者的）就直接開新 tab，並以同一個名稱替新 tab 命名。
 不放大既有 pane；Lead 漏處理 prompt 的直接原因仍未確認，亦未增加自動重送。
 驗證、部署與剩餘驗收見 `docs/known-issues.md` 的 ISSUE-108。
+
+
+## Card role ledger
+
+ISSUE-127（2026-11-08，待實機驗收）：新增 role_assigned 固定模板事件，Team 記 Lead 與每個 assignment id 的實際 Worker，card review／fix 記每輪角色身分。card show 依時間顯示完整歷史；舊卡不補寫。契約見 SPEC.md「卡片角色紀錄」，接線設計見 docs/coding-workflow-proposal.md「卡片角色帳本接線」。PR 內文角色摘要未加入；通知與 coding／merge gates 不變。尚未部署或實機驗證。

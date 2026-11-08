@@ -1,5 +1,19 @@
 # Known Issues
 
+## ISSUE-127：卡片缺少角色與實際 Agent 的對應（REQ-20261108-role-agents）
+
+更新日期：2026-11-08。狀態：已修正、待驗收。**尚未在 live bridge／Discord／Herdr／CLI 實機驗證；舊卡與舊事件不補寫角色。**
+
+症狀／預期：原本 `assigned` 只含 Lead 種類，review／fix 事件不含執行者，Team assignment 的 Worker 身分只在 task journal；卡片應能查到每次角色由誰擔任。重現環境：本機 worktree、假 Herdr／Git port，無真實服務。已確認根因：原事件契約與 card show 沒有角色事件或投影，啟動流程沒有接到卡片帳本。
+
+修正範圍：新增固定模板 `role_assigned`，保存 role、CLI 種類、machine、已知 model／profile id、task id 或 review／fix 輪次。CLI 種類經 `agentDisplayName` 共用 `identifyCli`，再用既有 AGENT 格式驗證；Team 使用 Lead 原 assignment id，記錄 acquire 後的實際 Worker，profile 僅取設定中的 id／model。Lead 啟動與 card assign 接線共用穩定 id，避免先後寫入重複；reviewer／fixer 在 Agent 成功啟動後、等待與派工前記錄（包含之後 inconclusive／失敗的輪次）。只投影允許的身分欄位，不保存 session、prompt、輸出、描述或 credentials。
+
+冪等／失敗：id 是 task id、role、round 的 SHA-256 截取值，同卡片同作用域重送／重啟只留第一筆；同 review／fix 輪的重試不覆蓋第一筆。沿用 CardStore 的旁檔輪替與去重。role ≤64、agent／profile 沿用 AGENT ≤40、model 為單行識別碼 ≤80、整筆仍 ≤300 字，不合法或超限拒絕。寫入拋錯或回傳拒絕只印固定 console error，不改流程結果、不放入通知。`card show` 從完整 readLog 按時間排序，在同一行顯示角色與種類及已知 model；舊卡顯示「沒有角色紀錄」，不從舊 assigned 事件推測角色。
+
+測試（2026-11-08）：先紅後綠；事件／show 新測試先失敗，review／fix 回呼測試先失敗。初始 `npm run build` 因缺少 tsc 失敗，`npm ci --ignore-scripts` 後解除。開發中另修正新增假 port 的 session kind（需 `id`，不是 `session_id`），未放寬產品身分守門。相關五個檔案測試 198/198 pass；完整檢查結果於本輪完成後補記。
+
+未驗證／下一步：原始碼已接線；執行中的 bridge 未部署、未重啟。Lead 應在部署後以新卡驗收 Lead、profile Worker、多輪 review／fix、card show 與重啟去重；舊卡不回填、舊訊息不補送。可選的 card pr／card attach-pr PR 內文角色摘要本輪未加入，PR 內文保持現行行為。權限、review、CI、merge gate、ISSUE-120 通知、config.json、policy.yml 均未變更。未 commit、push、merge，未使用 GitHub。
+
 ## ISSUE-126：bridge 重啟後進行中的 Discord 串流被靜默丟掉，最後回覆沒有送到 Discord（REQ-20261108-discord-reply-lost）
 
 2026-11-08。狀態：待調查（根因只是假設，尚未修正）。

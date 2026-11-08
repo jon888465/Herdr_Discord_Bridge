@@ -1115,4 +1115,69 @@ test("ISSUE-124 Lead 彙整回合逾時：失敗原因寫出 Lead synthesis 等�
     failed?.detail ?? "",
     /Lead synthesis 等待逾時（已等待 .*，上限 1\.5 秒）/,
   );
+
+test("Team roles use arbitrary Lead assignment ids and acquired Worker identity", async () => {
+  const prompts: Array<[string, string]> = [];
+  const roles: unknown[] = [];
+  const acquired = {
+    ...workerA,
+    agent: "codex",
+    model: "gpt-6.1-sol",
+    machine: "remote-1",
+    profileId: "helper",
+    agent_session: { kind: "id", value: "PRIVATE" },
+  };
+  const port: OrchestrationPort = {
+    async promptAgent(target, prompt) {
+      prompts.push([target, prompt]);
+    },
+    async waitAgent(target) {
+      return target === lead.pane_id ? lead : acquired;
+    },
+    async readAgent(target) {
+      const prompt = latestPrompt(prompts, target);
+      if (!prompt) return "history";
+      const body =
+        target !== lead.pane_id
+          ? "done"
+          : prompts.filter(([pane]) => pane === lead.pane_id).length === 1
+            ? JSON.stringify({
+                assignments: [
+                  {
+                    id: "custom-check",
+                    workerPaneId: workerA.pane_id,
+                    instruction: "Check",
+                  },
+                ],
+              })
+            : "complete";
+      return framed(prompt, body);
+    },
+  };
+  const result = await runTeamTask(
+    Object.assign(
+      {
+        taskId: "role-task",
+        prompt: "work",
+        lead,
+        workers: [workerA],
+        acquireWorker: async () => ({ agent: acquired, continuity: "unknown" }),
+      },
+      { onRoleAssigned: (role: unknown) => roles.push(role) },
+    ),
+    port,
+    () => undefined,
+  );
+  assert.equal(result.state, "completed", JSON.stringify(result.reports));
+  assert.deepEqual(roles, [
+    { role: "lead", agent: "codex", machine: "local", taskId: "role-task" },
+    {
+      role: "custom-check",
+      agent: "codex",
+      machine: "remote-1",
+      model: "gpt-6.1-sol",
+      profileId: "helper",
+      taskId: "role-task",
+    },
+  ]);
 });

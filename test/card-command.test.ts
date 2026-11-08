@@ -430,7 +430,7 @@ function assignSetup(overrides: Partial<CardCommandDeps> = {}) {
   return { ...s, calls };
 }
 
-test("assign hands the card to a Team task, then records the task, the status and two log entries", async () => {
+test("assign hands the card to a Team task, then records the task, the status and role plus lifecycle log entries", async () => {
   const { store, run, calls } = assignSetup();
   store.create(assignable());
   const reply = await run("assign", "REQ-20261102-work");
@@ -446,6 +446,11 @@ test("assign hands the card to a Team task, then records the task, the status an
   assert.deepEqual(
     log.ok && log.entries.map((e) => [e.event, e.text, e.eventId]),
     [
+      [
+        "role_assigned",
+        "lead：codex；machine=local；task=task-1111-aaaa",
+        "role-09ff625adc6bc9612fbcc7d3aee09461800c4d91224d28fc",
+      ],
       ["assigned", "指派給 codex（local）", "task-1111-aaaa-assigned"],
       ["started", "開始執行 task task-1111-aaaa", "task-1111-aaaa-started"],
     ],
@@ -560,7 +565,7 @@ test("the agent and machine written to the log come from the started task", asyn
   store.create(assignable());
   await run("assign", "REQ-20261102-work");
   const log = store.readLog("REQ-20261102-work");
-  assert.equal(log.ok && log.entries[0].text, "指派給 claude（agy-pod）");
+  assert.equal(log.ok && log.entries[1].text, "指派給 claude（agy-pod）");
 });
 
 test("assign records which card the task came from, and a failure to record only warns", async () => {
@@ -751,6 +756,7 @@ test("assign --worktree prepares the worktree first, records the project and the
   const log = store.readLog("REQ-20261102-work");
   assert.deepEqual(log.ok && log.entries.map((e) => e.event), [
     "worktree_created",
+    "role_assigned",
     "assigned",
     "started",
   ]);
@@ -831,6 +837,7 @@ test("a missing base sha still records the project but skips the worktree event"
   await run("assign", "REQ-20261102-work", "--worktree");
   const log = store.readLog("REQ-20261102-work");
   assert.deepEqual(log.ok && log.entries.map((e) => e.event), [
+    "role_assigned",
     "assigned",
     "started",
   ]);
@@ -2319,4 +2326,111 @@ test("mutual exclusion logs and notifies merge_blocked while preserving refusal"
     const log=s.store.readLog("REQ-20261102-work");assert.ok(log.ok);assert.equal(log.entries.filter(e=>e.event==="merge_blocked").length,1);
     await notifier.tick();assert.equal(sent.length,1);assert.match(sent[0],/merge_blocked/);
   } finally {release();await running;}
+});
+
+test("card show lists role records chronologically including repeated roles and old cards", async () => {
+  const { store, run } = setup();
+  const id = "REQ-20261102-roles";
+  store.create(card(id));
+  assert.match(await run("show", id), /角色紀錄：沒有角色紀錄/);
+  const events = [
+    { role: "reviewer", agent: "agy", round: 2, time: "2026-11-08T08:02:00Z" },
+    {
+      role: "lead",
+      agent: "claude",
+      taskId: "task-1",
+      time: "2026-11-08T08:00:00Z",
+    },
+    {
+      role: "reviewer",
+      agent: "codex",
+      round: 1,
+      time: "2026-11-08T08:01:00Z",
+    },
+  ];
+  for (const [i, event] of events.entries()) {
+    const value = {
+      ...event,
+      event: "role_assigned",
+      machine: "local",
+      eventId: `role-${i}`,
+    } as unknown as import("../src/card-events.js").CardEvent;
+    assert.ok(store.recordEvent(id, value).ok);
+    assert.ok(store.recordEvent(id, value).ok);
+  }
+  assert.match(
+    await run("show", id),
+    /角色紀錄：Lead：claude · reviewer（第 1 輪）：codex · reviewer（第 2 輪）：agy/,
+  );
+  const log = store.readLog(id);
+  assert.ok(log.ok);
+  if (log.ok) assert.equal(log.entries.length, 3);
+});
+
+test("review and fix command callbacks record roles without changing flow replies", async () => {
+  const review = reviewSetup({
+    reviewPullRequest: async (_card, options) => {
+      options.onRoleAssigned?.({
+        role: "reviewer",
+        agent: "codex",
+        machine: "local",
+        round: options.round,
+      });
+      return reviewOk({}, options.round);
+    },
+  });
+  await review.run("review", "REQ-20261102-work");
+  await review.run("review", "REQ-20261102-work");
+  assert.match(
+    await review.run("show", "REQ-20261102-work"),
+    /reviewer（第 1 輪）：codex · reviewer（第 2 輪）：codex/,
+  );
+  const fix = fixSetup({
+    fixCard: async (_card, options) => {
+      options.onRoleAssigned?.({
+        role: "fixer",
+        agent: "claude",
+        machine: "local",
+        round: options.round,
+      });
+      return {
+        ok: true,
+        fixerKind: "claude",
+        closed: true,
+        outcome: { kind: "failed", reason: "fixture failure", skipped: [] },
+      };
+    },
+  });
+  assert.match(await fix.run("fix", "REQ-20261102-work"), /這一圈沒有被採用/);
+  assert.match(
+    await fix.run("show", "REQ-20261102-work"),
+    /fixer（第 1 輪）：claude/,
+  );
+});
+
+test("role ledger rejection does not affect card assign or add warnings to its reply", async (t) => {
+  const errors: unknown[] = [];
+  t.mock.method(console, "error", (...args: unknown[]) => {
+    errors.push(args);
+  });
+  const original = CardStore.prototype.recordEvent;
+  t.mock.method(
+    CardStore.prototype,
+    "recordEvent",
+    function (
+      this: CardStore,
+      id: string,
+      event: import("../src/card-events.js").CardEvent,
+    ) {
+      if (event.event === "role_assigned")
+        return { ok: false as const, code: "io" as const, error: "PRIVATE" };
+      return original.call(this, id, event);
+    },
+  );
+  const { store, run } = assignSetup();
+  store.create(assignable());
+  const reply = await run("assign", "REQ-20261102-work");
+  assert.match(reply, /已指派/);
+  assert.doesNotMatch(reply, /PRIVATE|角色|警告/);
+  assert.deepEqual(errors, [["Role ledger write rejected"]]);
 });

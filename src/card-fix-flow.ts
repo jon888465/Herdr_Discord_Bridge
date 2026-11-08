@@ -1,3 +1,8 @@
+import {
+  roleIdentity,
+  recordRoleSafely,
+  type RoleIdentity,
+} from "./card-events.js";
 // 一圈修正的流程（追蹤清單 F5 的 loop 手動版，使用者 2026-11-04 決定）：組提示 → 確認工作樹乾淨 → 開新 pane →
 // 啟動新的作者 Agent（種類沿用最後一個作者的種類，可用 `--agent` 指定）→ 等就緒 → 送出並讀回覆 → 解析 →
 // 確認有新 commit 且工作樹乾淨 → **一定**關閉這個 pane。所有外部動作都由呼叫端注入；**不寫卡片、不 push**。
@@ -25,6 +30,7 @@ import { sensitivePathsIn } from "./sensitive-paths.js";
 import type { AgentRecord } from "./types.js";
 
 export interface FixFlowDeps {
+  onRoleAssigned?: (identity: RoleIdentity) => void;
   panePort: AgentStartPort;
   startAgent(input: {
     paneId: string;
@@ -241,6 +247,9 @@ async function fixInPane(
   } catch (error) {
     return { kind: "start-failed", error: message(error) };
   }
+  recordRoleSafely(() =>
+    deps.onRoleAssigned?.(roleIdentity("fixer", agent, { round: input.round })),
+  );
   const ready = await waitUntilReady(deps, run.pane, agent);
   if (ready.updateSkip) run.skipped.value = ready.updateSkip;
   if (!ready.ok) return failed(ready.reason);
