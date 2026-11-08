@@ -3831,6 +3831,7 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 **獨立 review 的修正（2026-11-08，2 輪；bridge 的 `card review` 因作者 pane 已不在無法執行，改由手動開的 codex 做唯讀 review，含它的兩個子 reviewer）：**已登記的路徑若是 symlink（即使目標也在根目錄底下）會信任到不是 bridge 建立的目錄，現在路徑本身必須是正規路徑；symlink 檢查原本只做一次，設定檔在重試期間被換成 symlink（含指向自己）會被 `rename` 蓋成一般檔案，現在每次重試與 `rename` 前都檢查；核對與 `rename` 之間無法與 agy 互斥，**並行寫入造成的遺失更新無法完全消除**——每次修改前先把驗證過的原內容備份到 state 目錄 `agy-settings-backups/`（權限 600、只留 5 份，備份在最後核對之前完成，核對後立刻 `rename`）供使用者還原；cleanup 當下設定檔壞掉會殘留信任且沒有重試入口，bridge 啟動時 `sweep()` 對「所有權還在、worktree 已不存在」的項目重試移除。每項都先確認測試紅燈再修。
 
 **未驗證：**①**agy 啟動時是否重新讀取 `settings.json`（最大未知數；若否，預先加入無效）**，要以 agy 當 Worker 的測試卡實測；②遠端 agy（`agy-pod`）不在範圍；③agy 的其他 profile（pi、opencode）有沒有類似提示；agy 是否有設定可改成信任子資料夾。
+agy 實機測試卡 REQ-20261108-agy-trust-live-test：Worker 在 bridge 預先授權的 worktree 內成功寫檔（2026-11-08）。
 
 ## ISSUE-114：新增 `agent start <machine:agent:model:level>`，臨時指定機器、Agent、model 與推理強度（level）
 
