@@ -207,6 +207,9 @@ export class AgyWorktreeTrust {
       try {
         fs.writeFileSync(tmp, next, { flag: "wx", mode: stat.mode & 0o777 });
         fs.chmodSync(tmp, stat.mode & 0o777);
+        // 備份在最後核對「之前」完成：核對通過後立刻 rename，中間不再有任何額外的檔案操作。
+        // agy 可能同時寫設定檔，rename 與核對之間無法互斥；備份供使用者還原。
+        this.backup(original);
         this.options.beforeRecheck?.();
         const current = fs.statSync(this.settings);
         if (
@@ -217,8 +220,6 @@ export class AgyWorktreeTrust {
         )
           continue;
         this.assertNotSymlink();
-        // agy 可能同時寫設定檔，rename 與核對之間無法互斥；先把驗證過的原內容備份，使用者才能還原。
-        this.backup(original);
         fs.renameSync(tmp, this.settings);
         return true;
       } finally {
@@ -333,6 +334,22 @@ export class AgyWorktreeTrust {
     } catch (e) {
       this.report(cardId, target, "remove", "error", String(e));
     }
+  }
+  /**
+   * 清理信任失敗（例如 cleanup 當下設定檔暫時壞掉）後，worktree 已被標成移除，沒有別的重試入口：
+   * bridge 啟動時對「所有權還在、但 worktree 目錄已不存在」的項目重試移除；worktree 還在的不動（review）。
+   */
+  sweep(): void {
+    let owners: Ownership[];
+    try {
+      owners = this.owners();
+    } catch (e) {
+      (this.options.log ?? console.warn)(`agy trust sweep error: ${String(e)}`);
+      return;
+    }
+    for (const owner of owners)
+      if (owner.settingsPath === this.settings && !fs.existsSync(owner.path))
+        this.cleanup(owner.cardId, owner.path);
   }
 }
 

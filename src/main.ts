@@ -183,7 +183,9 @@ async function startBridge(
     config.reconnectBaseMs,
   );
   // ISSUE-113：本機的 hub 才注入 agy 卡片 worktree 的預先信任；遠端 agy 只回報需人工處理。
-  herdr.setAgyTrust(defaultAgyWorktreeTrust());
+  const agyTrust = defaultAgyWorktreeTrust();
+  herdr.setAgyTrust(agyTrust);
+  agyTrust.sweep();
   herdr.startTunnels();
   const routing = new RoutingStore(
     statePath(config),

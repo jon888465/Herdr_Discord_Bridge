@@ -478,3 +478,42 @@ test("each edit keeps a private backup of the verified original in the state dir
   }
   assert.equal(fs.readdirSync(backups).length, 5);
 });
+
+// review：備份要在最後核對「之前」完成，核對通過後立刻 rename，中間不能再有額外的檔案操作。
+test("the backup is written before the final recheck, so nothing else runs between the recheck and the rename", () => {
+  const f = fixture();
+  const backups = path.join(f.state, "agy-settings-backups");
+  let seen = -1;
+  const trust = new AgyWorktreeTrust({
+    ...f.options,
+    beforeRecheck: () => {
+      seen = fs.existsSync(backups) ? fs.readdirSync(backups).length : 0;
+    },
+  });
+  trust.beforeLaunch("agy", "w1:p1", f.cwd);
+  assert.equal(seen, 1);
+});
+
+// review：cleanup 時設定檔暫時壞掉會殘留信任；worktree 已被標成移除，沒有別的重試入口，所以 bridge 啟動時 sweep。
+test("trust left behind by a failed cleanup is removed by sweep once the worktree is gone and settings are valid again", () => {
+  const f = fixture();
+  f.trust.beforeLaunch("agy", "w1:p1", f.cwd);
+  const good = fs.readFileSync(f.settings, "utf8");
+  fs.writeFileSync(f.settings, "{ not json");
+  fs.rmSync(f.cwd, { recursive: true });
+  f.trust.cleanup("REQ-20261107-test", f.cwd);
+  const ownership = path.join(f.state, "agy-worktree-trust.json");
+  assert.equal(JSON.parse(fs.readFileSync(ownership, "utf8")).length, 1);
+  fs.writeFileSync(f.settings, good);
+  new AgyWorktreeTrust(f.options).sweep();
+  assert.deepEqual(f.read(), f.original);
+  assert.deepEqual(JSON.parse(fs.readFileSync(ownership, "utf8")), []);
+});
+
+test("sweep leaves trust alone while its worktree still exists", () => {
+  const f = fixture();
+  f.trust.beforeLaunch("agy", "w1:p1", f.cwd);
+  const text = fs.readFileSync(f.settings, "utf8");
+  new AgyWorktreeTrust(f.options).sweep();
+  assert.equal(fs.readFileSync(f.settings, "utf8"), text);
+});
