@@ -124,6 +124,7 @@ import {
   statusEmoji,
 } from "./format.js";
 import { HerdrClient, HerdrError } from "./herdr.js";
+import { defaultAgyWorktreeTrust } from "./agy-worktree-trust.js";
 import { HerdrHub } from "./machines.js";
 import type { OrchestrationEvent } from "./team-orchestration.js";
 import { TeamTaskEngine } from "./team-task-engine.js";
@@ -181,6 +182,10 @@ async function startBridge(
     config.requestTimeoutMs,
     config.reconnectBaseMs,
   );
+  // ISSUE-113：本機的 hub 才注入 agy 卡片 worktree 的預先信任；遠端 agy 只回報需人工處理。
+  const agyTrust = defaultAgyWorktreeTrust();
+  herdr.setAgyTrust(agyTrust);
+  agyTrust.sweep();
   herdr.startTunnels();
   const routing = new RoutingStore(
     statePath(config),

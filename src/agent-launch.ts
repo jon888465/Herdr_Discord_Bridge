@@ -150,6 +150,7 @@ export async function runAgentStart(
   let started: AgentRecord;
   try {
     started = await startAgentInPane(deps.port, {
+      skipWorkspaceTrust: true,
       paneId: pane.paneId,
       kind: spec.kind,
       name: `hdb-start-${randomUUID().slice(0, 8)}`,
@@ -192,6 +193,9 @@ export async function runAgentStart(
     `✅ 已啟動 Agent：pane \`${ready.agent.pane_id}\``,
     `機器：${spec.machine} · 種類：${spec.kind} · model：${spec.model ?? CLI_DEFAULT} · level：${spec.level ?? CLI_DEFAULT}`,
     `工作目錄：${cwd}`,
+    ...(spec.kind === "agy" && spec.machine !== LOCAL_MACHINE
+      ? ["remote agy trust needs manual handling／遠端 agy 的信任需人工處理"]
+      : []),
     `未自動切換；要使用請 \`agent use ${ready.agent.pane_id}\`。`,
   ].join("\n");
 }
