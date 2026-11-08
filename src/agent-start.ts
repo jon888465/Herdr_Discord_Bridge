@@ -15,6 +15,8 @@ import type { AgentRecord } from "./types.js";
 
 export interface AgentStartPort {
   prepareWorkspaceTrust?(kind: string, paneId: string, cwd?: string): void;
+  /** 只處理使用者在 config 明列的目錄（`agyTrustedDirectories`）；不處理卡片 worktree（ISSUE-113）。 */
+  prepareConfiguredDirectoryTrust?(kind: string, paneId: string, cwd?: string): void;
   request(
     method: string,
     params?: Record<string, unknown>,
@@ -55,6 +57,8 @@ export async function startAgentInPane(
 ): Promise<AgentRecord> {
   if (!input.skipWorkspaceTrust)
     port.prepareWorkspaceTrust?.(input.kind, input.paneId, input.cwd);
+  else
+    port.prepareConfiguredDirectoryTrust?.(input.kind, input.paneId, input.cwd);
   const extra = extraLaunchArgsFor(input.kind, input.cwd);
   const args = [...(input.args ?? []), ...extra];
   const params = {

@@ -295,6 +295,51 @@ test("agent start --cwd cannot authorize even an indexed worktree", async () => 
   assert.deepEqual(f.read(), f.original);
 });
 
+test("agent start trusts a configured directory only; indexed worktrees and other cwd stay untrusted", async () => {
+  const f = fixture();
+  const dir = path.join(f.home, "git_wk");
+  fs.mkdirSync(dir, { recursive: true });
+  const trust = new AgyWorktreeTrust({ ...f.options, trustedDirectories: [dir] });
+  const port = {
+    prepareWorkspaceTrust: () =>
+      assert.fail("agent start must not request card worktree preauthorization"),
+    prepareConfiguredDirectoryTrust: (kind: string, pane: string, cwd?: string) =>
+      trust.beforeLaunchConfigured(kind, pane, cwd),
+    async request(method: string) {
+      if (method === "pane.layout")
+        return {
+          layout: {
+            panes: [{ pane_id: "w1:p1", rect: { width: 200, height: 60 } }],
+          },
+        };
+      if (method === "pane.split")
+        return {
+          pane: { pane_id: "w1:p2", workspace_id: "w1", terminal_id: "t2" },
+        };
+      if (method === "pane.get") return { pane: { terminal_id: "t2" } };
+      return {};
+    },
+    async listAgentsWithWorkspaceNames() {
+      return [agent(dir)];
+    },
+  };
+  const run = (cwd: string) =>
+    runAgentStart(
+      {
+        port,
+        selected: { ...agent(cwd), pane_id: "w1:p1" },
+        machineIds: [],
+        allowedWorkspaceIds: [],
+        workspacePath: cwd,
+      },
+      { spec: "agy", cwd },
+    );
+  await run(f.cwd);
+  assert.deepEqual(f.read(), f.original);
+  await run(dir);
+  assert.deepEqual(f.read().trustedWorkspaces, ["/user/original", dir]);
+});
+
 test("card cleanup removes owned trust only after successful worktree removal", async () => {
   const f = fixture();
   f.trust.beforeLaunch("agy", "w1:p1", f.cwd);

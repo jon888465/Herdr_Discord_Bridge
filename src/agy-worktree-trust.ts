@@ -263,6 +263,11 @@ export class AgyWorktreeTrust {
     }
     return true;
   }
+  /** `agent start` 用：只處理使用者明列的目錄，絕不信任卡片 worktree 或其他 `--cwd`。 */
+  beforeLaunchConfigured(kind: string, paneId: string, cwd?: string): void {
+    if (kind !== "agy" || !cwd || paneId.split(":").length > 2) return;
+    this.trustConfiguredDirectory(cwd);
+  }
   beforeLaunch(kind: string, paneId: string, cwd?: string): void {
     if (kind !== "agy" || !cwd) return;
     if (paneId.split(":").length <= 2 && this.trustConfiguredDirectory(cwd))
