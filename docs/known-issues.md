@@ -19,7 +19,7 @@
 
 ## ISSUE-127：卡片缺少角色與實際 Agent 的對應（REQ-20261108-role-agents）
 
-更新日期：2026-11-08。狀態：已修正、待驗收。**尚未在 live bridge／Discord／Herdr／CLI 實機驗證；舊卡與舊事件不補寫角色。**
+更新日期：2026-11-08。狀態：**已驗收**（使用者 2026-11-08 明確表示驗收）。**實機驗證（2026-11-08，本機 macOS，bridge 以 main `35e56cf`〔含 PR #166〕重啟後）：**驗收卡 `REQ-20261108-role-ledger-live`（PR #168，已關閉不 merge）由 autopick 跑完，流程紀錄依序寫入 `role_assigned`：lead＝claude／local、impl＝codex／local／profile `helper`、verify＝claude／local／profile `claude`、review＝codex／local／profile `reviewer`，以及 reviewer 第 1、2 輪＝codex／local；`card show` 的「角色紀錄」列出同樣六筆。該卡的 review 兩輪皆 `inconclusive`，原因是第 3 條驗收條件要看 `card show`，reviewer 只看得到 PR diff（卡片設計問題，非程式缺陷）。舊卡與舊事件不補寫角色。
 
 症狀／預期：原本 `assigned` 只含 Lead 種類，review／fix 事件不含執行者，Team assignment 的 Worker 身分只在 task journal；卡片應能查到每次角色由誰擔任。重現環境：本機 worktree、假 Herdr／Git port，無真實服務。已確認根因：原事件契約與 card show 沒有角色事件或投影，啟動流程沒有接到卡片帳本。
 
@@ -50,6 +50,8 @@
 **已確認根因：**codex 的 workspace-write 沙箱不允許測試用的 Unix socket；每個 Worker 都是新開的 codex，先前「允許一次」的授權不會延續，所以每次都會再問。
 
 **決定（使用者 2026-11-08）：**`agentProfiles` 中 `helper`（codex，實作與驗證的 Worker）的 `args` 設為 `["--dangerously-bypass-approvals-and-sandbox"]`（無沙箱、不問批准）。`reviewer` 這個 codex profile 與 Lead、`agent start`、其他 Agent 種類**都沒有改**。設定在使用者的 `config.json`（備份 `config.json.bak-codexperm-20261108`，旁邊有註解提醒）；沒有改程式。
+
+**追加（使用者 2026-11-08 稍晚）：**`reviewer`（codex，review／verify）也套用同樣參數。再現：卡片 `REQ-20261106-usage-query` 的 verify 被派到 `reviewer` profile，完整 `npm test` 在沙箱下 `listen EPERM`，pane（`w54:p3`）停在「是否允許在 sandbox 外重跑 npm test」的確認提示，Herdr 狀態 `blocked`，等滿 30 分鐘後 verify 逾時，task 失敗。備份 `config.json.bak-reviewerperm-20261108`，旁邊同樣有註解提醒。Lead 目前是 claude（`policy.yml` 的 `autopick_lead`），沒有 codex Lead profile，所以沒有 Lead 需要改。`agent start` 與其他 Agent 種類仍沒有改。**這次追加尚未驗證**：設定改了，但 bridge 尚未重啟載入，也還沒有以新設定跑過 verify。
 
 **實測（2026-11-08，本機，探針 tab，已關閉）：**以該旗標啟動 codex，直接 `idle`、`interactive_ready: true`，沒有多出確認畫面；請它在 `/tmp` 建立並關閉一個 Unix socket 監聽，回報 `listening`，沒有任何權限提示，沒有殘留檔案。
 
@@ -3841,7 +3843,7 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 ## ISSUE-113：agy 在新的 worktree 資料夾會停在「信任資料夾」提示，profile 啟動不就緒，錯誤訊息沒指出要去哪個 pane 處理
 
-更新日期：2026-11-08。狀態：已修正、待驗收（選項 (b)，使用者 2026-11-07 明確決定的預先授權）；**2026-11-08 已做一次實機驗證（見下方「實機驗證」），仍待使用者驗收**；先前：待決定（已知限制，靠使用者手動確認）。
+更新日期：2026-11-08。狀態：已驗收（選項 (b)，使用者 2026-11-07 明確決定的預先授權）；**2026-11-08 已做一次實機驗證（見下方「實機驗證」），使用者同日驗收通過（狀態：已驗收）**；先前：待決定（已知限制，靠使用者手動確認）。
 
 使用者可見症狀：agy 驗證卡 `REQ-20261106-agy-verify` 第一次執行時，Lead 的計畫正確（`implement` 給 `profile:agy`），但 agy pane `w3X:p2` 停在 Antigravity CLI 的選單 `Do you trust the contents of this project? > Yes, I trust this folder / No, exit`。bridge 的 `waitUntilReady` 等約 30 秒後回報 `started Agent does not match requested profile/workspace or is not ready`（09:44:19Z），implement 失敗，review、verify 因依賴它也失敗，task 在 09:44:31Z 失敗。訊息沒有提到是信任提示，也沒有指出是哪個 pane。
 

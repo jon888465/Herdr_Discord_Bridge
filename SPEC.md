@@ -191,7 +191,7 @@ mapping 過期時，一律 fail closed。
 
 Bridge pane 的 stdin 也接受相同指令，可直接輸入 `agent`、`agent use w2:p1`、`agent detach`、`status`、`ask <prompt>`、`read w2:p1`、`wait w2:p1`、`cancel w2:p1`，或使用 `/herdr` prefix。`agent detach`（相容 `detach`）回到安靜對話模式，保留 blocked 問題通知，不停止／取消 Agent，也不清除 routing；要顯示終端快照輸入 `attach <pane>`。結果與 streaming progress 會印回 pane。Team routing 指令需要目前已選取的 workspace；Discord thread 只提供 route context，本機可用 `wk use <workspace>` 選取。
 
-agy 卡片 worktree 預先信任（ISSUE-113，2026-11-08，已實作，已做一次實機驗證（agy 啟動時有讀取設定、無信任提示、cleanup 後設定檔還原），待使用者驗收；使用者預先授權）：bridge 啟動本機 agy 前，把 `card-worktrees.json` 記錄、realpath 為 `~/.herdr/worktrees/<repo>/card-req-…` 的完整路徑加入 agy 的 `trustedWorkspaces`；不信任上層目錄、`agent start --cwd`、遠端 agy；只移除自己加的那一筆；不對 pane 送按鍵。
+agy 卡片 worktree 預先信任（ISSUE-113，2026-11-08，已實作，已做一次實機驗證（agy 啟動時有讀取設定、無信任提示、cleanup 後設定檔還原），使用者 2026-11-08 已驗收；使用者預先授權）：bridge 啟動本機 agy 前，把 `card-worktrees.json` 記錄、realpath 為 `~/.herdr/worktrees/<repo>/card-req-…` 的完整路徑加入 agy 的 `trustedWorkspaces`；不信任上層目錄、`agent start --cwd`、遠端 agy；只移除自己加的那一筆；不對 pane 送按鍵。
 
 `agent start <machine:agent:model:level> [--cwd <路徑>]`（console 與 Discord `/herdr`，ISSUE-114）臨時啟動 Agent。規格以 `:` 分四段，後面的段落與空段落視為省略，超過四段拒絕；單段（無冒號）若是已知種類（`claude`、`codex`、`agy`、`pi`）視為 agent，否則視為 machine。省略的 `machine`／`agent` 沿用目前選定的 Agent（無選定時為 `local`）；省略的 `model`／`level` 不帶參數（CLI 預設，bridge 不猜）。範例：`claude`、`:codex`、`::opus`、`:::high`、`agy-pod:codex:gpt-6.1-sol:medium`。驗證不符就拒絕並說明、不開 pane：`machine` 必須是 `local` 或 `machines[].id`；`agent` 必須是已知種類；`model` 沿用 `validateProfiles`（非空、≤200 字元、種類須有 `modelFlag`：codex `-m`、claude `--model`，agy／pi 拒絕），另外拒絕任何控制字元（C0、DEL、C1）與以 `-` 開頭；`level` 只允許 `[A-Za-z0-9_-]`、不得以 `-` 開頭、≤32 字元，由 adapter 對應（codex `-c model_reasoning_effort=<level>`、claude `--effort <level>`），agy、pi 一律拒絕。新 pane 開在選定 Agent 的 workspace（沿用 `openReviewerPane`、`startAgentInPane`、`waitUntilReady`）。`--cwd` 預設為選定 Agent 的 cwd，須為絕對路徑；`allowedWorkspaceIds` 非空時須落在選定 workspace 路徑之內（與 `workspace.create` 同方向），比對用 canonical path（本機 realpath；遠端經 ssh `realpath`，無法驗證就拒絕）。信任資料夾提示（blocked）**不自動確認**，回報並保留 pane（ISSUE-113）；`agent.start` 失敗則關閉新 pane；回報成功前核對實際 Agent 的種類、workspace、pane、terminal 與要求相符，不符視為失敗。成功回報 pane id、機器、種類、model 與 level（未指定顯示「CLI 預設」）。**不**自動 `agent use`、不寫 `config.json`、不影響 profile、`--coding`、Team roster。v1 限制：只能在選定 Agent 所在的機器啟動（machine 不同則拒絕，跨機器另案）。
 
@@ -749,7 +749,7 @@ Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*
 - **L2 的 review 閘（追蹤清單 F5，使用者 2026-11-04 決定，已決定、未實作）與 F6 的 merge 端行為（未實作）：** L2 自動 merge 要求：PR 上由**不同 session** 的 Agent 審 diff，判定連同 head commit sha 記在卡片（`review_verdict`），`pass`、head 沒變、CI 全綠才 merge，新 commit 使判定作廢；PR 動到敏感路徑一律不自動 merge、退回人工。**目前沒有 merge 功能，L2 仍只是政策檔的設定值。** 使用者 2026-11-04 對子決定的回答（reviewer 盡量不同種類、repo 唯讀、逐條對驗收條件、每個 commit 審一次加最後整體 review、先審 2 輪後交 Lead 決定、quota 不夠要記錄並 handoff、敏感路徑清單加上 `SPEC.md`／`src/policy.ts`／`src/github.ts`）記在需求卡；使用者同日定奪：「審查→修正」loop **總上限先設 3 次**（使用者 2026-11-04 由 5 改為 3；可依要求調整，超過退回人工）、每次審查最多 2 輪；findings **寫在卡片的新欄位、不貼 PR 留言**（需擴充卡片格式，尚無設計）。限制：reviewer 與作者可能是同一家模型，獨立的只是 session，不是判斷能力。
 
 
-### 卡片角色紀錄（2026-11-08，ISSUE-127，待實機驗收）
+### 卡片角色紀錄（2026-11-08，ISSUE-127，2026-11-08 已實機驗證並由使用者驗收）
 
 卡片帳本新增 `role_assigned` 固定模板事件：role、AGENT 格式的 CLI 種類、machine（local 或已選定機器 id）、已知 model／profile id，並含 task id 或 review／fix round。種類沿用 cli-adapter 的 identifyCli（經 agentDisplayName），不猜未知 model／profile。Lead 在 task 啟動記錄；Team 每個 assignment 在 acquire 實際 Worker 後、派工前記錄，role 使用 Lead 的 assignment id，不固定角色清單；card review／fix 在 Agent 成功啟動後記 reviewer／fixer 每輪身分（之後失敗仍保留）。不存任何 session 內容、prompt、輸出、卡片描述或 credentials。
 
