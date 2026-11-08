@@ -509,4 +509,13 @@ test("a different agent in the same review round is a new role event; the same a
     roleEvent(identity, base.time).eventId,
     roleEvent({ ...identity, profileId: "reviewer" }, base.time).eventId,
   );
+  assert.notEqual(
+    roleEvent({ ...identity, model: "gpt-6.1-sol" }, base.time).eventId,
+    roleEvent({ ...identity, model: "gpt-6.1-luna" }, base.time).eventId,
+  );
+  assert.equal(
+    roleEvent({ ...identity, model: "gpt-6.1-sol" }, base.time).eventId,
+    roleEvent({ ...identity, model: "gpt-6.1-sol" }, "2026-11-08T00:00:00Z")
+      .eventId,
+  );
 });

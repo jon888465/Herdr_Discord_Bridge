@@ -449,7 +449,7 @@ test("assign hands the card to a Team task, then records the task, the status an
       [
         "role_assigned",
         "lead：codex；machine=local；task=task-1111-aaaa",
-        "role-e76499591841fa5d6b36f39ec2926b93933487e8a6371692",
+        "role-905c97bfa67b3df4bed62ff5f504a7d15209478ab601f3d0",
       ],
       ["assigned", "指派給 codex（local）", "task-1111-aaaa-assigned"],
       ["started", "開始執行 task task-1111-aaaa", "task-1111-aaaa-started"],

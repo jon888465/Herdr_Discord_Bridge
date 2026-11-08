@@ -166,6 +166,7 @@ export function roleEvent(identity: RoleIdentity, time: string): CardEvent {
           identity.agent,
           identity.machine,
           identity.profileId ?? null,
+          identity.model ?? null,
         ]),
       )
       .digest("hex")
