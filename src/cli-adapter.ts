@@ -5,6 +5,7 @@ import { stripAnsi } from "./format.js";
 
 export interface CliOutputAdapter {
   modelCommand(model: string): string;
+  parseUsage?(screen: string): string | undefined;
   /** 啟動參數的推理強度；沒有已確認的參數就不實作（拒絕，不猜）。 */
   levelArgs?(level: string): string[];
   extractLatestResponse(
@@ -484,7 +485,41 @@ const grokAdapter = new GrokCliAdapter();
 const claudeAdapter = new ClaudeCliAdapter();
 const piAdapter = new PiCliAdapter();
 
-const codexAdapter = new MarkerCliAdapter(["› ", "❯ "], "/model", (level) => [
+class CodexCliAdapter extends MarkerCliAdapter {
+  parseUsage(screen: string): string | undefined {
+    // Only a complete bottom status row; never echo arbitrary conversation text.
+    const bottom = stripAnsi(screen)
+      .replace(/\r/g, "")
+      .trimEnd()
+      .split("\n")
+      .at(-1)
+      ?.trim();
+    return bottom &&
+      /^(?:\d+h) (?:100|[0-9]{1,2})% left · weekly (?:100|[0-9]{1,2})% left$/.test(
+        bottom,
+      )
+      ? bottom
+      : undefined;
+  }
+}
+
+export function usageKind(kind: string | undefined): string {
+  const identified = identifyCli(kind);
+  return identified.adapter === genericAdapter ? "unknown" : identified.kind;
+}
+
+export function passiveUsage(
+  kind: string | undefined,
+  screen: string,
+): string | undefined {
+  try {
+    return adapterFor(kind).parseUsage?.(screen);
+  } catch {
+    return undefined;
+  }
+}
+
+const codexAdapter = new CodexCliAdapter(["› ", "❯ "], "/model", (level) => [
   "-c",
   `model_reasoning_effort=${level}`,
 ]);

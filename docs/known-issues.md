@@ -1,5 +1,22 @@
 # Known Issues
 
+## ISSUE-128：缺少 Agent usage 唯讀查詢（REQ-20261106-usage-query）
+
+更新：2026-11-08。狀態：已修正、待驗收。
+
+症狀／預期：原本只有 quota status 的操作者觀察，無法彙整 CLI usage；應以 console `usage [pane-or-profile-id]`／Discord `/herdr usage [pane-or-profile-id]` 查詢，無資料則 unknown，不干擾 Agent。重現環境：本卡 worktree，假 Herdr／Discord 單元測試；尚未在真實 Discord／Herdr／CLI 驗證。
+
+已確認根因：原本未有 usage command 或 adapter hook，不是 quota status 能量測的資料。修正範圍：共用指令、SHORT_COMMANDS、獨立只讀 usage table、adapter parseUsage、profile exact session 唯讀查找、遠端連線狀態；沿用 quota status 選定 workspace 與 allowlist，跨 workspace／未知／歧義拒絕。每列機器、目標、種類、原 usage 字樣／單位、來源、本次擷取嘗試時間。Codex 僅接受完整最後非空狀態列，其他種類無安全來源時 unknown；解析拋錯與讀取失敗逐列降級，不輸出任意畫面／錯誤內容。不估算、不讀 credentials／帳號／API key／billing，不寫 observations，不觸發 failover。
+
+三項預設決策：①目前選定的授權 workspace＋設定遠端；遠端 pane 仍限該 workspace，不可達機器 unknown，已連線但該 workspace 無 pane 也明示 unknown。②v1 全部只被動讀取，working／blocked／idle／done 都不送 usage 指令或按鍵。③僅純文字表格，無 JSON。
+
+資料限制：fetched-at 是畫面／連線查詢時間，不代表 provider 更新時間；source 明載 CLI freshness unknown，不保證畫面額度即時。沒有 usage 快取；遠端快取只有 pane metadata，不顯示為目前用量。Profile 只有設定未啟動、綁定不確定、session 無法安全核對都 unknown，不按名稱／種類猜綁定；claude／agy／pi 被動解析另案，無主動 /usage 支援。
+
+測試（2026-11-08，本機）：初次 `npm run typecheck` 因缺少 tsc 失敗，`npm ci --ignore-scripts` 後解除。第一輪 `npm run typecheck`、`npm test` 通過（1522 tests，1521 pass、0 fail、1 skipped）；補 profile／remote 測試前的 `npm run build` 與 `node --test dist/test/usage.test.js` 通過（3/3）。最終版本 `npm run typecheck`、`npm run build`、`npm run lint`、`git diff --check` 全部 exit 0；`npm test > /tmp/usage-query-acceptance.log 2>&1`（內含 build）exit 0：1524 tests，1523 pass、0 fail、1 skipped（既有略過），耗時 66.8 秒。usage 專項 4 tests 與 profile session 查找測試均通過。
+
+未驗證／下一步：原始碼已實作；未部署、未重啟，執行中 bridge 版本未核對，舊訊息不補送。Lead 部署後需驗收兩端路由／授權、busy 不送鍵、Codex 真實底列、遠端斷線與 profile session 綁定；尚未實機驗證 Discord／Herdr／CLI，不得視 build／unit test 為端到端驗收。不修改 config.json／policy.yml，不 commit／push。
+
+
 ## ISSUE-127：卡片缺少角色與實際 Agent 的對應（REQ-20261108-role-agents）
 
 更新日期：2026-11-08。狀態：已修正、待驗收。**尚未在 live bridge／Discord／Herdr／CLI 實機驗證；舊卡與舊事件不補寫角色。**

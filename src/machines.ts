@@ -451,6 +451,13 @@ export class HerdrHub extends HerdrClient {
     await cleanupRemoteAttachments(remote.config, root, minutes);
   }
 
+  usageMachineStatus(): Array<{ id: string; reachable: boolean }> {
+    return [...this.remotes.values()].map((r) => ({
+      id: r.config.id,
+      reachable: r.up,
+    }));
+  }
+
   machineIds(): string[] {
     return [...this.remotes.keys()];
   }

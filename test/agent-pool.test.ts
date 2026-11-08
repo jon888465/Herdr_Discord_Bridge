@@ -673,3 +673,25 @@ test("refresh rechecks reservation and binding after the live lookup", async () 
     }
   }
 });
+
+test("passive usage profile lookup requires a known matching session and never starts a CLI", () => {
+  const f = fixture();
+  try {
+    f.pool.select("w1", "helper", true);
+    f.pool.bind("w1", "helper", lead);
+    assert.equal(f.pool.passiveProfilePane("w1", "helper", [lead]), undefined);
+    const known = { ...lead, agent_session: { kind: "id", value: "known" } };
+    f.pool.bind("w1", "helper", known);
+    assert.equal(f.pool.passiveProfilePane("w1", "helper", [known]), known);
+    assert.equal(
+      f.pool.passiveProfilePane("w1", "helper", [
+        { ...known, agent_session: { kind: "id", value: "replacement" } },
+      ]),
+      undefined,
+    );
+    assert.equal(f.pool.passiveProfilePane("w2", "helper", [known]), undefined);
+    assert.equal(f.starts, 0);
+  } finally {
+    f.close();
+  }
+});
