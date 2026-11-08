@@ -17,8 +17,8 @@ const entry = {
   cardId: "REQ-20261103-one",
   workspaceId: "w9",
   sourceWorkspaceId: "w3",
-  path: "/Users/jon/.herdr/worktrees/repo/card-req-20261103-one",
-  repoPath: "/Users/jon/git_wk/repo",
+  path: "/Users/example/.herdr/worktrees/repo/card-req-20261103-one",
+  repoPath: "/Users/example/git_wk/repo",
   branch: "card/REQ-20261103-one",
 };
 const T1 = "2026-11-03T08:00:00Z";

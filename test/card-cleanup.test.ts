@@ -20,9 +20,9 @@ const card: Card = {
 };
 const info = {
   workspaceId: "w9",
-  path: "/Users/jon/.herdr/worktrees/repo/card-req-20261103-work",
+  path: "/Users/example/.herdr/worktrees/repo/card-req-20261103-work",
   branch: `card/${ID}`,
-  repoPath: "/Users/jon/git_wk/repo",
+  repoPath: "/Users/example/git_wk/repo",
 };
 const now = () => "2026-11-03T09:00:00Z";
 

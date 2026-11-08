@@ -21,8 +21,8 @@ const worktree: CardWorktree = {
   cardId: card.id,
   workspaceId: "w7",
   sourceWorkspaceId: "w1",
-  path: "/Users/jon/.herdr/worktrees/repo/card-req-20261104-export",
-  repoPath: "/Users/jon/git_wk/repo",
+  path: "/Users/example/.herdr/worktrees/repo/card-req-20261104-export",
+  repoPath: "/Users/example/git_wk/repo",
   branch: `card/${card.id}`,
   createdAt: "2026-11-04T01:00:00Z",
 };
