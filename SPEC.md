@@ -14,7 +14,7 @@ Console `usage`／`usage <pane 或 profile id>`，Discord 加 `/herdr` 前綴，
 
 三項預設：授權 workspace＋已設定遠端（不可達 unknown）；所有狀態均只被動讀取，不對 idle/done/working/blocked 送指令或按鍵；純文字表格，無 JSON。每列含 machine、pane/profile、kind、usage、source、fetched-at（本次擷取／嘗試時間，不是供應商更新時間）。不快取 usage、不把遠端快取 pane metadata 當用量；來源明載 CLI freshness unknown，畫面數值不保證供應商即時更新。
 
-Adapter 可選 parseUsage hook：Codex 只接受目前 visible 畫面最後非空列完整 `5h 35% left · weekly 85% left` 類格式，原字樣／單位保留；不輸出其他畫面內容，避免帳號／credentials／API key／billing。claude、agy、pi 與其他未知 CLI 沒有已確認安全被動來源時 unknown；解析失敗、拋錯、不可讀、遠端不可達均逐列 unknown 與原因，不中斷其他列。不估算 token、百分比或 reset；不讀 credentials、不寫 quota report、不觸發 failover。實機底列其他格式留後續 adapter 卡片，不擴大擷取範圍。
+Adapter 可選 parseUsage hook：Codex 只接受目前 visible 畫面底部最後 4 個非空列中、整列恰為（可帶模型名稱前綴的）`5h 35% left · weekly 85% left` 類格式的那一列（真實畫面該列下面還有一行快捷鍵提示），只輸出用量字樣本身（原字樣／單位保留，不含模型名稱）；不輸出其他畫面內容，避免帳號／credentials／API key／billing。claude、agy、pi 與其他未知 CLI 沒有已確認安全被動來源時 unknown；解析失敗、拋錯、不可讀、遠端不可達均逐列 unknown 與原因，不中斷其他列。不估算 token、百分比或 reset；不讀 credentials、不寫 quota report、不觸發 failover。實機底列其他格式留後續 adapter 卡片，不擴大擷取範圍。
 
 ## 1. 範圍與架構
 
