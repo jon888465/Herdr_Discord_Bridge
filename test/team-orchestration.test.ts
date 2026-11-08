@@ -1115,6 +1115,7 @@ test("ISSUE-124 Lead 彙整回合逾時：失敗原因寫出 Lead synthesis 等�
     failed?.detail ?? "",
     /Lead synthesis 等待逾時（已等待 .*，上限 1\.5 秒）/,
   );
+});
 
 test("Team roles use arbitrary Lead assignment ids and acquired Worker identity", async () => {
   const prompts: Array<[string, string]> = [];
