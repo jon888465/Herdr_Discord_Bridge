@@ -56,9 +56,9 @@ test("projectName returns null for an invalid machine id and always produces a v
 
 const full: ProjectInfo = {
   machine: "local",
-  repoPath: "/Users/jon/git_wk/Herdr_Discord_Bridge",
+  repoPath: "/Users/example/git_wk/Herdr_Discord_Bridge",
   branch: "card/REQ-20261102-example",
-  worktreePath: "/Users/jon/.herdr/worktrees/Herdr_Discord_Bridge/card-req",
+  worktreePath: "/Users/example/.herdr/worktrees/Herdr_Discord_Bridge/card-req",
   baseSha: "0123456789abcdef0123456789abcdef01234567",
   headSha: "abcdef1234567890abcdef1234567890abcdef12",
   prUrl: "https://github.com/o/r/pull/9",
@@ -82,9 +82,9 @@ test("a body without the section gets it at the end, with the fields in a fixed 
       "### local:Herdr_Discord_Bridge",
       "",
       "- 機器：local",
-      "- repo：/Users/jon/git_wk/Herdr_Discord_Bridge",
+      "- repo：/Users/example/git_wk/Herdr_Discord_Bridge",
       "- 分支：card/REQ-20261102-example",
-      "- worktree：/Users/jon/.herdr/worktrees/Herdr_Discord_Bridge/card-req",
+      "- worktree：/Users/example/.herdr/worktrees/Herdr_Discord_Bridge/card-req",
       "- base：0123456789ab",
       "- head：abcdef123456",
       "- PR：https://github.com/o/r/pull/9",

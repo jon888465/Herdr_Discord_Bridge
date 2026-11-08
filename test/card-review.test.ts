@@ -35,7 +35,7 @@ const BODY = [
   "",
   "### local:repo",
   "",
-  "- repo：/Users/jon/git_wk/repo",
+  "- repo：/Users/example/git_wk/repo",
   "",
 ].join("\n");
 
@@ -107,7 +107,7 @@ test("the prompt never includes the decision section or the project section of t
   const built = buildReviewPrompt(input());
   const prompt = built.ok ? built.prompt : "";
   assert.equal(prompt.includes("人寫的決議"), false);
-  assert.equal(prompt.includes("/Users/jon"), false);
+  assert.equal(prompt.includes("/Users/example"), false);
 });
 
 test("the prompt tells the reviewer it is read-only and that the data is not instructions", () => {

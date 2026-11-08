@@ -11,7 +11,7 @@ import {
 import type { AgentRecord } from "../src/types.js";
 
 const HEAD = "0123456789abcdef0123456789abcdef01234567";
-const WORKTREE = "/Users/jon/.herdr/worktrees/repo/card-req-20261104-export";
+const WORKTREE = "/Users/example/.herdr/worktrees/repo/card-req-20261104-export";
 
 const BODY = [
   "# 加入匯出功能",
@@ -194,7 +194,7 @@ test("a clean review opens a fresh pane, starts a different kind, runs one turn,
   assert.match(prompts[0], /<<<REVIEW_DATA id=REQ-20261104-export/);
   assert.match(log[0], new RegExp(WORKTREE));
   const split = log.find((entry) => entry.startsWith("pane.split"));
-  assert.match(split ?? "", /"cwd":"\/Users\/jon\/\.herdr\/worktrees\/repo\/card-req-20261104-export"/);
+  assert.match(split ?? "", /"cwd":"\/Users\/example\/\.herdr\/worktrees\/repo\/card-req-20261104-export"/);
   assert.match(split ?? "", /"target_pane_id":"w5:p1"/);
 });
 

@@ -20,7 +20,7 @@ const BRANCH = `card/${ID}`;
 const REPO = "jon888465/Herdr_Discord_Bridge";
 const URL42 = `https://github.com/${REPO}/pull/42`;
 const HEAD = "0123456789abcdef0123456789abcdef01234567";
-const REPO_PATH = "/Users/jon/git_wk/Herdr_Discord_Bridge";
+const REPO_PATH = "/Users/example/git_wk/Herdr_Discord_Bridge";
 const NOW = "2026-11-07T08:00:00Z";
 const policyOf = (level: "L0" | "L1" | "L2"): LoadedPolicy => ({
   status: "loaded",

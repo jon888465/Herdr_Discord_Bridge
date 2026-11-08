@@ -17,7 +17,7 @@
 // H2 自動撿卡（使用者 2026-11-05 決定）：政策檔明確選用才會有任何專案被自動撿卡——
 //   autopick_lead: claude          # 全域一個，claude 或 codex（預設 claude）
 //   autopick:
-//     local:Herdr_Discord_Bridge: /Users/jon/git_wk/Herdr_Discord_Bridge   # 專案 → repo 絕對路徑
+//     local:Herdr_Discord_Bridge: /path/to/Herdr_Discord_Bridge   # 專案 → repo 絕對路徑
 // 規則：autopick 的專案必須也明確列在 projects 裡（不能靠 default，避免寬鬆的 default 讓工作自己開始）；
 // 自動做到哪一步由該專案的等級決定（L0 到 commit、L1 到 PR、L2 一路到 merge），見 `src/autopick.ts`。
 //

@@ -198,7 +198,7 @@ test("sessionCreatedSince uses a creation-time lookup for non-UUIDv7 ids (agy, I
 
 test("sessionCreatedSince reads the creation time from a pi session file name (ISSUE-047)", () => {
   const file =
-    "/Users/jon/.pi/agent/sessions/--x--/2026-10-28T03-12-58-285Z_01a1807f-23aa-7140-a5d9-b27ee0187a7c.jsonl";
+    "/Users/example/.pi/agent/sessions/--x--/2026-10-28T03-12-58-285Z_01a1807f-23aa-7140-a5d9-b27ee0187a7c.jsonl";
   const at = Date.parse("2026-10-28T03:12:58.285Z");
   assert.equal(sessionCreatedSince({ kind: "path", value: file }, at), true);
   assert.equal(

@@ -35,13 +35,13 @@ const created = {
   type: "worktree_created",
   workspace: { workspace_id: "w9", label: "card" },
   worktree: {
-    path: "/Users/jon/.herdr/worktrees/repo/card-REQ-20261102-a",
+    path: "/Users/example/.herdr/worktrees/repo/card-REQ-20261102-a",
     branch: "card/REQ-20261102-a",
     is_linked_worktree: true,
   },
   root_pane: {
     pane_id: "w9:p1",
-    cwd: "/Users/jon/.herdr/worktrees/repo/card-REQ-20261102-a",
+    cwd: "/Users/example/.herdr/worktrees/repo/card-REQ-20261102-a",
   },
   tab: { tab_id: "w9:t1" },
 };
@@ -65,14 +65,14 @@ test("branchForCard names the branch card/<id> and refuses anything that is not 
 test("createWorktree sends only the safe parameters and returns where the work will happen", async () => {
   const port = fakePort(() => created);
   const result = await createWorktree(port, {
-    repoPath: "/Users/jon/git_wk/repo",
+    repoPath: "/Users/example/git_wk/repo",
     branch: "card/REQ-20261102-a",
   });
   assert.deepEqual(port.calls, [
     {
       method: "worktree.create",
       params: {
-        cwd: "/Users/jon/git_wk/repo",
+        cwd: "/Users/example/git_wk/repo",
         branch: "card/REQ-20261102-a",
         focus: false,
       },
@@ -80,7 +80,7 @@ test("createWorktree sends only the safe parameters and returns where the work w
   ]);
   assert.deepEqual(result, {
     workspaceId: "w9",
-    path: "/Users/jon/.herdr/worktrees/repo/card-REQ-20261102-a",
+    path: "/Users/example/.herdr/worktrees/repo/card-REQ-20261102-a",
     branch: "card/REQ-20261102-a",
     rootPaneId: "w9:p1",
     tabId: "w9:t1",

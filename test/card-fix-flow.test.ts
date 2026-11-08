@@ -13,7 +13,7 @@ import type { AgentRecord } from "../src/types.js";
 
 const A = "a".repeat(40);
 const B = "b".repeat(40);
-const WORKTREE = "/Users/jon/.herdr/worktrees/repo/card-req-20261104-export";
+const WORKTREE = "/Users/example/.herdr/worktrees/repo/card-req-20261104-export";
 
 const card: Card = {
   id: "REQ-20261104-export",

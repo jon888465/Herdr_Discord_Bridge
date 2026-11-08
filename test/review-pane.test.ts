@@ -83,7 +83,7 @@ test("a reviewer pane is split from the base pane in its workspace, in the given
   const opened = await openReviewerPane(port, {
     basePaneId: "w5:p1",
     workspaceId: "w5",
-    cwd: "/Users/jon/.herdr/worktrees/repo/card-req-x",
+    cwd: "/Users/example/.herdr/worktrees/repo/card-req-x",
   });
   assert.deepEqual(opened, { paneId: "w5:p9", terminalId: "term_new" });
   const splitCall = calls.find((call) => call.method === "pane.split");
@@ -91,7 +91,7 @@ test("a reviewer pane is split from the base pane in its workspace, in the given
     target_pane_id: "w5:p1",
     workspace_id: "w5",
     direction: "right",
-    cwd: "/Users/jon/.herdr/worktrees/repo/card-req-x",
+    cwd: "/Users/example/.herdr/worktrees/repo/card-req-x",
     focus: false,
   });
 });

@@ -225,13 +225,13 @@ agy 作為 coding Worker／Reviewer 還沒有實機驗證，我（使用者）�
 ## 流程紀錄
 
 - 2026-11-06T06:18:50Z | failed | 失敗：autopick_failed；原因：assign：卡片沒有「## 描述」段落（或內容是空的）；請補上描述後再指派 | ev:autopick-assign-1793945930073
-- 2026-11-06T06:21:03Z | worktree_created | 建立 worktree local:/Users/jon/.herdr/worktrees/Herdr_Discord_Bridge/card-req-20261106-agy-pool 分支 card/REQ-20261106-agy-pool 基準 da34ca29b0b3 | ev:w32-worktree-created
+- 2026-11-06T06:21:03Z | worktree_created | 建立 worktree local:~/.herdr/worktrees/Herdr_Discord_Bridge/card-req-20261106-agy-pool 分支 card/REQ-20261106-agy-pool 基準 da34ca29b0b3 | ev:w32-worktree-created
 - 2026-11-06T06:21:04Z | assigned | 指派給 claude（local） | ev:task-06eb2e97-7b7b-496e-b1b7-a10d722c343b-assigned
 - 2026-11-06T06:21:04Z | started | 開始執行 task task-06eb2e97-7b7b-496e-b1b7-a10d722c343b | ev:task-06eb2e97-7b7b-496e-b1b7-a10d722c343b-started
 - 2026-11-06T06:21:35Z | failed | 失敗：autopick_stopped；原因：task：task 沒有完成：failed：read-only coding assignments in a writer round must depend on that writer | ev:autopick-task-1793946095980
 - 2026-11-06T06:21:35Z | failed | 失敗：task_failed；原因：read-only coding assignments in a writer round must depend on that writer | ev:task-06eb2e97-7b7b-496e-b1b7-a10d722c343b-6
 - 2026-11-06T06:24:39Z | failed | 失敗：autopick_failed；原因：assign：卡片 REQ-20261106-agy-pool 已有作用中的 worktree；先用 `card cleanup REQ-20261106-agy-pool` 清掉，或直接在目前路由的 workspace 用 `card assign REQ-20261106-agy-pool` | ev:autopick-assign-1793946279562
-- 2026-11-06T06:28:14Z | worktree_created | 建立 worktree local:/Users/jon/.herdr/worktrees/Herdr_Discord_Bridge/card-req-20261106-agy-pool 分支 card/REQ-20261106-agy-pool 基準 da34ca29b0b3 | ev:w35-worktree-created
+- 2026-11-06T06:28:14Z | worktree_created | 建立 worktree local:~/.herdr/worktrees/Herdr_Discord_Bridge/card-req-20261106-agy-pool 分支 card/REQ-20261106-agy-pool 基準 da34ca29b0b3 | ev:w35-worktree-created
 - 2026-11-06T06:28:15Z | assigned | 指派給 claude（local） | ev:task-f10f36ba-f01d-4ed3-94fc-8f4c17d7bbb6-assigned
 - 2026-11-06T06:28:15Z | started | 開始執行 task task-f10f36ba-f01d-4ed3-94fc-8f4c17d7bbb6 | ev:task-f10f36ba-f01d-4ed3-94fc-8f4c17d7bbb6-started
 - 2026-11-06T06:28:45Z | failed | 失敗：autopick_stopped；原因：task：task 沒有完成：failed：read-only coding assignments in a writer round must depend on that writer | ev:autopick-task-1793946525398
@@ -243,9 +243,9 @@ agy 作為 coding Worker／Reviewer 還沒有實機驗證，我（使用者）�
 ### local:Herdr_Discord_Bridge
 
 - 機器：local
-- repo：/Users/jon/git_wk/Herdr_Discord_Bridge
+- repo：~/git_wk/Herdr_Discord_Bridge
 - 分支：card/REQ-20261106-agy-pool
-- worktree：/Users/jon/.herdr/worktrees/Herdr_Discord_Bridge/card-req-20261106-agy-pool
+- worktree：~/.herdr/worktrees/Herdr_Discord_Bridge/card-req-20261106-agy-pool
 - worktree 狀態：已清理（分支保留）
 - base：da34ca29b0b3
 ```

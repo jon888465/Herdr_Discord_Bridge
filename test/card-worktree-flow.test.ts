@@ -20,7 +20,7 @@ const lead: AgentRecord = {
   tab_id: "w3:t1",
   agent: "claude",
   agent_status: "idle",
-  foreground_cwd: "/Users/jon/git_wk/repo/src",
+  foreground_cwd: "/Users/example/git_wk/repo/src",
 };
 const started: AgentRecord = {
   ...lead,
@@ -33,7 +33,7 @@ const created = {
   type: "worktree_created",
   workspace: { workspace_id: "w9" },
   worktree: {
-    path: "/Users/jon/.herdr/worktrees/repo/card-req-20261103-one",
+    path: "/Users/example/.herdr/worktrees/repo/card-req-20261103-one",
     branch: `card/${CARD}`,
   },
   root_pane: { pane_id: "w9:p1" },
@@ -58,7 +58,7 @@ function setup(overrides: Partial<PrepareDeps> = {}) {
     sourceWorkspaceId: "w3",
     repoRoot: async (dir) => {
       log.push(`repoRoot:${dir}`);
-      return "/Users/jon/git_wk/repo";
+      return "/Users/example/git_wk/repo";
     },
     headSha: async () => "0123456789abcdef0123456789abcdef01234567",
     startAgent: async (input) => {
@@ -84,7 +84,7 @@ test("prepare creates the worktree, records it, starts the same kind of Agent, a
   const { deps, log, requests, recorded } = setup();
   const result = await prepareCardWorktree(deps, CARD);
   assert.deepEqual(log, [
-    "repoRoot:/Users/jon/git_wk/repo/src",
+    "repoRoot:/Users/example/git_wk/repo/src",
     "ping",
     "worktree.create",
     "record",
@@ -95,7 +95,7 @@ test("prepare creates the worktree, records it, starts the same kind of Agent, a
   assert.deepEqual(requests[1], {
     method: "worktree.create",
     params: {
-      cwd: "/Users/jon/git_wk/repo",
+      cwd: "/Users/example/git_wk/repo",
       branch: `card/${CARD}`,
       focus: false,
     },
@@ -106,7 +106,7 @@ test("prepare creates the worktree, records it, starts the same kind of Agent, a
       workspaceId: "w9",
       sourceWorkspaceId: "w3",
       path: created.worktree.path,
-      repoPath: "/Users/jon/git_wk/repo",
+      repoPath: "/Users/example/git_wk/repo",
       branch: `card/${CARD}`,
     },
   ]);
@@ -114,7 +114,7 @@ test("prepare creates the worktree, records it, starts the same kind of Agent, a
     workspaceId: "w9",
     path: created.worktree.path,
     branch: `card/${CARD}`,
-    repoPath: "/Users/jon/git_wk/repo",
+    repoPath: "/Users/example/git_wk/repo",
     baseSha: "0123456789abcdef0123456789abcdef01234567",
     agent: started,
     agentReady: true,
@@ -233,7 +233,7 @@ function cleanupSetup(
     workspaceId: "w9",
     sourceWorkspaceId: "w3",
     path: created.worktree.path,
-    repoPath: "/Users/jon/git_wk/repo",
+    repoPath: "/Users/example/git_wk/repo",
     branch: `card/${CARD}`,
     createdAt: "2026-11-03T08:00:00Z",
   },
@@ -267,7 +267,7 @@ test("cleanup removes a clean worktree, marks it removed and withdraws the autho
     workspaceId: "w9",
     path: created.worktree.path,
     branch: `card/${CARD}`,
-    repoPath: "/Users/jon/git_wk/repo",
+    repoPath: "/Users/example/git_wk/repo",
   });
   assert.deepEqual(log, [
     'worktree.remove:{"workspace_id":"w9"}',
@@ -291,7 +291,7 @@ test("cleanup keeps a worktree with uncommitted changes and changes nothing else
     workspaceId: "w9",
     path: created.worktree.path,
     branch: `card/${CARD}`,
-    repoPath: "/Users/jon/git_wk/repo",
+    repoPath: "/Users/example/git_wk/repo",
   });
   assert.deepEqual(log, ['worktree.remove:{"workspace_id":"w9"}']);
 });
