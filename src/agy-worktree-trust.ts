@@ -16,6 +16,8 @@ type Ownership = {
 };
 export interface AgyTrustOptions {
   stateDirectory: string;
+  /** 使用者在 config.json 明列的目錄；與卡片 worktree 不同，bridge 只補進信任清單、不會自動移除。 */
+  trustedDirectories?: string[];
   settingsPath?: string;
   home?: string;
   log?: (message: string) => void;
@@ -228,8 +230,43 @@ export class AgyWorktreeTrust {
     }
     throw new Error("settings.json kept changing; leaving it unchanged");
   }
+  /**
+   * 使用者明列的目錄（config.json `agyTrustedDirectories`）：cwd 必須「正好」是其中一個正規路徑
+   * （不信任上層或子目錄、不跟 symlink、不信任 `/` 與家目錄本身）。確保它在信任清單內，沒有所有權紀錄、不會被移除。
+   * 回傳 true 表示 cwd 屬於這類目錄（已處理，不再走卡片 worktree 流程）。
+   */
+  private trustConfiguredDirectory(cwd: string): boolean {
+    const configured = this.options.trustedDirectories ?? [];
+    if (!configured.includes(cwd)) return false;
+    try {
+      if (
+        !path.isAbsolute(cwd) ||
+        path.resolve(cwd) !== cwd ||
+        cwd === path.parse(cwd).root ||
+        cwd === this.home ||
+        fs.realpathSync(cwd) !== cwd ||
+        !fs.statSync(cwd).isDirectory()
+      ) {
+        (this.options.log ?? console.warn)(
+          `agy trusted directory skipped (not a canonical directory): ${cwd}`,
+        );
+        return true;
+      }
+      const added = this.edit(cwd, true);
+      (this.options.log ?? console.warn)(
+        `agy trusted directory ${added ? "added" : "unchanged"}: ${cwd}`,
+      );
+    } catch (e) {
+      (this.options.log ?? console.warn)(
+        `agy trusted directory error: ${cwd} (${String(e)})`,
+      );
+    }
+    return true;
+  }
   beforeLaunch(kind: string, paneId: string, cwd?: string): void {
     if (kind !== "agy" || !cwd) return;
+    if (paneId.split(":").length <= 2 && this.trustConfiguredDirectory(cwd))
+      return;
     let cardId = "";
     let target = cwd;
     try {
@@ -353,6 +390,11 @@ export class AgyWorktreeTrust {
   }
 }
 
-export function defaultAgyWorktreeTrust(): AgyWorktreeTrust {
-  return new AgyWorktreeTrust({ stateDirectory: stateDirectory() });
+export function defaultAgyWorktreeTrust(
+  trustedDirectories: string[] = [],
+): AgyWorktreeTrust {
+  return new AgyWorktreeTrust({
+    stateDirectory: stateDirectory(),
+    trustedDirectories,
+  });
 }

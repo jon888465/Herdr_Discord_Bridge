@@ -39,6 +39,9 @@
       "capabilities": ["review"],
     },
   ],
+  // 本機 agy 的工作目錄正好等於這裡的路徑時，bridge 會把它補進 agy 的信任清單（不自動移除；不含上層、子目錄、家目錄）。
+  // 這等於替整個資料夾預先信任，請只列你自己確認過的目錄。預設空。
+  "agyTrustedDirectories": [],
   "notifyOn": ["blocked"],
   "allowedWorkspaceIds": [],
   "pollIntervalMs": 2000,

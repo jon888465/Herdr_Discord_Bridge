@@ -3847,6 +3847,8 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 更新日期：2026-11-08。狀態：已驗收（選項 (b)，使用者 2026-11-07 明確決定的預先授權）；**2026-11-08 已做一次實機驗證（見下方「實機驗證」），使用者同日驗收通過（狀態：已驗收）**；先前：待決定（已知限制，靠使用者手動確認）。
 
+**追加（使用者 2026-11-08 要求，已實作、尚未實機驗證）：**查 agy usage 時，`agent start agy` 在 `/Users/jon/git_wk`（不是卡片 worktree）啟動，停在信任提示（Antigravity CLI 不繼承上層目錄的信任，家目錄 `/Users/jon` 已在清單內也一樣）。使用者先要求手動把 `/Users/jon/git_wk` 加入 `trustedWorkspaces`（備份 `agy-settings-pre-gitwk-20261108.json`，之後 agy 啟動無提示），再要求 bridge 的自動預先授權也涵蓋此目錄。做法：`config.json` 新增 `agyTrustedDirectories`（絕對路徑陣列，預設空；使用者本機已設 `["/Users/jon/git_wk"]`）；本機 agy 的 cwd 正好等於其中一個正規路徑時，bridge 缺才補、不自動移除、沒有所有權紀錄；不信任上層／子目錄／symlink／`/`／家目錄／相對路徑／不存在的目錄，遠端 agy 與其他 CLI 不適用，卡片 worktree 的授權與清理不變。測試（2026-11-08）：`test/agy-worktree-trust.test.ts` 新增 2 項；bridge 載入此變更後的實機啟動**尚未驗證**。這是比「只信任自己建立的卡片 worktree」更大的授權範圍，由使用者明列在 config 控制。
+
 使用者可見症狀：agy 驗證卡 `REQ-20261106-agy-verify` 第一次執行時，Lead 的計畫正確（`implement` 給 `profile:agy`），但 agy pane `w3X:p2` 停在 Antigravity CLI 的選單 `Do you trust the contents of this project? > Yes, I trust this folder / No, exit`。bridge 的 `waitUntilReady` 等約 30 秒後回報 `started Agent does not match requested profile/workspace or is not ready`（09:44:19Z），implement 失敗，review、verify 因依賴它也失敗，task 在 09:44:31Z 失敗。訊息沒有提到是信任提示，也沒有指出是哪個 pane。
 
 預期行為：bridge 不替使用者確認信任提示（與現有行為一致，不改）；但不就緒時應告知「agy pane 在等信任資料夾確認，請到 `<pane id>` 處理」，讓使用者知道要做什麼。
