@@ -517,3 +517,45 @@ test("sweep leaves trust alone while its worktree still exists", () => {
   new AgyWorktreeTrust(f.options).sweep();
   assert.equal(fs.readFileSync(f.settings, "utf8"), text);
 });
+
+test("configured directory is added only for an exact canonical local cwd, never owned or removed", () => {
+  const f = fixture();
+  const dir = path.join(f.home, "git_wk");
+  fs.mkdirSync(path.join(dir, "child"), { recursive: true });
+  const link = path.join(f.home, "link_wk");
+  fs.symlinkSync(dir, link);
+  const missing = path.join(f.home, "missing");
+  const trust = new AgyWorktreeTrust({
+    ...f.options,
+    trustedDirectories: [dir, link, f.home, "relative/dir", missing],
+  });
+  // 其他種類、遠端 pane、子目錄、上層、symlink、家目錄、相對路徑、不存在的目錄都不動設定。
+  trust.beforeLaunch("claude", "w1:p1", dir);
+  trust.beforeLaunch("agy", "m:w1:p1", dir);
+  for (const cwd of [path.join(dir, "child"), f.home, link, "relative/dir", missing])
+    trust.beforeLaunch("agy", "w1:p1", cwd);
+  assert.deepEqual(f.read(), f.original);
+  // 正好是明列的目錄：補進清單，只多一筆；再啟動不重複；cleanup 不會移除它（沒有所有權紀錄）。
+  trust.beforeLaunch("agy", "w1:p1", dir);
+  assert.deepEqual(f.read().trustedWorkspaces, ["/user/original", dir]);
+  const text = fs.readFileSync(f.settings, "utf8");
+  trust.beforeLaunch("agy", "w1:p1", dir);
+  assert.equal(fs.readFileSync(f.settings, "utf8"), text);
+  trust.cleanup("REQ-20261107-test", dir);
+  trust.sweep();
+  assert.deepEqual(f.read().trustedWorkspaces, ["/user/original", dir]);
+  assert.equal(fs.existsSync(path.join(f.state, "agy-worktree-trust.json")), false);
+});
+
+test("configured directory does not weaken card worktree trust or trust an unlisted path", () => {
+  const f = fixture();
+  const dir = path.join(f.home, "git_wk");
+  fs.mkdirSync(dir, { recursive: true });
+  const trust = new AgyWorktreeTrust({ ...f.options, trustedDirectories: [dir] });
+  trust.beforeLaunch("agy", "w1:p1", f.cwd);
+  assert.deepEqual(f.read().trustedWorkspaces, ["/user/original", f.cwd]);
+  trust.beforeLaunch("agy", "w1:p1", path.join(f.home, "other"));
+  assert.deepEqual(f.read().trustedWorkspaces, ["/user/original", f.cwd]);
+  trust.cleanup("REQ-20261107-test", f.cwd);
+  assert.deepEqual(f.read(), f.original);
+});
