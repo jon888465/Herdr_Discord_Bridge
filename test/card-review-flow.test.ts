@@ -441,3 +441,52 @@ test("a skipped update prompt is reported in the review result; a pane still blo
   assert.equal(kept.ok && kept.updateSkip?.key, "3");
   assert.equal(stuck.log.includes("pane.close"), false);
 });
+
+test("review records the actual reviewer identity each round before work and tolerates ledger failure", async () => {
+  const records: unknown[] = [];
+  for (const round of [1, 2]) {
+    const { deps } = setup({
+      start: () =>
+        reviewer({
+          agent: "codex",
+          model: "gpt-6.1-sol",
+          machine: "local",
+          profileId: "reviewer",
+          agent_session: "PRIVATE",
+        }),
+    });
+    Object.assign(deps, {
+      onRoleAssigned: (identity: unknown) => records.push(identity),
+    });
+    const result = await runCardReview(deps, input({ round }));
+    assert.ok(result.ok);
+  }
+  assert.deepEqual(
+    records,
+    [1, 2].map((round) => ({
+      role: "reviewer",
+      agent: "codex",
+      model: "gpt-6.1-sol",
+      machine: "local",
+      profileId: "reviewer",
+      round,
+    })),
+  );
+});
+
+test("role sink failure does not change runCardReview result", async (t) => {
+  const errors: unknown[] = [];
+  t.mock.method(console, "error", (...args: unknown[]) => {
+    errors.push(args);
+  });
+  const { deps } = setup();
+  Object.assign(deps, {
+    onRoleAssigned: () => {
+      throw new Error("PRIVATE");
+    },
+  });
+  const result = await runCardReview(deps, input());
+  assert.ok(result.ok);
+  if (result.ok) assert.equal(result.batch.verdict, "pass");
+  assert.deepEqual(errors, [["Role ledger write failed"]]);
+});

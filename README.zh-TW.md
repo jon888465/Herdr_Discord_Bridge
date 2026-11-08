@@ -357,3 +357,8 @@ Agent 可在最終回覆中單獨一行寫 `[[discord-attach: /絕對路徑]]`�
 ### 遠端 machine 的 hook
 
 遠端 Agent 預設只用 parser；在該 machine 設定 `hookSocket`（遠端的絕對路徑）後，bridge 會另外維持一條 `ssh -R <hookSocket>:<本機 hook socket>`（與 `-L` 分開，轉發失敗不會影響遠端控制），並在遠端建立 0700 目錄。遠端需安裝 `scripts/remote/herdr-discord-hook.py`（只需 Python 3，不需 Node），並註冊為該 CLI 的 `Stop` hook；agy 寫在 `~/.gemini/config/hooks.json`：`{ "herdr-discord-bridge": { "Stop": [{ "command": "/root/.local/bin/herdr-discord-hook.py --machine <id>", "timeout": 10, "type": "command" }] } }`。Claude／Codex 格式的 `Stop` 也接受。遠端腳本在遠端讀 agy transcript，不需要把檔案傳過 tunnel。
+
+
+### 卡片上的角色紀錄（ISSUE-127，2026-11-08，待實機驗收）
+
+新流程的 `card show <id>` 會以一行「角色紀錄」顯示 Lead、Team 的每個 assignment id、reviewer／fixer 各輪對應的 Agent 種類，以及已知 model。完整 machine／profile／task 或輪次保存在流程紀錄。沒有角色事件的舊卡顯示「沒有角色紀錄」，不回填、不猜模型；重送事件去重，寫入失敗只記 console。尚未部署或在 live bridge 實機驗證。PR 內文角色摘要本輪未加入，通知與 merge／review／CI 守門維持原行為。

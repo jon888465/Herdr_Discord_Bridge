@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildLogEntry,
+  roleEvent,
+  recordRoleSafely,
+  withProfileIdentity,
   OMITTED_TEXT,
   type CardEvent,
 } from "../src/card-events.js";
@@ -377,4 +380,178 @@ test("completed names the finished task and validates the task id", () => {
   assert.equal(ok.ok && ok.entry.event, "completed");
   reject({ ...base, event: "completed", taskId: "a b" }, /taskId/, "taskId");
   reject({ ...base, event: "completed" }, /taskId/, "missing taskId");
+});
+
+test("role ledger validates bounded identity and preserves legacy events", () => {
+  const result = buildLogEntry({
+    ...base,
+    event: "role_assigned",
+    role: "impl",
+    agent: "codex",
+    machine: "local",
+    taskId: "task-1",
+    model: "gpt-6.1-sol",
+    profileId: "helper",
+  } as unknown as CardEvent);
+  assert.ok(result.ok);
+  if (result.ok)
+    assert.equal(
+      result.entry.text,
+      "impl：codex（gpt-6.1-sol）；machine=local；profile=helper；task=task-1",
+    );
+  for (const role of ["bad role", "x".repeat(81), "bad\nrole"]) {
+    assert.equal(
+      buildLogEntry({
+        ...base,
+        event: "role_assigned",
+        role,
+        agent: "codex",
+        machine: "local",
+        taskId: "task-1",
+      } as unknown as CardEvent).ok,
+      false,
+    );
+  }
+  assert.equal(
+    buildLogEntry({
+      ...base,
+      event: "role_assigned",
+      role: "review",
+      agent: "bad agent",
+      machine: "local",
+      round: 1,
+    } as unknown as CardEvent).ok,
+    false,
+  );
+  assert.ok(
+    buildLogEntry({
+      ...base,
+      event: "review_verdict",
+      role: "reviewer",
+      round: 1,
+      verdict: "pass",
+    }).ok,
+  );
+});
+
+test("role ids survive replay and distinguish tasks, assignments and rounds", () => {
+  const identity = {
+    role: "impl",
+    agent: "codex",
+    machine: "local",
+    taskId: "task-a",
+  };
+  const event = roleEvent(identity, base.time);
+  assert.equal(
+    event.eventId,
+    roleEvent(identity, "2026-11-08T00:00:00Z").eventId,
+  );
+  assert.notEqual(
+    event.eventId,
+    roleEvent({ ...identity, taskId: "task-b" }, base.time).eventId,
+  );
+  assert.notEqual(
+    event.eventId,
+    roleEvent({ ...identity, role: "verify" }, base.time).eventId,
+  );
+  assert.notEqual(
+    roleEvent({ ...identity, round: 1 }, base.time).eventId,
+    roleEvent({ ...identity, round: 2 }, base.time).eventId,
+  );
+  const extra = {
+    ...event,
+    prompt: "PRIVATE",
+    output: "PRIVATE",
+    credentials: "PRIVATE",
+    agent_session: "PRIVATE",
+  };
+  const built = buildLogEntry(extra);
+  assert.ok(built.ok);
+  if (built.ok) assert.ok(!JSON.stringify(built.entry).includes("PRIVATE"));
+});
+
+test("role write failures log only a fixed console error and never propagate", (t) => {
+  const errors: unknown[][] = [];
+  t.mock.method(console, "error", (...args: unknown[]) => {
+    errors.push(args);
+  });
+  assert.doesNotThrow(() =>
+    recordRoleSafely(() => {
+      throw new Error("PRIVATE");
+    }),
+  );
+  assert.doesNotThrow(() => recordRoleSafely(() => ({ ok: false })));
+  assert.deepEqual(errors, [
+    ["Role ledger write failed"],
+    ["Role ledger write rejected"],
+  ]);
+});
+
+test("a different agent in the same review round is a new role event; the same agent replayed is not", () => {
+  const identity = {
+    role: "reviewer",
+    agent: "codex",
+    machine: "local",
+    round: 1,
+  };
+  assert.equal(
+    roleEvent(identity, base.time).eventId,
+    roleEvent(identity, "2026-11-08T00:00:00Z").eventId,
+  );
+  assert.notEqual(
+    roleEvent(identity, base.time).eventId,
+    roleEvent({ ...identity, agent: "claude" }, base.time).eventId,
+  );
+  assert.notEqual(
+    roleEvent(identity, base.time).eventId,
+    roleEvent({ ...identity, machine: "remote-1" }, base.time).eventId,
+  );
+  assert.notEqual(
+    roleEvent(identity, base.time).eventId,
+    roleEvent({ ...identity, profileId: "reviewer" }, base.time).eventId,
+  );
+  assert.notEqual(
+    roleEvent({ ...identity, model: "gpt-6.1-sol" }, base.time).eventId,
+    roleEvent({ ...identity, model: "gpt-6.1-luna" }, base.time).eventId,
+  );
+  assert.equal(
+    roleEvent({ ...identity, model: "gpt-6.1-sol" }, base.time).eventId,
+    roleEvent({ ...identity, model: "gpt-6.1-sol" }, "2026-11-08T00:00:00Z")
+      .eventId,
+  );
+});
+
+test("a profile model is recorded only when the bridge launched the session with it", () => {
+  const agent = { pane_id: "w1:p2", agent: "codex" } as never;
+  const profile = { id: "helper", model: "gpt-6.1-sol" };
+  assert.equal(
+    (withProfileIdentity(agent, profile, "new-session") as { model?: string })
+      .model,
+    "gpt-6.1-sol",
+  );
+  for (const continuity of ["same-session", "unknown"])
+    assert.equal(
+      "model" in withProfileIdentity(agent, profile, continuity),
+      false,
+      continuity,
+    );
+  // a model the agent really reported is never overwritten by configuration
+  const reported = { ...(agent as object), model: "actual" } as never;
+  assert.equal(
+    (withProfileIdentity(reported, profile, "new-session") as { model?: string })
+      .model,
+    "actual",
+  );
+  assert.equal(
+    (withProfileIdentity(reported, profile, "same-session") as { model?: string })
+      .model,
+    "actual",
+  );
+  assert.equal(
+    (withProfileIdentity(agent, profile, "new-session") as { profileId?: string })
+      .profileId,
+    "helper",
+  );
+  // no profile (a directly named pane): unchanged
+  assert.deepEqual(withProfileIdentity(agent, undefined, "unknown"), agent);
 });
