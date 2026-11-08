@@ -487,19 +487,22 @@ const piAdapter = new PiCliAdapter();
 
 class CodexCliAdapter extends MarkerCliAdapter {
   parseUsage(screen: string): string | undefined {
-    // Only a complete bottom status row; never echo arbitrary conversation text.
+    // 只看畫面底部最後幾行裡「完整」的狀態列（可帶模型名稱前綴，其後的快捷鍵提示行在它下面），
+    // 只回傳用量字樣本身；不輸出任意對話內容，也不輸出模型名稱。
     const bottom = stripAnsi(screen)
       .replace(/\r/g, "")
-      .trimEnd()
       .split("\n")
-      .at(-1)
-      ?.trim();
-    return bottom &&
-      /^(?:\d+h) (?:100|[0-9]{1,2})% left · weekly (?:100|[0-9]{1,2})% left$/.test(
-        bottom,
-      )
-      ? bottom
-      : undefined;
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(-4);
+    for (const line of bottom.reverse()) {
+      const match =
+        /^(?:[^·]{1,60} · )?(\d+h (?:100|[0-9]{1,2})% left · weekly (?:100|[0-9]{1,2})% left)$/.exec(
+          line,
+        );
+      if (match) return match[1];
+    }
+    return undefined;
   }
 }
 

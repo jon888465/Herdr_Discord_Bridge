@@ -23,7 +23,6 @@ test("Codex parses only the complete bottom status line and preserves wording", 
   );
   for (const text of [
     "",
-    `${status}\nother text`,
     `quoted ${status}`,
     `${status} account@example.com`,
     "5h 101% left · weekly 85% left",
@@ -37,6 +36,25 @@ test("Codex parses only the complete bottom status line and preserves wording", 
     },
   };
   assert.equal(passiveUsage(bad as unknown as string, status), undefined);
+});
+test("Codex real bottom layout: model prefix and a hint line below the usage row", () => {
+  // 2026-11-08 從真實 codex pane 讀到的底部三行。
+  const real = [
+    "› Ask Codex to do anything",
+    "",
+    "  GPT-6.1-Sol low · 5h 64% left · weekly 67% left",
+    "  ← for agents · ? for shortcuts                       ⚠ 3 warnings · f2 to view",
+  ].join("\n");
+  assert.equal(passiveUsage("codex", real), "5h 64% left · weekly 67% left");
+  // 用量行被推到太上面（超過底部 4 行）或夾在對話文字裡，不採用。
+  assert.equal(
+    passiveUsage("codex", `GPT-6.1-Sol low · ${status}\na\nb\nc\nd\n`),
+    undefined,
+  );
+  assert.equal(
+    passiveUsage("codex", `I said: GPT-6.1-Sol low · ${status} ok\n`),
+    undefined,
+  );
 });
 test("working, blocked and idle queries have only a visible-read port; failures stay per-row", async () => {
   const reads: string[] = [];

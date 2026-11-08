@@ -2,7 +2,9 @@
 
 ## ISSUE-128：缺少 Agent usage 唯讀查詢（REQ-20261106-usage-query）
 
-更新：2026-11-08。狀態：已修正、待驗收。
+更新：2026-11-08。狀態：重新開啟後再修正、待驗收（PR #172 已 merge、bridge 以 e69828f 重啟後實機查詢發現真實 codex 畫面讀不到用量，已另開 PR 修正）。
+
+**實機發現（2026-11-08，本機，bridge 載入 PR #172 後，`wk use w3` 再 `usage`）：**指令可用，profile 列、遠端機器列與跨 workspace 拒絕都符合設計；但 codex pane `w3:p3` 顯示 `unknown (no readable passive usage for this CLI)`，而它的畫面底部其實有用量。真實底部是 `  GPT-6.1-Sol low · 5h 64% left · weekly 67% left`，其下還有一行 `  ← for agents · ? for shortcuts …` 的快捷鍵提示。**根因（已確認）：**原 `parseUsage` 只看最後一個非空列，且要求整列恰為 `5h N% left · weekly N% left`，但真實畫面用量在倒數第二列且前面有模型名稱，所以真實 codex 永遠讀不到；單元測試用的是合成格式，沒有抓到。**修正：**改成在底部最後 4 個非空列找整列恰為（可帶模型名稱前綴的）用量格式的那一列，只輸出用量字樣、不輸出模型名稱，並新增真實畫面佈局的測試；原本「用量列後面還有其他文字就拒絕」的案例因真實畫面本來就有提示行而移除。測試：`npm run build` 通過、`test/usage.test.ts` 5/5 pass（2026-11-08）；重啟載入此修正後的實機查詢**尚未驗證**。
 
 症狀／預期：原本只有 quota status 的操作者觀察，無法彙整 CLI usage；應以 console `usage [pane-or-profile-id]`／Discord `/herdr usage [pane-or-profile-id]` 查詢，無資料則 unknown，不干擾 Agent。重現環境：本卡 worktree，假 Herdr／Discord 單元測試；尚未在真實 Discord／Herdr／CLI 驗證。
 
