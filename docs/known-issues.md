@@ -1,5 +1,19 @@
 # Known Issues
 
+## ISSUE-127：卡片缺少角色與實際 Agent 的對應（REQ-20261108-role-agents）
+
+更新日期：2026-11-08。狀態：已修正、待驗收。**尚未在 live bridge／Discord／Herdr／CLI 實機驗證；舊卡與舊事件不補寫角色。**
+
+症狀／預期：原本 `assigned` 只含 Lead 種類，review／fix 事件不含執行者，Team assignment 的 Worker 身分只在 task journal；卡片應能查到每次角色由誰擔任。重現環境：本機 worktree、假 Herdr／Git port，無真實服務。已確認根因：原事件契約與 card show 沒有角色事件或投影，啟動流程沒有接到卡片帳本。
+
+修正範圍：新增固定模板 `role_assigned`，保存 role、CLI 種類、machine、已知 model／profile id、task id 或 review／fix 輪次。CLI 種類經 `agentDisplayName` 共用 `identifyCli`，再用既有 AGENT 格式驗證；Team 使用 Lead 原 assignment id，記錄 acquire 後的實際 Worker，profile 僅取設定中的 id／model。Lead 啟動與 card assign 接線共用穩定 id，避免先後寫入重複；reviewer／fixer 在 Agent 成功啟動後、等待與派工前記錄（包含之後 inconclusive／失敗的輪次）。只投影允許的身分欄位，不保存 session、prompt、輸出、描述或 credentials。
+
+冪等／失敗：id 是 task id、role、round 與執行者（agent、machine、profile id、model）的 SHA-256 截取值，同一個執行者在同卡片同作用域重送／重啟只留第一筆；同 review／fix 輪換另一個執行者重試會另記一筆（原本只以角色與輪次去重，換 agent 的新事件會被丟掉，卡片仍顯示第一次失敗的執行者——bridge 獨立 review 第 2 輪 F1，已修正）。Team 的 assignment id 與 Lead 的 `lead` 同形時，原本兩者事件 id 完全相同、Worker 身分被去重掉（同輪 F2）；現在這類 assignment 的角色名加 `assignment-` 前綴。兩項都先寫會失敗的測試（card-events、team-orchestration 各新增）再修。第 3 輪的 F3（事件 id 缺 model 與啟動次數識別）：model 已納入 id（換 model 另記一筆，先寫紅燈測試）；**已知限制（刻意不做）**：同一個 agent／machine／profile／model 在同一輪重新啟動（新 session）仍被視為同一筆——卡片上顯示的角色、agent、machine、profile、model 完全相同，另記一筆只會重複，不增加資訊；若日後需要區分每次啟動，要另外持久化啟動識別（pane／terminal id），不在本卡範圍。第 4 輪的 F4（`src/main.ts` 的 profile Worker 以設定的 model 覆蓋 `acquired.agent.model`）：**不改程式，已記為限制**——Herdr 的 `AgentRecord` 型別沒有 `model` 欄位，bridge 拿不到 Worker 實際使用的模型，能記的只有 profile 設定、啟動時帶入的 model；因此角色紀錄的 model 是「profile 設定值」，不是即時驗證過的實際模型，新啟動的 Worker 若在啟動後被手動切換模型，紀錄不會跟著變。沒有 profile 的 Worker（直接指定 pane）不記 model。finding 以 `dismissed` 處理並附此理由。**第 5 輪 F5 指出更精確的一點並已修正：**重用或綁定（`AgentPool.bind`）的既有 session，bridge 沒有帶 model 啟動、也沒確認過，卻把 profile 的 model 記成事實；現在只有 `acquire` 回傳 `continuity: new-session`（bridge 用該 profile 啟動新 session，啟動時帶了 model）才採用設定的 model，`same-session`／`unknown` 一律省略；Agent 自己回報的 model 永遠優先。接線抽成 `withProfileIdentity`（`src/card-events.ts`）並有單元測試（先紅後綠）。沿用 CardStore 的旁檔輪替與去重。role ≤64、agent／profile 沿用 AGENT ≤40、model 為單行識別碼 ≤80、整筆仍 ≤300 字，不合法或超限拒絕。寫入拋錯或回傳拒絕只印固定 console error，不改流程結果、不放入通知。`card show` 從完整 readLog 按時間排序，在同一行顯示角色與種類及已知 model；舊卡顯示「沒有角色紀錄」，不從舊 assigned 事件推測角色。
+
+測試（2026-11-08）：先紅後綠；事件／show 新測試先失敗，review／fix 回呼測試先失敗。初始 `npm run build` 因缺少 tsc 失敗，`npm ci --ignore-scripts` 後解除。開發中另修正新增假 port 的 session kind（需 `id`，不是 `session_id`），未放寬產品身分守門。相關五個檔案測試 198/198 pass；**接手後完整檢查（2026-11-08，我接手 Worker 輸出、rebase 到 main `8ac0eb7` 後，在卡片 worktree）：**`npm run build` 通過，完整測試 1510 項、1509 pass、0 fail、1 skipped（原 Worker 因 codex 沙箱與逾時未能跑完整套件）；修正 bridge 獨立 review 第 2 輪的兩個 medium（F1、F2，見冪等／失敗段）後再跑一次：build、lint 通過，完整測試 1512 項、1511 pass、0 fail、1 skipped；F5 修正後再跑一次：1513 項、1512 pass、0 fail、1 skipped。接手時 issue 編號由 Worker 寫的 ISSUE-125 改為 ISSUE-127（main 上 125／126 已被佔用），其餘檔案的引用同步。
+
+未驗證／下一步：原始碼已接線；執行中的 bridge 未部署、未重啟。Lead 應在部署後以新卡驗收 Lead、profile Worker、多輪 review／fix、card show 與重啟去重；舊卡不回填、舊訊息不補送。可選的 card pr／card attach-pr PR 內文角色摘要本輪未加入，PR 內文保持現行行為。權限、review、CI、merge gate、ISSUE-120 通知、config.json、policy.yml 均未變更。接手前 Worker 未 commit、push、merge；PR 與 review 的狀態以卡片流程紀錄為準。
+
 ## ISSUE-126：bridge 重啟後進行中的 Discord 串流被靜默丟掉，最後回覆沒有送到 Discord（REQ-20261108-discord-reply-lost）
 
 2026-11-08。狀態：待調查（根因只是假設，尚未修正）。
@@ -3810,7 +3824,7 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 ## ISSUE-113：agy 在新的 worktree 資料夾會停在「信任資料夾」提示，profile 啟動不就緒，錯誤訊息沒指出要去哪個 pane 處理
 
-更新日期：2026-11-08。狀態：已修正、待驗收（選項 (b)，使用者 2026-11-07 明確決定的預先授權）；**尚未實機驗證**；先前：待決定（已知限制，靠使用者手動確認）。
+更新日期：2026-11-08。狀態：已修正、待驗收（選項 (b)，使用者 2026-11-07 明確決定的預先授權）；**2026-11-08 已做一次實機驗證（見下方「實機驗證」），仍待使用者驗收**；先前：待決定（已知限制，靠使用者手動確認）。
 
 使用者可見症狀：agy 驗證卡 `REQ-20261106-agy-verify` 第一次執行時，Lead 的計畫正確（`implement` 給 `profile:agy`），但 agy pane `w3X:p2` 停在 Antigravity CLI 的選單 `Do you trust the contents of this project? > Yes, I trust this folder / No, exit`。bridge 的 `waitUntilReady` 等約 30 秒後回報 `started Agent does not match requested profile/workspace or is not ready`（09:44:19Z），implement 失敗，review、verify 因依賴它也失敗，task 在 09:44:31Z 失敗。訊息沒有提到是信任提示，也沒有指出是哪個 pane。
 
@@ -3830,7 +3844,9 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 **獨立 review 的修正（2026-11-08，2 輪；bridge 的 `card review` 因作者 pane 已不在無法執行，改由手動開的 codex 做唯讀 review，含它的兩個子 reviewer）：**已登記的路徑若是 symlink（即使目標也在根目錄底下）會信任到不是 bridge 建立的目錄，現在路徑本身必須是正規路徑；symlink 檢查原本只做一次，設定檔在重試期間被換成 symlink（含指向自己）會被 `rename` 蓋成一般檔案，現在每次重試與 `rename` 前都檢查；核對與 `rename` 之間無法與 agy 互斥，**並行寫入造成的遺失更新無法完全消除**——每次修改前先把驗證過的原內容備份到 state 目錄 `agy-settings-backups/`（權限 600、只留 5 份，備份在最後核對之前完成，核對後立刻 `rename`）供使用者還原；cleanup 當下設定檔壞掉會殘留信任且沒有重試入口，bridge 啟動時 `sweep()` 對「所有權還在、worktree 已不存在」的項目重試移除。每項都先確認測試紅燈再修。
 
-**未驗證：**①**agy 啟動時是否重新讀取 `settings.json`（最大未知數；若否，預先加入無效）**，要以 agy 當 Worker 的測試卡實測；②遠端 agy（`agy-pod`）不在範圍；③agy 的其他 profile（pi、opencode）有沒有類似提示；agy 是否有設定可改成信任子資料夾。
+**實機驗證（2026-11-08，本機 macOS，Antigravity CLI，bridge 載入 main `2351f06`（PR #163）後；測試卡 `REQ-20261108-agy-trust-live-test`，task `task-9f4d9bd3-b42d-4e44-ab3e-106f068f144a`，PR #164）：**bridge 在 08:08:26Z 把卡片 worktree 寫進 `~/.gemini/antigravity-cli/settings.json` 的 `trustedWorkspaces`（寫入前先備份真實設定檔，與備份只差這一行），之後 agy Worker（pane `w4W:p2`）**沒有跳出信任提示**、直接收下 prompt，並只在 `docs/known-issues.md` 加了要求的那一行（PR #164 為 +1／-0）；08:11:39Z `card cleanup` 後信任項目被移除，`settings.json` 與備份**逐位元組相同**，所有權檔 `agy-worktree-trust.json` 為空，卡片事件有 `agy_worktree_trust` added 與 removed。因此未驗證項目①的答案：**agy 會在啟動時讀取 `settings.json`，預先授權有效**（一次實測，agy 每次啟動是否都重讀仍只是這一次的觀察）。**同一次測試的其他觀察：**(a) autopick 在 review 步驟停下（`loop_stopped`，狀態 `failed`），原因是測試卡沒有 `## 驗收條件` 條列、`card review` 無法逐條對照——是卡片寫法問題，不是信任機制問題；PR #164 因此沒有經過 bridge review，也沒有被合併；(b) agy pane 同時顯示警告「Sign-in update needed：登入缺少新要求的權限，部分請求可能失敗，請 `/logout` 重新登入」，本次任務沒受影響，**原因與影響未調查**，若之後 agy 請求失敗要先看這個。仍未驗證：遠端 agy、並行寫入的遺失更新（已知限制）、使用者驗收。
+
+**未驗證：**①~~agy 啟動時是否重新讀取 `settings.json`~~（2026-11-08 已實測，見上）；②遠端 agy（`agy-pod`）不在範圍；③agy 的其他 profile（pi、opencode）有沒有類似提示；agy 是否有設定可改成信任子資料夾。
 
 ## ISSUE-114：新增 `agent start <machine:agent:model:level>`，臨時指定機器、Agent、model 與推理強度（level）
 

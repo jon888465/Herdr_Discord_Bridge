@@ -1,3 +1,8 @@
+import {
+  roleIdentity,
+  recordRoleSafely,
+  type RoleIdentity,
+} from "./card-events.js";
 // 一次 review 的完整流程（追蹤清單 F5 階段 3c-2，使用者 2026-11-04 決定）：組提示 → 開新 pane → 啟動 Agent →
 // 送出並讀回覆 → 解析 → 工作樹指紋檢查 → **一定**關閉這個 pane。所有外部動作（Herdr、Agent、git）都由呼叫端注入，
 // 這一層只管順序與失敗時的處理；**不寫卡片、不讀 GitHub**，結果回傳給呼叫者（3d 的 `card review` 負責寫入）。
@@ -34,6 +39,7 @@ import {
 import type { AgentRecord } from "./types.js";
 
 export interface ReviewFlowDeps {
+  onRoleAssigned?: (identity: RoleIdentity) => void;
   /** pane.layout／split／get／close 與 Agent 清單。 */
   panePort: AgentStartPort;
   startAgent(input: {
@@ -265,6 +271,11 @@ async function reviewInPane(
   } catch (error) {
     return { kind: "failed", error: message(error) };
   }
+  recordRoleSafely(() =>
+    deps.onRoleAssigned?.(
+      roleIdentity("reviewer", agent, { round: input.round }),
+    ),
+  );
   const ready = await waitUntilReady(deps, run.pane, agent);
   if (ready.updateSkip) run.skipped.value = ready.updateSkip;
   if (!ready.ok)

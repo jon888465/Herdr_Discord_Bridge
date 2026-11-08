@@ -1,4 +1,9 @@
 import {
+  roleIdentity,
+  recordRoleSafely,
+  type RoleIdentity,
+} from "./card-events.js";
+import {
   codingPlanningAddendum,
   codingSynthesisAddendum,
   codingWorkerAddendum,
@@ -10,6 +15,16 @@ import {
 import { stripAnsi } from "./format.js";
 import { runTeamTurn } from "./team-turn.js";
 import type { AgentRecord, ReadSource } from "./types.js";
+
+/**
+ * Lead 的角色固定叫 `lead`；Lead 計畫的 assignment id 也可以是 `lead`，兩者的角色事件 id 會相同而被去重。
+ * 與 `lead`（及已加過前綴的同形字串）同形的 assignment id 加上 `assignment-` 前綴，對應是一對一的。
+ */
+export function workerRole(assignmentId: string): string {
+  return /^(?:assignment-)*lead$/i.test(assignmentId)
+    ? `assignment-${assignmentId}`
+    : assignmentId;
+}
 
 export type AssignmentState =
   | "pending"
@@ -99,6 +114,7 @@ export type OrchestrationEvent = {
 };
 
 export interface TeamTaskInput {
+  onRoleAssigned?: (identity: RoleIdentity) => void;
   origin?: { guildId: string; channelId: string; threadId?: string };
   taskId: string;
   signal?: AbortSignal;
@@ -266,6 +282,11 @@ export async function runTeamTask(
         `Lead is ${input.lead.agent_status}; it cannot plan this task`,
       );
 
+    recordRoleSafely(() =>
+      input.onRoleAssigned?.(
+        roleIdentity("lead", input.lead, { taskId: input.taskId }),
+      ),
+    );
     const allAssignments: AssignmentPlan["assignments"] = [];
     let gate: { reasons: string[]; fingerprint: string } | undefined;
     const considerGate = () => {
@@ -602,6 +623,13 @@ async function runAssignment(
     });
     if (!["idle", "done"].includes(worker.agent_status))
       throw new Error(`Worker is ${worker.agent_status}`);
+    recordRoleSafely(() =>
+      input.onRoleAssigned?.(
+        roleIdentity(workerRole(assignment.id), worker, {
+          taskId: input.taskId,
+        }),
+      ),
+    );
     input.codingHooks?.onAssignmentStart(assignment, worker);
     startedAt = Date.now();
     inTurn = true;

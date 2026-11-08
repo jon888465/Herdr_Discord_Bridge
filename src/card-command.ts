@@ -1,3 +1,9 @@
+import {
+  roleSummary,
+  roleEvent,
+  recordRoleSafely,
+  type RoleIdentity,
+} from "./card-events.js";
 // `card` 指令（ADR-0002 階段 2）：list、show、import、assign。Discord 與本機 console 共用
 // handleCommand 的同一個入口；授權沿用既有的 allowedUserIds（在 handleCommand 之前已檢查）。
 // 只有 assign 會啟動 Team 任務，且只接受 ready 的卡片。
@@ -61,8 +67,16 @@ export interface CardCommandDeps {
   /** 以卡片產生的 prompt 啟動 Team 任務；失敗要丟出錯誤（此時卡片不會被改動）。 */
   startTask: (
     prompt: string,
-    options: { coding: boolean },
-  ) => Promise<{ taskId: string; lead: { agent: string; machine: string } }>;
+    options: { coding: boolean; cardId?: string },
+  ) => Promise<{
+    taskId: string;
+    lead: {
+      agent: string;
+      machine: string;
+      model?: string;
+      profileId?: string;
+    };
+  }>;
   /** 哪個任務由哪張卡指派的索引；卡片被刪除後靠它辨認進行中的任務（階段 2c）。 */
   assignments: {
     record(
@@ -75,7 +89,12 @@ export interface CardCommandDeps {
   taskInfo: (taskId: string) =>
     | {
         originalPrompt: string;
-        lead: { agent: string; machine: string };
+        lead: {
+          agent: string;
+          machine: string;
+          model?: string;
+          profileId?: string;
+        };
         state: string;
       }
     | undefined;
@@ -85,7 +104,11 @@ export interface CardCommandDeps {
    */
   reviewPullRequest: (
     card: Card,
-    options: { agent?: string; round: number },
+    options: {
+      agent?: string;
+      round: number;
+      onRoleAssigned?: (identity: RoleIdentity) => void;
+    },
   ) => Promise<ReviewRun>;
   /**
    * `card fix`（F5 的 loop 手動版）：把 open 的 findings 交給新開 pane 的新作者修一圈（開新 pane、啟動 Agent、
@@ -93,7 +116,12 @@ export interface CardCommandDeps {
    */
   fixCard: (
     card: Card,
-    options: { agent?: string; round: number; findings: OpenFinding[] },
+    options: {
+      agent?: string;
+      round: number;
+      findings: OpenFinding[];
+      onRoleAssigned?: (identity: RoleIdentity) => void;
+    },
   ) => Promise<FixFlowResult>;
   /**
    * `card merge`（L2，G7）：合併卡片開著的 PR。前提全部成立才會合併（政策 L2、review pass 且 head 一致、CI 全綠、
@@ -305,8 +333,12 @@ function showCard(args: string[], deps: CardCommandDeps): string {
       lines.push(`…還有 ${counts.open - findings.open.length} 筆 open，完整內容請開卡片檔`);
   }
 
-  lines.push("", `── 最近紀錄（最多 ${RECENT_LOG} 筆）──`);
   const log = store.readLog(id);
+  lines.push(
+    "",
+    `角色紀錄：${log.ok ? roleSummary(log.entries) : "沒有角色紀錄"}`,
+  );
+  lines.push("", `── 最近紀錄（最多 ${RECENT_LOG} 筆）──`);
   if (!log.ok) lines.push(`（紀錄讀取失敗：${log.error}）`);
   else if (log.entries.length === 0) lines.push("（尚無紀錄）");
   else
@@ -426,7 +458,7 @@ async function assignCard(
 
     let task: Awaited<ReturnType<CardCommandDeps["startTask"]>>;
     try {
-      task = await deps.startTask(built.prompt, { coding });
+      task = await deps.startTask(built.prompt, { coding, cardId: id });
     } catch (error) {
       if (!prepared) throw error;
       throw new Error(
@@ -434,6 +466,15 @@ async function assignCard(
       );
     }
     const assignedAt = deps.now();
+    recordRoleSafely(() =>
+      store.recordEvent(
+        id,
+        roleEvent(
+          { role: "lead", ...task.lead, taskId: task.taskId },
+          assignedAt,
+        ),
+      ),
+    );
 
     // 任務已經啟動：之後的卡片更新失敗只警告，不丟錯誤，否則使用者會以為沒指派而重複指派。
     const today = deps.now().slice(0, 10);
@@ -767,6 +808,10 @@ async function reviewStep(
     const run = await deps.reviewPullRequest(read.card, {
       ...(agent !== undefined ? { agent } : {}),
       round,
+      onRoleAssigned: (identity) =>
+        recordRoleSafely(() =>
+          store.recordEvent(id, roleEvent(identity, deps.now())),
+        ),
     });
     if (!run.result.ok)
       throw new Error(
@@ -888,6 +933,10 @@ async function fixStep(
     const result = await deps.fixCard(read.card, {
       ...(agent !== undefined ? { agent } : {}),
       round: check.reviewRound,
+      onRoleAssigned: (identity) =>
+        recordRoleSafely(() =>
+          store.recordEvent(id, roleEvent(identity, deps.now())),
+        ),
       findings: check.findings,
     });
     if (!result.ok)
