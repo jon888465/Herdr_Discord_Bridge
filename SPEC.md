@@ -745,6 +745,6 @@ Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*
 
 卡片帳本新增 `role_assigned` 固定模板事件：role、AGENT 格式的 CLI 種類、machine（local 或已選定機器 id）、已知 model／profile id，並含 task id 或 review／fix round。種類沿用 cli-adapter 的 identifyCli（經 agentDisplayName），不猜未知 model／profile。Lead 在 task 啟動記錄；Team 每個 assignment 在 acquire 實際 Worker 後、派工前記錄，role 使用 Lead 的 assignment id，不固定角色清單；card review／fix 在 Agent 成功啟動後記 reviewer／fixer 每輪身分（之後失敗仍保留）。不存任何 session 內容、prompt、輸出、卡片描述或 credentials。
 
-事件 id 由 task id、role、round 決定並 hash，沿用 CardStore 跨旁檔的 event id 去重；同卡同輪重送只保留第一筆，重試不覆蓋。無 agent 欄位的舊事件照常解析，不補寫舊卡。role 為英數與 `_ . -`、≤64，agent／profile 沿用 AGENT ≤40；model 為英數起頭及 `_ . / : + -`、≤80。其他欄位沿用原驗證，單筆 ≤300 字；不合法／超限拒絕，寫入失敗只印固定 console error，不能影響 autopick、loop、review、fix、merge 或其通知結果。
+事件 id 由 task id、role、round 與執行者（agent、machine、profile id）決定並 hash，沿用 CardStore 跨旁檔的 event id 去重；同一個執行者在同卡同作用域重送／重啟只保留第一筆，同一輪換另一個執行者重試則是新的事實、另記一筆（`card show` 依時間列出）。Team 的 assignment id 若與 Lead 的角色 `lead` 同形（含已加前綴的 `assignment-lead` 等），角色名加上 `assignment-` 前綴，與 Lead 分開記錄。無 agent 欄位的舊事件照常解析，不補寫舊卡。role 為英數與 `_ . -`、≤64，agent／profile 沿用 AGENT ≤40；model 為英數起頭及 `_ . / : + -`、≤80。其他欄位沿用原驗證，單筆 ≤300 字；不合法／超限拒絕，寫入失敗只印固定 console error，不能影響 autopick、loop、review、fix、merge 或其通知結果。
 
 `card show <id>` 從完整帳本（含輪替旁檔）按時間排序，單行 `角色紀錄：Lead：claude · impl：codex（gpt-6.1-sol）· reviewer（第 2 輪）：agy`；重複角色不合併，無紀錄顯示「沒有角色紀錄」。本輪不增加 PR 內文角色摘要，不把角色放進 ISSUE-120 通知，不改任何權限、review、CI 或 merge gate。原始碼／假 port 測試完成，live bridge 尚未部署及實機驗證。

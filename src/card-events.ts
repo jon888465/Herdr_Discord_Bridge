@@ -152,7 +152,7 @@ export function roleIdentity(
   };
 }
 
-/** Stable across replay/restart. The assignment id is the role for Team work. */
+/** Stable across replay/restart of the same actor. The assignment id is the role for Team work. */
 export function roleEvent(identity: RoleIdentity, time: string): CardEvent {
   const eventId =
     "role-" +
@@ -162,6 +162,10 @@ export function roleEvent(identity: RoleIdentity, time: string): CardEvent {
           identity.taskId ?? null,
           identity.role,
           identity.round ?? null,
+          // 同一輪換另一個執行者是新的事實；同一個執行者重送／重啟才去重。
+          identity.agent,
+          identity.machine,
+          identity.profileId ?? null,
         ]),
       )
       .digest("hex")

@@ -16,6 +16,16 @@ import { stripAnsi } from "./format.js";
 import { runTeamTurn } from "./team-turn.js";
 import type { AgentRecord, ReadSource } from "./types.js";
 
+/**
+ * Lead 的角色固定叫 `lead`；Lead 計畫的 assignment id 也可以是 `lead`，兩者的角色事件 id 會相同而被去重。
+ * 與 `lead`（及已加過前綴的同形字串）同形的 assignment id 加上 `assignment-` 前綴，對應是一對一的。
+ */
+export function workerRole(assignmentId: string): string {
+  return /^(?:assignment-)*lead$/i.test(assignmentId)
+    ? `assignment-${assignmentId}`
+    : assignmentId;
+}
+
 export type AssignmentState =
   | "pending"
   | "assigned"
@@ -615,7 +625,9 @@ async function runAssignment(
       throw new Error(`Worker is ${worker.agent_status}`);
     recordRoleSafely(() =>
       input.onRoleAssigned?.(
-        roleIdentity(assignment.id, worker, { taskId: input.taskId }),
+        roleIdentity(workerRole(assignment.id), worker, {
+          taskId: input.taskId,
+        }),
       ),
     );
     input.codingHooks?.onAssignmentStart(assignment, worker);

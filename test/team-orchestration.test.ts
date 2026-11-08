@@ -4,6 +4,7 @@ import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentRecord } from "../src/types.js";
+import { roleEvent } from "../src/card-events.js";
 import {
   runTeamTask,
   parseAssignmentPlan,
@@ -1181,4 +1182,57 @@ test("Team roles use arbitrary Lead assignment ids and acquired Worker identity"
       taskId: "role-task",
     },
   ]);
+});
+
+test("a Worker assignment named lead is recorded under a role that cannot collide with the Lead", async () => {
+  const prompts: Array<[string, string]> = [];
+  const roles: Array<{ role: string }> = [];
+  const port: OrchestrationPort = {
+    async promptAgent(target, prompt) {
+      prompts.push([target, prompt]);
+    },
+    async waitAgent(target) {
+      return target === lead.pane_id ? lead : workerA;
+    },
+    async readAgent(target) {
+      const prompt = latestPrompt(prompts, target);
+      if (!prompt) return "history";
+      const body =
+        target !== lead.pane_id
+          ? "done"
+          : prompts.filter(([pane]) => pane === lead.pane_id).length === 1
+            ? JSON.stringify({
+                assignments: [
+                  {
+                    id: "lead",
+                    workerPaneId: workerA.pane_id,
+                    instruction: "Check",
+                  },
+                ],
+              })
+            : "complete";
+      return framed(prompt, body);
+    },
+  };
+  const result = await runTeamTask(
+    Object.assign(
+      {
+        taskId: "role-task",
+        prompt: "work",
+        lead,
+        workers: [workerA],
+        acquireWorker: async () => ({ agent: workerA, continuity: "unknown" }),
+      },
+      { onRoleAssigned: (role: { role: string }) => roles.push(role) },
+    ),
+    port,
+    () => undefined,
+  );
+  assert.equal(result.state, "completed", JSON.stringify(result.reports));
+  assert.equal(roles[0]!.role, "lead");
+  assert.equal(roles[1]!.role, "assignment-lead");
+  assert.notEqual(
+    roleEvent(roles[0] as never, "2026-11-08T00:00:00Z").eventId,
+    roleEvent(roles[1] as never, "2026-11-08T00:00:00Z").eventId,
+  );
 });

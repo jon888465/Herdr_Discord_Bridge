@@ -485,3 +485,28 @@ test("role write failures log only a fixed console error and never propagate", (
     ["Role ledger write rejected"],
   ]);
 });
+
+test("a different agent in the same review round is a new role event; the same agent replayed is not", () => {
+  const identity = {
+    role: "reviewer",
+    agent: "codex",
+    machine: "local",
+    round: 1,
+  };
+  assert.equal(
+    roleEvent(identity, base.time).eventId,
+    roleEvent(identity, "2026-11-08T00:00:00Z").eventId,
+  );
+  assert.notEqual(
+    roleEvent(identity, base.time).eventId,
+    roleEvent({ ...identity, agent: "claude" }, base.time).eventId,
+  );
+  assert.notEqual(
+    roleEvent(identity, base.time).eventId,
+    roleEvent({ ...identity, machine: "remote-1" }, base.time).eventId,
+  );
+  assert.notEqual(
+    roleEvent(identity, base.time).eventId,
+    roleEvent({ ...identity, profileId: "reviewer" }, base.time).eventId,
+  );
+});
