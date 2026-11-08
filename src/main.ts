@@ -2,6 +2,7 @@ import {
   roleIdentity,
   roleEvent,
   recordRoleSafely,
+  withProfileIdentity,
   type RoleIdentity,
 } from "./card-events.js";
 import { createCardNotifier } from "./card-notify.js";
@@ -1917,15 +1918,11 @@ async function startTeamTask(
           ? runtime.pool?.profiles.find((p) => p.id === target.pane_id.slice(8))
           : undefined;
         return {
-          agent: {
-            ...acquired.agent,
-            ...(profile
-              ? {
-                  profileId: profile.id,
-                  ...(profile.model ? { model: profile.model } : {}),
-                }
-              : {}),
-          },
+          agent: withProfileIdentity(
+            acquired.agent,
+            profile,
+            acquired.continuity,
+          ),
           continuity: acquired.continuity,
         };
       },

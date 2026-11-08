@@ -4,6 +4,7 @@ import {
   buildLogEntry,
   roleEvent,
   recordRoleSafely,
+  withProfileIdentity,
   OMITTED_TEXT,
   type CardEvent,
 } from "../src/card-events.js";
@@ -518,4 +519,39 @@ test("a different agent in the same review round is a new role event; the same a
     roleEvent({ ...identity, model: "gpt-6.1-sol" }, "2026-11-08T00:00:00Z")
       .eventId,
   );
+});
+
+test("a profile model is recorded only when the bridge launched the session with it", () => {
+  const agent = { pane_id: "w1:p2", agent: "codex" } as never;
+  const profile = { id: "helper", model: "gpt-6.1-sol" };
+  assert.equal(
+    (withProfileIdentity(agent, profile, "new-session") as { model?: string })
+      .model,
+    "gpt-6.1-sol",
+  );
+  for (const continuity of ["same-session", "unknown"])
+    assert.equal(
+      "model" in withProfileIdentity(agent, profile, continuity),
+      false,
+      continuity,
+    );
+  // a model the agent really reported is never overwritten by configuration
+  const reported = { ...(agent as object), model: "actual" } as never;
+  assert.equal(
+    (withProfileIdentity(reported, profile, "new-session") as { model?: string })
+      .model,
+    "actual",
+  );
+  assert.equal(
+    (withProfileIdentity(reported, profile, "same-session") as { model?: string })
+      .model,
+    "actual",
+  );
+  assert.equal(
+    (withProfileIdentity(agent, profile, "new-session") as { profileId?: string })
+      .profileId,
+    "helper",
+  );
+  // no profile (a directly named pane): unchanged
+  assert.deepEqual(withProfileIdentity(agent, undefined, "unknown"), agent);
 });

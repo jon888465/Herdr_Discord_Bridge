@@ -152,6 +152,26 @@ export function roleIdentity(
   };
 }
 
+/**
+ * profile Worker 的身分：profile id 一律記；model 只在 bridge 用這個 profile 啟動新 session
+ * （continuity 為 `new-session`，啟動時帶了 profile 的 model）時才採用設定值。
+ * 重用或綁定的既有 session 沒有啟動或確認 model 的證據，所以不記；Agent 自己回報的 model 永遠優先。
+ */
+export function withProfileIdentity(
+  agent: AgentRecord,
+  profile: { id: string; model?: string } | undefined,
+  continuity: string,
+): AgentRecord {
+  if (!profile) return agent;
+  return {
+    ...agent,
+    profileId: profile.id,
+    ...(!agent.model && profile.model && continuity === "new-session"
+      ? { model: profile.model }
+      : {}),
+  };
+}
+
 /** Stable across replay/restart of the same actor. The assignment id is the role for Team work. */
 export function roleEvent(identity: RoleIdentity, time: string): CardEvent {
   const eventId =
