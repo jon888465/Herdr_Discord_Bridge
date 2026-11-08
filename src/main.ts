@@ -2972,6 +2972,7 @@ async function dispatchPrompt(
       prompt,
       baselineOutput,
       startedAt: Date.now(),
+      sessionKey: agentSessionKey(agent),
     });
     void streamAgent(
       agent,
@@ -3288,6 +3289,12 @@ export async function relayApprovalFollowup(
   return false;
 }
 
+function agentSessionKey(agent: AgentRecord): string | undefined {
+  const s = agent.agent_session as
+    { kind?: string; value?: string } | undefined;
+  return s ? `${s.kind ?? ""}:${s.value ?? ""}` : undefined;
+}
+
 export const STREAM_RESUME_FETCH_ATTEMPTS = 3;
 export const STREAM_RESUME_RETRY_MS = 2000;
 
@@ -3340,6 +3347,12 @@ export async function relayRecoveredStreams(runtime: Runtime): Promise<void> {
       )
         continue;
       if (streamOwnershipLost(runtime, record)) continue;
+      if (agentSessionKey(agent) !== record.sessionKey) {
+        console.warn(
+          `Stream not recovered terminal=${record.terminalId} pane=${record.paneId}: agent session changed`,
+        );
+        continue;
+      }
       const session = agent.agent_session as
         { kind?: string; value?: string } | undefined;
       const event = session

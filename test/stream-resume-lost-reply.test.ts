@@ -476,3 +476,40 @@ test("f3: exactly 24-hour-old records expire with terminal, pane and reason logg
   f.store.add({ ...record, startedAt: Date.now() - 86400000 + 1 });
   assert.equal(f.store.list().length, 1);
 });
+
+test("f1: a session switched in the same pane never recovers into the old thread", async (t) => {
+  const f = fixture(t, "switched");
+  const a = f.agent as Record<string, unknown>;
+  a.agent_session = { kind: "id", value: "old-session" };
+  f.store.add({
+    terminalId: "switched",
+    paneId: "switched",
+    channelId: "original-thread",
+    progressMessageId: "progress",
+    prompt: "q",
+    baselineOutput: "",
+    startedAt: Date.now() - 10,
+    sessionKey: "id:old-session",
+  });
+  await resumeStreams(f.typed, async () => {});
+  a.agent_session = { kind: "id", value: "new-session" };
+  hookEvents.record({
+    event: "Stop",
+    sessionId: "new-session",
+    paneId: "switched",
+    message: "other session answer",
+  });
+  await relayRecoveredStreams(f.typed);
+  assert.deepEqual(f.sent, []);
+  assert.ok(f.logs.some((l) => /agent session changed/.test(l)));
+  a.agent_session = { kind: "id", value: "old-session" };
+  hookEvents.record({
+    event: "Stop",
+    sessionId: "old-session",
+    paneId: "switched",
+    message: "original answer",
+  });
+  await relayRecoveredStreams(f.typed);
+  assert.equal(f.sent.length, 1);
+  assert.match(f.sent[0]!, /original answer/);
+});

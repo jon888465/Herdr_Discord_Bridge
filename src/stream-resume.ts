@@ -16,6 +16,8 @@ export interface ActiveStreamRecord {
   prompt: string;
   baselineOutput: string;
   startedAt: number;
+  /** 原回合的 agent session（`kind:value`）；沒有 session 時省略。補送時用來確認仍是同一個回合。 */
+  sessionKey?: string;
   recovery?: "pending" | "claimed";
 }
 
