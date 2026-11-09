@@ -1,6 +1,7 @@
 // 把 worktree 清理的結果記到卡片（`card cleanup` 與 PR merge 後的自動清理共用）：
 // 流程紀錄 `cleanup_done`／`cleanup_pending`，以及 `## 異動專案` 的 `worktree 狀態`。
 
+import { AUTOPICK_LEADS, autopickLeadLabel } from "./policy.js";
 import type { CardStore } from "./card-store.js";
 import type { CleanupResult } from "./card-worktree-flow.js";
 
@@ -79,11 +80,7 @@ export async function closeAutopickLead(
     const workspaceId = card.autopick_workspace_id;
     const label = card.autopick_workspace_label;
     if (!workspaceId || !label) return;
-    if (
-      !["claude", "codex"].some(
-        (kind) => label === `autopick-${kind}-${id}`.slice(0, 60),
-      )
-    ) {
+    if (!AUTOPICK_LEADS.some((kind) => label === autopickLeadLabel(kind, id))) {
       log(`autopick Lead cleanup ${id}: invalid recorded label`);
       return;
     }

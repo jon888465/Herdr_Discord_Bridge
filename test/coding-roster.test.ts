@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   assertCodingRoster,
   autoEnableCodingProfiles,
+  leadGateFor,
 } from "../src/coding-roster.js";
 
 test("a coding task with no Worker is refused up front, naming the reason and the way out", () => {
@@ -142,6 +143,35 @@ test("the no-Worker error says agy is opt-in via capabilities and pi is unverifi
       /agy/.test(error.message) &&
       /implementation/.test(error.message) &&
       /review/.test(error.message) &&
-      /pi/.test(error.message),
+      /pi/.test(error.message) &&
+      /已有程式支援/.test(error.message) &&
+      /實機驗收尚未完成/.test(error.message) &&
+      !/第 2、3 部分尚未完成/.test(error.message),
+  );
+});
+
+// autopick Lead 的開放條件（REQ-20261109-codex-lead-agy，使用者選項 2）：agy、pi 要有宣告 implementation 的 profile。
+test("claude and codex Leads need no declaration; agy and pi need a profile of the same kind with the implementation capability", () => {
+  const gate = leadGateFor([
+    { kind: "agy", capabilities: ["analysis"] },
+    { kind: "pi", capabilities: ["implementation"] },
+    { kind: "codex" },
+  ]);
+  assert.equal(gate("claude"), undefined);
+  assert.equal(gate("codex"), undefined);
+  assert.equal(gate("pi"), undefined);
+  assert.match(gate("agy") ?? "", /agy.*implementation/);
+  assert.match(leadGateFor([])("pi") ?? "", /pi.*implementation/);
+});
+
+test("a profile of another kind, or only review, does not open agy", () => {
+  assert.match(
+    leadGateFor([{ kind: "pi", capabilities: ["implementation"] }])("agy") ??
+      "",
+    /agy/,
+  );
+  assert.match(
+    leadGateFor([{ kind: "agy", capabilities: ["review"] }])("agy") ?? "",
+    /agy/,
   );
 });

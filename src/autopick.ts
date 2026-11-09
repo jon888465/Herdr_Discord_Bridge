@@ -38,6 +38,7 @@ export function pickNext(
   policy: Policy,
   cards: Card[],
   skip: ReadonlySet<string> = new Set(),
+  leadGate?: LeadGate,
 ): AutopickJob | undefined {
   const ordered = [...cards]
     .filter((card) => card.status === "ready" && !skip.has(card.id))
@@ -49,9 +50,31 @@ export function pickNext(
   for (const card of ordered)
     for (const project of declaredProjects(card)) {
       const enabled = autopickFor(policy, project);
-      if (enabled) return { card, project, ...enabled };
+      if (enabled && leadGate?.(enabled.lead) === undefined)
+        return { card, project, ...enabled };
     }
   return undefined;
+}
+
+/** Lead 種類的開放條件：沒達到回傳原因，通過回傳 undefined（見 `leadGateFor`）。 */
+export type LeadGate = (kind: string) => string | undefined;
+
+/** 這張卡的 Lead 尚未開放（agy、pi 沒宣告）：回傳原因（只有被政策選用的專案才算），否則 undefined。 */
+export function leadRejection(
+  policy: Policy,
+  card: Card,
+  leadGate?: LeadGate,
+): string | undefined {
+  if (card.status !== "ready" || !leadGate) return undefined;
+  const selected = declaredProjects(card).some(
+    (project) => policy.autopick && Object.hasOwn(policy.autopick, project),
+  );
+  if (!selected) return undefined;
+  const lead = policy.autopickLead ?? "claude";
+  const closed = leadGate(lead);
+  return closed === undefined
+    ? undefined
+    : `Lead「${lead}」尚未開放，不撿這張卡：${closed}；改完 config.json 後重啟 bridge`;
 }
 
 export type AutopickStep =
@@ -89,7 +112,7 @@ export interface AutopickReport {
   log: string[];
 }
 
-/** 與作者不同種類的 reviewer（H4 用 codex 審 claude 與 codex 混合的作者）。 */
+/** reviewer 偏好：codex Lead 用 claude，其餘用 codex；真正的作者／reviewer session 獨立性仍由 gate 核對。 */
 function reviewerFor(lead: AutopickLead): string {
   return lead === "codex" ? "claude" : "codex";
 }
@@ -181,6 +204,10 @@ export interface AutopickerDeps {
   /** 每張卡做完（不論結果）呼叫一次，接線層用來通知與記錄。 */
   onReport(report: AutopickReport): void | Promise<void>;
   onError?(error: unknown): void;
+  /** Lead 種類的開放條件（agy、pi 要先在 config.json 宣告）；沒提供就不檢查。 */
+  leadGate?: LeadGate;
+  /** Lead 尚未開放時，每張卡只通知一次。 */
+  onRejected?(card: Card, reason: string): void;
 }
 
 /**
@@ -189,6 +216,7 @@ export interface AutopickerDeps {
  */
 export function createAutopicker(deps: AutopickerDeps) {
   const attempted = new Set<string>();
+  const rejected = new Set<string>();
   let running: Promise<void> | undefined;
   return {
     get busy(): boolean {
@@ -198,7 +226,15 @@ export function createAutopicker(deps: AutopickerDeps) {
       if (running) return undefined;
       const loaded = deps.policy();
       if (loaded.status !== "loaded") return undefined;
-      const job = pickNext(loaded.policy, deps.readyCards(), attempted);
+      const cards = deps.readyCards();
+      for (const card of cards) {
+        const reason = leadRejection(loaded.policy, card, deps.leadGate);
+        if (reason && !rejected.has(card.id)) {
+          rejected.add(card.id);
+          deps.onRejected?.(card, reason);
+        }
+      }
+      const job = pickNext(loaded.policy, cards, attempted, deps.leadGate);
       if (!job) return undefined;
       attempted.add(job.card.id);
       running = (async () => {
