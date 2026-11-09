@@ -1,11 +1,19 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import test, { beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { HerdrError } from "../src/herdr.js";
 import { streamAgent } from "../src/main.js";
 import { splitFinalMarkdown } from "../src/final-format.js";
+
+// ISSUE-118: keep application logs out of the test runner output.
+beforeEach((t) => {
+  if (!("mock" in t)) return;
+  t.mock.method(console, "log", () => {});
+  t.mock.method(console, "warn", () => {});
+  t.mock.method(console, "error", () => {});
+});
 
 test("long final keeps code fences balanced and Unicode intact", () => {
   const text =

@@ -107,7 +107,7 @@ import {
   teamTaskTimeoutMs,
   type Config,
 } from "./config.js";
-import { StreamResumeStore } from "./stream-resume.js";
+import { StreamResumeStore, type ActiveStreamRecord } from "./stream-resume.js";
 import {
   claudeTurnComplete,
   stableScreen,
@@ -2995,6 +2995,7 @@ async function dispatchPrompt(
       prompt,
       baselineOutput,
       startedAt: Date.now(),
+      sessionKey: agentSessionKey(agent) ?? "",
     });
     void streamAgent(
       agent,
@@ -3311,25 +3312,204 @@ export async function relayApprovalFollowup(
   return false;
 }
 
-export async function resumeStreams(runtime: Runtime): Promise<void> {
+function agentSessionKey(
+  agent: AgentRecord,
+): string | undefined {
+  const s = agent.agent_session as
+    { kind?: string; value?: string } | undefined;
+  return s ? `${s.kind ?? ""}:${s.value ?? ""}` : undefined;
+}
+
+function persistTrackedSession(
+  runtime: Runtime,
+  initial: AgentRecord,
+  session: unknown,
+): void {
+  const key = agentSessionKey({ ...initial, agent_session: session });
+  if (key) runtime.streamResume?.updateSession(initial.terminal_id, key);
+}
+
+export const STREAM_RESUME_FETCH_ATTEMPTS = 3;
+export const STREAM_RESUME_RETRY_MS = 2000;
+
+function missingDiscordMessage(error: unknown): boolean {
+  const e = error as {
+    code?: unknown;
+    status?: unknown;
+    message?: unknown;
+  } | null;
+  return (
+    e?.code === 10008 ||
+    e?.status === 404 ||
+    (typeof e?.message === "string" && /Unknown Message/i.test(e.message))
+  );
+}
+
+function streamOwnershipLost(
+  runtime: Runtime,
+  record: ActiveStreamRecord,
+): boolean {
+  const reason = runtime.activeStreams.has(record.terminalId)
+    ? "stream already running"
+    : !runtime.streamResume?.owns(record)
+      ? "record ownership changed"
+      : undefined;
+  if (!reason) return false;
+  console.warn(
+    `Stream not resumed terminal=${record.terminalId} pane=${record.paneId}: ${reason}`,
+  );
+  return true;
+}
+
+/** Install before fetching progress so a Stop arriving during startup is retained. */
+export async function relayRecoveredStreams(runtime: Runtime): Promise<void> {
   const store = runtime.streamResume;
   if (!store) return;
   for (const record of store.list()) {
-    const agent = (await runtime.herdr.listAgentsWithWorkspaceNames()).find(
-      (a) => a.terminal_id === record.terminalId,
-    );
-    const progress = agent
-      ? await runtime.discord.fetchMessage(
-          record.channelId,
-          record.progressMessageId,
-        )
-      : undefined;
-    if (!agent || !progress || runtime.activeStreams.has(record.terminalId)) {
-      store.remove(record.terminalId);
+    if (record.recovery !== "pending" || streamOwnershipLost(runtime, record))
+      continue;
+    try {
+      const agent = (await runtime.herdr.listAgentsWithWorkspaceNames()).find(
+        (a) =>
+          a.terminal_id === record.terminalId && a.pane_id === record.paneId,
+      );
+      if (streamOwnershipLost(runtime, record)) continue;
+      if (
+        !agent ||
+        hookModeFor(runtime.config.hookTransport, agent.agent) !== "auto" ||
+        !(await hookReplyTrusted(agent))
+      )
+        continue;
+      if (streamOwnershipLost(runtime, record)) continue;
+      // 舊版紀錄沒有 sessionKey：無從比對，維持先前行為（只由 Stop 事件的 session 與時間篩選）。
+      const currentKey = agentSessionKey(agent) ?? "";
+      if (
+        record.sessionKey !== undefined &&
+        currentKey !== record.sessionKey
+      ) {
+        // 停機或抓取重試期間發生、streamAgent 沒來得及同步的合法轉移：回合開始時沒有 session 而現在首次登記，
+        // 或 codex／agy／pi 在這個回合開始後才建立新 session（與 streamAgent 的判斷一致）。
+        const legalTransfer =
+          hasAgentSession(agent.agent_session) &&
+          (record.sessionKey === "" ||
+            (["codex", "agy", "pi"].includes(agent.agent ?? "") &&
+              sessionCreatedSince(
+                agent.agent_session,
+                record.startedAt,
+                (id) =>
+                  agent.agent === "agy" && !agent.machine
+                    ? agyConversationCreatedAt(id)
+                    : undefined,
+              )));
+        if (!legalTransfer) {
+          console.warn(
+            `Stream not recovered terminal=${record.terminalId} pane=${record.paneId}: agent session changed`,
+          );
+          continue;
+        }
+        console.log(
+          `Stream recovery follows session transfer terminal=${record.terminalId} pane=${record.paneId}`,
+        );
+        store.updateSession(record.terminalId, currentKey);
+      }
+      const session = agent.agent_session as
+        { kind?: string; value?: string } | undefined;
+      const event = session
+        ? ["id", "path"].includes(session.kind ?? "")
+          ? hookEvents.stopSince(session.value, record.startedAt)
+          : undefined
+        : hookEvents.stopForPane(record.paneId, record.startedAt);
+      if (!event?.message.trim() || record.recovery !== "pending") continue;
+      if (!store.claim(record)) continue;
+      await runtime.discord.postRecoveredOutput(
+        record.channelId,
+        `bridge 重啟後補送\n${event.message.trim()}`,
+      );
+    } catch (error) {
+      console.warn(
+        `Stream recovery failed terminal=${record.terminalId} pane=${record.paneId}: ${safeError(error)}`,
+      );
+    }
+  }
+}
+
+const recoverySubscriptions = new WeakMap<StreamResumeStore, () => void>();
+
+export async function resumeStreams(
+  runtime: Runtime,
+  sleep: (ms: number) => Promise<void> = (ms) =>
+    new Promise((resolve) => setTimeout(resolve, ms)),
+): Promise<void> {
+  const store = runtime.streamResume;
+  if (!store) return;
+  recoverySubscriptions.get(store)?.();
+  recoverySubscriptions.set(
+    store,
+    hookEvents.onStop(() => {
+      void relayRecoveredStreams(runtime);
+    }),
+  );
+  records: for (const record of store.list()) {
+    const log = (reason: string) =>
+      console.warn(
+        `Stream not resumed terminal=${record.terminalId} pane=${record.paneId}: ${reason}`,
+      );
+    if (record.recovery) {
+      log(`recovery ${record.recovery}`);
+      continue;
+    }
+    if (runtime.activeStreams.has(record.terminalId)) {
+      log("stream already running");
+      continue;
+    }
+    let agent: AgentRecord | undefined;
+    let progress: import("discord.js").Message | undefined;
+    let reason = "agent not found";
+    try {
+      agent = (await runtime.herdr.listAgentsWithWorkspaceNames()).find(
+        (a) =>
+          a.terminal_id === record.terminalId && a.pane_id === record.paneId,
+      );
+      if (streamOwnershipLost(runtime, record)) continue;
+      if (agent) {
+        for (
+          let attempt = 1;
+          attempt <= STREAM_RESUME_FETCH_ATTEMPTS;
+          attempt++
+        ) {
+          try {
+            progress = await runtime.discord.fetchMessage(
+              record.channelId,
+              record.progressMessageId,
+            );
+            if (streamOwnershipLost(runtime, record)) continue records;
+            if (progress) break;
+            reason = "progress message unavailable (retry exhausted)";
+          } catch (error) {
+            if (streamOwnershipLost(runtime, record)) continue records;
+            if (missingDiscordMessage(error)) {
+              reason = "progress message missing (Unknown Message/404)";
+              break;
+            }
+            reason = `progress fetch retry exhausted: ${safeError(error)}`;
+          }
+          if (attempt < STREAM_RESUME_FETCH_ATTEMPTS) {
+            await sleep(STREAM_RESUME_RETRY_MS);
+            if (streamOwnershipLost(runtime, record)) continue records;
+          }
+        }
+      }
+    } catch (error) {
+      reason = `agent lookup failed: ${safeError(error)}`;
+    }
+    if (streamOwnershipLost(runtime, record)) continue;
+    if (!agent || !progress) {
+      log(reason);
+      store.add({ ...record, recovery: "pending" });
       continue;
     }
     console.log(
-      `Resuming stream pane=${agent.pane_id} (started ${new Date(record.startedAt).toISOString()})`,
+      `Resuming stream terminal=${record.terminalId} pane=${agent.pane_id} (started ${new Date(record.startedAt).toISOString()})`,
     );
     runtime.activeStreams.add(record.terminalId);
     const transcript = await CodexTranscript.connect(agent, record.prompt);
@@ -3351,6 +3531,7 @@ export async function resumeStreams(runtime: Runtime): Promise<void> {
         runtime.activeStreams.delete(record.terminalId);
       });
   }
+  await relayRecoveredStreams(runtime);
 }
 
 export async function streamAgent(
@@ -3443,6 +3624,7 @@ export async function streamAgent(
         `${initial.agent} session first registered during turn pane=${initial.pane_id}; following new session`,
       );
       trackedSession = candidate!.agent_session;
+      persistTrackedSession(runtime, initial, trackedSession);
     } else if (
       sameLocation &&
       !sessionMatches &&
@@ -3457,6 +3639,7 @@ export async function streamAgent(
         `${initial.agent} session created during turn pane=${initial.pane_id}; following new session`,
       );
       trackedSession = candidate.agent_session;
+      persistTrackedSession(runtime, initial, trackedSession);
     }
     if (
       !sameLocation ||

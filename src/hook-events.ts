@@ -37,10 +37,21 @@ export class HookEventStore {
 
   private readonly byPane = new Map<string, HookEvent & { at: number }>();
 
+  private listeners = new Set<() => void>();
+
+  onStop(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
   record(event: HookEvent, at = Date.now()): void {
+    if (event.event !== "Stop") return;
     if (event.paneId) this.byPane.set(event.paneId, { ...event, at });
     this.stops.delete(event.sessionId);
     this.stops.set(event.sessionId, { ...event, at });
+    for (const listener of this.listeners) listener();
     while (this.stops.size > KEEP_EVENTS) {
       const oldest = this.stops.keys().next().value;
       if (oldest === undefined) break;
