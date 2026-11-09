@@ -172,7 +172,15 @@ Review3 文件修正（2026-11-09，f4）：SPEC 的 PR merge 自動清理段落
 
 歷史：初版 red 6 fail，整合 733 項／7 fail 修正後 737 pass。Review 重新開啟 f1–f3（重送、互斥漏紀錄、故障測試缺注入）；本輪 red 126 項／3 fail，已修正並補測試。2026-11-07：Worker 因 codex 權限提示逾時而任務失敗（ISSUE-115），產出存成 WIP commit，由人工接手檢查後修正三處：(1) 沒有通知對象的舊卡，每次掃描會把所有歷史事件都寫一筆「沒有通知對象」進卡片紀錄——改為只處理 notifier 啟動（`startedAt`）之後的事件，並補測試；(2) `card loop` 的 `notify` 被改成只有 console 才回覆 Discord——還原為原行為；(3) PR 監看對所有卡改成只印 console——收窄為只有「卡片有記錄通知對象」才只印 console，沒有記錄的舊卡維持回報到原 thread。另把新增檔案整理成專案的 prettier 格式。測試（2026-11-07，本機非 sandbox，Node 26.12）：`npm run build` 通過，`node --test dist/test/*.test.js` 1442 項，1441 pass、0 fail、1 skipped（既有的略過），輸出沒有多餘 stdout；`herdr-card-check` 實測接受 `notify: discord:123456789`、拒絕 `notify: agent:w4:p2`。
 
-限制：當機寧可漏送、不重送；僅明確 failed 可重試，認領寫失敗不送，同程序最多三次（計數不能在寫盤失敗時跨重啟保存）。無來源舊卡不通知 Agent。Lead 重啟後驗證來源隔離、排隊、身分替換與失敗。未改 config.json／policy.yml。**尚未實機驗證**：Discord 來源與 Agent 來源的真實通知、排隊與身分核對都只用假 port 測過；bridge 尚未重啟載入此功能。
+限制：當機寧可漏送、不重送；僅明確 failed 可重試，認領寫失敗不送，同程序最多三次（計數不能在寫盤失敗時跨重啟保存）。無來源舊卡不通知 Agent。Lead 重啟後驗證來源隔離、排隊、身分替換與失敗。未改 config.json／policy.yml。**尚未實機驗證**：Discord 來源與 Agent 來源的真實通知、排隊與身分核對都只用假 port 測過（2026-11-07 當時；bridge 已重啟載入此功能，2026-11-09 的 Agent 來源實機觀察見下）。
+
+**Agent 來源實機觀察（2026-11-09，本機，bridge 為 main `1657138`〔10:50 重啟〕之後的程序；證據來自 ISSUE-129 驗收用的三張測試卡，卡片 `notify` 為 `agent:w1:p1:term_65e82e90eb7da4:claude`，通知對象是跑驗收的 Claude pane）：**
+
+- 卡片流程紀錄每則通知都先記 `notification | agent:… ` 目標，因為當時該 pane 正在工作，再記 `Agent 忙碌，通知排隊`，沒有立刻打斷；該 pane 閒下來後，排隊的通知才依序送進 pane，內容為 `[bridge 通知] <卡片 id> · 標題=… · <事件> · <說明>`，後面附 PR 網址。精確送達時間沒有記錄。
+- 實際收到的事件：卡 A 5 則（autopick_picked、pr_opened、review_verdict、ci_result、merged）、卡 B 1 則（autopick_picked；重啟後被取消，沒有 PR）、卡 C 7 則（autopick_picked、pr_opened、review_verdict、ci_result、merge_blocked、loop_stopped、autopick_stopped），共 13 則，沒有重複也沒有遺漏。
+- 這證明 Agent 來源的「對象記錄、忙碌排隊、閒置後送達、事件內容與 PR 網址」在真實 Herdr pane 上可運作。
+- **觀察（未開新 issue、待觀察）：**卡 C 的 `autopick_stopped` 通知寫「review 條件、版本條件未滿足」，與同一事件的 `merge_blocked` 通知（CI 條件、停止要求、狀態條件未滿足）及卡片紀錄的實際原因（卡片狀態被人工改成 cancelled、PR 分支落後 main）說法不同；兩則是不同步驟的檢查結果，是否為訊息誤導未確認。
+- **仍未驗證：**Discord 來源的真實通知、身分被取代時的核對（pane 換成別的 Agent）、通知失敗的有限重試，以及排隊逾時情境；狀態維持「已修正、待驗收」。這次驗證不是專門針對 ISSUE-120 設計，而是 ISSUE-129 驗收的副產品。
 
 維護規則見 [AGENTS.md](../AGENTS.md)。最後整理：2026-11-02（ISSUE-052 到 056 的索引列與 Card-to-Merge 追蹤清單；更早的條目未重新整理）。
 
