@@ -43,7 +43,7 @@ Lead 是 agy 或 pi 時，`config.json` 的 `agentProfiles` 必須有**同種類
 
 | 階段 | 內容 | 狀態 |
 |---|---|---|
-| P0 | 四種 Lead、agy／pi 開放條件、Lead 啟動等待（來源與 worktree） | **已實作，僅單元測試**：`npm run check` 為 1602 tests／1601 pass／0 fail／1 skipped，`npm run lint` 通過（2026-11-09，本機） |
+| P0 | 四種 Lead、agy／pi 開放條件、Lead 啟動等待（來源與 worktree） | **已實作，僅單元測試**：`npm run check` 為 1605 tests／1604 pass／0 fail／1 skipped，`npm run lint` 通過（2026-11-09，本機） |
 | P1 | **agy 當 Lead 的驗證卡**（見下） | 未開始 |
 | P2 | P1 通過後，使用者在 agy profile 長期宣告 `implementation`，讓 agy 當 autopick Lead 走完一張 L1 卡到 PR | 未開始 |
 | P3 | **pi 重複 P1、P2**。pi 連 Worker 都沒驗過，順序是先驗 pi 當 Worker，再驗當 Lead | 未開始 |

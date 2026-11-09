@@ -404,3 +404,39 @@ test("a Lead that is not open is neither picked nor replaced, and the reason is 
   assert.equal(picker.tick(), undefined);
   assert.deepEqual(rejected, ["REQ-20261105-g1"]);
 });
+
+test("a rejection is reported again when the reason changes, because the policy is reloaded every tick", () => {
+  const make = (lead: string) => {
+    const parsed = parsePolicy(
+      [
+        "version: 1",
+        `autopick_lead: ${lead}`,
+        "projects:",
+        "  local:Herdr_Discord_Bridge: L1",
+        "autopick:",
+        `  local:Herdr_Discord_Bridge: ${REPO}`,
+        "",
+      ].join("\n"),
+    );
+    assert.ok(parsed.ok);
+    return parsed.policy;
+  };
+  let current = make("agy");
+  const rejected: string[] = [];
+  const ready = card("REQ-20261105-r1");
+  const picker = createAutopicker({
+    policy: () => loaded(current),
+    readyCards: () => [ready],
+    steps: fakeSteps().steps,
+    onReport: () => undefined,
+    leadGate: (kind) => `${kind} 未宣告`,
+    onRejected: (_card, reason) => rejected.push(reason),
+  });
+  picker.tick();
+  picker.tick();
+  current = make("pi");
+  picker.tick();
+  assert.equal(rejected.length, 2);
+  assert.match(rejected[0], /agy/);
+  assert.match(rejected[1], /pi/);
+});

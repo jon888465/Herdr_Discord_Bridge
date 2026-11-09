@@ -419,3 +419,19 @@ test("an Agent that never becomes ready keeps the not-ready result instead of fa
   });
   assert.equal((await prepareCardWorktree(deps, CARD)).agentReady, true);
 });
+
+test("an Agent that starts blocked on a skippable prompt is awaited the same way as a working one", async () => {
+  const blocked = { ...started, agent_status: "blocked" };
+  const ready = { ...started, agent_status: "idle" };
+  const seen: string[] = [];
+  const { deps } = setup({
+    startAgent: async () => blocked,
+    awaitReady: async (agent) => {
+      seen.push(agent.agent_status);
+      return ready;
+    },
+  });
+  const result = await prepareCardWorktree(deps, CARD);
+  assert.deepEqual(seen, ["blocked"]);
+  assert.equal(result.agentReady, true);
+});

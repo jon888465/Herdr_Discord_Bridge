@@ -216,3 +216,16 @@ test("the done-as-ready adapter is one object per port, so the once-per-pane upd
   const { deps } = fixture([{}]);
   assert.equal(doneAsReady(deps.panePort), doneAsReady(deps.panePort));
 });
+
+test("the role label replaces reviewer in the failure messages, and the default stays reviewer", async () => {
+  const { deps } = fixture([{}], [agent("codex", "working")]);
+  const lead = await waitUntilReady(
+    { ...deps, role: "Lead" },
+    pane,
+    agent("codex", "working"),
+  );
+  assert.equal(lead.ok, false);
+  assert.match(!lead.ok ? lead.reason : "", /^Lead 在 /);
+  const reviewer = await waitUntilReady(deps, pane, agent("codex", "working"));
+  assert.match(!reviewer.ok ? reviewer.reason : "", /^reviewer 在 /);
+});

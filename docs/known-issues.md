@@ -8,7 +8,9 @@
 
 修正：見 SPEC「四種 Lead 與開放條件」。四種共用常數、型別與 label；agy、pi 的開放條件 `leadGateFor`；來源 Lead 與 worktree 第二次啟動共用等待（`doneAsReady`）。不改使用者的 `policy.yml`、`config.json`。
 
-驗證（2026-11-09，本機，假 Herdr port）：`npm run check` 為 1602 tests／1601 pass／0 fail／1 skipped；`npm run lint` 通過。涵蓋四種政策與 label、working → idle／done、blocked／逾時、安全更新跳過、worktree 啟動等待、四種 cleanup label、開放條件不撿且不改用別的 Lead。
+驗證（2026-11-09，本機，假 Herdr port）：`npm run check` 為 1605 tests／1604 pass／0 fail／1 skipped；`npm run lint` 通過。涵蓋四種政策與 label、working → idle／done、blocked／逾時、安全更新跳過、worktree 啟動等待（working 與 blocked）、四種 cleanup label、開放條件不撿且不改用別的 Lead、原因換了會重新通報。
+
+code-review（high，2026-11-09，只當參考，不是 bridge 的 review）：9 項發現，已修 5 項（worktree 的 blocked 也等待、通報以卡片加原因為 key、`leadRejection` 改用 `autopickFor`、等待訊息用 `role` 取代字串替換、還原格式雜訊）。**未修：**拒絕原因只有 console 警告，沒有卡片紀錄或通知（Discord 看不到，要另開卡加事件）；`doneAsReady` 轉接不帶 port 的選用 trust 方法、去重不與 reviewer 等待共用（Lead 與 reviewer 是不同 pane，影響低）；等待用真實計時而非注入的 `sleep`／`now`；開放條件只看 `implementation`、不看 `review`（刻意，使用者選項 2）；`done` 啟動即算就緒（與原本來源路徑一致）。
 
 過程：本議題原在 REQ-20261109-codex-lead-agy（PR #185、#186，含多個 Lead、卡片指定），3 次 `card review` 用完仍 `changes_requested`，範圍縮小後改由 REQ-20261109-autopick-four-leads 重做；多 Lead 清單、卡片 `lead:`、Lead 選擇依據的紀錄、`card assign` 指定 Lead 都延後，另開卡。
 

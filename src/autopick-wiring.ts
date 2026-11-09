@@ -121,6 +121,7 @@ export function createAutopickSteps(deps: AutopickWiringDeps): AutopickSteps {
         const ready = await waitUntilReady(
           {
             panePort: readyPort,
+            role: "Lead",
             readyTimeoutMs: deps.readyTimeoutMs,
             readyPollMs: deps.readyPollMs,
           },
@@ -131,7 +132,7 @@ export function createAutopickSteps(deps: AutopickWiringDeps): AutopickSteps {
         );
         if (!ready.ok)
           throw new Error(
-            `Lead（${job.lead}）沒有就緒：${ready.reason.replaceAll("reviewer", "Lead")}`,
+            `Lead（${job.lead}）沒有就緒：${ready.reason}`,
           );
         await deps.command(`wk use ${workspaceId}`);
         await deps.command(`agent use ${paneId}`);

@@ -10,6 +10,8 @@ export interface ReadyDeps {
   /** 啟動後等 Agent 變成 idle 的上限（預設 30 秒）與輪詢間隔（預設 1 秒）。 */
   readyTimeoutMs?: number;
   readyPollMs?: number;
+  /** 訊息裡稱呼被等的 Agent（預設 reviewer；autopick 的 Lead 用 Lead）。 */
+  role?: string;
 }
 
 // Shared across calls on the same bridge port, including concurrent waits.
@@ -52,8 +54,11 @@ export function doneAsReady(port: AgentStartPort): AgentStartPort {
 const READY_TIMEOUT_MS = 30_000;
 const READY_POLL_MS = 1_000;
 
-export const BLOCKED_AT_START =
-  "reviewer 卡在啟動提示（blocked）。常見原因：Agent 自己的更新提示或新資料夾的信任提示；bridge 不會替人確認，請先在要用的種類上處理一次";
+function blockedAtStart(role: string): string {
+  return `${role} 卡在啟動提示（blocked）。常見原因：Agent 自己的更新提示或新資料夾的信任提示；bridge 不會替人確認，請先在要用的種類上處理一次`;
+}
+
+export const BLOCKED_AT_START = blockedAtStart("reviewer");
 
 async function skipKnownUpdate(
   deps: ReadyDeps,
@@ -120,6 +125,7 @@ export async function waitUntilReady(
   pane: { paneId: string; terminalId: string },
   started: AgentRecord,
 ): Promise<ReadyResult> {
+  const role = deps.role ?? "reviewer";
   let agent = started;
   let updateSkip: UpdateSkip | undefined;
   const withSkip = <T extends object>(result: T) =>
@@ -129,7 +135,7 @@ export async function waitUntilReady(
     const handled = await skipKnownUpdate(deps, pane.paneId, agent.agent);
     updateSkip = handled.skip ?? updateSkip;
     if (!handled.proceed)
-      return withSkip({ ok: false as const, reason: BLOCKED_AT_START });
+      return withSkip({ ok: false as const, reason: blockedAtStart(role) });
   }
   const timeout = deps.readyTimeoutMs ?? READY_TIMEOUT_MS;
   const poll = deps.readyPollMs ?? READY_POLL_MS;
@@ -138,7 +144,7 @@ export async function waitUntilReady(
     if (Date.now() >= deadline)
       return withSkip({
         ok: false as const,
-        reason: `reviewer 在 ${Math.round(timeout / 1000)} 秒內沒有就緒（狀態 ${agent.agent_status}）`,
+        reason: `${role} 在 ${Math.round(timeout / 1000)} 秒內沒有就緒（狀態 ${agent.agent_status}）`,
       });
     await new Promise((resolve) => setTimeout(resolve, poll));
     let listed: AgentRecord[];
@@ -147,7 +153,7 @@ export async function waitUntilReady(
     } catch (error) {
       return withSkip({
         ok: false as const,
-        reason: `等待 reviewer 就緒時讀取 Agent 清單失敗：${error instanceof Error ? error.message : "unknown error"}`,
+        reason: `等待 ${role} 就緒時讀取 Agent 清單失敗：${error instanceof Error ? error.message : "unknown error"}`,
       });
     }
     const current = listed.find(
@@ -157,16 +163,15 @@ export async function waitUntilReady(
     if (!current)
       return withSkip({
         ok: false as const,
-        reason: "等待 reviewer 就緒時，它的 pane 不見了（消失或被換掉）",
+        reason: `等待 ${role} 就緒時，它的 pane 不見了（消失或被換掉）`,
       });
     agent = current;
-    if (agent.agent_status === "idle")
-      return withSkip({ ok: true as const, agent });
+    if (agent.agent_status === "idle") return withSkip({ ok: true as const, agent });
     if (agent.agent_status === "blocked") {
       const handled = await skipKnownUpdate(deps, pane.paneId, agent.agent);
       updateSkip = handled.skip ?? updateSkip;
       if (!handled.proceed)
-        return withSkip({ ok: false as const, reason: BLOCKED_AT_START });
+        return withSkip({ ok: false as const, reason: blockedAtStart(role) });
     }
   }
 }

@@ -66,15 +66,14 @@ export function leadRejection(
   leadGate?: LeadGate,
 ): string | undefined {
   if (card.status !== "ready" || !leadGate) return undefined;
-  const selected = declaredProjects(card).some(
-    (project) => policy.autopick && Object.hasOwn(policy.autopick, project),
-  );
-  if (!selected) return undefined;
-  const lead = policy.autopickLead ?? "claude";
-  const closed = leadGate(lead);
+  const picked = declaredProjects(card)
+    .map((project) => autopickFor(policy, project))
+    .find((enabled) => enabled !== undefined);
+  if (!picked) return undefined;
+  const closed = leadGate(picked.lead);
   return closed === undefined
     ? undefined
-    : `Lead「${lead}」尚未開放，不撿這張卡：${closed}；改完 config.json 後重啟 bridge`;
+    : `Lead「${picked.lead}」尚未開放，不撿這張卡：${closed}；改完 config.json 後重啟 bridge`;
 }
 
 export type AutopickStep =
@@ -229,8 +228,10 @@ export function createAutopicker(deps: AutopickerDeps) {
       const cards = deps.readyCards();
       for (const card of cards) {
         const reason = leadRejection(loaded.policy, card, deps.leadGate);
-        if (reason && !rejected.has(card.id)) {
-          rejected.add(card.id);
+        // 以卡片加原因當 key：政策每次掃描都重讀，原因換了要重新通報。
+        const key = `${card.id}\n${reason}`;
+        if (reason && !rejected.has(key)) {
+          rejected.add(key);
           deps.onRejected?.(card, reason);
         }
       }

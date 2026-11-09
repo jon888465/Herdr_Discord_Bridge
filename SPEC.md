@@ -763,7 +763,7 @@ Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*
 
 - `autopick_lead` 接受 claude、codex、agy、pi（單一值）；省略仍是 claude，未知值拒絕並列出四種。種類清單、型別與 label（`autopick-<kind>-<卡片 id>`，最多 60 字元）共用 `src/policy.ts`，ISSUE-129 的收尾也用同一份。reviewer 偏好不變（codex Lead 用 claude，其餘用 codex），真正的依據仍是作者與 reviewer 不同 session 的 gate。
 - **開放條件：**agy、pi 當 Lead 需要 `config.json` 的 `agentProfiles` 有同種類、且 `capabilities` 含 `implementation` 的 profile（`leadGateFor`，使用者表示該種類的 coding 已驗證）；沒達到就不撿，每張卡在 console 記一次原因，不改用別的 Lead。claude、codex 不需要。這不是安全邊界，能改 `config.json` 的人就能宣告，bridge 也不判斷它們是否真的能當 Lead。
-- **啟動等待：**Lead 啟動回來是 working 時等到就緒（`waitUntilReady`，`doneAsReady` 把 done 當 idle，working → done 轉態也算）。來源 workspace 與 `prepareCardWorktree` 的第二次啟動共用；blocked 只跳過已知安全更新提示，信任、權限、登入仍要人處理；逾時、blocked 或等待丟錯時維持「Agent 還沒準備好、不啟動任務、卡片仍是 ready」。
+- **啟動等待：**Lead 啟動回來是 working 時等到就緒（`waitUntilReady`，`doneAsReady` 把 done 當 idle，working → done 轉態也算）。來源 workspace 與 `prepareCardWorktree` 的第二次啟動共用；working 或 blocked（已知安全更新提示可跳過）都會等，信任、權限、登入仍要人處理；逾時、blocked 或等待丟錯時維持「Agent 還沒準備好、不啟動任務、卡片仍是 ready」。
 - **未做：**多個 Lead、卡片指定 Lead、流程紀錄記 Lead 的選擇依據，另開卡。agy、pi 從未當過 Lead，所有證據只有單元測試，規劃與階段見 `docs/multi-lead-plan.md`。
 
 ### Autopick Lead workspace 收尾（ISSUE-129，2026-11-09，已驗收）
