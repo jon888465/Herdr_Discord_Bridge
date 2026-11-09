@@ -24,23 +24,23 @@
 
 ## 現況矩陣
 
-**資料來源與限制：**41 張營運卡的流程紀錄裡的 `role_assigned`（2026-11-08 到 2026-11-09，本機）。數字是**被分派的次數，含失敗**，不是成功次數，我沒有逐筆核對每次的結果。角色紀錄從 2026-11-08（ISSUE-127）才有，更早的證據另行標註。
+**資料來源與限制：**42 張營運卡的流程紀錄裡的 `role_assigned`（2026-11-08 到 2026-11-09，本機；2026-11-09 pi 重測後重新統計）。角色 id 依前綴歸類（`impl*`→implement、`diag*`／`identify*`→diagnose、`rev*`／`review*`／`complete-independent-review`→review、`ver*`／`verify*`→verify），歸類是我的簡化，與先前一版（41 張卡）的數字略有不同。數字是**被分派的次數，含失敗**，不是成功次數，我沒有逐筆核對每次的結果。角色紀錄從 2026-11-08（ISSUE-127）才有，更早的證據另行標註。
 
 | 角色 | claude | codex | agy | pi |
 |---|---|---|---|---|
-| lead | 8 | 2 | 1 | 1（**失敗**） |
-| implement | 無 | 16 | 無（早期 1 次，見註 1） | 無 |
-| diagnose | 1 | 2 | 1 | 無 |
-| review（task 內） | 2 | 13 | 無 | 無 |
-| verify | 13 | 4 | 無 | 無 |
-| reviewer（`card review`） | 3（見註 2） | 20 | 無 | 無 |
+| lead | 8 | 2 | 1 | 2（1 次失敗、1 次成功，見註 4） |
+| implement | 無 | 17 | 無（早期 1 次，見註 1） | 無 |
+| diagnose | 1 | 3 | 1 | 無 |
+| review（task 內） | 3 | 16 | 無 | 無 |
+| verify | 13 | 6 | 無 | 無 |
+| reviewer（`card review`） | 3（見註 2） | 21 | 無 | 無 |
 | fixer（`card fix`） | 5 | 無 | 無 | 無 |
 
 **註：**
 1. agy 當 implement：2026-11-06 `REQ-20261106-agy-verify`（PR #141，ISSUE-107），早於角色紀錄，證據來自 `docs/known-issues.md`，未重驗。
 2. claude 當 reviewer 的 3 次：2 次（2026-11-09 `REQ-20261109-lead-live-codex`）因「回覆不是單一 JSON」`inconclusive`，根因與修正見 ISSUE-134；1 次（`REQ-20261109-claude-reviewer-live`）修正後 `pass`。
 3. agy 當 lead 只有 1 次極簡卡（`REQ-20261109-agy-lead-live`，PR #196 自動 merge）；codex 當 lead 2 次極簡卡；證據的限制見 `docs/multi-lead-plan.md`。
-4. **pi 當 lead 的 1 次失敗：**`REQ-20261109-pi-lead-live`，第一個 `agent.prompt` 在 Herdr 登記完成前被拒（`agent_not_ready`），pi 沒有收到規劃 prompt。修正（PR #198，`945ccd6`）已 merge，**尚未部署到執行中的 bridge，也尚未重測**；請求 A 的來源仍未指認（ISSUE-137）。
+4. **pi 當 lead 的 2 次：**第 1 次 `REQ-20261109-pi-lead-live`（2026-11-09 07:56 UTC）失敗：第一個 `agent.prompt` 在 Herdr 登記完成前被拒（`agent_not_ready`），pi 沒有收到規劃 prompt（ISSUE-137）。第 2 次 `REQ-20261109-pi-lead-retest`（PR #200，08:51 到 08:59 UTC，#198 的有上限重試部署後）**成功**：pi 規劃出 6 個派工（全由 codex 執行）、task 5.5 分鐘 `completed`、codex reviewer 第 1 輪 `pass`、bridge 自動 squash merge `20faaf7`。限制：只有一張極簡卡、一次；pi 只當 Lead，所有實作、審查、驗證都是 codex 做的，所以**不代表 pi 能擔任其他角色**。
 5. 表中 claude 的 implement 為「無」只代表角色紀錄裡沒有，早期文件（追蹤清單 E14，2026-11-05）曾記 claude profile 可當 Worker，沒有重驗。
 
 ## 阻礙與缺口（要讓每格都可行必須處理）
@@ -65,7 +65,7 @@
 | 階段 | 內容 | 狀態 |
 |---|---|---|
 | R0 | 本文與矩陣 | 本 PR |
-| R1 | **不需要新程式就能驗證的格子**：`card review --agent agy`（agy 當 reviewer）；`card loop --fix-agent codex`／`agy`（codex、agy 當 fixer）；pi 當 Lead 重測（需重啟 bridge 載入 #198）；`card review --agent pi`（pi 當 reviewer） | 未開始 |
+| R1 | **不需要新程式就能驗證的格子**：`card review --agent agy`（agy 當 reviewer）；`card loop --fix-agent codex`／`agy`（codex、agy 當 fixer）；~~pi 當 Lead 重測~~（**已於 2026-11-09 完成一次**，見註 4）；`card review --agent pi`（pi 當 reviewer） | 部分完成 |
 | R2 | **pi 納入 Worker 名單**：改 `coding-roster.ts` 的 pi 排除規則（需要使用者決定，因為目前是刻意寫死）；先驗 pi 當 implement／diagnose／verify | 未開始，需要決策 |
 | R3 | **可指定角色的機制**：讓卡片或使用者能指定某角色由某 Agent 扮演（例如卡片欄位或計畫提示），否則 implement、diagnose、verify、review（task 內）無法可控驗證 | 未開始，需要設計與決策 |
 | R4 | **整張矩陣補齊**：依 R1 到 R3，每個還沒有證據的格子各跑一張無害卡，更新本文的矩陣與日期 | 未開始 |
@@ -73,12 +73,12 @@
 **R1 的具體方式（不需要新程式）：**
 1. agy 當 reviewer：對一張有 PR 的卡跑 `card review <id> --agent agy`（作者必須是不同 session）。
 2. fixer：`card loop <id> --fix-agent codex`、`--fix-agent agy`，需要一張會 `changes_requested` 的卡，才會進修正輪。
-3. pi 當 Lead：授權重啟 bridge 後，用一張新的一行檔案卡（`lead: pi`），觀察 bridge console 新增的 `agent.prompt` 追蹤紀錄（ISSUE-137）。
+3. ~~pi 當 Lead~~：已於 2026-11-09 完成一次（PR #200）；之後應該再用不同的卡重複，才符合「至少兩張不同卡成功」的建議。
 4. pi 當 reviewer：`card review <id> --agent pi`。
 
 ## 風險
 
-- pi 沒有任何角色的成功證據，R1 到 R4 可能發現大量問題，不要預期一次達成。
+- pi 只有 Lead 一格有成功證據（1 次極簡卡），其他角色完全沒有；R1 到 R4 可能發現大量問題，不要預期一次達成。
 - 每張驗證卡在 L2 專案下通過後會**自動 merge**，所以內容要保持「一行檔案」這類無害任務。
 - 單次成功不代表可靠；一格要算「可以」，建議至少兩次不同卡片都成功（這是 Agent 的建議，需要使用者確認）。
 - 矩陣的次數是分派次數，不是成功次數；之後更新請區分「分派」與「成功」。
