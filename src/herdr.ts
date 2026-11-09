@@ -57,22 +57,15 @@ interface RequestOptions {
 /** Newline-delimited JSON client. Each request gets a bounded fresh connection. */
 /**
  * 每次送出 `agent.prompt` 留一行 console 紀錄（ISSUE-137）。沒有它，Herdr 日誌裡的請求 id（`herdr-discord-<毫秒>`）
- * 無法對回 bridge 是哪個程式路徑送的。只記目標 pane、字數、時間與呼叫位置，**不記 prompt 內容**。
- * 呼叫位置取自呼叫堆疊的函式名稱（略過這個 helper 與送出它的方法本身）。
+ * 無法對回 bridge 送出的目標 pane。只記目標 pane、字數、時間，**不記 prompt 內容**。
  */
 export function tracePromptRequest(
   kind: "prompt" | "prompt+wait" | "send-fallback",
   target: string,
   text: string,
 ): void {
-  const via = (new Error().stack ?? "")
-    .split("\n")
-    .slice(3, 7)
-    .map((line) => /at (?:async )?([\w.<>$]+)/.exec(line.trim())?.[1])
-    .filter((name): name is string => Boolean(name))
-    .join(" < ");
   console.log(
-    `agent.prompt ${kind} target=${target} chars=${text.length} ts=${Date.now()} via=${via || "?"}`,
+    `agent.prompt ${kind} target=${target} chars=${text.length} ts=${Date.now()}`,
   );
 }
 

@@ -252,7 +252,7 @@ prompt 先描述 end 再描述 begin，避免 echo 構成完整回覆；逾時�
 詳見 [修正交接](docs/team-orchestration-issues-013-014-handoff.md)。
 
 Bridge pane 的 stdin 會使用同一個 command handler；啟動後可在 `bridge>` prompt 輸入指令，輸出與 Discord 相同的 Agent routing 與回應流程。
-`HerdrClient` 每次送 `agent.prompt`（`promptAgent`、`promptAgentAndWait`、`sendAgent` 的 agent.send 失效 fallback）會在 console 印一行 `agent.prompt <kind> target=<pane> chars=<字數> ts=<毫秒> via=<呼叫位置>`，不含 prompt 內容，供對照 Herdr 日誌的請求 id（ISSUE-137）。
+`HerdrClient` 每次送 `agent.prompt`（`promptAgent`、`promptAgentAndWait`、`sendAgent` 的 agent.send 失效 fallback）會在 console 印一行 `agent.prompt <kind> target=<pane> chars=<字數> ts=<毫秒>`，不含 prompt 內容，供對照 Herdr 日誌的請求 id（ISSUE-137）。
 
 Team 首次 prompt（ISSUE-137，2026-11-09）：僅 `HerdrError.code === agent_not_ready` 每約 500 ms 重試，預設上限 15 秒且受 turn 剩餘 timeoutMs 與 abort signal 限制。回合開始時計算一次固定 deadline；初始化、重試等待、atomic prompt 耗時與後續 marker 觀察共用此期限，stalled 後不重新起算等待時間。ok（含 undefined）停止重送，stalled 沿用 marker 接收，其他錯誤原樣丟出；超限含等待秒數、第一個 prompt 未送達與最後原始訊息。假設 agent_not_ready 表示 Herdr 未接受 prompt，此為推論，Herdr 契約未讀。HerdrClient 與其他 prompt 呼叫端不變。
 
