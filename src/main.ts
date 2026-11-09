@@ -64,6 +64,7 @@ import { waitForChecks } from "./card-ci-wait.js";
 import {
   assertCodingRoster,
   autoEnableCodingProfiles,
+  leadGateFor,
 } from "./coding-roster.js";
 import { mergeCardPullRequest, readCardChecks } from "./card-merge-wiring.js";
 import { sharedCardPullRequests } from "./card-prs.js";
@@ -2761,6 +2762,7 @@ function startAutopick(runtime: Runtime): () => void {
       sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
       now: () => Date.now(),
     }),
+    leadGate: leadGateFor(runtime.config.agentProfiles ?? []),
     onRejected: (card, reason) =>
       console.warn(`自動撿卡 ${card.id}：${reason}`),
     onPicked: (job) => {

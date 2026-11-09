@@ -17,6 +17,30 @@ export const AUTO_CODING_KINDS = ["claude", "codex"];
 export const OPT_IN_CODING_KIND = "agy";
 export const OPT_IN_CODING_CAPABILITIES = ["implementation", "review"];
 
+/** 當 autopick Lead 前必須先通過 coding 驗證、由使用者在 profile 宣告的種類（claude、codex 已實機驗證）。 */
+export const LEAD_GATED_KINDS: readonly string[] = ["agy", "pi"];
+
+/**
+ * autopick Lead 的開放條件：agy、pi 要在 `config.json` 的 `agentProfiles` 有同種類、且 `capabilities` 含
+ * `implementation` 的 profile（使用者表示這個種類的 coding 已驗證過）；沒達到回傳原因，通過回傳 undefined。
+ * 這與 Worker 自動入池使用同一個明確宣告機制；bridge 不會自己判斷 CLI 的 coding 是否可靠。
+ */
+export function leadGateFor(
+  profiles: ReadonlyArray<{ kind: string; capabilities?: readonly string[] }>,
+): (kind: string) => string | undefined {
+  return (kind) => {
+    if (!LEAD_GATED_KINDS.includes(kind)) return undefined;
+    const declared = profiles.some(
+      (profile) =>
+        profile.kind === kind &&
+        profile.capabilities?.includes("implementation"),
+    );
+    return declared
+      ? undefined
+      : `${kind} 當 Lead 要先在 config.json 的 agentProfiles 有一個 kind 為 ${kind}、capabilities 含 implementation 的 profile（表示你已驗證它的 coding 能力）`;
+  };
+}
+
 interface AutoPool {
   profiles: ReadonlyArray<{
     id: string;

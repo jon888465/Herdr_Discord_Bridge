@@ -389,3 +389,52 @@ test("a card's lead selects the Lead kind when the policy allows it, otherwise t
   assert.equal(picker.tick(), undefined);
   assert.deepEqual(rejected, ["REQ-20261105-c"], "reported once per card");
 });
+
+test("a gated Lead is neither picked nor silently replaced, and the reason is reported once per card", () => {
+  const parsed = parsePolicy(
+    [
+      "version: 1",
+      "autopick_lead: agy, claude",
+      "projects:",
+      "  local:Herdr_Discord_Bridge: L1",
+      "autopick:",
+      `  local:Herdr_Discord_Bridge: ${REPO}`,
+      "",
+    ].join("\n"),
+  );
+  assert.ok(parsed.ok);
+  const closed = (kind: string) => (kind === "agy" ? "未宣告" : undefined);
+  const byDefault = card("REQ-20261105-g1");
+  const explicit = card("REQ-20261105-g2", { lead: "claude" });
+  assert.equal(
+    pickNext(parsed.policy, [byDefault], new Set(), closed),
+    undefined,
+  );
+  assert.match(
+    leadRejection(parsed.policy, byDefault, closed) ?? "",
+    /agy.*未宣告/,
+  );
+  assert.equal(
+    pickNext(parsed.policy, [byDefault, explicit], new Set(), closed)?.card.id,
+    "REQ-20261105-g2",
+    "a card that names an open Lead is still picked",
+  );
+  assert.equal(leadRejection(parsed.policy, explicit, closed), undefined);
+  assert.equal(
+    pickNext(parsed.policy, [byDefault])?.lead,
+    "agy",
+    "no gate, no check",
+  );
+  const rejected: string[] = [];
+  const picker = createAutopicker({
+    policy: () => loaded(parsed.policy),
+    readyCards: () => [byDefault],
+    steps: fakeSteps().steps,
+    onReport: () => undefined,
+    leadGate: closed,
+    onRejected: (c) => rejected.push(c.id),
+  });
+  assert.equal(picker.tick(), undefined);
+  assert.equal(picker.tick(), undefined);
+  assert.deepEqual(rejected, ["REQ-20261105-g1"]);
+});
