@@ -1,5 +1,25 @@
 # Known Issues
 
+## ISSUE-133：`autopick_stopped` 的原因只留 loop 輸出的前 200 字，真正的停止原因被截掉，通知因此誤導
+
+更新日期：2026-11-09。狀態：待調查（根因已由讀碼加實例確認；尚未修正、沒有測試、沒有重現程式）。
+
+**使用者可見症狀：**卡片 `REQ-20261109-multi-lead-card-lead`（PR #189）已在 06:41:19Z 通過第 2 輪 review，真正擋住自動 merge 的只有敏感路徑 `src/policy.ts`（設計上要人工 merge）。但 06:41:54Z 寫進卡片的 `failed`／`autopick_stopped` 事件，原因是「loop：review 完成：… PR #189（head e1a3174b2a24）· 第 1 輪 … 判定：changes_requested …」，是**第 1 輪**的結果；bridge 據此通知「review 條件、版本條件未滿足」，與實際狀況（`pass`、head 一致，只剩敏感路徑）不符。
+
+**預期行為：**`autopick_stopped` 的原因要是實際停止的原因（這次是敏感路徑，要人工 merge），至少不能是過期輪次的摘要。
+
+**重現／環境（2026-11-09，本機）：**bridge 為 #187（`b6e507d`）merge 後重啟的程序；卡片流程紀錄與 PR 狀態：第 1 輪 `changes_requested`（06:37:45Z，head `e1a3174`）、fixer 修正（06:39:45Z，head `bdbdb04`）、第 2 輪 `pass`（06:41:19Z，head `bdbdb046553c`），PR head 也是 `bdbdb046553c`；06:41:54Z 的 `merge_blocked`、`loop_stopped` 寫「敏感路徑未滿足」（正確），緊接著的 `failed` 事件原因卻是第 1 輪摘要。
+
+**已確認根因（讀碼，2026-11-09）：**`src/autopick.ts` 在 `!loop.merged` 時以 `report("stopped", "loop", loop.text)` 回報，原因是整段 loop 輸出；`src/main.ts` 的 `report` 寫事件時，原因是 `${result.lastStep}：${result.reason}` 再 `.slice(0, 200)`（約第 2750 行）。loop 輸出以第 1 輪的 review 摘要開頭，所以前 200 字剛好只含第 1 輪的標題與判定，結尾才有的實際停止原因（敏感路徑）被截掉。這個推論由上述實例吻合（事件文字停在「驗收條件： 1. ✓」附近，正是 200 字截斷點）；我沒有執行或重現。
+
+**影響：**使用者從通知會以為 review 或版本沒過，可能多做不必要的處理。實際只有這一次觀察，不知道其他 loop 停止情境是否同樣被截。
+
+**修正範圍：**無（只記錄）。建議方向：停止原因改取 loop 的結構化停止理由或輸出的最後一段，而不是開頭；事件原因的截斷要保留停止理由。要先決定 loop 結果是否要回傳結構化的 `stopReason`。
+
+**暫行做法：**看卡片流程紀錄的 `merge_blocked`／`loop_stopped` 事件，不要只看 `autopick_stopped` 的原因文字。
+
+**未驗證／下一步：**沒有測試；是否其他停止原因（CI 紅、review 沒過）也被截斷，要另外檢查。
+
 ## ISSUE-132：自動撿卡缺少多候選、卡片指定與 Lead 選擇來源
 
 更新日期：2026-11-09。狀態：已修正、待驗收。
@@ -10,9 +30,13 @@
 
 修正範圍：policy 有序陣列解析、重複／空值拒絕；卡片 parser／serializer／check；選卡與專案明確等級守門；agy／pi 共用既有 leadGateFor；拒絕寫 failed/autopick_stopped（沿用 card show 與 notify）；任務 Lead role_assigned 記實際種類與凍結的 leadSelection=card|policy。手動 assign 不改 Lead，舊卡與單值政策行為相容，舊事件 id 不變。
 
-驗證（2026-11-09）：相關測試 `npm run build` 後 `node --test dist/test/autopick.test.js dist/test/card-check.test.js dist/test/card-events.test.js dist/test/policy.test.js`：101 項／101 pass／0 fail；`npm run lint` 通過（192 TypeScript files）。最終 `npm run check`（含 typecheck、build、完整測試）：1613 項／1612 pass／0 fail／1 skipped（既有略過），exit 0。`git diff --check` 通過。`scripts/herdr-card-check docs/card-examples/REQ-*.md docs/card-examples/TKT-*.md`：3 張範例卡通過（2026-11-09）；先前以 `*.md` 掃入非卡片 README 時得到預期格式拒絕，改為只檢查卡片檔後通過。過程曾發生 card-command 舊角色事件 id 比對失敗（新增可選來源欄位時將空值加入 hash）；已改成只有存在來源時才加入 hash，保留舊事件 id，未降低斷言。初次 typecheck 因尚未安裝依賴找不到 tsc，npm ci --ignore-scripts 後解除；未更動相依版本。
+驗證（2026-11-09）：相關測試 `npm run build` 後 `node --test dist/test/autopick.test.js dist/test/card-check.test.js dist/test/card-events.test.js dist/test/policy.test.js`：101 項／101 pass／0 fail；`npm run lint` 通過（192 TypeScript files）。最終 `npm run check`（含 typecheck、build、完整測試）：1613 項／1612 pass／0 fail／1 skipped（既有略過），exit 0。`git diff --check` 通過。`scripts/herdr-card-check docs/card-examples/REQ-*.md docs/card-examples/TKT-*.md`（2026-11-09 補跑）：3 個檔案都 OK、exit 0。3 張範例卡通過（2026-11-09）；先前以 `*.md` 掃入非卡片 README 時得到預期格式拒絕，改為只檢查卡片檔後通過。過程曾發生 card-command 舊角色事件 id 比對失敗（新增可選來源欄位時將空值加入 hash）；已改成只有存在來源時才加入 hash，保留舊事件 id，未降低斷言。初次 typecheck 因尚未安裝依賴找不到 tsc，npm ci --ignore-scripts 後解除；未更動相依版本。
 
-未驗證／下一步：未部署、未重啟，執行中 bridge 未載入此原始碼；未做 Discord／Herdr／CLI 端到端驗收。Lead 應在重啟後驗證卡片指定、拒絕原因顯示及通知、實際 Lead 身分與選擇來源、啟動失敗不換候選；agy／pi 仍須累積 ISSUE-130 的真實 coding 證據。舊任務與訊息不補送。無 commit／push／merge。
+使用者決定（2026-11-09）：沒有 `lead:` 的卡取清單第一個，**維持不輪流**；清單其餘種類只是允許被卡片指定的名單。
+
+部署：PR #189（`88e1ce6`）已 merge，2026-11-09 重啟 bridge 載入（build 成功、Gateway 連線、`card policy` 顯示政策載入正常）；`policy.yml` 仍是單一值 `autopick_lead: claude`，所以實際撿卡行為沒變。
+
+未驗證／下一步：未做 Discord／Herdr／CLI 端到端驗收。Lead 應在重啟後驗證卡片指定、拒絕原因顯示及通知、實際 Lead 身分與選擇來源、啟動失敗不換候選；agy／pi 仍須累積 ISSUE-130 的真實 coding 證據。舊任務與訊息不補送。無 commit／push／merge。
 
 ## ISSUE-130：自動撿卡的 Lead 只支援 claude、codex，agy、pi 無法選用（REQ-20261109-autopick-four-leads）
 

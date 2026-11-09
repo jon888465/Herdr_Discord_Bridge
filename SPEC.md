@@ -788,8 +788,8 @@ Autopick 建立 Lead workspace 後、啟動 Agent 前，把 id 與實際 label �
 
 `autopick_lead: claude, codex` 解析為有序候選清單；候選前後空白可省略，重複、空項與非法值沿用政策無效的安全拒絕，不撿任何卡。單一值舊政策相容，省略預設 claude。卡片選填 `lead: claude|codex|agy|pi`，只接受一個值，parser／serializer 與 `scripts/herdr-card-check` 共用驗證；非法值 FAIL 並 WARN。
 
-自動撿卡先核對專案明確列入 autopick 及 projects，再選卡片指定的 Lead，無指定取政策清單第一個。指定值必須在清單內；agy／pi 的 implementation 開放條件同樣套用。指定不得增加專案授權、提升等級或繞過開放條件。拒絕不撿、不換候選，卡片維持 ready，寫入既有 `failed`／`autopick_stopped` 事件（每程序依卡片＋原因去重），card show 可見，有 notify 的卡沿用既有通知；寫盤或通知故障仍有既有可靠性限制，歷史事件不補送。
+自動撿卡先核對專案明確列入 autopick 及 projects，再選卡片指定的 Lead，無指定取政策清單第一個。**不輪流：**沒有 `lead:` 的卡一律取清單第一個（使用者 2026-11-09 確認維持這樣，不改成輪流或依可用性換人）；清單其餘的種類只是「允許被卡片指定」的名單，不會依序分配給後面的卡。指定值必須在清單內；agy／pi 的 implementation 開放條件同樣套用。指定不得增加專案授權、提升等級或繞過開放條件。拒絕不撿、不換候選，卡片維持 ready，寫入既有 `failed`／`autopick_stopped` 事件（每程序依卡片＋原因去重），card show 可見，有 notify 的卡沿用既有通知；寫盤或通知故障仍有既有可靠性限制，歷史事件不補送。
 
 一次仍只開一個 Lead、只做一張卡。選定 Lead 啟動失敗就記 autopick_failed，絕不嘗試下一個候選；尚未建立任務的卡仍是 ready，本程序不重試。Task 的 ISSUE-127 `role_assigned` 保留實際 agent 種類，Lead 額外記 `leadSelection=card|policy`，來源在撿卡時凍結，不在執行途中重讀政策推測；手動 card assign 仍使用目前路由的 Lead，不套用此欄位，舊事件不補寫。
 
-原始碼與自動化檢查完成不代表執行中 bridge 已更新；本輪未部署／重啟，Discord／Herdr／CLI 實機驗收待辦，尤其 agy／pi 的 coding 證據要求不變。
+PR #189（`88e1ce6`）已於 2026-11-09 merge，並重啟 bridge 載入（`card policy` 顯示政策載入正常）；Discord／Herdr／CLI 實機驗收仍待辦，尤其 agy／pi 的 coding 證據要求不變。
