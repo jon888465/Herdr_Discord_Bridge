@@ -162,3 +162,13 @@
 ## 原始規格稿中刻意不做的項目
 
 最初的對話式多機器編排規格稿（Conversation Engine、Requirement Engine、HTTP API、Web UI、Machine Scheduler、SQLite schema）**不在本計畫內**：卡片改為 md 檔、營運卡片放 plugin 狀態目錄、先走 IPC 與 Discord／CLI，多機器沿用現有的 `machines` 設定（ISSUE-041）。若日後要重新評估，從 [REQ-20261030-card-to-merge](cards/REQ-20261030-card-to-merge.md) 的「非目標」開始。
+
+
+## 多種 Lead 第一階段（2026-11-09，ISSUE-130，待實機驗收）
+
+政策 `autopick_lead` 可明確選 claude、codex、agy、pi，且可列多個（逗號分隔，例如 `claude, codex`；不可重複），預設仍為 claude；未知值拒絕。清單第一個是預設 Lead，卡片可用 `lead:` 欄位指定清單內的種類；卡片指定清單以外的種類時 bridge 不撿這張卡並在 console 記一次拒絕原因，不會改用別的 Lead，卡片也不能繞過政策檔的專案選用與等級（一次仍只做一張卡）。agy／pi Lead 是明確選用，不表示其 Worker coding 能力已驗收；Worker 自動候選規則不變，analysis-only agy 與 pi 不自動入池。來源 Lead 啟動等待 working → idle／done，blocked 只跳過已知安全更新提示，信任／權限／登入仍需人處理；啟動失敗清理剛建立的來源 workspace。Lead 使用 CLI 預設設定，不繼承 Worker profile 的 model／args。
+
+ISSUE-129 cleanup 同時核對四種 Lead 的卡片持久化 id 與現況 label，沿用 `autopick-<kind>-<id>`、60 字元上限、in_progress 保留與不依名稱搜尋；notify 維持原來源。此輪不改實際 policy／config，不部署或重啟。agy／pi Lead 的多輪 --coding、長 JSON 回讀、Discord 端到端與新增種類的實機 cleanup 尚未驗收；已知 session 更新、hook fallback、非 codex terminal JSON unwrap 缺口與後續驗收見 docs/known-issues.md 的 ISSUE-130（docs 目錄內見 known-issues.md）。
+
+
+目前限制：來源 Lead workspace 與 `card assign --worktree` 的第二次 Lead 啟動都會等 working → idle／done（2026-11-09 已補，待實機驗收）。多 Lead 清單、卡片 `lead:` 與四種 Lead 都只有單元測試證據，沒有任何 CLI 的端到端驗收；不能把政策解析或單元測試通過當作四種 autopick 端到端可用；細節與 2026-11-09 測試證據見 ISSUE-130。
