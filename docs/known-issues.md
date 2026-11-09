@@ -16,19 +16,21 @@
 
 ## ISSUE-134：claude 當 reviewer 時，回覆「不是單一 JSON 物件」，兩輪都 `inconclusive`，review 退回人工
 
-更新日期：2026-11-09。狀態：待調查（現象已實機觀察；根因未確認）。
+更新日期：2026-11-09。狀態：已修正、待驗收。
 
-**使用者可見症狀：**`REQ-20261109-lead-live-codex`（PR #191，head `a773038`，只改一個一行檔案）由 codex 當 Lead，bridge 依偏好開 claude 當 reviewer：第 1 輪 06:59:54Z 開始、07:00:00Z 回 `inconclusive`，第 2 輪 07:00:07Z 開始、07:00:13Z 回 `inconclusive`，原因都是「reviewer 的回覆不是單一 JSON 物件」，沒有任何發現。同一個 head 連續 2 次 `inconclusive`，bridge 依規則退回人工，loop 停下。
+**使用者可見症狀／重現環境：**2026-11-09，本機 macOS、bridge main `88e1ce6`，卡片 `REQ-20261109-lead-live-codex`（PR #191，head `a773038`）由 codex 當 Lead，新開 claude reviewer pane。第 1 輪 06:59:54Z–07:00:00Z、第 2 輪 07:00:07Z–07:00:13Z 都回 `inconclusive`，原因「reviewer 的回覆不是單一 JSON 物件」，loop 退回人工。原先因每輪約 6 秒而猜測未審查或格式不符；後續 session 證據已排除該猜測。
 
-**預期行為：**claude 當 reviewer 能回出合格的 review JSON，或失敗時有可查的原因。
+**預期行為：**card review／card fix 在 hookTransport 為 auto 時使用本回合完整 Stop 訊息框內的回覆；沒有訊息時保留終端畫面 fallback，parser 模式不查 hook。
 
-**重現／環境：**2026-11-09，本機 macOS，bridge 為 main `88e1ce6`；reviewer 是 claude（新開的 pane，用完即關）。每輪只花約 6 秒，所以 claude 很可能沒有真的審查就回了非 JSON 的內容；我看不到實際回覆（reviewer pane 已關閉，卡片的原因又被截斷，見 ISSUE-133）。
+**已確認根因與證據（2026-11-09）：**上述兩個 reviewer session 的最後訊息分別為 323 與 317 字元，是合格的 pass JSON，marker nonce 與 prompt 一致。`src/main.ts` 的 card fix 與 card review 的 runTurn 沒有把第 6 個 context 參數傳給 `runTeamTurn`，因此缺少 hookFinal，只能讀終端畫面。Claude Code 依 pane 寬度硬換行切斷 JSON（ISSUE-086），導致 parseReviewReply 失敗；TeamTaskEngine 原本有接 hookFinal。
 
-**已確認根因：**未確認。可能是回覆被截、格式不符、被提示擋住或 claude 的輸出格式與解析不合，這些都是猜測。追蹤清單原本就寫「Claude 當 reviewer 未實機驗證」，這是第一次實機結果。
+**修正範圍（2026-11-09）：**新增共用 `createTurnHookFinal` factory，TeamTaskEngine、card fix、card review 共用相同模式、session／pane 與 since 查詢邏輯。兩個 card runTurn 傳入 `{ hookFinal }`。TeamTurnContext 的 taskId／phase 選填，Debug context 省略缺少欄位，不印 undefined。parseReviewReply 與 codex rollout 路徑未改。假 port 測試以完整 framed review JSON 對照硬換行畫面，並覆蓋空 hook、parser 模式與缺少 taskId。
 
-**對照與暫行做法：**同一張卡改用 `card review REQ-20261109-lead-live-codex --agent codex`，第 3 輪 07:03:59Z `pass`（約 15 秒），之後手動 `card merge` 成功（`1448d51`）。同日 #189（`REQ-20261109-multi-lead-card-lead`）的 reviewer 是 codex，兩輪都有合格的結果；所以只有 claude 當 reviewer 失敗，但這只是這一張卡兩輪的觀察，不是已證實的結論。
+**測試（2026-11-09）：**首次 `npm run check` 因依賴未安裝、`tsc: command not found` 停止（0 個測試執行）；`npm ci` 成功後重跑，1617 tests、1615 pass、1 fail、1 skipped。失敗為新測試的假 Claude 畫面未含訊息圓點／續行縮排，parser 忽略畫面而逾時；已修正 fixture，沒有修改 parser 或驗收標準。最終 `npm run build && node --test dist/test/team-turn.test.js` 通過，18 tests、18 pass、0 fail、0 skipped。最終 `npm run check` 通過（exit 0；typecheck、build 成功；1617 tests、1616 pass、0 fail、1 skipped，71220.75925 ms）。`git diff --check` 通過。
 
-**修正範圍：**無（只記錄）。**未驗證／下一步：**重現並保存 reviewer 的原始回覆（要有辦法在 pane 關閉前記錄，或失敗時保留 pane）；是否與 reviewer 的提示、claude 的啟動提示或版本有關；claude 當 reviewer 在其他卡是否同樣失敗。
+**對照與暫行做法：**同卡改用 codex reviewer 第 3 輪於 07:03:59Z pass，之後人工 merge `1448d51`；此為修正前的對照，不能當作本修正驗收。
+
+**未驗證／下一步：**沒有實機驗證 claude 當 reviewer（本修正後尚未驗證）；也尚未驗證真實 card fix。只完成原始碼與自動化驗證，未部署、未重啟執行中的 bridge，舊回覆不會補送；待 Lead 安排重啟與 Discord／Herdr／Claude 端到端驗收，不宣稱已驗收。
 
 ## ISSUE-133：`autopick_stopped` 的原因只留 loop 輸出的前 200 字，真正的停止原因被截掉，通知因此誤導
 

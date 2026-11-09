@@ -101,6 +101,7 @@ import {
 } from "./response-stream.js";
 import { AgentPool } from "./agent-pool.js";
 import { runTeamTurn } from "./team-turn.js";
+import { createTurnHookFinal } from "./turn-hook-final.js";
 import {
   configDirectory,
   loadConfig,
@@ -263,15 +264,7 @@ async function startBridge(
     (owner) => pool.release(owner),
     config.allowedWorkspaceIds,
     undefined,
-    (agent, since) => {
-      if (hookModeFor(config.hookTransport, agent.agent) !== "auto") return;
-      const session = agent.agent_session as
-        { kind?: string; value?: string } | undefined;
-      const event = session
-        ? hookEvents.stopSince(session.value, since)
-        : hookEvents.stopForPane(agent.pane_id, since);
-      return event?.message;
-    },
+    createTurnHookFinal(config.hookTransport, hookEvents),
   );
   await tasks.reconcile();
   const handoffs = new SessionHandoffRuntime(
@@ -809,6 +802,12 @@ export async function handleCommand(
                     runtime.herdr,
                     timeoutMs,
                     runtime.config.outputLines,
+                    {
+                      hookFinal: createTurnHookFinal(
+                        runtime.config.hookTransport,
+                        hookEvents,
+                      ),
+                    },
                   );
                   return { state: turn.state, text: turn.text };
                 },
@@ -848,6 +847,12 @@ export async function handleCommand(
                     runtime.herdr,
                     timeoutMs,
                     runtime.config.outputLines,
+                    {
+                      hookFinal: createTurnHookFinal(
+                        runtime.config.hookTransport,
+                        hookEvents,
+                      ),
+                    },
                   );
                   return { state: turn.state, text: turn.text };
                 },
