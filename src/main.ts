@@ -46,7 +46,7 @@ import {
 } from "./agent-launch.js";
 import { CardStore } from "./card-store.js";
 import { LEDGER_MAX_FILE_BYTES } from "./card.js";
-import { recordCleanupOnCard } from "./card-cleanup.js";
+import { closeAutopickLead, recordCleanupOnCard } from "./card-cleanup.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { missingCardMessage, syncCards, taskSourceFrom } from "./card-sync.js";
@@ -963,8 +963,8 @@ export async function handleCommand(
             card.id,
           );
         },
-        cleanupWorktree: (cardId) =>
-          cleanupCardWorktree(
+        cleanupWorktree: async (cardId) => {
+          const result = await cleanupCardWorktree(
             {
               port: runtime.herdr,
               worktrees: lazyCardWorktrees(),
@@ -973,7 +973,17 @@ export async function handleCommand(
               now: nowSeconds,
             },
             cardId,
-          ),
+          );
+          await closeAutopickLead(
+            new CardStore(join(stateDirectory(), "cards"), {
+              maxFileBytes: LEDGER_MAX_FILE_BYTES,
+            }),
+            cardId,
+            runtime.herdr,
+            result.removed,
+          );
+          return result;
+        },
         taskInfo: (taskId) => {
           try {
             const task = runtime.tasks?.store.get(taskId);
@@ -2475,6 +2485,7 @@ function startPullRequestSync(
     const cards = existsSync(rootDir)
       ? new CardStore(rootDir, { maxFileBytes: LEDGER_MAX_FILE_BYTES })
       : undefined;
+    await closeAutopickLead(cards, pr.cardId, herdr, result.removed);
     const recording = recordCleanupOnCard(cards, pr.cardId, result, nowSeconds);
     const note = recording.logError ?? recording.projectError;
     const suffix = note ? `\n⚠️ 卡片記錄失敗：${note}` : "";
@@ -2723,6 +2734,13 @@ function startAutopick(runtime: Runtime): () => void {
     steps: createAutopickSteps({
       port: runtime.herdr,
       command,
+      recordLeadWorkspace: (id, workspaceId, label) => {
+        const result = new CardStore(rootDir, {
+          maxFileBytes: LEDGER_MAX_FILE_BYTES,
+        }).recordAutopickWorkspace(id, workspaceId, label);
+        if (!result.ok)
+          throw new Error(`Lead workspace 記錄失敗：${result.error}`);
+      },
       taskIdForCard: (cardId) =>
         lazyCardAssignments().forCard(cardId).at(-1)?.taskId,
       taskState: (taskId) => {
@@ -2750,7 +2768,24 @@ function startAutopick(runtime: Runtime): () => void {
     onReport: report,
     onError: (error) => console.error(`自動撿卡失敗：${safeError(error)}`),
   });
-  const timer = setInterval(() => void picker.tick(), AUTOPICK_INTERVAL_MS);
+  let sweeping = false;
+  const sweep = async () => {
+    if (sweeping || picker.busy) return;
+    sweeping = true;
+    try {
+      const cards = new CardStore(rootDir, {
+        maxFileBytes: LEDGER_MAX_FILE_BYTES,
+      });
+      for (const { card } of cards.list().cards)
+        await closeAutopickLead(cards, card.id, runtime.herdr);
+      await picker.tick();
+    } catch {
+      console.warn("autopick Lead cleanup: card scan failed");
+    } finally {
+      sweeping = false;
+    }
+  };
+  const timer = setInterval(() => void sweep(), AUTOPICK_INTERVAL_MS);
   timer.unref();
   return () => clearInterval(timer);
 }

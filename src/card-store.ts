@@ -343,6 +343,18 @@ export class CardStore {
     return failure("conflict", `card ${id} kept changing`);
   }
 
+  recordAutopickWorkspace(
+    id: string,
+    workspaceId: string,
+    label: string,
+  ): UpdateResult {
+    return this.mutate(id, (card) => ({
+      ...card,
+      autopick_workspace_id: workspaceId,
+      autopick_workspace_label: label,
+    }));
+  }
+
   /** bridge 專用：只改 status 與 updated；只允許 ready → in_progress → done。 */
   setStatus(id: string, status: string, today: string): UpdateResult {
     if (!Object.hasOwn(BRIDGE_STATUS_FROM, status))
