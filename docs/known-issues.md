@@ -55,6 +55,8 @@
 
 **已知限制（2026-11-09，第 5 輪 review F4，使用者決定不在本 PR 處理）：**`relayRecoveredStreams` 查詢 Herdr 拋錯（暫時故障）時該筆直接結束，沒有重試；之後只有 bridge 啟動或別的 Stop 事件才會再觸發補送，所以若那是唯一的最後 Stop 又恰逢查詢故障，pending 回覆不會送出。第 5 輪 review 對 7 項驗收條件皆為通過，F2、F3 已不再被提出。下一步：另開卡為補送加有限次、可注入計時的重試與「無後續 Stop」測試。
 
+**實機結果（2026-11-09，本機，bridge 以 main `367b552`〔含 #170〕重啟後）：**使用者從 Discord 對 `w1:p1` 傳「跑 sleep 60 然後回答 ok」，進度訊息出現後重啟 bridge。console 記 `Resuming stream terminal=… pane=w1:p1`（一般續傳，進度訊息抓得到），回答送出後收到 `hook Stop`、`active-streams.json` 清空，沒有 `Stream not resumed`／`not recovered`；使用者確認 Discord 收到最後回覆、只有一則。這筆紀錄由舊 bridge 寫入、沒有 `sessionKey`，也順帶走過舊版紀錄路徑。**尚未實機驗證：**ISSUE-126 原本的失敗情境（重啟時進度訊息抓不到，走「bridge 重啟後補送」）沒有被製造出來，補送路徑、重試用盡與 session 轉移仍只有假 port 測試；實際 `fetchMessage` 當時的回傳也仍未確認。因此維持「已修正、待驗收」，不標已驗收。下一步：製造進度訊息抓不到的情境（例如回合中刪掉進度訊息再重啟）驗補送路徑。
+
 **限制／下一步：**尚未實機驗證 Discord／Herdr；原始碼與 build 已完成，執行中的 bridge 未部署、未重啟，交 Lead 安排實機重啟續傳／補送驗收。送前認領後若當機或補送失敗（含部分送出），為避免重複不自動再送；寫盤失敗不送。紀錄沿用 24 小時有效期，新回合取代同 terminal 的舊紀錄。bridge 停機期間未收到的 hook 不會憑空恢復；舊版本已刪除的記錄與既有遺失訊息無法追溯補送。未 commit、未 push，未連真實 Discord／GitHub，未執行 herdr 指令。
 
 ## ISSUE-125：codex Worker 反覆停在 `npm test` 的權限提示逾時失敗，改為 helper 暫時最大權限（需提醒：目前仍在 VM）
