@@ -1,5 +1,23 @@
 # Known Issues
 
+## ISSUE-136：卡片通知在對象的 Agent 顯示忙碌時排隊，之後沒有送出（`REQ-20261109-agy-lead-live`）
+
+更新日期：2026-11-09。狀態：待調查（現象已觀察；根因未確認；沒有修正）。
+
+**使用者可見症狀：**測試卡 `REQ-20261109-agy-lead-live` 的 4 筆通知（07:38:27Z、07:41:34Z、07:41:54Z、07:44:24Z）在卡片流程紀錄都只有「Agent 忙碌，通知排隊」，到 07:47:53Z 沒有任何「Agent 通知已送出」，`notify` 對象（Claude Code pane `w5D:p1`）在這段時間沒有收到通知，直到我主動查詢才知道這張卡已經 merge。
+
+**預期行為：**排隊的通知在對象 Agent 閒置後送出。
+
+**對照：**同日其他卡都有送出：`REQ-20261109-claude-reviewer-live` 排隊 0、送出 5；`REQ-20261109-reviewer-hook-final` 排隊 0、送出 4；`REQ-20261109-lead-live-codex` 排隊 5、送出 9（排隊的後來有送出）。
+
+**重現／環境：**2026-11-09，本機 macOS，bridge 為 main `ae356aa` 之後重啟的程序；通知目標 `agent:w5D:p1:…:claude`。
+
+**已確認根因：**未確認。那段時間 `w5D:p1` 的實際狀態我沒有保存；可能是該 pane 被判定為 working 太久，也可能是排隊重送的機制有問題，這些都只是猜測。我也不確定之後有沒有補送（到 07:47:53Z 為止沒有）。
+
+**影響：**使用者依賴通知得知進度時，這張卡的進度完全沒有通知，卡片本身的紀錄仍完整。
+
+**修正範圍：**無（只記錄）。**未驗證／下一步：**重現（讓目標 Agent 長時間顯示 working）、讀 `src/card-notify.ts` 的排隊與重送邏輯、確認排隊通知是否會逾時被丟棄。
+
 ## ISSUE-135：卡片事件通知的標題把「Lead 不在候選清單」說成「專案政策未滿足」
 
 更新日期：2026-11-09。狀態：待調查（現象已實機觀察；根因尚未讀碼確認；沒有修正）。
@@ -83,7 +101,7 @@
 
 ## ISSUE-130：自動撿卡的 Lead 只支援 claude、codex，agy、pi 無法選用（REQ-20261109-autopick-four-leads）
 
-更新日期：2026-11-09。狀態：已修正、待驗收（codex 當 Lead 已於 2026-11-09 實機驗收，見「實機驗收」；agy、pi 與開放條件的實際撿卡沒驗）。
+更新日期：2026-11-09。狀態：已修正、待驗收（codex 與 agy 當 Lead 已於 2026-11-09 各實機走完一張極簡卡，見「實機驗收」；pi、開放條件擋住的情境、複雜任務沒驗）。
 
 症狀／預期：`autopick_lead` 只接受 claude、codex；Lead 啟動後先是 working 時（codex）會被立刻判為沒就緒。預期四種都能明確選用，agy、pi 要先通過開放條件，Lead 要等到就緒。已確認根因（讀碼）：政策與 ISSUE-129 收尾的白名單只有兩種，autopick 只檢查 `agent.start` 回傳當下的狀態，`prepareCardWorktree` 也只認 idle。
 
@@ -95,9 +113,11 @@ code-review（high，2026-11-09，只當參考，不是 bridge 的 review）：9
 
 實機驗收（2026-11-09，本機 macOS，bridge 為 main `88e1ce6`（#189）merge 後重啟的程序；`policy.yml` 暫時設為 `autopick_lead: claude, codex`（備份 `policy.yml.bak-live-20261109`，驗收後已改回單一值 `claude`），`config.json` 沒改）：測試卡 `REQ-20261109-lead-live-codex`（`lead: codex`，改一個 `docs/card-runs/` 檔案）由 codex 當 Lead 走完：06:54:39Z 撿起，Lead workspace `w5J`（`autopick-codex-<卡片 id>`）與卡片 worktree `w5K`，06:54:50Z task 開始，06:59:31Z `completed`，06:59:40Z commit `a773038`，06:59:47Z 開 PR #191，CI 兩平台綠，squash merge `1448d51`，07:04:40Z 記 `merged` 與 `cleanup_done`，worktree 與 `w5J` 都已關閉。這證明 codex 當 Lead 時，來源 Lead 啟動與 worktree 第二次 Lead 啟動都沒有被「沒就緒」拒絕（我沒有直接觀察到 working 狀態，只看到 `w5J` 閒置、`w5K` 為 unknown 後流程正常往下走），label 與收尾清理在真實 bridge 上有效。**過程中不是全自動：**claude 當 reviewer 兩輪 `inconclusive`（見 ISSUE-134），loop 退回人工；我用 `card review --agent codex` 重試（第 3 輪 `pass`，07:03:59Z）並手動 `card merge`。**未驗：**agy、pi 的開放條件（宣告前不撿、宣告後撿）與當 Lead、claude 當 reviewer。
 
+agy 實機驗收（2026-11-09，本機 macOS，bridge 為 main `ae356aa` 之後重啟的程序，`policy.yml` 為 `autopick_lead: claude, codex, agy`（使用者決定驗證後保留 agy，備份 `policy.yml.bak-agy-live-20261109` 是加入 agy 之前的版本），`config.json` 沒改（agy profile 本來就宣告 `implementation`））：測試卡 `REQ-20261109-agy-lead-live`（`lead: agy`，新增 `docs/card-runs/` 一個一行檔案）：07:38:22Z 撿起，Lead workspace `w5R`（`autopick-agy-<卡片 id>`）；07:38:33Z `role_assigned` 為 `lead：agy；…；leadSelection=card`，task journal 的 Lead 種類也是 agy；agy 規劃的計畫被 bridge 解析成功（`impl-1` codex 實作、`rev-1` codex review、`ver-1` claude 驗證，全部完成，Team 問題數 0，32 個事件）；07:40:29Z task `completed`；07:41:24Z commit `f64aeb4`；07:41:32Z 開 PR #196（只改一個檔案，內容 `ok`）；07:41:50Z reviewer（codex）第 1 輪 `pass`；07:44:04Z bridge 自動 squash merge `9875e8f`；07:44:24Z `cleanup_done`，worktree、agy 信任項目與 Lead workspace 都已移除；全程沒有手動介入，來源 Lead 啟動沒有停在信任提示。**這個結果能證明的有限：**只有一次、最簡單的任務；agy 只需要產出一個小計畫，沒有檢驗多輪、長 JSON、review 退回修正或 agy 當 reviewer 的情境；來源資料夾沒有被信任提示擋住的原因沒查（可能是先前已被信任，`agyTrustedDirectories` 只列 `/Users/jon/git_wk` 且不含子目錄）；ISSUE-130 記的幾個讀碼缺口（session 回寫、hook fallback、非 codex 長 JSON）這次沒有發作，但沒有被證明不存在；pi 完全沒涵蓋。
+
 過程：本議題原在 REQ-20261109-codex-lead-agy（PR #185、#186，含多個 Lead、卡片指定），3 次 `card review` 用完仍 `changes_requested`，範圍縮小後改由 REQ-20261109-autopick-four-leads 重做；多 Lead 清單、卡片 `lead:`、Lead 選擇依據的紀錄、`card assign` 指定 Lead 都延後，另開卡。
 
-未驗證／已知缺口：四種 CLI 當 Lead 的真實啟動；agy、pi 從未當過 Lead，pi 連 Worker 的 coding 證據都沒有（規劃與階段見 `docs/multi-lead-plan.md`）。讀碼確認、尚未重現：`runTeamTask` 沒把第 0 輪新登記的 session 回寫 `input.lead`；`hookFinal` 有 session 時無結果不 fallback `stopForPane`；非 codex 的 terminal fallback 沒有 JSON 硬換行 unwrap。未部署、未重啟；原始碼與 build 不等於執行中 bridge，舊任務不補送。
+未驗證／已知缺口：pi 當 Lead 的真實啟動；agy 只有一次極簡卡的證據（見上方 agy 實機驗收）、pi 連 Worker 的 coding 證據都沒有（規劃與階段見 `docs/multi-lead-plan.md`）。讀碼確認、尚未重現：`runTeamTask` 沒把第 0 輪新登記的 session 回寫 `input.lead`；`hookFinal` 有 session 時無結果不 fallback `stopForPane`；非 codex 的 terminal fallback 沒有 JSON 硬換行 unwrap。未部署、未重啟；原始碼與 build 不等於執行中 bridge，舊任務不補送。
 
 ## ISSUE-129：卡片結束後留下 autopick Lead workspace（REQ-20261109-autopick-lead-cleanup）
 
