@@ -156,9 +156,14 @@ export async function runTeamTurn(
     new Error(
       `Waited ${(clock.now() - retryStarted) / 1000} seconds for Agent ${agent.pane_id}; first prompt was not delivered: ${lastNotReady!.message}`,
     );
+  const expiredBeforeDispatch = () =>
+    new Error(
+      `Turn budget for Agent ${agent.pane_id} was used up before the first prompt was dispatched; nothing was sent`,
+    );
   for (;;) {
     check();
     if (lastNotReady && clock.now() >= retryDeadline) throw exhausted();
+    if (clock.now() >= deadline) throw expiredBeforeDispatch();
     try {
       promptSettled = herdr.promptAgentAndWait
         ? await herdr.promptAgentAndWait(

@@ -18,6 +18,8 @@
 
 **Review 修正（retry-deadline-1，P2，2026-11-09）：**重新開啟後修正完成，狀態維持「已修正、待驗收」。reviewer 發現原 marker 觀察期限在 atomic prompt 返回後重新起算，只扣除 dispatch 前的 retryElapsed，未扣除 atomic wait；原先「受回合上限限制」的驗證不完整。reviewer 的唯讀重現為 120 ms 上限、30 ms 重試等待、接著 stalled 且無 marker，總耗時 212 ms。修正為回合進入時計算一次固定 deadline；重試、atomic wait、後續 waitAgent／marker 觀察及 hook grace 共用同一 clock 與剩餘預算，不在 stalled 後重設期限。ok／stalled 不重送、其他錯誤不重試、abort 與 beforeDispatch 一次的契約不變。新增兩個假 clock 回歸案例：30 ms 重試後 atomic 消耗 60 ms／90 ms，再 stalled 且無 marker；斷言總計恰 120 ms、observation 預算分別僅 30 ms／不再等待，兩次嘗試但僅一次 accepted。首次 npm run check 因新增 fake waitAgent 的可選 timeout 型別未縮窄而 typecheck 失敗（exit 2，測試未執行，0 pass／0 fail），補上 timeout 存在檢查後重跑 npm run check 通過（2026-11-09，exit 0）：typecheck／build 通過，1629 tests／1628 pass／0 fail／1 skipped；兩個 retry-deadline-1 假 clock 案例皆通過。git diff --check 通過（2026-11-09）。
 
+**Review 修正（round 1，F2，2026-11-09）：**reviewer 唯讀重現：100 ms 預算、baseline 耗時 120 ms 仍送出一次 prompt。修正為每次派送前（含第一次）檢查回合期限，用盡即失敗並說明「未送出」；新增假 clock 測試斷言 0 次派送。npm run check 通過（2026-11-09，exit 0）：1630 tests／1629 pass／0 fail／1 skipped。F1（兩個請求來源）仍需現場 journal，未能取得，維持未確認。
+
 **未驗證／下一步：**沒有實機驗證 pi 當 Lead；Lead 需取得原 task journal／完整 request log，確認兩次請求來源與 Herdr 拒收契約，部署／重啟後重跑原卡。原始碼修正不等同 Discord／Herdr／CLI 端到端成功；執行中的 bridge 未部署、未重啟，舊失敗 prompt／訊息不補送。本輪不 commit、不 push、不使用 GitHub。
 
 ## ISSUE-136：卡片通知在對象的 Agent 顯示忙碌時排隊，延遲很久才送出（`REQ-20261109-agy-lead-live`）

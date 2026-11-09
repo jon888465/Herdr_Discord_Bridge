@@ -479,6 +479,26 @@ for (const timeoutMs of [1200, 5000]) {
   });
 }
 
+test("ISSUE-137 never dispatches when setup already used the turn budget", async () => {
+  const clock = retryClock();
+  const port = fakePort([base]);
+  const read = port.readAgent;
+  port.readAgent = async (...args) => {
+    clock.now = () => 120;
+    return read(...args);
+  };
+  let calls = 0;
+  port.promptAgentAndWait = async () => {
+    calls++;
+    return base;
+  };
+  await assert.rejects(
+    runTeamTurn(base, "plan", port, 100, 20, { promptRetry: { clock } }),
+    /used up before the first prompt was dispatched; nothing was sent/,
+  );
+  assert.equal(calls, 0);
+});
+
 for (const outcome of ["ok", "undefined", "stalled"]) {
   test(`ISSUE-137 ${outcome} is never resent`, async () => {
     const port = fakePort([base]);
