@@ -19,9 +19,14 @@
 - `.3627` 請求 B 回 error（`agent_not_ready`）；`.363`、`.377` journal 兩筆 `task_failed`。
 - `.4157` 請求 A 才回 `ok`，此時 task 已失敗。
 
-**已確認：**請求 B 是 Team 引擎的規劃 prompt（`runTeamTurn` 在送出 prompt 之前才呼叫 `beforeDispatch` 記 `turn_dispatched`，B 在其後 20 ms）；task 的失敗由 B 的 error 造成（error 回來與 `task_failed` 相差約 1 ms）。請求 A 早於 `turn_dispatched` 119 ms，不在 `runTeamTurn` 的送出順序裡，是**另一個程式路徑**送的。pi 的 session 資料夾當時是空的、畫面沒有對話，所以兩個請求都沒有真的把 prompt 送進 pi（A 回 `ok` 的原因不明）。
+**直接觀察到的（只有時序與方法）：**上面時間對照裡的每一個時間與結果，都來自 journal 與 Herdr 日誌；請求 A、B 都是同一個 pane 的 `agent.prompt`；A 早於 journal 的 `turn_dispatched` 119 ms，B 晚於它 20 ms；B 的 error 與第一筆 `task_failed` 相差約 1 ms。
 
-**未確認：**請求 A 由哪個函式送出，讀碼無法指認（`dispatchPrompt` 的六個呼叫者、`console-agent`、通知路徑都不在 `card assign --worktree --coding` 的明顯流程裡）。為了下一次能直接指認，本 PR 在 `HerdrClient` 每次送 `agent.prompt` 時印一行 console 紀錄（`agent.prompt <prompt|prompt+wait|send-fallback> target=… chars=… ts=<毫秒> via=<呼叫位置>`，不含 prompt 內容；`ts` 可對 Herdr 日誌請求 id 裡的毫秒），重測 pi 當 Lead 時就能在 bridge console 對出 A。
+**推論（沒有直接證據，審查指出 2026-11-09）：**
+- B 是這個 turn 的規劃 prompt：依據是 `runTeamTurn` 在送 prompt 之前才呼叫 `beforeDispatch`（讀碼）加上 B 緊接在 `turn_dispatched` 之後、其 error 與 `task_failed` 幾乎同時；但日誌沒有「請求 id 對應哪個 turn」的欄位，所以不能直接確認。
+- A 是「另一個程式路徑」：只因為它早於 `turn_dispatched`，而 `runTeamTurn` 的送出在其後；也可能是 journal 事件寫入與請求送出的相對順序和我的理解不同。
+- 兩個請求都沒有把 prompt 送進 pi：依據是 pi 的 session 資料夾當時是空的、畫面沒有對話；這**不足以證明** A（回 `ok`）沒有送達，可能是 pi 當時還沒寫 session 檔、畫面也還沒重繪。A 回 `ok` 的原因不明。
+
+**未確認（驗收條件 1 在這個 PR 無法完成，審查第 3 輪 F4 指出）：**請求 A 由哪個函式送出，讀碼無法指認（`dispatchPrompt` 的六個呼叫者、`console-agent`、通知路徑都不在 `card assign --worktree --coding` 的明顯流程裡）。為了下一次能直接指認，本 PR 在 `HerdrClient` 每次送 `agent.prompt` 時印一行 console 紀錄（`agent.prompt <prompt|prompt+wait|send-fallback> target=… chars=… ts=<毫秒> via=<呼叫位置>`，不含 prompt 內容；`ts` 可對 Herdr 日誌請求 id 裡的毫秒），重測 pi 當 Lead 時就能在 bridge console 對出 A。
 
 **修正範圍：**僅 runTeamTurn 首次派送，在 baseline 與 beforeDispatch 之後有界迴圈，turn_dispatched 一次；重用 agent-start.ts 已匯出的 Clock（該檔無須修改），context 可注入 clock、timeout、interval，預設 15 秒／500 ms。僅重試 HerdrError agent_not_ready，睡眠與 atomic wait 受 turn 剩餘時間約束，每次重試檢查 abort，睡眠可取消。ok（含 undefined）停止，stalled 沿用 marker，其他錯誤原樣丟出。HerdrClient、其他 prompt 呼叫端與 Agent kinds 不變。同步 SPEC 與 CONTEXT。
 
@@ -30,6 +35,8 @@
 **Review 修正（retry-deadline-1，P2，2026-11-09）：**重新開啟後修正完成，狀態維持「已修正、待驗收」。reviewer 發現原 marker 觀察期限在 atomic prompt 返回後重新起算，只扣除 dispatch 前的 retryElapsed，未扣除 atomic wait；原先「受回合上限限制」的驗證不完整。reviewer 的唯讀重現為 120 ms 上限、30 ms 重試等待、接著 stalled 且無 marker，總耗時 212 ms。修正為回合進入時計算一次固定 deadline；重試、atomic wait、後續 waitAgent／marker 觀察及 hook grace 共用同一 clock 與剩餘預算，不在 stalled 後重設期限。ok／stalled 不重送、其他錯誤不重試、abort 與 beforeDispatch 一次的契約不變。新增兩個假 clock 回歸案例：30 ms 重試後 atomic 消耗 60 ms／90 ms，再 stalled 且無 marker；斷言總計恰 120 ms、observation 預算分別僅 30 ms／不再等待，兩次嘗試但僅一次 accepted。首次 npm run check 因新增 fake waitAgent 的可選 timeout 型別未縮窄而 typecheck 失敗（exit 2，測試未執行，0 pass／0 fail），補上 timeout 存在檢查後重跑 npm run check 通過（2026-11-09，exit 0）：typecheck／build 通過，1629 tests／1628 pass／0 fail／1 skipped；兩個 retry-deadline-1 假 clock 案例皆通過。git diff --check 通過（2026-11-09）。
 
 **Review 修正（round 1，F2，2026-11-09）：**reviewer 唯讀重現：100 ms 預算、baseline 耗時 120 ms 仍送出一次 prompt。修正為每次派送前（含第一次）檢查回合期限，用盡即失敗並說明「未送出」；新增假 clock 測試斷言 0 次派送。npm run check 通過（2026-11-09，exit 0）：1630 tests／1629 pass／0 fail／1 skipped。F1（兩個請求來源）當時未取得 journal；之後由 Agent 取得並補在上方「兩個 agent.prompt 請求來源」段（部分確認：B 是引擎、A 未指認）。
+
+**最新完整檢查（2026-11-09，本機，對 head `95e9794` 的程式內容；之後只改文件）：**`npm run check` 通過（exit 0）：typecheck／build 通過，1631 tests／1630 pass／0 fail／1 skipped（既有略過）；`npm run lint` 通過（193 TypeScript files）；`git diff --check` 通過。新增的 `test/herdr.test.ts` 追蹤紀錄案例（每個請求一行、含呼叫函式名稱、不含 prompt 內容）通過。上方較早的 1627、1629、1630 是歷次修正當時的數字，不是最新結果。
 
 **更正（2026-11-09，Agent）：**下一段 round 2 說「搜尋 … 沒有任何檔案含 w5V:p1」是因為搜錯目錄（見上方「兩個 agent.prompt 請求來源」段）。
 
