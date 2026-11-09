@@ -9,6 +9,7 @@
 // 由接線層（main.ts）決定怎麼開 Lead、怎麼下指令。
 
 import type { Card } from "./card.js";
+import type { CardEvent } from "./card-events.js";
 import {
   autopickFor,
   type AutopickLead,
@@ -23,6 +24,7 @@ export interface AutopickJob {
   repoPath: string;
   level: PolicyLevel;
   lead: AutopickLead;
+  leadSelection?: "card" | "policy";
 }
 
 /** 卡片宣告的專案：`projects`（bridge 寫入）優先，其次舊的 `project` 欄位。 */
@@ -50,8 +52,14 @@ export function pickNext(
   for (const card of ordered)
     for (const project of declaredProjects(card)) {
       const enabled = autopickFor(policy, project);
-      if (enabled && leadGate?.(enabled.lead) === undefined)
-        return { card, project, ...enabled };
+      if (enabled && !leadRejection(policy, card, leadGate))
+        return {
+          card,
+          project,
+          ...enabled,
+          lead: card.lead ?? enabled.lead,
+          leadSelection: card.lead ? "card" : "policy",
+        };
     }
   return undefined;
 }
@@ -65,15 +73,18 @@ export function leadRejection(
   card: Card,
   leadGate?: LeadGate,
 ): string | undefined {
-  if (card.status !== "ready" || !leadGate) return undefined;
+  if (card.status !== "ready") return undefined;
   const picked = declaredProjects(card)
     .map((project) => autopickFor(policy, project))
     .find((enabled) => enabled !== undefined);
   if (!picked) return undefined;
-  const closed = leadGate(picked.lead);
+  const selected = card.lead ?? picked.lead;
+  if (!(policy.autopickLead ?? ["claude"]).includes(selected))
+    return `Lead「${selected}」不在政策候選清單內，不撿這張卡`;
+  const closed = leadGate?.(selected);
   return closed === undefined
     ? undefined
-    : `Lead「${picked.lead}」尚未開放，不撿這張卡：${closed}；改完 config.json 後重啟 bridge`;
+    : `Lead「${selected}」尚未開放，不撿這張卡：${closed}；改完 config.json 後重啟 bridge`;
 }
 
 export type AutopickStep =
@@ -255,4 +266,9 @@ export function createAutopicker(deps: AutopickerDeps) {
       return running;
     },
   };
+}
+
+/** Shared visible rejection template; feeds card show and existing failed-event notifications. */
+export function leadRejectionEvent(reason: string, time: string, eventId: string): CardEvent {
+  return { event: "failed", code: "autopick_stopped", reason: reason.slice(0, 200), time, eventId };
 }

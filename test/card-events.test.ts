@@ -555,3 +555,22 @@ test("a profile model is recorded only when the bridge launched the session with
   // no profile (a directly named pane): unchanged
   assert.deepEqual(withProfileIdentity(agent, undefined, "unknown"), agent);
 });
+
+test("Lead role records card versus policy selection with the actual kind", () => {
+  for (const leadSelection of ["card", "policy"] as const) {
+    const result = buildLogEntry({
+      ...base,
+      event: "role_assigned",
+      role: "lead",
+      agent: "pi",
+      machine: "local",
+      taskId: "task-1",
+      leadSelection,
+    });
+    assert.ok(result.ok);
+    assert.match(
+      result.entry.text,
+      new RegExp(`lead：pi.*leadSelection=${leadSelection}`),
+    );
+  }
+});

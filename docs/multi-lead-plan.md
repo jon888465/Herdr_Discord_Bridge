@@ -7,12 +7,12 @@
 ## 範圍
 
 - **本卡做：**`autopick_lead` 接受 claude、codex、agy、pi（單一值）；agy、pi 的開放條件；Lead 啟動等待。
-- **本卡不做（另開卡）：**`autopick_lead` 多個與選擇規則；卡片指定 Lead；流程紀錄記 Lead 的選擇依據；`card assign` 指定 Lead。**`card assign` 目前沒有也不新增指定 Lead 的方式**，Lead 就是目前路由的 Agent（手動流程）或 `policy.yml` 的 `autopick_lead`（自動撿卡），兩者都不讀卡片欄位。
+- **原卡不做（後續 ISSUE-132 已完成原始碼，2026-11-09，尚未實機驗收）：**`autopick_lead` 多個與選擇規則；卡片指定 Lead；流程紀錄記 Lead 的選擇依據。**`card assign` 目前沒有也不新增指定 Lead 的方式**，Lead 就是目前路由的 Agent（手動流程）或 `policy.yml` 的 `autopick_lead`（自動撿卡），手動流程不讀卡片欄位；自動流程現依 SPEC 的多候選與卡片指定契約。
 - Lead 角色目前已有紀錄：流程紀錄的 `role_assigned` 事件會記 `lead：<種類>`（ISSUE-127），本卡沒有新增紀錄。
 
 ## 開放條件（使用者選擇，2026-11-09）
 
-Lead 是 agy 或 pi 時，`config.json` 的 `agentProfiles` 必須有**同種類**、且 `capabilities` 含 `implementation` 的 profile；否則 bridge 不撿這張卡，console 每張卡記一次原因，不改用別的 Lead。claude、codex 不需要。
+Lead 是 agy 或 pi 時，`config.json` 的 `agentProfiles` 必須有**同種類**、且 `capabilities` 含 `implementation` 的 profile；否則 bridge 不撿這張卡，卡片 failed／autopick_stopped 事件與 console 依卡片＋原因記一次原因，不改用別的 Lead。claude、codex 不需要。
 
 - 這是「使用者明確宣告該種類的 coding 已驗證」，與 Worker 自動入池（ISSUE-107）同一個機制；bridge 不判斷 CLI 是否可靠。
 - 所以要「通過檢查」，實際上是使用者在驗證後才在 profile 加上 `implementation`；下面的階段是在累積可以宣告的證據。

@@ -125,7 +125,7 @@ import {
   createConsoleContext,
 } from "./console.js";
 import { AUTOPICK_USER, createAutopickSteps } from "./autopick-wiring.js";
-import { createAutopicker, type AutopickReport } from "./autopick.js";
+import { leadRejectionEvent, createAutopicker, type AutopickReport } from "./autopick.js";
 import { ConsoleAgent } from "./console-agent.js";
 import {
   agentHeader,
@@ -1927,7 +1927,22 @@ async function startTeamTask(
           if (!owner) return;
           return new CardStore(join(stateDirectory(), "cards"), {
             maxFileBytes: LEDGER_MAX_FILE_BYTES,
-          }).recordEvent(owner, roleEvent(identity, nowSeconds()));
+          }).recordEvent(
+            owner,
+            roleEvent(
+              {
+                ...identity,
+                ...(identity.role === "lead" &&
+                autopickSelections.get(owner)?.agent === identity.agent
+                  ? {
+                      leadSelection:
+                        autopickSelections.get(owner)!.leadSelection,
+                    }
+                  : {}),
+              },
+              nowSeconds(),
+            ),
+          );
         }),
       acquireWorker: async (target) => {
         const acquired = target.pane_id.startsWith("profile:")
@@ -2697,6 +2712,11 @@ const AUTOPICK_INTERVAL_MS = 60 * 1000;
  * 自動撿卡的排程（ISSUE-096）：每分鐘看一次政策檔選用專案裡有沒有 ready 的卡，一次只做一張。
  * 以另一個使用者 id（`autopick`）的本機 console 身分執行 `card …` 指令，不動到使用者自己的 console 路由。
  */
+const autopickSelections = new Map<
+  string,
+  { agent: string; leadSelection: "card" | "policy" }
+>();
+
 function startAutopick(runtime: Runtime): () => void {
   const rootDir = join(stateDirectory(), "cards");
   let output: string[] = [];
@@ -2721,6 +2741,7 @@ function startAutopick(runtime: Runtime): () => void {
         : `${result.outcome === "stopped" ? "停下來等人" : "失敗"}，停在 ${result.lastStep}：${result.reason ?? ""}`
     }`;
     console.log(summary);
+    autopickSelections.delete(result.cardId);
     if (result.outcome === "reached") return;
     const logged = new CardStore(rootDir).recordEvent(result.cardId, {
       event: "failed",
@@ -2763,9 +2784,16 @@ function startAutopick(runtime: Runtime): () => void {
       now: () => Date.now(),
     }),
     leadGate: leadGateFor(runtime.config.agentProfiles ?? []),
-    onRejected: (card, reason) =>
-      console.warn(`自動撿卡 ${card.id}：${reason}`),
+    onRejected: (card, reason) => {
+      console.warn(`自動撿卡 ${card.id}：${reason}`);
+      const logged = new CardStore(rootDir).recordEvent(card.id, leadRejectionEvent(reason, nowSeconds(), `lead-rejected-${randomBytes(12).toString("hex")}`));
+      if (!logged.ok) console.error(`自動撿卡拒絕紀錄失敗（${card.id}）：${logged.error}`);
+    },
     onPicked: (job) => {
+      autopickSelections.set(job.card.id, {
+        agent: job.lead,
+        leadSelection: job.leadSelection ?? "policy",
+      });
       new CardStore(rootDir, { maxFileBytes: LEDGER_MAX_FILE_BYTES }).appendLog(
         job.card.id,
         [

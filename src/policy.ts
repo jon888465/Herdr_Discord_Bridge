@@ -15,7 +15,7 @@
 //     local:Herdr_Discord_Bridge: L1
 //
 // H2 自動撿卡（使用者 2026-11-05 決定）：政策檔明確選用才會有任何專案被自動撿卡——
-//   autopick_lead: claude          # 全域一個，claude、codex、agy 或 pi（預設 claude）；agy、pi 要先通過開放條件
+//   autopick_lead: claude          # 有序候選清單，claude、codex、agy 或 pi（預設 claude）；agy、pi 要先通過開放條件
 //   autopick:
 //     local:Herdr_Discord_Bridge: /path/to/Herdr_Discord_Bridge   # 專案 → repo 絕對路徑
 // 規則：autopick 的專案必須也明確列在 projects 裡（不能靠 default，避免寬鬆的 default 讓工作自己開始）；
@@ -39,8 +39,8 @@ export interface Policy {
   projects: Record<string, PolicyLevel>;
   /** 專案 → repo 絕對路徑；沒有 autopick 區塊時整個欄位不存在。 */
   autopick?: Record<string, string>;
-  /** 自動撿卡時 bridge 自己開的 Lead 種類；只有設定過才存在，預設 claude。 */
-  autopickLead?: AutopickLead;
+  /** 自動撿卡時 bridge 自己開的 Lead 種類；只有設定過才存在，預設 [claude]。 */
+  autopickLead?: AutopickLead[];
 }
 
 export const DEFAULT_POLICY: Policy = Object.freeze({
@@ -98,15 +98,19 @@ export function parsePolicy(text: string): ParsePolicyResult {
       seen.add(key);
       section = key === "projects" || key === "autopick" ? key : undefined;
       if (key === "autopick_lead") {
+        const candidates = value?.split(",").map((kind) => kind.trim());
         if (
-          value === undefined ||
-          !AUTOPICK_LEADS.some((kind) => kind === value)
+          !candidates?.length ||
+          new Set(candidates).size !== candidates.length ||
+          candidates.some(
+            (kind) => !AUTOPICK_LEADS.includes(kind as AutopickLead),
+          )
         )
           return fail(
             n,
             `invalid "autopick_lead"; use ${AUTOPICK_LEADS.join(", ")}`,
           );
-        policy.autopickLead = value as AutopickLead;
+        policy.autopickLead = candidates as AutopickLead[];
       } else if (key === "version") {
         if (value !== "1")
           return fail(n, 'unsupported version; only "version: 1" is known');
@@ -197,12 +201,16 @@ export function autopickFor(
   policy: Policy,
   projectName: string,
 ): { repoPath: string; level: PolicyLevel; lead: AutopickLead } | undefined {
-  if (!policy.autopick || !Object.hasOwn(policy.autopick, projectName))
+  if (
+    !policy.autopick ||
+    !Object.hasOwn(policy.autopick, projectName) ||
+    !Object.hasOwn(policy.projects, projectName)
+  )
     return undefined;
   return {
     repoPath: policy.autopick[projectName],
     level: levelFor(policy, projectName),
-    lead: policy.autopickLead ?? "claude",
+    lead: policy.autopickLead?.[0] ?? "claude",
   };
 }
 

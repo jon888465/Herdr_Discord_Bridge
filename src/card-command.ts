@@ -1226,7 +1226,7 @@ function showPolicy(args: string[], deps: CardCommandDeps): string {
   const picks = Object.entries(loaded.policy.autopick ?? {});
   if (picks.length) {
     lines.push(
-      `自動撿卡（Lead：${loaded.policy.autopickLead ?? "claude"}；一次一張；做到哪一步由專案等級決定）：`,
+      `自動撿卡（Lead：${loaded.policy.autopickLead?.join(", ") ?? "claude"}；一次一張；做到哪一步由專案等級決定）：`,
     );
     for (const [name, repoPath] of picks)
       lines.push(`- ${name} → ${repoPath}（${loaded.policy.projects[name]}）`);

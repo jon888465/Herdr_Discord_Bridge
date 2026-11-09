@@ -1,5 +1,19 @@
 # Known Issues
 
+## ISSUE-132：自動撿卡缺少多候選、卡片指定與 Lead 選擇來源
+
+更新日期：2026-11-09。狀態：已修正、待驗收。
+
+症狀／預期：延續 ISSUE-130，政策只能單一 Lead、卡片不能指定、角色帳本缺選擇依據，未開放時 Discord 看不到原因。預期有序候選、卡片指定優先且必須在政策清單內；無指定取首個，失敗不換候選，一次一張卡。
+
+重現／環境：2026-11-09 本機 worktree、假 Herdr port 與自動化測試，未操作 live bridge。已確認根因（讀碼）：policy 純量白名單、Card 無 lead 欄位、pickNext 只讀政策，onRejected 只有 console。
+
+修正範圍：policy 有序陣列解析、重複／空值拒絕；卡片 parser／serializer／check；選卡與專案明確等級守門；agy／pi 共用既有 leadGateFor；拒絕寫 failed/autopick_stopped（沿用 card show 與 notify）；任務 Lead role_assigned 記實際種類與凍結的 leadSelection=card|policy。手動 assign 不改 Lead，舊卡與單值政策行為相容，舊事件 id 不變。
+
+驗證（2026-11-09）：相關測試 `npm run build` 後 `node --test dist/test/autopick.test.js dist/test/card-check.test.js dist/test/card-events.test.js dist/test/policy.test.js`：101 項／101 pass／0 fail；`npm run lint` 通過（192 TypeScript files）。最終 `npm run check`（含 typecheck、build、完整測試）：1613 項／1612 pass／0 fail／1 skipped（既有略過），exit 0。`git diff --check` 通過。`scripts/herdr-card-check docs/card-examples/REQ-*.md docs/card-examples/TKT-*.md`：3 張範例卡通過（2026-11-09）；先前以 `*.md` 掃入非卡片 README 時得到預期格式拒絕，改為只檢查卡片檔後通過。過程曾發生 card-command 舊角色事件 id 比對失敗（新增可選來源欄位時將空值加入 hash）；已改成只有存在來源時才加入 hash，保留舊事件 id，未降低斷言。初次 typecheck 因尚未安裝依賴找不到 tsc，npm ci --ignore-scripts 後解除；未更動相依版本。
+
+未驗證／下一步：未部署、未重啟，執行中 bridge 未載入此原始碼；未做 Discord／Herdr／CLI 端到端驗收。Lead 應在重啟後驗證卡片指定、拒絕原因顯示及通知、實際 Lead 身分與選擇來源、啟動失敗不換候選；agy／pi 仍須累積 ISSUE-130 的真實 coding 證據。舊任務與訊息不補送。無 commit／push／merge。
+
 ## ISSUE-130：自動撿卡的 Lead 只支援 claude、codex，agy、pi 無法選用（REQ-20261109-autopick-four-leads）
 
 更新日期：2026-11-09。狀態：已修正、待驗收（僅單元測試，沒有任何 CLI 實機驗收）。
@@ -10,7 +24,7 @@
 
 驗證（2026-11-09，本機，假 Herdr port）：`npm run check` 為 1605 tests／1604 pass／0 fail／1 skipped；`npm run lint` 通過。涵蓋四種政策與 label、working → idle／done、blocked／逾時、安全更新跳過、worktree 啟動等待（working 與 blocked）、四種 cleanup label、開放條件不撿且不改用別的 Lead、原因換了會重新通報。
 
-code-review（high，2026-11-09，只當參考，不是 bridge 的 review）：9 項發現，已修 5 項（worktree 的 blocked 也等待、通報以卡片加原因為 key、`leadRejection` 改用 `autopickFor`、等待訊息用 `role` 取代字串替換、還原格式雜訊）。**未修：**拒絕原因只有 console 警告，沒有卡片紀錄或通知（Discord 看不到，要另開卡加事件）；`doneAsReady` 轉接不帶 port 的選用 trust 方法、去重不與 reviewer 等待共用（Lead 與 reviewer 是不同 pane，影響低）；等待用真實計時而非注入的 `sleep`／`now`；開放條件只看 `implementation`、不看 `review`（刻意，使用者選項 2）；`done` 啟動即算就緒（與原本來源路徑一致）。
+code-review（high，2026-11-09，只當參考，不是 bridge 的 review）：9 項發現，已修 5 項（worktree 的 blocked 也等待、通報以卡片加原因為 key、`leadRejection` 改用 `autopickFor`、等待訊息用 `role` 取代字串替換、還原格式雜訊）。**原審查未修項目（2026-11-09 ISSUE-132 已補卡片拒絕事件，待實機驗收）：**拒絕原因原本只有 console 警告；`doneAsReady` 轉接不帶 port 的選用 trust 方法、去重不與 reviewer 等待共用（Lead 與 reviewer 是不同 pane，影響低）；等待用真實計時而非注入的 `sleep`／`now`；開放條件只看 `implementation`、不看 `review`（刻意，使用者選項 2）；`done` 啟動即算就緒（與原本來源路徑一致）。
 
 過程：本議題原在 REQ-20261109-codex-lead-agy（PR #185、#186，含多個 Lead、卡片指定），3 次 `card review` 用完仍 `changes_requested`，範圍縮小後改由 REQ-20261109-autopick-four-leads 重做；多 Lead 清單、卡片 `lead:`、Lead 選擇依據的紀錄、`card assign` 指定 Lead 都延後，另開卡。
 

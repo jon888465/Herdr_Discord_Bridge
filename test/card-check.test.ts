@@ -145,3 +145,28 @@ test("a ready card without notify warns on stderr but still exits 0; with notify
     assert.equal(quiet.stderr, "", file);
   }
 });
+
+test("lead field accepts each single kind and reports invalid kinds", () => {
+  for (const lead of [
+    "claude",
+    "codex",
+    "agy",
+    "pi",
+    "unknown",
+    "claude,codex",
+  ]) {
+    const result = runCardCheck(["REQ-20261030-example.md"], () =>
+      valid.replace("status: draft", `lead: ${lead}\nstatus: draft`),
+    );
+    assert.equal(
+      result.code,
+      ["unknown", "claude,codex"].includes(lead) ? 1 : 0,
+    );
+    if (result.code) assert.match(result.stderr, /invalid lead/);
+  }
+});
+
+test("invalid lead emits an explicit warning", () => {
+  const result = runCardCheck(["REQ-20261030-example.md"], () => valid.replace("status: draft", "lead: unknown\nstatus: draft"));
+  assert.match(result.stderr, /WARN.*invalid lead/);
+});
