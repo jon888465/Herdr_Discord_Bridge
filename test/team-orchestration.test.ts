@@ -4,6 +4,7 @@ import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentRecord } from "../src/types.js";
+import { HerdrError } from "../src/herdr.js";
 import { roleEvent } from "../src/card-events.js";
 import {
   runTeamTask,
@@ -1235,4 +1236,62 @@ test("a Worker assignment named lead is recorded under a role that cannot collid
     roleEvent(roles[0] as never, "2026-11-08T00:00:00Z").eventId,
     roleEvent(roles[1] as never, "2026-11-08T00:00:00Z").eventId,
   );
+});
+
+test("ISSUE-137 Lead and Worker first prompt readiness retries do not block the task", async () => {
+  const prompts: Array<[string, string]> = [];
+  const rejected = new Set<string>();
+  const port: OrchestrationPort = {
+    async promptAgent(target, prompt) {
+      prompts.push([target, prompt]);
+    },
+    async promptAgentAndWait(target, prompt) {
+      if (!rejected.has(target)) {
+        rejected.add(target);
+        throw new HerdrError(
+          "agent.prompt",
+          "agent_not_ready",
+          "agent w5V:p1 is not an active named agent",
+        );
+      }
+      prompts.push([target, prompt]);
+      return {
+        ...(target === lead.pane_id ? lead : workerA),
+        agent_status: "done",
+      };
+    },
+    async waitAgent(target) {
+      return target === lead.pane_id ? lead : workerA;
+    },
+    async readAgent(target) {
+      const prompt = latestPrompt(prompts, target);
+      const planning =
+        target === lead.pane_id &&
+        prompts.filter(([pane]) => pane === target).length === 1;
+      return framed(
+        prompt,
+        planning
+          ? '{"assignments":[{"id":"inspect","workerPaneId":"w2:p6","instruction":"Inspect"}]}'
+          : "completed report",
+      );
+    },
+  };
+  const result = await runTeamTask(
+    {
+      taskId: "prompt-retry",
+      prompt: "Inspect",
+      lead,
+      workers: [workerA],
+      timeoutMs: 3000,
+    },
+    port,
+    () => undefined,
+  );
+  assert.equal(result.state, "completed");
+  assert.equal(
+    prompts.filter(([target]) => target === workerA.pane_id).length,
+    1,
+  );
+  assert.equal(prompts.filter(([target]) => target === lead.pane_id).length, 2);
+  assert.equal(rejected.size, 2);
 });

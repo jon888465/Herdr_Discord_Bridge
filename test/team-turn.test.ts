@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { HerdrError } from "../src/herdr.js";
 import { runTeamTurn } from "../src/team-turn.js";
 import type { OrchestrationPort } from "../src/team-orchestration.js";
 import type { AgentRecord } from "../src/types.js";
@@ -387,3 +388,192 @@ test("Team engine and both card flows wire the shared hook lookup", async () => 
     );
   }
 });
+
+function retryClock() {
+  let now = 0;
+  const sleeps: number[] = [];
+  return {
+    now: () => now,
+    sleeps,
+    sleep: async (ms: number) => {
+      sleeps.push(ms);
+      now += ms;
+    },
+  };
+}
+
+for (const atomic of [true, false]) {
+  test(`ISSUE-137 retries rejected first prompt exactly until accepted (atomic=${atomic})`, async () => {
+    const port = fakePort([base]);
+    const send = port.promptAgent;
+    let calls = 0,
+      accepted = 0,
+      dispatched = 0;
+    const dispatch = async (target: string, text: string) => {
+      if (++calls <= 3)
+        throw new HerdrError(
+          "agent.prompt",
+          "agent_not_ready",
+          "agent w5V:p1 is not an active named agent",
+        );
+      accepted++;
+      await send(target, text);
+      return base;
+    };
+    if (atomic) port.promptAgentAndWait = dispatch;
+    else
+      port.promptAgent = async (target, text) => {
+        await dispatch(target, text);
+      };
+    const clock = retryClock();
+    const result = await runTeamTurn(base, "plan", port, 5000, 20, {
+      promptRetry: { clock },
+      beforeDispatch: () => {
+        dispatched++;
+      },
+    });
+    assert.equal(result.state, "done");
+    assert.equal(calls, 4);
+    assert.equal(accepted, 1);
+    assert.equal(dispatched, 1);
+    assert.deepEqual(clock.sleeps, [500, 500, 500]);
+  });
+}
+
+test("ISSUE-137 other errors propagate unchanged without retry", async () => {
+  const port = fakePort([base]);
+  const error = new HerdrError("agent.prompt", "agent_blocked", "blocked");
+  let calls = 0;
+  port.promptAgentAndWait = async () => {
+    calls++;
+    throw error;
+  };
+  await assert.rejects(
+    runTeamTurn(base, "plan", port, 2000, 20),
+    (e) => e === error,
+  );
+  assert.equal(calls, 1);
+});
+
+for (const timeoutMs of [1200, 5000]) {
+  test(`ISSUE-137 exhaustion is bounded by retry and turn budgets (${timeoutMs})`, async () => {
+    const port = fakePort([base]);
+    const clock = retryClock();
+    let calls = 0;
+    port.promptAgent = async () => {
+      calls++;
+      throw new HerdrError(
+        "agent.prompt",
+        "agent_not_ready",
+        "agent w5V:p1 is not an active named agent",
+      );
+    };
+    await assert.rejects(
+      runTeamTurn(base, "plan", port, timeoutMs, 20, {
+        promptRetry: { clock, timeoutMs: 1200 },
+      }),
+      /Waited 1\.2 seconds.*first prompt was not delivered:.*agent_not_ready.*active named agent/,
+    );
+    assert.equal(calls, 3);
+    assert.equal(clock.now(), 1200);
+  });
+}
+
+for (const outcome of ["ok", "undefined", "stalled"]) {
+  test(`ISSUE-137 ${outcome} is never resent`, async () => {
+    const port = fakePort([base]);
+    const send = port.promptAgent;
+    let calls = 0;
+    port.promptAgentAndWait = async (target, text) => {
+      calls++;
+      await send(target, text);
+      if (outcome === "stalled")
+        throw new HerdrError("agent.prompt", "agent_prompt_stalled", "stalled");
+      return outcome === "undefined" ? undefined : base;
+    };
+    assert.equal(
+      (await runTeamTurn(base, "plan", port, 2000, 20)).state,
+      "done",
+    );
+    assert.equal(calls, 1);
+  });
+}
+
+test("ISSUE-137 abort during retry sleep prevents another dispatch", async () => {
+  const port = fakePort([base]);
+  const controller = new AbortController();
+  let calls = 0;
+  port.promptAgent = async () => {
+    calls++;
+    throw new HerdrError("agent.prompt", "agent_not_ready", "not ready");
+  };
+  const clock = {
+    now: () => 0,
+    sleep: async () => {
+      controller.abort();
+    },
+  };
+  await assert.rejects(
+    runTeamTurn(base, "plan", port, 2000, 20, {
+      signal: controller.signal,
+      promptRetry: { clock },
+    }),
+    /abort/i,
+  );
+  assert.equal(calls, 1);
+});
+
+for (const atomicMs of [60, 90]) {
+  test(`ISSUE-137 retry-deadline-1 shares the turn deadline after retry then stalled (${atomicMs} ms atomic wait)`, async () => {
+    const clock = retryClock();
+    let calls = 0,
+      accepted = 0,
+      dispatched = 0;
+    const observationBudgets: number[] = [];
+    const port: OrchestrationPort = {
+      async promptAgent() {
+        throw new Error("unexpected fallback");
+      },
+      async promptAgentAndWait(_target, _text, remaining) {
+        calls++;
+        if (calls === 1)
+          throw new HerdrError(
+            "agent.prompt",
+            "agent_not_ready",
+            "not registered",
+          );
+        accepted++;
+        assert.equal(remaining, 90);
+        await clock.sleep(atomicMs);
+        throw new HerdrError("agent.prompt", "agent_prompt_stalled", "stalled");
+      },
+      async waitAgent(_target, _states, remaining) {
+        assert.ok(remaining !== undefined);
+        observationBudgets.push(remaining);
+        await clock.sleep(remaining);
+        return base;
+      },
+      async readAgent() {
+        return "no current marker";
+      },
+    };
+    await assert.rejects(
+      runTeamTurn(base, "plan", port, 120, 20, {
+        promptRetry: { clock, intervalMs: 30 },
+        beforeDispatch: () => {
+          dispatched++;
+        },
+      }),
+      /Timed out waiting for current response/,
+    );
+    assert.equal(
+      clock.now(),
+      120,
+      "observation must not create a new turn budget",
+    );
+    assert.deepEqual(observationBudgets, atomicMs === 60 ? [30] : []);
+    assert.equal(calls, 2);
+    assert.equal(accepted, 1);
+    assert.equal(dispatched, 1);
+  });
+}

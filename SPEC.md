@@ -94,6 +94,8 @@ Client 使用下列官方方法：
 | wait          | `agent.wait`                                                                     |
 | cancel        | `agent.send_keys`，傳送 `ctrl+c`                                                 |
 
+Team 的 `agent.prompt` 有界重試見 ISSUE-137；method／legacy fallback 選擇不變，其他呼叫端不重試。
+
 ID 一律複製自 Herdr JSON response。Bridge 不會預測 workspace 或 pane ID，也
 不接受 filesystem path 作為 workspace selector。`agent.prompt` 與
 `agent.send` 傳送 JSON text；Discord input 不會經過 shell。
@@ -156,6 +158,8 @@ name/alias、agent kind、pane ID、terminal ID 或 terminal title；若有歧�
 mapping 過期時，一律 fail closed。
 
 ### 啟動就緒與更新提示（ISSUE-118）
+
+就緒狀態不保證 Herdr 已登記 active named agent：autopick 等待只檢查 agent_status；Team 首次 prompt 處理見 ISSUE-137。
 
 `src/agent-ready.ts` 的 `waitUntilReady` 在啟動或輪詢到 `blocked` 時，只有成功讀取 visible 畫面、CLI 種類與已知更新提示清單相符，且畫面不含信任、權限、approval 或登入字樣時，才送清單指定的跳過鍵。**只自動跳過更新提示，信任與權限提示仍由人處理**。目前清單只有 codex：同時包含 `Update available` 與 `Skip until next version`，送 `3`；claude、agy 與其他 CLI 尚無清單項目，不猜按鍵。
 
@@ -248,6 +252,8 @@ prompt 先描述 end 再描述 begin，避免 echo 構成完整回覆；逾時�
 詳見 [修正交接](docs/team-orchestration-issues-013-014-handoff.md)。
 
 Bridge pane 的 stdin 會使用同一個 command handler；啟動後可在 `bridge>` prompt 輸入指令，輸出與 Discord 相同的 Agent routing 與回應流程。
+Team 首次 prompt（ISSUE-137，2026-11-09）：僅 `HerdrError.code === agent_not_ready` 每約 500 ms 重試，預設上限 15 秒且受 turn 剩餘 timeoutMs 與 abort signal 限制。回合開始時計算一次固定 deadline；初始化、重試等待、atomic prompt 耗時與後續 marker 觀察共用此期限，stalled 後不重新起算等待時間。ok（含 undefined）停止重送，stalled 沿用 marker 接收，其他錯誤原樣丟出；超限含等待秒數、第一個 prompt 未送達與最後原始訊息。假設 agent_not_ready 表示 Herdr 未接受 prompt，此為推論，Herdr 契約未讀。HerdrClient 與其他 prompt 呼叫端不變。
+
 `assign` 將目前 thread 或 user 綁定至選定的 workspace/agent，並使用
 `agent.prompt`；正在工作的 Agent 或重複的 active stream 會被視為 busy 而拒絕。
 `read` 使用 `recent_unwrapped`，`wait` 使用 event-driven Herdr wait，
@@ -629,6 +635,7 @@ Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*
 - agy Stop hook（ISSUE-045）：`~/.gemini/config/hooks.json` 註冊 `herdr-discord-hook` 於 `Stop`；hook 先輸出 `{}`，只在 `terminationReason=NO_TOOL_CALL` 且 `fullyIdle` 不為 false 時，從 `transcriptPath` 取最後一個沒有 tool_calls 的 `PLANNER_RESPONSE.content` 當最終回覆，以 `conversationId` 轉給 bridge；`hookTransport.agy` 控制是否採用，失敗退回 parser。agy 權限不使用 hook（`PreToolUse` 每次工具呼叫都觸發），維持 parser。
 - pi 擴充（ISSUE-045）：`~/.pi/agent/extensions/herdr-discord-bridge.ts`（來源 `scripts/pi/`）在 `agent_settled`（未中止、TUI、已 idle）時把最後一則 assistant 文字以 session 檔路徑為 sessionId 送到 hook socket；bridge 對 `agent_session.kind` 為 `id` 或 `path` 都比對。pi 沒有內建權限提示，不做權限 hook；`hookTransport.pi` 控制是否採用，失敗退回 parser。此擴充須在每台執行 pi 的機器各自安裝，並由該 pi `/reload` 或啟動時載入；重啟 bridge 不會替 pi 載入擴充。無 hook 且 parser 失去 prompt／baseline 邊界時，不保證取得 final；帶警告的較早擷取片段不得視為 CLI 最後回答（ISSUE-045／033，2026-10-29）。
 - 遠端 machine hook（ISSUE-045）：machine 的選填 `hookSocket` 啟用額外的 `ssh -R`（與 `-L` 獨立）把遠端 hook socket 轉回本機 hook socket；遠端以 `scripts/remote/herdr-discord-hook.py`（Python 3）送 Stop 事件，bridge 以 session id 比對；遠端沒有 `agent_session` 時改以 pane ID 比對，遠端腳本以 `--machine <id>` 在 paneId 加上 `<id>:` 前綴。未設定 `hookSocket` 的 machine 只用 parser。權限事件不支援遠端。
+- Team 首次派送（ISSUE-137）：baseline 與 beforeDispatch 只做一次，再依上述契約有界重試；同回合 nonce 不變，turn_dispatched 不重複。
 - Team 回合改用 hook 完整訊息（ISSUE-086，2026-11-05，已修正、待實機驗收）：`runTeamTurn` 在 `hookTransport` 為 `auto` 且 hook 的 Stop 訊息在本回合送出之後到達時，優先從該訊息取 `BRIDGE_BEGIN…END` 框內的內容（不受 pane 寬度影響；Claude Code 依寬度硬換行會切斷 JSON）。畫面已見到框但 hook 事件還沒到時最多再等 1.5 秒；沒有 hook（未安裝、事件遺失、`parser` 模式）時行為與原本相同，仍讀畫面。Team 任務的規劃、Worker 回報與統整都適用。
 - card review／card fix（ISSUE-134，2026-11-09，已驗收；範圍：claude 當 reviewer 的 `card review` 第 1 輪 `pass`，`card fix`、有發現的長 JSON、hookTransport 非 auto 未驗）：與 TeamTaskEngine 共用 Stop hookFinal factory，runTurn 傳入 hook context；auto 模式優先讀本回合完整 marker 框內訊息，沒有訊息時退回畫面，非 auto 不查 hook。taskId／phase 選填，Debug context 省略缺少欄位、不含 undefined。parseReviewReply 與 codex rollout 行為不變。根因證據：卡 `REQ-20261109-lead-live-codex`、PR #191 的兩個 reviewer session 最後訊息分別為 323／317 字元，nonce 與 prompt 一致；兩個 card 呼叫點原本漏傳 context，Claude 畫面硬換行切斷 JSON。2026-11-09 已部署並實機驗證：驗證卡 `REQ-20261109-claude-reviewer-live`（PR #194）claude 當 reviewer 第 1 輪 `pass`，同組合修正前兩輪 `inconclusive`；「回覆取自 hook」是推論，不是直接觀察。
 - 串流續傳（ISSUE-042）：Discord 驅動的回合在送出 prompt 後登記到 `active-streams.json`（terminal、pane、進度訊息、prompt、baseline、startedAt），結束後移除；bridge 重啟並連上 Discord 後，對仍存在的 Agent 與進度訊息重新啟動 `streamAgent`，沿用原 `startedAt`。超過 24 小時者清除並記 terminal／pane／紀錄逾期；無法續傳時依下方 ISSUE-126 補送契約處理。bridge 停機期間未收到的 Stop hook 事件不補回（成功續傳時由 parser 備援）。team／console 路徑不在範圍。Codex 的 session 若在送問後才建立（UUIDv7 時間不早於送問時間），`streamAgent` 改追蹤新 session，首次登記則不要求 session 建立時間：只有 initial 與目前追蹤值都沒有可辨識 session、候選有 session，且 pane／terminal／workspace／Agent 種類完全相同時才接受並記錄 log；Console 使用同一判斷函式。首次登記後不同的舊 session 仍停止，候選消失或 session 暫時缺失維持既有身份不可用處理；其餘 session 變動仍停止擷取（ISSUE-047）。
@@ -764,8 +771,9 @@ Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*
 
 - `autopick_lead` 接受 claude、codex、agy、pi 的逗號分隔有序清單（單一值相容）；省略仍是 claude，未知值拒絕並列出四種。種類清單、型別與 label（`autopick-<kind>-<卡片 id>`，最多 60 字元）共用 `src/policy.ts`，ISSUE-129 的收尾也用同一份。reviewer 偏好不變（codex Lead 用 claude，其餘用 codex），真正的依據仍是作者與 reviewer 不同 session 的 gate。
 - **開放條件：**agy、pi 當 Lead 需要 `config.json` 的 `agentProfiles` 有同種類、且 `capabilities` 含 `implementation` 的 profile（`leadGateFor`，使用者表示該種類的 coding 已驗證）；沒達到就不撿，每張卡依原因記一次 `failed`（`autopick_stopped`）事件，console 同步顯示，不改用別的 Lead。claude、codex 不需要。這不是安全邊界，能改 `config.json` 的人就能宣告，bridge 也不判斷它們是否真的能當 Lead。
+- **啟動等待補充（ISSUE-137）：**idle／done 不保證 active named agent 登記完成，Team 第一個 prompt 可有界重試；**沒有實機驗證 pi 當 Lead**（本次修正未做真機驗收）。
 - **啟動等待：**Lead 啟動回來是 working 時等到就緒（`waitUntilReady`，`doneAsReady` 把 done 當 idle，working → done 轉態也算）。來源 workspace 與 `prepareCardWorktree` 的第二次啟動共用；working 或 blocked（已知安全更新提示可跳過）都會等，信任、權限、登入仍要人處理；逾時、blocked 或等待丟錯時維持「Agent 還沒準備好、不啟動任務、卡片仍是 ready」。
-- 多候選與卡片指定契約見下節；agy 有一次極簡卡走完 PR 與自動 merge 的實機證據（2026-11-09，PR #196），pi 從未當過 Lead；規劃與階段見 `docs/multi-lead-plan.md`。
+- 多候選與卡片指定契約見下節；agy 有一次極簡卡走完 PR 與自動 merge 的實機證據（2026-11-09，PR #196），pi 的 2026-11-09 Lead 嘗試於首次 prompt 失敗（ISSUE-137），尚無成功實機驗收；規劃與階段見 `docs/multi-lead-plan.md`。
 
 ### Autopick Lead workspace 收尾（ISSUE-129，2026-11-09，已驗收）
 
