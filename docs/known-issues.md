@@ -36,7 +36,11 @@
 
 **Review 修正（round 1，F2，2026-11-09）：**reviewer 唯讀重現：100 ms 預算、baseline 耗時 120 ms 仍送出一次 prompt。修正為每次派送前（含第一次）檢查回合期限，用盡即失敗並說明「未送出」；新增假 clock 測試斷言 0 次派送。npm run check 通過（2026-11-09，exit 0）：1630 tests／1629 pass／0 fail／1 skipped。F1（兩個請求來源）當時未取得 journal；之後由 Agent 取得並補在上方「兩個 agent.prompt 請求來源」段（部分確認：B 是引擎、A 未指認）。
 
-**最新完整檢查（2026-11-09，本機，對 head `95e9794` 的程式內容；之後只改文件）：**`npm run check` 通過（exit 0）：typecheck／build 通過，1631 tests／1630 pass／0 fail／1 skipped（既有略過）；`npm run lint` 通過（193 TypeScript files）；`git diff --check` 通過。新增的 `test/herdr.test.ts` 追蹤紀錄案例（每個請求一行、含呼叫函式名稱、不含 prompt 內容）通過。上方較早的 1627、1629、1630 是歷次修正當時的數字，不是最新結果。
+**CI 不穩定的測試（2026-11-09，Agent 查出並修正）：**head `3e29dcd` 的 ubuntu CI 失敗（macOS 通過）：`ISSUE-124 Lead 規劃、每個 Worker、Lead 彙整都以 timeoutMs 為等待上限`（`test/team-orchestration.test.ts`，既有測試、本 PR 沒改它）斷言 `1233 !== 1234`。**根因（已確認）：**本 PR 把送給 `promptAgentAndWait` 的等待上限從 `timeoutMs` 改成 `Math.max(1, deadline - clock.now())`（剩餘預算），從算出 deadline 到送出之間只要過 1 毫秒就變成 `timeoutMs - 1`，違反 ISSUE-124 契約「等待上限＝timeoutMs」。對同一個測試各跑 60 次（本機）：本 PR 的程式 48 次通過、12 次失敗（約 20%）；修正後 60 次全過。前三次 CI 通過只是剛好沒跨毫秒。
+
+**修正：**`src/team-turn.ts` 沒有重試過（`lastNotReady` 為空）時維持傳 `timeoutMs`，重試之後才改傳共享預算的剩餘時間；既有測試與契約不變，沒有放寬任何測試。副作用：沒重試時 atomic wait 可能比回合 deadline 多出「算 deadline 到送出」那幾毫秒（與本 PR 之前的行為相同）。
+
+**最新完整檢查（2026-11-09，本機，對修正 CI 不穩定測試後的程式內容）：**`npm run check` 通過（exit 0）：typecheck／build 通過，1631 tests／1630 pass／0 fail／1 skipped（既有略過）；`npm run lint` 通過（193 TypeScript files）；`git diff --check` 通過。新增的 `test/herdr.test.ts` 追蹤紀錄案例（每個請求一行、含呼叫函式名稱、不含 prompt 內容）通過。上方較早的 1627、1629、1630 是歷次修正當時的數字，不是最新結果。
 
 **更正（2026-11-09，Agent）：**下一段 round 2 說「搜尋 … 沒有任何檔案含 w5V:p1」是因為搜錯目錄（見上方「兩個 agent.prompt 請求來源」段）。
 

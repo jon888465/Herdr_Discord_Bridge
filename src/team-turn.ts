@@ -169,7 +169,9 @@ export async function runTeamTurn(
         ? await herdr.promptAgentAndWait(
             agent.pane_id,
             prompt,
-            Math.max(1, deadline - clock.now()),
+            // ISSUE-124：沒有重試過就維持回合上限 timeoutMs（契約是「等待上限＝timeoutMs」，不因為
+            // 算出 deadline 之後過了幾毫秒而變成 timeoutMs-1）；重試之後才改用共享預算的剩餘時間。
+            lastNotReady ? Math.max(1, deadline - clock.now()) : timeoutMs,
           )
         : (await herdr.promptAgent(agent.pane_id, prompt), undefined);
       break;
