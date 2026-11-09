@@ -125,7 +125,11 @@ import {
   createConsoleContext,
 } from "./console.js";
 import { AUTOPICK_USER, createAutopickSteps } from "./autopick-wiring.js";
-import { createAutopicker, type AutopickReport } from "./autopick.js";
+import {
+  createAutopicker,
+  pickedLogText,
+  type AutopickReport,
+} from "./autopick.js";
 import { ConsoleAgent } from "./console-agent.js";
 import {
   agentHeader,
@@ -2773,7 +2777,7 @@ function startAutopick(runtime: Runtime): () => void {
             event: "autopick_picked",
             time: nowSeconds(),
             eventId: `picked-${randomBytes(12).toString("hex")}`,
-            text: "bridge 已撿起卡片",
+            text: pickedLogText(job),
           },
         ],
       );

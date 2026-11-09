@@ -56,6 +56,11 @@ export function pickNext(
   return undefined;
 }
 
+/** 卡片流程紀錄 `autopick_picked` 的文字：記下 Lead 種類與選擇依據（卡片指定，或政策清單第一個），事後可追溯。 */
+export function pickedLogText(job: AutopickJob): string {
+  return `bridge 已撿起卡片；Lead：${job.lead}（${job.card.lead === undefined ? "政策預設，autopick_lead 清單第一個" : "卡片 lead 欄位指定"}）`;
+}
+
 /** Lead 種類的開放條件：沒達到回傳原因，通過回傳 undefined（見 `leadGateFor`）。 */
 export type LeadGate = (kind: string) => string | undefined;
 

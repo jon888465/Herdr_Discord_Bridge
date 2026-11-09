@@ -4,6 +4,7 @@ import {
   createAutopicker,
   leadRejection,
   pickNext,
+  pickedLogText,
   runAutopick,
   type AutopickJob,
   type AutopickReport,
@@ -437,4 +438,26 @@ test("a gated Lead is neither picked nor silently replaced, and the reason is re
   assert.equal(picker.tick(), undefined);
   assert.equal(picker.tick(), undefined);
   assert.deepEqual(rejected, ["REQ-20261105-g1"]);
+});
+
+test("the picked log line records the Lead and whether the card or the policy default chose it", () => {
+  const parsed = parsePolicy(
+    [
+      "version: 1",
+      "autopick_lead: claude, codex",
+      "projects:",
+      "  local:Herdr_Discord_Bridge: L1",
+      "autopick:",
+      `  local:Herdr_Discord_Bridge: ${REPO}`,
+      "",
+    ].join("\n"),
+  );
+  assert.ok(parsed.ok);
+  const byCard = pickNext(parsed.policy, [
+    card("REQ-20261105-p1", { lead: "codex" }),
+  ]);
+  const byDefault = pickNext(parsed.policy, [card("REQ-20261105-p2")]);
+  assert.ok(byCard && byDefault);
+  assert.match(pickedLogText(byCard), /Lead：codex.*卡片 lead 欄位指定/);
+  assert.match(pickedLogText(byDefault), /Lead：claude.*政策預設/);
 });
