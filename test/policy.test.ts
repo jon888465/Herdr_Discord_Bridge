@@ -233,7 +233,10 @@ test("autopick lists the projects to pick cards for, with each repo path and one
     "local:Herdr_Discord_Bridge": "/Users/example/git_wk/Herdr_Discord_Bridge",
   });
   assert.equal(result.policy.autopickLead, "codex");
-  assert.equal(autopickFor(result.policy, "local:Herdr_Discord_Bridge")?.level, "L2");
+  assert.equal(
+    autopickFor(result.policy, "local:Herdr_Discord_Bridge")?.level,
+    "L2",
+  );
   assert.equal(autopickFor(result.policy, "local:Other"), undefined);
 });
 
@@ -241,19 +244,28 @@ test("without an autopick block nothing is picked, and the parsed policy keeps i
   const result = parsePolicy(valid);
   assert.ok(result.ok);
   assert.equal("autopick" in result.policy, false);
-  assert.equal(autopickFor(result.policy, "local:Herdr_Discord_Bridge"), undefined);
+  assert.equal(
+    autopickFor(result.policy, "local:Herdr_Discord_Bridge"),
+    undefined,
+  );
 });
 
-test("the Lead kind defaults to claude and only claude or codex are accepted", () => {
+test("the Lead kind defaults to claude and all four Lead kinds are accepted", () => {
   const result = parsePolicy(
     "version: 1\nprojects:\n  local:A: L1\nautopick:\n  local:A: /repo/a\n",
   );
   assert.ok(result.ok);
   assert.equal(autopickFor(result.policy, "local:A")?.lead, "claude");
-  assert.equal(
-    parsePolicy("version: 1\nautopick_lead: agy\n").ok,
-    false,
-  );
+  for (const kind of ["claude", "codex", "agy", "pi"]) {
+    const parsed = parsePolicy(`version: 1\nautopick_lead: ${kind}\n`);
+    assert.ok(parsed.ok);
+    assert.equal(parsed.policy.autopickLead, kind);
+  }
+  for (const kind of ["unknown", "AGY", "", "claude|pi"]) {
+    const parsed = parsePolicy(`version: 1\nautopick_lead: ${kind}\n`);
+    assert.equal(parsed.ok, false);
+    assert.match(!parsed.ok ? parsed.error : "", /claude, codex, agy, pi/);
+  }
 });
 
 test("autopick is refused for a project that has no explicit level, so a permissive default can never start work by itself", () => {

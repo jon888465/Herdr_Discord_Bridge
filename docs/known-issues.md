@@ -1,5 +1,21 @@
 # Known Issues
 
+## ISSUE-130：自動撿卡的 Lead 只支援 claude、codex，agy、pi 無法選用（REQ-20261109-autopick-four-leads）
+
+更新日期：2026-11-09。狀態：已修正、待驗收（僅單元測試，沒有任何 CLI 實機驗收）。
+
+症狀／預期：`autopick_lead` 只接受 claude、codex；Lead 啟動後先是 working 時（codex）會被立刻判為沒就緒。預期四種都能明確選用，agy、pi 要先通過開放條件，Lead 要等到就緒。已確認根因（讀碼）：政策與 ISSUE-129 收尾的白名單只有兩種，autopick 只檢查 `agent.start` 回傳當下的狀態，`prepareCardWorktree` 也只認 idle。
+
+修正：見 SPEC「四種 Lead 與開放條件」。四種共用常數、型別與 label；agy、pi 的開放條件 `leadGateFor`；來源 Lead 與 worktree 第二次啟動共用等待（`doneAsReady`）。不改使用者的 `policy.yml`、`config.json`。
+
+驗證（2026-11-09，本機，假 Herdr port）：`npm run check` 為 1605 tests／1604 pass／0 fail／1 skipped；`npm run lint` 通過。涵蓋四種政策與 label、working → idle／done、blocked／逾時、安全更新跳過、worktree 啟動等待（working 與 blocked）、四種 cleanup label、開放條件不撿且不改用別的 Lead、原因換了會重新通報。
+
+code-review（high，2026-11-09，只當參考，不是 bridge 的 review）：9 項發現，已修 5 項（worktree 的 blocked 也等待、通報以卡片加原因為 key、`leadRejection` 改用 `autopickFor`、等待訊息用 `role` 取代字串替換、還原格式雜訊）。**未修：**拒絕原因只有 console 警告，沒有卡片紀錄或通知（Discord 看不到，要另開卡加事件）；`doneAsReady` 轉接不帶 port 的選用 trust 方法、去重不與 reviewer 等待共用（Lead 與 reviewer 是不同 pane，影響低）；等待用真實計時而非注入的 `sleep`／`now`；開放條件只看 `implementation`、不看 `review`（刻意，使用者選項 2）；`done` 啟動即算就緒（與原本來源路徑一致）。
+
+過程：本議題原在 REQ-20261109-codex-lead-agy（PR #185、#186，含多個 Lead、卡片指定），3 次 `card review` 用完仍 `changes_requested`，範圍縮小後改由 REQ-20261109-autopick-four-leads 重做；多 Lead 清單、卡片 `lead:`、Lead 選擇依據的紀錄、`card assign` 指定 Lead 都延後，另開卡。
+
+未驗證／已知缺口：四種 CLI 當 Lead 的真實啟動；agy、pi 從未當過 Lead，pi 連 Worker 的 coding 證據都沒有（規劃與階段見 `docs/multi-lead-plan.md`）。讀碼確認、尚未重現：`runTeamTask` 沒把第 0 輪新登記的 session 回寫 `input.lead`；`hookFinal` 有 session 時無結果不 fallback `stopForPane`；非 codex 的 terminal fallback 沒有 JSON 硬換行 unwrap。未部署、未重啟；原始碼與 build 不等於執行中 bridge，舊任務不補送。
+
 ## ISSUE-129：卡片結束後留下 autopick Lead workspace（REQ-20261109-autopick-lead-cleanup）
 
 更新日期：2026-11-09。狀態：已驗收（2026-11-09，範圍與未驗證項見「實機驗收」段）。
@@ -4018,7 +4034,7 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 ## ISSUE-117：自動撿卡的 Lead 設成 codex 時，`startLead` 一定失敗（只看 `agent.start` 當下的狀態，codex 啟動後先是 working）
 
-更新日期：2026-11-07。狀態：待決定（根因已由讀碼確認、尚未修正；目前不要把 `autopick_lead` 設成 codex）。
+更新日期：2026-11-09。狀態：已修正、待驗收（2026-11-09 見 ISSUE-130：來源 Lead 與 worktree 第二次啟動都會等 working；僅單元測試，尚未用 codex 實機驗證）。下列 2026-11-07 內容是修正前的診斷歷史。
 
 使用者可見症狀：2026-11-06，使用者要求把 `policy.yml` 的 `autopick_lead` 從 `claude` 改成 `codex`（備份 `policy.yml.bak-lead-20261106`），bridge 重啟後 `card policy` 顯示「Lead：codex」。ready 的卡 `REQ-20261107-small-pane-tab` 在 16:27:28Z 被撿起，立刻失敗（`autopick_failed`）：`lead：Lead（codex）沒有就緒，狀態是 working；可能卡在信任資料夾或登入提示`。bridge 依設計在失敗時關掉剛開的 workspace，所以事後沒有現場可看，無法確認當時是否真的有提示；卡片留在 `ready`。
 
