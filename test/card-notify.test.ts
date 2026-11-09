@@ -371,14 +371,24 @@ test("ISSUE-124 非逾時失敗的分類不變", async (t) => {
 test("ISSUE-135 Lead rejection notices use Lead-specific classification", async (t) => {
   for (const [n, text] of [
     ["candidate", "Lead「pi」不在政策候選清單內，不撿這張卡"],
-    ["closed", "Lead「pi」尚未開放，不撿這張卡：config.json 的 agentProfiles 沒有宣告 implementation；改完 config.json 後重啟 bridge"],
+    [
+      "closed",
+      "Lead「pi」尚未開放，不撿這張卡：config.json 的 agentProfiles 沒有宣告 implementation；改完 config.json 後重啟 bridge",
+    ],
   ]) {
     const s = setup(t, "discord:12345");
-    const event = { event: "failed", eventId: `lead-${n}`, time: s.deps.now(), text: `autopick_stopped：${text}` };
+    const event = {
+      event: "failed",
+      eventId: `lead-${n}`,
+      time: s.deps.now(),
+      text: `autopick_stopped：${text}`,
+    };
     assert.equal(notificationReason(event), "Lead 不可用");
     s.store.appendLog(id, [event]);
     await s.notifier.tick();
-    const msg = s.discord.map(([, content]) => content).find((content) => content.includes("autopick_stopped"))!;
+    const msg = s.discord
+      .map(([, content]) => content)
+      .find((content) => content.includes("autopick_stopped"))!;
     assert.ok(msg.includes("Lead 不可用"), msg);
     assert.ok(!msg.includes("專案政策"), msg);
   }
@@ -387,10 +397,22 @@ test("ISSUE-135 Lead rejection notices use Lead-specific classification", async 
 test("sensitive-path stop notices do not add review or version classifications", (t) => {
   for (const [n, text] of [
     ["merge", "card merge 拒絕：這個 PR 動到敏感路徑：src/policy.ts"],
-    ["fix", "修正動到敏感路徑：src/policy.ts。新 commit 留在 worktree、沒有 push，請人檢查後再 `card pr`"],
+    [
+      "merge-with-review-head",
+      "loop：第 2 輪 review pass（head e1a3174b2a24），card merge 拒絕：這個 PR 動到敏感路徑：.github/workflows/review.yml",
+    ],
+    [
+      "fix",
+      "修正動到敏感路徑：src/policy.ts。新 commit 留在 worktree、沒有 push，請人檢查後再 `card pr`",
+    ],
   ]) {
     const s = setup(t);
-    const event = { event: "failed", eventId: `sensitive-${n}`, time: s.deps.now(), text };
+    const event = {
+      event: "failed",
+      eventId: `sensitive-${n}`,
+      time: s.deps.now(),
+      text,
+    };
     assert.equal(notificationReason(event), "敏感路徑未滿足");
     assert.ok(!notificationReason(event).includes("review 條件"));
     assert.ok(!notificationReason(event).includes("版本條件"));
