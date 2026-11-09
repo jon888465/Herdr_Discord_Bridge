@@ -542,7 +542,7 @@ test("f2: updateSession persists a legal session transfer and ignores a no-op", 
   );
 });
 
-test("f2: a first session registered during the turn is recovered once it is persisted", async (t) => {
+test("f3: a first session registered while the bridge was down is recovered without streamAgent sync", async (t) => {
   const f = fixture(t, "first");
   const a = f.agent as Record<string, unknown>;
   addRecord(f, "first", ""); // 送出時沒有 session
@@ -550,10 +550,11 @@ test("f2: a first session registered during the turn is recovered once it is per
   a.agent_session = { kind: "id", value: "first" };
   f.stop("answer after first registration");
   await relayRecoveredStreams(f.typed);
-  assert.deepEqual(f.sent, [], "尚未同步 session 時仍拒絕");
-  f.store.updateSession("first", "id:first"); // streamAgent 跟隨新 session 時會做的事
-  await relayRecoveredStreams(f.typed);
   assert.equal(f.sent.length, 1);
+  assert.equal(
+    new StreamResumeStore(f.path).list()[0]?.sessionKey,
+    "id:first",
+  );
   assert.match(f.sent[0]!, /answer after first registration/);
 });
 

@@ -51,6 +51,8 @@
 
 **第 2 輪 review 修正（2026-11-09，F2，由 Lead 接手，因 fixer 沒有產出）：**根因（已確認）：補送嚴格比對 `sessionKey`，但它只在送出 prompt 時寫入；`streamAgent` 合法接受「回合中首次登記 session」或「同回合新建 session」時沒有同步，重啟後的可信 Stop 會被永久拒絕；沒有該欄位的舊紀錄也會拒絕有 session 的 Agent。修正：`StreamResumeStore.updateSession` 在 `streamAgent` 兩個合法轉移點同步並持久化；回合開始時沒有 session 記成空字串（與「欄位不存在＝舊版紀錄」區分）；舊版紀錄無從比對，維持 #170 之前的行為（只靠 Stop 事件的 session 與 startedAt 篩選）。同回合轉移之外的 session 變更仍拒絕補送。測試（2026-11-09，本機，假 port）：`node --test dist/test/stream-resume-lost-reply.test.js` 20/20 pass；新增 4 項（updateSession 持久化、首次登記補送、舊紀錄、`streamAgent` 實際寫入）；暫時停用同步後 `streamAgent` 那項轉紅、還原後轉綠。全套與實機尚未驗證。
 
+**第 3 輪 review 修正（2026-11-09，F3）：**根因（已確認）：同步只發生在 `streamAgent`；回合開始時沒有 session、停機或抓取重試期間才首次登記 session、且抓取最終失敗時，沒有任何程式會同步，pending 紀錄永遠拒絕可信 Stop。修正：`relayRecoveredStreams` 自己辨識合法轉移——回合開始時無 session 而現在首次登記，或 codex／agy／pi 在回合開始後才建立新 session（與 `streamAgent` 同一套 `sessionCreatedSince` 判斷）——記 log、持久化新 session 後補送；其他 session 變更（例如 claude 換 session）仍拒絕。測試（2026-11-09，本機，假 port）：`node --test dist/test/stream-resume-lost-reply.test.js` 20/20 pass；原「手動 updateSession 後才補送」的測試改成不經 `streamAgent` 同步、直接由補送路徑辨識首次登記並持久化。全套與實機尚未驗證。
+
 **限制／下一步：**尚未實機驗證 Discord／Herdr；原始碼與 build 已完成，執行中的 bridge 未部署、未重啟，交 Lead 安排實機重啟續傳／補送驗收。送前認領後若當機或補送失敗（含部分送出），為避免重複不自動再送；寫盤失敗不送。紀錄沿用 24 小時有效期，新回合取代同 terminal 的舊紀錄。bridge 停機期間未收到的 hook 不會憑空恢復；舊版本已刪除的記錄與既有遺失訊息無法追溯補送。未 commit、未 push，未連真實 Discord／GitHub，未執行 herdr 指令。
 
 ## ISSUE-125：codex Worker 反覆停在 `npm test` 的權限提示逾時失敗，改為 helper 暫時最大權限（需提醒：目前仍在 VM）

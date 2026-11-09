@@ -3382,14 +3382,35 @@ export async function relayRecoveredStreams(runtime: Runtime): Promise<void> {
         continue;
       if (streamOwnershipLost(runtime, record)) continue;
       // 舊版紀錄沒有 sessionKey：無從比對，維持先前行為（只由 Stop 事件的 session 與時間篩選）。
+      const currentKey = agentSessionKey(agent) ?? "";
       if (
         record.sessionKey !== undefined &&
-        (agentSessionKey(agent) ?? "") !== record.sessionKey
+        currentKey !== record.sessionKey
       ) {
-        console.warn(
-          `Stream not recovered terminal=${record.terminalId} pane=${record.paneId}: agent session changed`,
+        // 停機或抓取重試期間發生、streamAgent 沒來得及同步的合法轉移：回合開始時沒有 session 而現在首次登記，
+        // 或 codex／agy／pi 在這個回合開始後才建立新 session（與 streamAgent 的判斷一致）。
+        const legalTransfer =
+          hasAgentSession(agent.agent_session) &&
+          (record.sessionKey === "" ||
+            (["codex", "agy", "pi"].includes(agent.agent ?? "") &&
+              sessionCreatedSince(
+                agent.agent_session,
+                record.startedAt,
+                (id) =>
+                  agent.agent === "agy" && !agent.machine
+                    ? agyConversationCreatedAt(id)
+                    : undefined,
+              )));
+        if (!legalTransfer) {
+          console.warn(
+            `Stream not recovered terminal=${record.terminalId} pane=${record.paneId}: agent session changed`,
+          );
+          continue;
+        }
+        console.log(
+          `Stream recovery follows session transfer terminal=${record.terminalId} pane=${record.paneId}`,
         );
-        continue;
+        store.updateSession(record.terminalId, currentKey);
       }
       const session = agent.agent_session as
         { kind?: string; value?: string } | undefined;
