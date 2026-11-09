@@ -232,7 +232,7 @@ test("autopick lists the projects to pick cards for, with each repo path and one
   assert.deepEqual(result.policy.autopick, {
     "local:Herdr_Discord_Bridge": "/Users/example/git_wk/Herdr_Discord_Bridge",
   });
-  assert.equal(result.policy.autopickLead, "codex");
+  assert.deepEqual(result.policy.autopickLead, ["codex"]);
   assert.equal(
     autopickFor(result.policy, "local:Herdr_Discord_Bridge")?.level,
     "L2",
@@ -259,7 +259,7 @@ test("the Lead kind defaults to claude and all four Lead kinds are accepted", ()
   for (const kind of ["claude", "codex", "agy", "pi"]) {
     const parsed = parsePolicy(`version: 1\nautopick_lead: ${kind}\n`);
     assert.ok(parsed.ok);
-    assert.equal(parsed.policy.autopickLead, kind);
+    assert.deepEqual(parsed.policy.autopickLead, [kind]);
   }
   for (const kind of ["unknown", "AGY", "", "claude|pi"]) {
     const parsed = parsePolicy(`version: 1\nautopick_lead: ${kind}\n`);
@@ -286,4 +286,30 @@ test("autopick paths must be absolute, free of .. and control characters, and pr
     "  local:A: /repo/a\n  local:A: /repo/b",
   ])
     assert.equal(parsePolicy(base + bad + "\n").ok, false, bad);
+});
+
+test("comma separated Lead policy preserves order and rejects duplicate or empty candidates", () => {
+  const parsed = parsePolicy(
+    "version: 1\nautopick_lead:  pi , codex, agy , claude \n",
+  );
+  assert.ok(parsed.ok);
+  assert.deepEqual(parsed.policy.autopickLead, [
+    "pi",
+    "codex",
+    "agy",
+    "claude",
+  ]);
+  for (const value of [
+    "claude, claude",
+    "pi, codex, pi",
+    "claude,",
+    ",codex",
+    "claude,,pi",
+    "codex,unknown",
+  ]) {
+    assert.equal(
+      parsePolicy(`version: 1\nautopick_lead: ${value}\n`).ok,
+      false,
+    );
+  }
 });

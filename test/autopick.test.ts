@@ -440,3 +440,95 @@ test("a rejection is reported again when the reason changes, because the policy 
   assert.match(rejected[0], /agy/);
   assert.match(rejected[1], /pi/);
 });
+
+test("ordered candidates select card override or first policy entry at every project level", () => {
+  for (const level of ["L0", "L1", "L2"] as const) {
+    const policy = policyFor(level, "codex, claude, agy, pi");
+    assert.equal(pickNext(policy, [card("REQ-x")])?.lead, "codex");
+    assert.equal(pickNext(policy, [card("REQ-x")])?.leadSelection, "policy");
+    const selected = pickNext(policy, [card("REQ-x", { lead: "claude" })]);
+    assert.equal(selected?.lead, "claude");
+    assert.equal(selected?.leadSelection, "card");
+    assert.equal(selected?.level, level);
+    assert.equal(
+      pickNext(policy, [
+        card("REQ-x", { lead: "claude", projects: ["local:NotPicked"] }),
+      ]),
+      undefined,
+    );
+    delete policy.projects["local:Herdr_Discord_Bridge"];
+    assert.equal(
+      pickNext(policy, [card("REQ-x", { lead: "claude" })]),
+      undefined,
+    );
+  }
+});
+
+test("card Lead outside candidates or closed agy/pi is visibly rejected without fallback", async () => {
+  for (const lead of ["codex", "agy", "pi"] as const) {
+    const policy = policyFor(
+      "L1",
+      lead === "codex" ? "claude" : `claude, ${lead}`,
+    );
+    const ready = card("REQ-x", { lead });
+    const reasons: string[] = [];
+    const { steps, calls } = fakeSteps();
+    const picker = createAutopicker({
+      policy: () => ({ status: "loaded", policy, file: "/policy" }),
+      readyCards: () => [ready],
+      steps,
+      onReport: () => {},
+      leadGate: (kind) =>
+        ["agy", "pi"].includes(kind) ? "implementation required" : undefined,
+      onRejected: (_card, reason) => {
+        reasons.push(reason);
+      },
+    });
+    await picker.tick();
+    await picker.tick();
+    assert.equal(reasons.length, 1);
+    assert.match(
+      reasons[0]!,
+      lead === "codex" ? /候選清單/ : /implementation required/,
+    );
+    assert.deepEqual(calls, []);
+  }
+});
+
+test("failed selected Lead starts exactly once and never tries the next candidate", async () => {
+  const selected = pickNext(policyFor("L1", "codex, claude"), [card("REQ-x")])!;
+  const starts: string[] = [];
+  const { steps, calls } = fakeSteps({
+    startLead: async (job) => {
+      starts.push(job.lead);
+      throw new Error("startup failed");
+    },
+  });
+  const result = await runAutopick(selected, steps);
+  assert.equal(result.outcome, "failed");
+  assert.equal(result.lastStep, "lead");
+  assert.deepEqual(starts, ["codex"]);
+  assert.deepEqual(calls, []);
+});
+
+test("rejection template persists a visible failed event in the card ledger", async () => {
+  const { leadRejectionEvent } = await import("../src/autopick.js");
+  const { CardStore } = await import("../src/card-store.js");
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = mkdtempSync(join(tmpdir(), "lead-rejected-"));
+  try {
+    const store = new CardStore(root);
+    const ready = card("REQ-20261109-rejection", { lead: "pi" });
+    assert.ok(store.create(ready).ok);
+    const reason = leadRejection(policyFor("L1", "claude"), ready)!;
+    assert.ok(store.recordEvent(ready.id, leadRejectionEvent(reason, "2026-11-09T00:00:00Z", "lead-rejected-test")).ok);
+    const read = store.read(ready.id);
+    assert.ok(read.ok);
+    assert.match(read.card.body, /autopick_stopped/);
+    assert.match(read.card.body, /候選清單/);
+    assert.equal(read.card.status, "ready");
+    assert.equal(read.card.lead, "pi");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

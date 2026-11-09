@@ -59,6 +59,7 @@ export function runCardCheck(
           );
       } else {
         failed.push(`FAIL  ${file}: ${result.error}`);
+        if (result.error.includes("invalid lead")) warned.push(`WARN  ${file}: ${result.error}`);
       }
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);

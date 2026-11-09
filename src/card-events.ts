@@ -122,6 +122,7 @@ export type CardEvent = { time: string; eventId: string } & (
 /** Only explicit identity facts; never session history, prompts or output. */
 export interface RoleIdentity {
   role: string;
+  leadSelection?: "card" | "policy";
   agent: string;
   machine: string;
   model?: string;
@@ -187,6 +188,7 @@ export function roleEvent(identity: RoleIdentity, time: string): CardEvent {
           identity.machine,
           identity.profileId ?? null,
           identity.model ?? null,
+          // leadSelection 不進 ID：main 的角色回呼（帶選擇依據）與 assignCard（不帶）是同一個 Lead，必須去重成一筆。
         ]),
       )
       .digest("hex")
@@ -269,8 +271,12 @@ function render(fields: Fields): { text: string; suspicious: boolean } {
           ? ""
           : `（第 ${integer(fields, "round", 1, 1_000_000)} 輪）`;
       if (!task && !round) bad("scope", "task id or round");
+      const selection =
+        fields.leadSelection === undefined
+          ? ""
+          : `；leadSelection=${oneOf(fields, "leadSelection", ["card", "policy"] as const)}`;
       return {
-        text: `${role}${round}：${agent}${model}；machine=${machine}${profile}${task}`,
+        text: `${role}${round}：${agent}${model}；machine=${machine}${profile}${task}${selection}`,
         suspicious: false,
       };
     }

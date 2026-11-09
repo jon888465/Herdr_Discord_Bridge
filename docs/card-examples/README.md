@@ -105,3 +105,5 @@ FAIL  bad.md: "external.mantis" must be a string or null
 - 這是**自由文字**，由寫的人負責內容；**bridge 不會改寫這一段**，`card show` 會單獨顯示它。
 - **不要把機敏資料（token、密碼、連線字串）寫進去**：這一段沒有自動的機敏檢查，匯出到 Mantis 或 Notion 時也會一併帶出。
 - `card assign` 只會把標題、`## 描述`、`## 驗收條件` 交給 Agent；`## 決議` 不在其中。
+
+選用自動撿卡 Lead（2026-11-09，ISSUE-132，原始碼已修正、待實機驗收）：卡片可填 `lead: codex`，只接受 claude、codex、agy、pi 的單一值。指定須在政策 `autopick_lead` 逗號候選清單內；省略取清單第一個。agy／pi 仍須通過 implementation 開放條件，專案選用與等級不變；啟動失敗不換候選。手動 `card assign` 仍用目前路由的 Agent。`scripts/herdr-card-check` 驗證此欄位，非法值 FAIL／WARN。

@@ -1,4 +1,5 @@
 import path from "node:path";
+import type { AutopickLead } from "./policy.js";
 
 export type CardType = "requirement" | "ticket";
 
@@ -24,6 +25,7 @@ export interface Card {
   updated: string;
   source?: string;
   notify?: string;
+  lead?: AutopickLead;
   autopick_workspace_id?: string;
   autopick_workspace_label?: string;
   project?: string;
@@ -53,6 +55,7 @@ const KNOWN_KEYS = new Set<string>([
   ...REQUIRED_KEYS,
   "source",
   "notify",
+  "lead",
   "autopick_workspace_id",
   "autopick_workspace_label",
   "project",
@@ -471,6 +474,12 @@ export function buildCard(
       ...checkRequired(fields, filename),
       body: document.body,
     };
+    if (fields.has("lead")) {
+      const value = asString("lead", fields.get("lead"));
+      if (!["claude", "codex", "agy", "pi"].includes(value))
+        reject("invalid lead; use claude, codex, agy or pi");
+      card.lead = value as AutopickLead;
+    }
     if (fields.has("notify")) {
       const value = asString("notify", fields.get("notify"));
       if (!parseNotifyTarget(value)) reject("invalid notify destination");

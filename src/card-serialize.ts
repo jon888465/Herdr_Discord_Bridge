@@ -74,6 +74,7 @@ export function serializeCard(
     `created: ${formatString(card.created)}`,
     `updated: ${formatString(card.updated)}`,
   ];
+  if (card.lead !== undefined) lines.push(`lead: ${formatString(card.lead)}`);
   if (card.notify !== undefined)
     lines.push(`notify: ${formatString(card.notify)}`);
   for (const key of [

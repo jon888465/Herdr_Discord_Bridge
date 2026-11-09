@@ -1047,7 +1047,7 @@ test("card policy shows which projects are opted in to auto-pick, with the repo,
     default: "L0" as const,
     projects: { "local:Foo": "L2" as const },
     autopick: { "local:Foo": "/Users/example/git_wk/Foo" },
-    autopickLead: "codex" as const,
+    autopickLead: ["codex" as const],
   };
   const { run } = setup({ policy: () => loadedPolicy("loaded", policy) });
   const text = await run("policy");
