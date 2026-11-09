@@ -16,7 +16,7 @@
 
 ## ISSUE-134：claude 當 reviewer 時，回覆「不是單一 JSON 物件」，兩輪都 `inconclusive`，review 退回人工
 
-更新日期：2026-11-09。狀態：已修正、待驗收。
+更新日期：2026-11-09。狀態：已驗收（2026-11-09，範圍：claude 當 reviewer 的 `card review` 第 1 輪；`card fix` 與其他情境未驗，見「實機驗收」段）。
 
 **使用者可見症狀／重現環境：**2026-11-09，本機 macOS、bridge main `88e1ce6`，卡片 `REQ-20261109-lead-live-codex`（PR #191，head `a773038`）由 codex 當 Lead，新開 claude reviewer pane。第 1 輪 06:59:54Z–07:00:00Z、第 2 輪 07:00:07Z–07:00:13Z 都回 `inconclusive`，原因「reviewer 的回覆不是單一 JSON 物件」，loop 退回人工。原先因每輪約 6 秒而猜測未審查或格式不符；後續 session 證據已排除該猜測。
 
@@ -30,7 +30,11 @@
 
 **對照與暫行做法：**同卡改用 codex reviewer 第 3 輪於 07:03:59Z pass，之後人工 merge `1448d51`；此為修正前的對照，不能當作本修正驗收。
 
-**未驗證／下一步：**沒有實機驗證 claude 當 reviewer（本修正後尚未驗證）；也尚未驗證真實 card fix。只完成原始碼與自動化驗證，未部署、未重啟執行中的 bridge，舊回覆不會補送；待 Lead 安排重啟與 Discord／Herdr／Claude 端到端驗收，不宣稱已驗收。
+**實機驗收（2026-11-09，本機 macOS）：**PR #193（`ae356aa`）由 bridge 全自動 merge 後，授權重啟 bridge（新程序載入 `ae356aa`，`dist/src/turn-hook-final.js` 存在，Gateway 連線正常）。驗證卡 `REQ-20261109-claude-reviewer-live`（`lead: codex`，改一個一行檔案；與修正前失敗的 `REQ-20261109-lead-live-codex` 同一種組合：codex 當 Lead、claude 當 reviewer）：07:29:33Z 開 PR #194（head `7b9eb65`），07:29:41Z `reviewer（第 1 輪）：claude`，07:29:46Z `review_verdict` 為 **`pass`**（約 5 秒，沒有發現），CI 兩平台綠，07:31:27Z bridge 自動 squash merge `c29d84e`，07:32:24Z `cleanup_done`；bridge console 有 `hook Stop … pane=w5Q:p5 chars=320`。修正前同樣的組合兩輪都 `inconclusive`。
+
+**這個驗收沒有證明的：**bridge 沒有紀錄「這次回覆取自 hook」，所以「由 hook 路徑取得」是由 hook 字數紀錄與結果推論，不是直接觀察；只有一次 `pass`，沒有重複，也沒有驗證 claude reviewer 回 `changes_requested` 的情境（有發現時的 JSON 較長，折行風險更高）；`card fix`（作者回覆走同一個修正）從未實機驗證；hookTransport 非 auto 的情境未驗。
+
+**未驗證／下一步：**上述未證明項；ISSUE-133、ISSUE-135 另案。
 
 ## ISSUE-133：`autopick_stopped` 的原因只留 loop 輸出的前 200 字，真正的停止原因被截掉，通知因此誤導
 
