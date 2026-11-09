@@ -733,7 +733,7 @@ Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*
 - **限制（誠實說明）：** 用的是使用者現有的 `gh`／ssh 登入，PR 會顯示是使用者開的；同一環境的 Agent 也能用同一份憑證。只支援本機、只支援 github.com；`card pr` 不會替 Agent commit（沒有 commit 就拒絕）；輪詢最多延遲約 60 秒；`gh` 需要已登入且有該 repo 的 Contents 與 Pull requests 讀寫權限。
 - **PR merge 後自動清理**（追蹤清單 E11，使用者 2026-11-03：「卡片 merge 了就應該清理」，**已實作，主要路徑 live 驗收通過 2026-11-03**，ISSUE-065；髒檢出保留、squash／rebase 推斷、清理失敗通知未取得 live 證據）：輪詢發現 PR 被 merge 時，bridge 依序：
   1. **卡片寫 `merged`**（事件 id `pr-<number>-merged`），含 merge commit 前 12 位與 merge 方式。**merge 方式是推斷的，不是 GitHub 回報的事實**：merge commit 有兩個 parent → `merge`；一個 parent 且標題以 ` (#<PR 編號>)` 結尾 → `squash`；其餘 → `rebase`（自訂過 squash 標題的 repo 可能被誤判成 rebase）。取得失敗只回報問題、略過這筆事件。
-  2. **自動清理這張卡的 worktree**，與 `card cleanup` 同一套規則：**永不強制**；有未提交修改就保留（卡片 `worktree 狀態` 顯示「保留（有未提交修改）」、記 `cleanup_pending`）；成功則記 `cleanup_done`、`worktree 狀態` 變「已清理（分支保留）」並撤銷授權；**分支一律保留**。來源 repo workspace 的 ISSUE-129 例外（2026-11-09，已修正、待驗收）：merge cleanup 成功後，會以卡片記錄的 Lead workspace id 查詢現況，僅在記錄與現況 label 完全相同且符合本卡 `autopick-<lead>-<卡片 id>`（沿用 60 字元上限）時關閉該 autopick Lead；in_progress 一律不關。找不到、標籤不符、查詢或關閉失敗只記 log，不影響 cleanup 結果。其餘來源 repo workspace、Worker／reviewer 所在的其他 workspace 與使用者 workspace 不在此 Lead 收尾範圍；本步原有 card worktree 移除行為不變。每分鐘終態掃描在本程序 autopick 執行中會延後，讓 reached 路徑收尾；merge cleanup 仍可能先關 Lead，此時 reached 查詢確認該 id 已不存在即視為成功（見 ISSUE-129 收尾段落）。沒有作用中的 worktree 就略過本步，終態卡仍由每分鐘掃描處理。
+  2. **自動清理這張卡的 worktree**，與 `card cleanup` 同一套規則：**永不強制**；有未提交修改就保留（卡片 `worktree 狀態` 顯示「保留（有未提交修改）」、記 `cleanup_pending`）；成功則記 `cleanup_done`、`worktree 狀態` 變「已清理（分支保留）」並撤銷授權；**分支一律保留**。來源 repo workspace 的 ISSUE-129 例外（2026-11-09，已驗收；merge cleanup 自己關 Lead 的路徑沒有單獨實機觸發，見 ISSUE-129）：merge cleanup 成功後，會以卡片記錄的 Lead workspace id 查詢現況，僅在記錄與現況 label 完全相同且符合本卡 `autopick-<lead>-<卡片 id>`（沿用 60 字元上限）時關閉該 autopick Lead；in_progress 一律不關。找不到、標籤不符、查詢或關閉失敗只記 log，不影響 cleanup 結果。其餘來源 repo workspace、Worker／reviewer 所在的其他 workspace 與使用者 workspace 不在此 Lead 收尾範圍；本步原有 card worktree 移除行為不變。每分鐘終態掃描在本程序 autopick 執行中會延後，讓 reached 路徑收尾；merge cleanup 仍可能先關 Lead，此時 reached 查詢確認該 id 已不存在即視為成功（見 ISSUE-129 收尾段落）。沒有作用中的 worktree 就略過本步，終態卡仍由每分鐘掃描處理。
   3. 在原 thread 通知「PR #N 已 merge（<方式>）」並附上清理結果；自動清理失敗（例如 Herdr 連不上）只在通知裡說明並提示手動 `card cleanup <id>`，**不會自動重試**。
   - 只有 **merge** 會觸發；PR 被關閉不會。bridge 不會 `git pull` 或更新使用者本機 repo 的 `main`，也不刪遠端或本機分支。
   - 限制：merge 方式是推斷；通知送不出去時索引仍已更新、不重送；merge 發生在 bridge 停止期間時，下次啟動後的第一輪輪詢會補上（索引中仍標為開著）。
@@ -759,7 +759,7 @@ Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*
 
 `card show <id>` 從完整帳本（含輪替旁檔）按時間排序，單行 `角色紀錄：Lead：claude · impl：codex（gpt-6.1-sol）· reviewer（第 2 輪）：agy`；重複角色不合併，無紀錄顯示「沒有角色紀錄」。本輪不增加 PR 內文角色摘要，不把角色放進 ISSUE-120 通知，不改任何權限、review、CI 或 merge gate。原始碼／假 port 測試完成，live bridge 尚未部署及實機驗證。
 
-### Autopick Lead workspace 收尾（ISSUE-129，2026-11-09，已修正、待驗收）
+### Autopick Lead workspace 收尾（ISSUE-129，2026-11-09，已驗收）
 
 Autopick 建立 Lead workspace 後、啟動 Agent 前，把 id 與實際 label 寫入卡片 frontmatter 的 `autopick_workspace_id`／`autopick_workspace_label`；寫入失敗則停止並清理剛建立的 workspace。欄位沿用 CardStore 的原子更新與 parser／serializer；外部匯入時清除此營運 metadata，不信任外部 workspace 指向。舊卡沒有記錄則不猜測或回填。
 
@@ -767,7 +767,7 @@ Autopick 建立 Lead workspace 後、啟動 Agent 前，把 id 與實際 label �
 
 關閉只使用記錄的 Lead id，先讀 workspace 現況，要求記錄的 label 符合本卡 `autopick-<claude|codex>-<卡片 id>`（沿用 60 字元上限），且現況 label 完全相等；不依名稱搜尋其他 workspace，不關 Worker／reviewer 的 card worktree workspace 或使用者 workspace。找不到、標籤不符、查詢／關閉失敗都只記 console warning，不改 cleanup 結果；close 不重試不確定送達。一般來源 repo workspace 保留規則不變，此處只例外關閉有記錄且通過標籤核對的 bridge 自建 Lead。
 
-原始碼已實作；build／自動化檢查證據見 ISSUE-129。執行中的 bridge 尚未部署或重啟，尚未 Discord／Herdr／CLI 端到端驗收；沒有記錄的舊 Lead 不會自動補清。
+原始碼已實作並於 2026-11-09 實機驗收（取消、重啟續清、人工改名保留、其他 workspace 保留；證據與未驗證項見 ISSUE-129）。done 卡由 cleanup 關 Lead 與 merge cleanup 自己關 Lead 兩條路徑沒有單獨實機觸發；Discord 端到端未驗；沒有記錄的舊 Lead 不會自動補清。
 
 ### ISSUE-126：重啟後無法續傳的最後回覆（已實作、待實機驗收）
 

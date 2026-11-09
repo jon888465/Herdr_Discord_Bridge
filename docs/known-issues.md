@@ -2,7 +2,7 @@
 
 ## ISSUE-129：卡片結束後留下 autopick Lead workspace（REQ-20261109-autopick-lead-cleanup）
 
-更新日期：2026-11-09。狀態：已修正、待驗收。
+更新日期：2026-11-09。狀態：已驗收（2026-11-09，範圍與未驗證項見「實機驗收」段）。
 
 症狀：autopick stopped／failed 後人工接手完成或取消卡片，Lead workspace 留著；bridge 重啟後原有 close handle 遺失。預期：卡片結束或 cleanup 成功後，以持久化身分安全關閉 Lead，不影響其他 workspace 或 cleanup 結果。
 
@@ -19,6 +19,15 @@ Review2 文件修正（2026-11-09，f3）：README 的舊 autopick／merge clean
 Review3 文件修正（2026-11-09，f4）：SPEC 的 PR merge 自動清理段落仍無條件宣稱來源 workspace 不關閉，根因為舊段落漏同步；經 review3 重新檢查後補上 ISSUE-129 的記錄 id／label 核對、失敗只記 log、不改 cleanup 結果及其餘 workspace 保留例外。狀態維持「已修正、待驗收」。已對照 SPEC 命名／Lead 收尾段落與 src/main.ts 的 merge cleanup：只有每分鐘終態掃描在 autopick 執行中延後，merge cleanup 可先關 Lead，reached 以確認已不存在即成功處理；本輪未將尚未實作的「merge cleanup 延後」寫成現況，也未改程式碼。全面搜尋 SPEC.md、README.zh-TW.md、docs/known-issues.md 的 `不關閉|保留.*workspace|workspace.*保留|什麼都不做|不關.*workspace`，逐項檢視：README 已有例外；一般 routing／restart／pane／usage 與拒絕操作敘述無關，保留；舊 ISSUE-062／065／096／119 補現況註記，日期與原驗收證據不變。內容檢查及 `git diff --check` 通過（2026-11-09）。純文件變更未重跑 build／測試；執行中 bridge 未部署／重啟，未端到端驗收。
 
 未驗證／下一步：原始碼已修改；執行中的 bridge 尚未部署／重啟，未做 Discord／Herdr／CLI 端到端驗收。Lead 需重啟後驗證完成／取消、重啟續清、人工改名與其他 workspace 保留。沒有 metadata 的舊卡不回填，不補送舊訊息。（撰寫此紀錄時尚未 commit；commit、PR 與 merge 以 PR 紀錄為準。）
+
+實機驗收（2026-11-09，本機；bridge 以 main `1657138`〔含 #180〕於 10:50 重啟，10:59 為驗證重啟續清再重啟一次）：以三張只新增 `docs/card-runs/` 一個檔案的測試卡驗證（卡片檔在 plugin 狀態目錄、不進 git），結果如下，前面「未驗證／下一步」列的重啟與實機項目已在此處理。
+
+- 卡 A（完成路徑，`REQ-20261109-lead-cleanup-live-a`）：autopick 撿卡後 Lead workspace w57 的 id／label 立即寫進卡片；跑到 PR #181 squash merge 後數秒內 Lead 消失，其他 workspace（bridge、git_wk、本 Agent、colab_llm）不動。merge cleanup 隨後發現 workspace 已不存在，只記 `workspace missing or label mismatch` warning，cleanup 仍回報 removed。**這張卡的 Lead 是被 autopick 自己的 reached 路徑先關掉，不是 cleanup 關的**，所以「done 卡由 cleanup 依持久化 id 關 Lead」沒有被這張卡單獨證明。
+- 卡 B（重啟＋取消，`...-live-b`）：Lead w59 開著、卡片 in_progress 時重啟 bridge；重啟後 Lead 仍在，超過一次每分鐘掃描都沒被關（in_progress 保留）。把卡片改成 cancelled 後約 36 秒（11:01:28→11:02:04）Lead 被關，Worker workspace 與其他 workspace 保留。證明 cleanup 靠持久化的卡片紀錄（不靠記憶體 handle）能關 Lead，涵蓋取消與重啟續清。
+- 卡 C（人工改名，`...-live-c`）：Lead w5B 被人工改名為「手動改名-lead-c」；卡片終態且 autopick 已停止後，掃描記 `workspace missing or label mismatch`，Lead 保留。卡 C 在改名前已跑到 done，我手動把狀態從 done 改成 cancelled，autopick 因此在 merge 步驟被拒（`card merge` 要求 done）而 stopped，PR #182 留在 open，驗收後手動關閉、未 merge。這是人工改狀態的副作用，不是產品行為。
+- 測試後已關閉測試 workspace、worktree、本機與遠端測試分支、PR #182；三張測試卡片檔仍留在狀態目錄。
+
+結論：狀態改為已驗收（2026-11-09，範圍僅限上述）。**未驗證：**done 卡由 cleanup（而非 reached）關 Lead、merge cleanup 自己關 Lead 兩條路徑沒有單獨實機觸發（只有單元測試）；沒有 metadata 的舊 Lead 不回填；Discord 端到端未驗（測試卡 `notify` 為 agent 形式，通知送進本 Agent pane）。**觀察（未開新 issue、待觀察）：**cleanup 對已不存在的 Lead 會重複記 warning（卡 A 在重啟後約 9 分鐘內出現 4 次，頻率與原因未確認），目前只是 log 雜訊，不影響 cleanup 結果。
 
 
 ## ISSUE-128：缺少 Agent usage 唯讀查詢（REQ-20261106-usage-query）
@@ -2551,7 +2560,7 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 使用者可見行為：見 SPEC「隔離 worktree」與 `card cleanup`。
 
-現況補充（2026-11-09，ISSUE-129，已修正、待驗收）：以下保留 ISSUE-062 當時的需求與驗收歷史；現行 cleanup 對有卡片記錄且通過 id／label 核對的 autopick Lead 有關閉例外，其餘來源 workspace 保留。
+現況補充（2026-11-09，ISSUE-129，已驗收）：以下保留 ISSUE-062 當時的需求與驗收歷史；現行 cleanup 對有卡片記錄且通過 id／label 核對的 autopick Lead 有關閉例外，其餘來源 workspace 保留。
 
 預期行為：`card assign <id> --worktree` 在目前 thread Agent 所在 repo 建立 `card/<id>` 分支的 worktree 與 workspace、啟動同種 Agent、切換路由、記錄到卡片、啟動任務；Agent 被擋住時不啟動任務並說明；`card cleanup <id>` 永不強制、髒檢出保留、不刪分支、不關來源 workspace；沒帶旗標的流程完全不變。
 
@@ -2717,7 +2726,7 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 使用者可見行為：bridge 開出的 PR 被 merge 後（輪詢最多延遲約 60 秒），卡片寫入 `merged`、自動清理 worktree，並在原 thread 通知。見 SPEC「PR merge 後自動清理」。
 
-現況補充（2026-11-09，ISSUE-129，已修正、待驗收）：以下保留 ISSUE-065 的原需求與實機證據；現行 merge cleanup 可關閉卡片記錄且通過 id／label 核對的 autopick Lead，其餘來源 workspace 保留。
+現況補充（2026-11-09，ISSUE-129，已驗收）：以下保留 ISSUE-065 的原需求與實機證據；現行 merge cleanup 可關閉卡片記錄且通過 id／label 核對的 autopick Lead，其餘來源 workspace 保留。
 
 預期行為：只有 merge 觸發（關閉不清理）；`merged` 事件含 merge commit 與推斷的方式（merge／squash／rebase）；清理永不強制、髒檢出保留並寫 `cleanup_pending`、分支與來源 workspace 保留；清理失敗只說明並提示手動 `card cleanup`；merge 方式取得失敗只回報問題。
 
@@ -3545,7 +3554,7 @@ H4 脈絡：這是自動串接最小的摩擦；已選用（1）的單卡同步�
 
 第一部分的內容（2026-11-05）：`src/policy.ts` 新增 `autopick_lead`、`autopick:` 區塊與 `autopickFor`；autopick 的專案必須也明確列在 `projects`（不能靠 `default`，避免寬鬆的 default 讓工作自己開始）；路徑必須是絕對路徑、不可有 `..` 或控制字元。`src/autopick.ts`：`pickNext`（ready、宣告的專案被選用、先建立的先做、略過已試過的）、`runAutopick`（依等級依序執行並在每個停止條件停下）、`createAutopicker`（一次一張、不重試、政策檔有問題不撿）。所有外部動作經注入的 `AutopickSteps`，所以邏輯可以單元測試。
 
-現況補充（2026-11-09，ISSUE-129，已修正、待驗收）：以下為 ISSUE-096 初版設計歷史；現在未選用政策只是不撿新卡，仍每分鐘掃描終態卡；未結束且未成功 cleanup 的 stopped／failed 保留現場，in_progress 一律不關 Lead，結束卡片的 Lead 收尾依 ISSUE-129。
+現況補充（2026-11-09，ISSUE-129，已驗收）：以下為 ISSUE-096 初版設計歷史；現在未選用政策只是不撿新卡，仍每分鐘掃描終態卡；未結束且未成功 cleanup 的 stopped／failed 保留現場，in_progress 一律不關 Lead，結束卡片的 Lead 收尾依 ISSUE-129。
 
 安全設計：失敗或需要人就停下、保留 Lead 的 workspace 與 worktree；不重試（同一個程序內已試過的卡不再撿）；L2 的 merge 仍完全受 `card merge` 的守門（獨立 review、CI、PR 乾淨、不動敏感路徑）；沒有選用就什麼都不做。
 
@@ -4038,7 +4047,7 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 更新日期：2026-11-07。狀態：已修正、待驗收。
 
-現況補充（2026-11-09，ISSUE-129，已修正、待驗收）：以下為 ISSUE-119 命名變更當時的範圍與驗證歷史；現行 Lead cleanup 另以卡片記錄 id 加上 label 現況核對守門，label 不再僅供顯示；不依名稱搜尋其他 workspace。
+現況補充（2026-11-09，ISSUE-129，已驗收）：以下為 ISSUE-119 命名變更當時的範圍與驗證歷史；現行 Lead cleanup 另以卡片記錄 id 加上 label 現況核對守門，label 不再僅供顯示；不依名稱搜尋其他 workspace。
 
 使用者可見症狀：autopick Lead workspace 原本只有 `autopick-<卡片 id>`；reviewer、profile Worker、`agent start` pane 未標示種類與角色，側欄難以辨認。預期名稱包含實際種類，workspace 保留卡片及 `autopick-` 前綴、最多 60 字元；名稱不作為關閉身分。
 
