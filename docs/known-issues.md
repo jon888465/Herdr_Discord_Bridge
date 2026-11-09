@@ -46,6 +46,30 @@ Review3 文件修正（2026-11-09，f4）：SPEC 的 PR merge 自動清理段落
 結論：狀態改為已驗收（2026-11-09，範圍僅限上述）。**未驗證：**done 卡由 cleanup（而非 reached）關 Lead、merge cleanup 自己關 Lead 兩條路徑沒有單獨實機觸發（只有單元測試）；沒有 metadata 的舊 Lead 不回填；Discord 端到端未驗（測試卡 `notify` 為 agent 形式，通知送進本 Agent pane）。**觀察（未開新 issue、待觀察）：**cleanup 對已不存在的 Lead 會重複記 warning（卡 A 在重啟後約 9 分鐘內出現 4 次，頻率與原因未確認），目前只是 log 雜訊，不影響 cleanup 結果。
 
 
+## ISSUE-131：手動建立 worktree 開的 PR 無法用 `card attach-pr` 登記，也就不能 `card review`／`merge`／`loop`
+
+更新日期：2026-11-09。狀態：待調查（根因已由讀碼確認；要不要修、怎麼修尚未決定，沒有修正、沒有測試）。
+
+**使用者可見症狀：**卡片的分支與 PR 不是由 `card assign --worktree` 建立（例如手動 `git worktree add`）時，`card attach-pr <卡片 id> <PR 編號>` 回覆「卡片 … 沒有 worktree 紀錄，無法判斷它屬於哪個專案（要由 `card assign … --worktree` 建立過）」。結果這張卡不能 `card review`、`card merge`、`card loop`，bridge 也不追蹤它的 CI 與 merge；L2 專案只能人工 merge。
+
+**預期行為：**ISSUE-123 的 `card attach-pr` 目的是讓人工接手的 PR 能登記回卡片。至少在卡片宣告的專案（`project`／`projects`）已被 `policy.yml` 的 `autopick` 選用、有明確 repo 路徑時，不需要 worktree 紀錄也能登記。
+
+**重現／環境（2026-11-09，本機）：**bridge（pid 32824，10:59 啟動）的 console 執行 `card attach-pr REQ-20261109-autopick-four-leads 187`。該卡是 `draft`、`project: local:Herdr_Discord_Bridge`，分支 `card/REQ-20261109-autopick-four-leads` 由手動 `git worktree add` 建立，PR #187 在 GitHub 上正常（CI 綠）。對照：同日對有 worktree 紀錄的 `REQ-20261109-codex-lead-agy` 登記 PR #185 成功。
+
+**已確認根因（讀碼，2026-11-09）：**`src/main.ts` 的 `attachPullRequest` 用 `lazyCardWorktrees().latest(card.id)` 取得 repo 路徑，沒有紀錄就丟錯；`src/card-merge-wiring.ts` 同樣依賴 worktree 紀錄。卡片的 `project`／`projects` 與 `policy.yml` 的 `autopick` repo 路徑沒有被當成 fallback。
+
+**影響：**人工接手或自建 worktree 的卡，沒有 bridge 的獨立 review 與自動 merge 守門。實際發生：`REQ-20261109-autopick-four-leads`（PR #187）無法走 `card review`，改用 code-review 技能審查（只當參考，沒有 `review_verdict`），只能由人手動 merge（截至 2026-11-09 尚未 merge）。
+
+**修正範圍：**無（只記錄）。建議方向：沒有 worktree 紀錄時，改用卡片 `project` 在政策 `autopick` 的 repo 路徑；只能使用政策檔已選用的專案，不能由卡片新增路徑（Agent 能寫卡片）。`card-merge-wiring` 要一併處理。
+
+**暫行做法：**人工 merge；或用 `card assign <id> --worktree` 讓 bridge 建 worktree（會啟動任務，分支名稱已存在時預期會衝突，未實測）。
+
+**相關觀察（2026-11-09，不是本 issue 的修正範圍）：**
+- `card review` 只看單一 PR 的 diff（上限 20 個檔案、60000 字元）；程式與文件拆成兩個 PR 時，reviewer 看不到另一個 PR 的文件，`REQ-20261109-codex-lead-agy` 的第 1 到 3 輪 review 重複標出「文件未同步」「缺規劃文件」（第 3 輪用盡次數仍 `changes_requested`）。
+- console 的 `team cancel <task-id>` 在 console 路由不在任務所屬 workspace 時回「task belongs to another workspace」；同日改用 `card cleanup` 清理 `blocked` 任務的 worktree（成功，分支保留）。任務本身沒有被取消，卡片仍是 `in_progress`（bridge 只在 task `completed` 才把卡片設為 `done`）。
+
+**未驗證／下一步：**沒有實作與測試；是否採用 fallback 與其安全性要使用者決定。
+
 ## ISSUE-128：缺少 Agent usage 唯讀查詢（REQ-20261106-usage-query）
 
 更新：2026-11-08。狀態：重新開啟後再修正、待驗收（PR #172 已 merge、bridge 以 e69828f 重啟後實機查詢發現真實 codex 畫面讀不到用量，已另開 PR 修正）。
