@@ -1,5 +1,35 @@
 # Known Issues
 
+## ISSUE-135：卡片事件通知的標題把「Lead 不在候選清單」說成「專案政策未滿足」
+
+更新日期：2026-11-09。狀態：待調查（現象已實機觀察；根因尚未讀碼確認；沒有修正）。
+
+**使用者可見症狀：**測試卡 `REQ-20261109-lead-live-reject`（`lead: pi`，不在 `autopick_lead: claude, codex` 內）被拒絕時，卡片的事件原因正確寫「Lead『pi』不在政策候選清單內，不撿這張卡」，但 `notify` 對象收到的通知標題是「autopick_stopped · 專案政策未滿足」。這不是專案等級或專案選用的問題，標題會誤導使用者去查專案政策。
+
+**預期行為：**標題要對應實際原因（Lead 不在候選清單）。
+
+**重現／環境：**2026-11-09，本機 macOS，bridge 為 main `88e1ce6` 的程序，通知送到 Agent pane（先排隊、Agent 空閒後送達）。
+
+**已確認根因：**未確認。推測通知依事件原因文字裡的「政策」兩個字歸類成「專案政策未滿足」，我沒有讀通知分類的程式。
+
+**修正範圍：**無（只記錄）。**未驗證／下一步：**是否其他以「政策」開頭的原因（例如 agy、pi 未開放）也會被同樣歸類；要先讀 `src/card-notify.ts` 的歸類規則。
+
+## ISSUE-134：claude 當 reviewer 時，回覆「不是單一 JSON 物件」，兩輪都 `inconclusive`，review 退回人工
+
+更新日期：2026-11-09。狀態：待調查（現象已實機觀察；根因未確認）。
+
+**使用者可見症狀：**`REQ-20261109-lead-live-codex`（PR #191，head `a773038`，只改一個一行檔案）由 codex 當 Lead，bridge 依偏好開 claude 當 reviewer：第 1 輪 06:59:54Z 開始、07:00:00Z 回 `inconclusive`，第 2 輪 07:00:07Z 開始、07:00:13Z 回 `inconclusive`，原因都是「reviewer 的回覆不是單一 JSON 物件」，沒有任何發現。同一個 head 連續 2 次 `inconclusive`，bridge 依規則退回人工，loop 停下。
+
+**預期行為：**claude 當 reviewer 能回出合格的 review JSON，或失敗時有可查的原因。
+
+**重現／環境：**2026-11-09，本機 macOS，bridge 為 main `88e1ce6`；reviewer 是 claude（新開的 pane，用完即關）。每輪只花約 6 秒，所以 claude 很可能沒有真的審查就回了非 JSON 的內容；我看不到實際回覆（reviewer pane 已關閉，卡片的原因又被截斷，見 ISSUE-133）。
+
+**已確認根因：**未確認。可能是回覆被截、格式不符、被提示擋住或 claude 的輸出格式與解析不合，這些都是猜測。追蹤清單原本就寫「Claude 當 reviewer 未實機驗證」，這是第一次實機結果。
+
+**對照與暫行做法：**同一張卡改用 `card review REQ-20261109-lead-live-codex --agent codex`，第 3 輪 07:03:59Z `pass`（約 15 秒），之後手動 `card merge` 成功（`1448d51`）。同日 #189（`REQ-20261109-multi-lead-card-lead`）的 reviewer 是 codex，兩輪都有合格的結果；所以只有 claude 當 reviewer 失敗，但這只是這一張卡兩輪的觀察，不是已證實的結論。
+
+**修正範圍：**無（只記錄）。**未驗證／下一步：**重現並保存 reviewer 的原始回覆（要有辦法在 pane 關閉前記錄，或失敗時保留 pane）；是否與 reviewer 的提示、claude 的啟動提示或版本有關；claude 當 reviewer 在其他卡是否同樣失敗。
+
 ## ISSUE-133：`autopick_stopped` 的原因只留 loop 輸出的前 200 字，真正的停止原因被截掉，通知因此誤導
 
 更新日期：2026-11-09。狀態：待調查（根因已由讀碼加實例確認；尚未修正、沒有測試、沒有重現程式）。
@@ -16,13 +46,15 @@
 
 **修正範圍：**無（只記錄）。建議方向：停止原因改取 loop 的結構化停止理由或輸出的最後一段，而不是開頭；事件原因的截斷要保留停止理由。要先決定 loop 結果是否要回傳結構化的 `stopReason`。
 
-**暫行做法：**看卡片流程紀錄的 `merge_blocked`／`loop_stopped` 事件，不要只看 `autopick_stopped` 的原因文字。
+**第二個實例（2026-11-09，卡片 `REQ-20261109-lead-live-codex`，PR #191）：**claude 當 reviewer 兩輪 `inconclusive` 後，卡片的 `failed`／`autopick_stopped` 原因只顯示「第 1 輪」的標題與「inconclusive 的原因：rev」就被截斷；完整原因「reviewer 的回覆不是單一 JSON 物件」是從 bridge console 才看到的（見 ISSUE-134）。
+
+**暫行做法：**看卡片流程紀錄的 `merge_blocked`／`loop_stopped` 事件與 bridge console 的完整輸出，不要只看 `autopick_stopped` 的原因文字。
 
 **未驗證／下一步：**沒有測試；是否其他停止原因（CI 紅、review 沒過）也被截斷，要另外檢查。
 
 ## ISSUE-132：自動撿卡缺少多候選、卡片指定與 Lead 選擇來源
 
-更新日期：2026-11-09。狀態：已修正、待驗收。
+更新日期：2026-11-09。狀態：已修正、待驗收（卡片指定、拒絕與選擇依據已於 2026-11-09 實機驗收，見「實機驗收」；沒指定時取第一個、起不來就失敗、agy／pi 開放條件未驗）。
 
 症狀／預期：延續 ISSUE-130，政策只能單一 Lead、卡片不能指定、角色帳本缺選擇依據，未開放時 Discord 看不到原因。預期有序候選、卡片指定優先且必須在政策清單內；無指定取首個，失敗不換候選，一次一張卡。
 
@@ -32,6 +64,11 @@
 
 驗證（2026-11-09）：相關測試 `npm run build` 後 `node --test dist/test/autopick.test.js dist/test/card-check.test.js dist/test/card-events.test.js dist/test/policy.test.js`：101 項／101 pass／0 fail；`npm run lint` 通過（192 TypeScript files）。最終 `npm run check`（含 typecheck、build、完整測試）：1613 項／1612 pass／0 fail／1 skipped（既有略過），exit 0。`git diff --check` 通過。`scripts/herdr-card-check docs/card-examples/REQ-*.md docs/card-examples/TKT-*.md`（2026-11-09 補跑）：3 個檔案都 OK、exit 0。3 張範例卡通過（2026-11-09）；先前以 `*.md` 掃入非卡片 README 時得到預期格式拒絕，改為只檢查卡片檔後通過。過程曾發生 card-command 舊角色事件 id 比對失敗（新增可選來源欄位時將空值加入 hash）；已改成只有存在來源時才加入 hash，保留舊事件 id，未降低斷言。初次 typecheck 因尚未安裝依賴找不到 tsc，npm ci --ignore-scripts 後解除；未更動相依版本。
 
+實機驗收（2026-11-09，本機 macOS，bridge 為 main `88e1ce6`（#189）merge 後重啟的程序；`policy.yml` 暫時設為 `autopick_lead: claude, codex`（備份 `policy.yml.bak-live-20261109`，驗收後已改回單一值 `claude`），`config.json` 沒改）：
+- **拒絕路徑：**測試卡 `REQ-20261109-lead-live-reject`（`lead: pi`，不在清單內，`notify` 為本 Agent pane）在 06:53:39Z 沒被撿、沒開 workspace，卡片寫入 `failed`／`autopick_stopped`（原因「Lead『pi』不在政策候選清單內，不撿這張卡」），console 有警告，通知先「Agent 忙碌，通知排隊」，空閒後送達。通過。通知標題寫「專案政策未滿足」不精確，見 ISSUE-135。
+- **卡片指定：**測試卡 `REQ-20261109-lead-live-codex`（`lead: codex`）在 06:54:39Z 被撿，06:54:50Z 的 `role_assigned` 是 `lead：codex；…；leadSelection=card`，Lead workspace label 為 `autopick-codex-REQ-20261109-lead-live-codex`。通過。
+- **未驗：**沒指定 `lead:` 時取清單第一個（`leadSelection=policy`）、Lead 起不來時卡片失敗且不換下一個、agy／pi 的開放條件；測試卡已刪（沒有 task 紀錄），不留殘卡。
+
 使用者決定（2026-11-09）：沒有 `lead:` 的卡取清單第一個，**維持不輪流**；清單其餘種類只是允許被卡片指定的名單。
 
 部署：PR #189（`88e1ce6`）已 merge，2026-11-09 重啟 bridge 載入（build 成功、Gateway 連線、`card policy` 顯示政策載入正常）；`policy.yml` 仍是單一值 `autopick_lead: claude`，所以實際撿卡行為沒變。
@@ -40,7 +77,7 @@
 
 ## ISSUE-130：自動撿卡的 Lead 只支援 claude、codex，agy、pi 無法選用（REQ-20261109-autopick-four-leads）
 
-更新日期：2026-11-09。狀態：已修正、待驗收（僅單元測試，沒有任何 CLI 實機驗收）。
+更新日期：2026-11-09。狀態：已修正、待驗收（codex 當 Lead 已於 2026-11-09 實機驗收，見「實機驗收」；agy、pi 與開放條件的實際撿卡沒驗）。
 
 症狀／預期：`autopick_lead` 只接受 claude、codex；Lead 啟動後先是 working 時（codex）會被立刻判為沒就緒。預期四種都能明確選用，agy、pi 要先通過開放條件，Lead 要等到就緒。已確認根因（讀碼）：政策與 ISSUE-129 收尾的白名單只有兩種，autopick 只檢查 `agent.start` 回傳當下的狀態，`prepareCardWorktree` 也只認 idle。
 
@@ -49,6 +86,8 @@
 驗證（2026-11-09，本機，假 Herdr port）：`npm run check` 為 1605 tests／1604 pass／0 fail／1 skipped；`npm run lint` 通過。涵蓋四種政策與 label、working → idle／done、blocked／逾時、安全更新跳過、worktree 啟動等待（working 與 blocked）、四種 cleanup label、開放條件不撿且不改用別的 Lead、原因換了會重新通報。
 
 code-review（high，2026-11-09，只當參考，不是 bridge 的 review）：9 項發現，已修 5 項（worktree 的 blocked 也等待、通報以卡片加原因為 key、`leadRejection` 改用 `autopickFor`、等待訊息用 `role` 取代字串替換、還原格式雜訊）。**原審查未修項目（2026-11-09 ISSUE-132 已補卡片拒絕事件，待實機驗收）：**拒絕原因原本只有 console 警告；`doneAsReady` 轉接不帶 port 的選用 trust 方法、去重不與 reviewer 等待共用（Lead 與 reviewer 是不同 pane，影響低）；等待用真實計時而非注入的 `sleep`／`now`；開放條件只看 `implementation`、不看 `review`（刻意，使用者選項 2）；`done` 啟動即算就緒（與原本來源路徑一致）。
+
+實機驗收（2026-11-09，本機 macOS，bridge 為 main `88e1ce6`（#189）merge 後重啟的程序；`policy.yml` 暫時設為 `autopick_lead: claude, codex`（備份 `policy.yml.bak-live-20261109`，驗收後已改回單一值 `claude`），`config.json` 沒改）：測試卡 `REQ-20261109-lead-live-codex`（`lead: codex`，改一個 `docs/card-runs/` 檔案）由 codex 當 Lead 走完：06:54:39Z 撿起，Lead workspace `w5J`（`autopick-codex-<卡片 id>`）與卡片 worktree `w5K`，06:54:50Z task 開始，06:59:31Z `completed`，06:59:40Z commit `a773038`，06:59:47Z 開 PR #191，CI 兩平台綠，squash merge `1448d51`，07:04:40Z 記 `merged` 與 `cleanup_done`，worktree 與 `w5J` 都已關閉。這證明 codex 當 Lead 時，來源 Lead 啟動與 worktree 第二次 Lead 啟動都沒有被「沒就緒」拒絕（我沒有直接觀察到 working 狀態，只看到 `w5J` 閒置、`w5K` 為 unknown 後流程正常往下走），label 與收尾清理在真實 bridge 上有效。**過程中不是全自動：**claude 當 reviewer 兩輪 `inconclusive`（見 ISSUE-134），loop 退回人工；我用 `card review --agent codex` 重試（第 3 輪 `pass`，07:03:59Z）並手動 `card merge`。**未驗：**agy、pi 的開放條件（宣告前不撿、宣告後撿）與當 Lead、claude 當 reviewer。
 
 過程：本議題原在 REQ-20261109-codex-lead-agy（PR #185、#186，含多個 Lead、卡片指定），3 次 `card review` 用完仍 `changes_requested`，範圍縮小後改由 REQ-20261109-autopick-four-leads 重做；多 Lead 清單、卡片 `lead:`、Lead 選擇依據的紀錄、`card assign` 指定 Lead 都延後，另開卡。
 
@@ -4096,7 +4135,7 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 ## ISSUE-117：自動撿卡的 Lead 設成 codex 時，`startLead` 一定失敗（只看 `agent.start` 當下的狀態，codex 啟動後先是 working）
 
-更新日期：2026-11-09。狀態：已修正、待驗收（2026-11-09 見 ISSUE-130：來源 Lead 與 worktree 第二次啟動都會等 working；僅單元測試，尚未用 codex 實機驗證）。下列 2026-11-07 內容是修正前的診斷歷史。
+更新日期：2026-11-09。狀態：已修正、待驗收（2026-11-09 見 ISSUE-130：來源 Lead 與 worktree 第二次啟動都會等 working；codex 當 Lead 已於同日實機走完一張卡，但沒有直接觀察到 working 狀態，也沒有保存啟動時的畫面）。下列 2026-11-07 內容是修正前的診斷歷史。
 
 使用者可見症狀：2026-11-06，使用者要求把 `policy.yml` 的 `autopick_lead` 從 `claude` 改成 `codex`（備份 `policy.yml.bak-lead-20261106`），bridge 重啟後 `card policy` 顯示「Lead：codex」。ready 的卡 `REQ-20261107-small-pane-tab` 在 16:27:28Z 被撿起，立刻失敗（`autopick_failed`）：`lead：Lead（codex）沒有就緒，狀態是 working；可能卡在信任資料夾或登入提示`。bridge 依設計在失敗時關掉剛開的 workspace，所以事後沒有現場可看，無法確認當時是否真的有提示；卡片留在 `ready`。
 
