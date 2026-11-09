@@ -55,6 +55,27 @@ interface RequestOptions {
 }
 
 /** Newline-delimited JSON client. Each request gets a bounded fresh connection. */
+/**
+ * 每次送出 `agent.prompt` 留一行 console 紀錄（ISSUE-137）。沒有它，Herdr 日誌裡的請求 id（`herdr-discord-<毫秒>`）
+ * 無法對回 bridge 是哪個程式路徑送的。只記目標 pane、字數、時間與呼叫位置，**不記 prompt 內容**。
+ * 呼叫位置取自呼叫堆疊的函式名稱（略過這個 helper 與送出它的方法本身）。
+ */
+export function tracePromptRequest(
+  kind: "prompt" | "prompt+wait" | "send-fallback",
+  target: string,
+  text: string,
+): void {
+  const via = (new Error().stack ?? "")
+    .split("\n")
+    .slice(3, 7)
+    .map((line) => /at (?:async )?([\w.<>$]+)/.exec(line.trim())?.[1])
+    .filter((name): name is string => Boolean(name))
+    .join(" < ");
+  console.log(
+    `agent.prompt ${kind} target=${target} chars=${text.length} ts=${Date.now()} via=${via || "?"}`,
+  );
+}
+
 export class HerdrClient {
   private workspaceNameCache = new Map<string, string | undefined>();
   private workspaceNameCacheAt = 0;
@@ -372,6 +393,7 @@ export class HerdrClient {
 
   /** Use the documented prompt method, with compatibility for herdr-hail's agent.send. */
   async promptAgent(target: string, text: string): Promise<void> {
+    tracePromptRequest("prompt", target, text);
     try {
       await this.request("agent.prompt", { target, text }, { retries: 0 });
     } catch (error) {
@@ -387,6 +409,7 @@ export class HerdrClient {
     text: string,
     timeoutMs: number,
   ): Promise<AgentRecord | undefined> {
+    tracePromptRequest("prompt+wait", target, text);
     try {
       const result = await this.request<{ agent?: AgentRecord }>(
         "agent.prompt",
@@ -428,6 +451,7 @@ export class HerdrClient {
       if (!(error instanceof HerdrError) || !isMissingMethod(error))
         throw error;
       try {
+        tracePromptRequest("send-fallback", target, text);
         await this.request("agent.prompt", { target, text }, options);
       } catch (promptError) {
         // Herdr 0.8 removed the legacy agent.send method and deliberately

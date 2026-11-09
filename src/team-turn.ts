@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { normalizeTerminalResponse } from "./cli-adapter.js";
+import type { Clock } from "./agent-start.js";
+import { HerdrError } from "./herdr.js";
 import { stripAnsi } from "./format.js";
 import {
   CodexTranscript,
@@ -12,6 +14,7 @@ import type { AgentRecord, ReadSource } from "./types.js";
 import type { OrchestrationPort } from "./team-orchestration.js";
 
 export interface TeamTurnContext {
+  promptRetry?: { timeoutMs?: number; intervalMs?: number; clock?: Clock };
   taskId?: string;
   phase?: "planning" | "assignment" | "synthesis";
   assignmentId?: string;
@@ -60,6 +63,12 @@ export async function runTeamTurn(
    */
   session?: { kind: string; value: string };
 }> {
+  const clock = context?.promptRetry?.clock ?? {
+    now: () => Date.now(),
+    sleep: (ms: number) => delay(ms),
+  };
+  // One budget covers setup, rejected dispatches, atomic wait and observation.
+  const deadline = clock.now() + timeoutMs;
   const signal = context?.signal;
   const check = () => signal?.throwIfAborted();
   check();
@@ -135,15 +144,54 @@ export async function runTeamTurn(
   // lifecycle 綁在同一個 request；不支援時才 fallback 到 promptAgent + waitAgent。
   let promptSettled: AgentRecord | undefined;
   let promptStalled = false;
-  try {
-    promptSettled = herdr.promptAgentAndWait
-      ? await herdr.promptAgentAndWait(agent.pane_id, prompt, timeoutMs)
-      : (await herdr.promptAgent(agent.pane_id, prompt), undefined);
-  } catch (error) {
-    if (!isPromptStalled(error)) throw error;
-    // Herdr may have accepted the prompt but failed to observe a lifecycle change.
-    // Do not resend: continue reading this turn's unique marker envelope.
-    promptStalled = true;
+  const retryStarted = clock.now();
+  const retryBudget = Math.min(
+    Math.max(0, deadline - clock.now()),
+    Math.max(0, context?.promptRetry?.timeoutMs ?? 15_000),
+  );
+  const retryDeadline = retryStarted + retryBudget;
+  const interval = Math.max(1, context?.promptRetry?.intervalMs ?? 500);
+  let lastNotReady: HerdrError | undefined;
+  const exhausted = () =>
+    new Error(
+      `Waited ${(clock.now() - retryStarted) / 1000} seconds for Agent ${agent.pane_id}; first prompt was not delivered: ${lastNotReady!.message}`,
+    );
+  const expiredBeforeDispatch = () =>
+    new Error(
+      `Turn budget for Agent ${agent.pane_id} was used up before the first prompt was dispatched; nothing was sent`,
+    );
+  for (;;) {
+    check();
+    if (lastNotReady && clock.now() >= retryDeadline) throw exhausted();
+    if (clock.now() >= deadline) throw expiredBeforeDispatch();
+    try {
+      promptSettled = herdr.promptAgentAndWait
+        ? await herdr.promptAgentAndWait(
+            agent.pane_id,
+            prompt,
+            // ISSUE-124：沒有重試過就維持回合上限 timeoutMs（契約是「等待上限＝timeoutMs」，不因為
+            // 算出 deadline 之後過了幾毫秒而變成 timeoutMs-1）；重試之後才改用共享預算的剩餘時間。
+            lastNotReady ? Math.max(1, deadline - clock.now()) : timeoutMs,
+          )
+        : (await herdr.promptAgent(agent.pane_id, prompt), undefined);
+      break;
+    } catch (error) {
+      if (isPromptStalled(error)) {
+        // Delivery may have succeeded; observe this nonce without resending.
+        promptStalled = true;
+        break;
+      }
+      if (!(error instanceof HerdrError) || error.code !== "agent_not_ready")
+        throw error;
+      lastNotReady = error;
+      const remaining = Math.min(
+        retryDeadline - clock.now(),
+        deadline - clock.now(),
+      );
+      if (remaining <= 0) throw exhausted();
+      check();
+      await abortable(clock.sleep(Math.min(interval, remaining)), signal);
+    }
   }
   check();
   if (!onBlocked && promptSettled && promptSettled.agent_status === "blocked")
@@ -153,20 +201,20 @@ export async function runTeamTurn(
       terminal: false,
     };
   // 這是本次 Lead／Worker turn 的 report 等待期限；逾時不得以舊 terminal 輸出結案。
-  const deadline = Date.now() + timeoutMs;
   let lastStatus = promptStalled ? "prompt_stalled" : "pending";
   // agent.prompt(wait=...) already waited for this request. Reusing its
   // settled record avoids spending a second timeout on agent.wait.
   let current = promptSettled;
   do {
     check();
+    if (clock.now() >= deadline) break;
     // atomic prompt 已回傳 settled record 時不再重複消耗另一個完整 wait timeout。
     if (!current)
       current = await abortable(
         herdr.waitAgent(
           agent.pane_id,
           ["idle", "done", "blocked", "unknown"],
-          Math.max(1, deadline - Date.now()),
+          Math.max(1, deadline - clock.now()),
         ),
         signal,
       );
@@ -197,7 +245,10 @@ export async function runTeamTurn(
       await onBlocked(current);
       check();
       current = undefined;
-      await delay(Math.min(100, Math.max(1, deadline - Date.now())));
+      await abortable(
+        clock.sleep(Math.min(100, Math.max(0, deadline - clock.now()))),
+        signal,
+      );
       continue;
     }
     if (lastStatus === "blocked")
@@ -285,10 +336,13 @@ export async function runTeamTurn(
             );
           // 畫面框可能被硬換行切斷；hook 事件通常稍後才到，寬限一下以優先使用它。
           if (context?.hookFinal) {
-            const graceEnd = Math.min(deadline, Date.now() + HOOK_GRACE_MS);
+            const graceEnd = Math.min(deadline, clock.now() + HOOK_GRACE_MS);
             let fromHook = hookFrame(current);
-            while (fromHook === undefined && Date.now() < graceEnd) {
-              await delay(50);
+            while (fromHook === undefined && clock.now() < graceEnd) {
+              await abortable(
+                clock.sleep(Math.min(50, graceEnd - clock.now())),
+                signal,
+              );
               check();
               fromHook = hookFrame(current);
             }
@@ -315,9 +369,10 @@ export async function runTeamTurn(
       }
     }
     current = undefined;
-    const remaining = deadline - Date.now();
-    if (remaining > 0) await delay(Math.min(100, remaining));
-  } while (Date.now() < deadline);
+    const remaining = deadline - clock.now();
+    if (remaining > 0)
+      await abortable(clock.sleep(Math.min(100, remaining)), signal);
+  } while (clock.now() < deadline);
   throw new Error(
     `Timed out waiting for current response from ${agent.pane_id} (last state: ${lastStatus}); no verified completion`,
   );

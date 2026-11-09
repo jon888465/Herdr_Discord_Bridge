@@ -184,3 +184,7 @@ ISSUE-127（2026-11-08，待實機驗收）：新增 role_assigned 固定模板�
 
 - [ISSUE-130](docs/known-issues.md)：2026-11-09 `autopick_lead` 接受 claude、codex、agy、pi，agy、pi 要先在 config.json 宣告 implementation（開放條件），Lead 啟動等待 working → idle／done；待實機驗收，規劃見 [docs/multi-lead-plan.md](docs/multi-lead-plan.md)。多 Lead 清單與卡片指定 Lead 的後續實作見 ISSUE-132（2026-11-09，待實機驗收），選擇來源寫 role_assigned；一次仍只做一張卡。
 - Usage v1 (REQ-20261106-usage-query, ISSUE-128): `usage [pane-or-profile-id]`, selected-workspace authorization, passive Codex bottom status row and explicit unknown fallbacks; configured profiles and unreachable machines included. No usage commands, quota writes or failover. Contract: SPEC.md “Usage 唯讀快照”; relation to operator observations: docs/quota-failover-manager.md. Real Discord/Herdr/CLI acceptance pending.
+
+## Team first prompt readiness (ISSUE-137, 2026-11-09)
+
+`src/team-turn.ts` retries only Herdr `agent_not_ready` for up to 15 seconds, within the turn budget and abort signal. Successful or stalled prompts are never resent. See [known issues](docs/known-issues.md) for source/tests and pending live acceptance；沒有實機驗證 pi 當 Lead。
