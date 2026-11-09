@@ -1,3 +1,4 @@
+import { usageTable } from "./usage.js";
 import {
   roleIdentity,
   roleEvent,
@@ -190,7 +191,7 @@ async function startBridge(
     config.reconnectBaseMs,
   );
   // ISSUE-113：本機的 hub 才注入 agy 卡片 worktree 的預先信任；遠端 agy 只回報需人工處理。
-  const agyTrust = defaultAgyWorktreeTrust();
+  const agyTrust = defaultAgyWorktreeTrust(config.agyTrustedDirectories);
   herdr.setAgyTrust(agyTrust);
   agyTrust.sweep();
   herdr.startTunnels();
@@ -680,6 +681,28 @@ export async function handleCommand(
     case "cancel":
       await cancelAgent(args, context, runtime);
       return;
+    case "usage": {
+      if (args.length > 1) throw new Error("usage: usage [pane-or-profile-id]");
+      const workspace = await teamWorkspaceId(context, runtime);
+      const agents = await runtime.herdr.listAgentsWithWorkspaceNames();
+      await runtime.discord.reply(
+        context.message,
+        await usageTable({
+          agents,
+          workspace,
+          target: args[0],
+          profiles: runtime.config.agentProfiles ?? [],
+          profilePane: (id) =>
+            runtime.pool?.passiveProfilePane(workspace, id, agents),
+          machines:
+            runtime.herdr instanceof HerdrHub
+              ? runtime.herdr.usageMachineStatus()
+              : [],
+          read: (pane) => runtime.herdr.readAgent(pane, "visible", 80),
+        }),
+      );
+      return;
+    }
     case "quota":
     case "failover":
       await quotaFailoverCommand(command, args, context, runtime);
@@ -4096,6 +4119,7 @@ function helpText(prefix: string): string {
     `\`${prefix} team questions <task-id>\` / \`${prefix} team reply <task-id> <question-id> <answer>\` — 指定問題回答`,
     `\`${prefix} team status [task-id]\` / \`${prefix} team cancel <task-id>\` — 查看／取消任務`,
     `\`${prefix} card list [status]\` / \`${prefix} card show <id>\` — 查看營運卡片；\`card import\`（附上 .md 檔）匯入為 draft；\`card assign <id> [--coding]\` 把 ready 的卡片交給目前 workspace 的 Team（同 \`team ask\`）；任務還在跑卻刪了卡片時用 \`card recreate <id>\` 重建；\`card assign <id> --worktree\` 在隔離的 worktree 做，完成後 \`card cleanup <id>\` 清掉；\`card policy [專案]\` 查看專案政策（唯讀）；\`card pr <id>\` 把 done 卡片的分支 push 並開 PR（需專案政策 L1 以上）；\`card review <id> [--agent <種類>]\` 對開著的 PR 開新 pane 讓另一個 Agent 做獨立 review（結果寫進卡片，用完關閉 pane）；\`card fix <id> [--agent <種類>]\` 把 review 的 open findings 交給新開 pane 的新作者修一圈（不 push；總上限 3 次 review）；\`card loop <id> [--agent <種類>] [--fix-agent <種類>]\` 自動跑 review → fix → push → review 直到通過或需要人（bridge 自己 push 這張卡的分支到既有 PR），\`card loop stop <id>\` 要求停止；\`card merge <id> [--method squash|merge|rebase]\` 合併卡片開著的 PR（只有專案政策 L2、review 通過且 head 一致、CI 全綠、沒有敏感路徑才會合併，不成立就列出原因）`,
+    `\`${prefix} usage [pane-or-profile-id]\` — 被動讀取 CLI usage；unknown 顯示原因`,
     `\`${prefix} quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds]\` — 明確額度回報；quota status 查詢`,
     `\`${prefix} failover arm <source> <candidate1,candidate2> <goal>\` → \`failover run <id> confirm-source-stopped\` — 確認停止後自動選擇候選並驗證切換；status/cancel 可查詢／取消`,
     `\`${prefix} handoff checkpoint <source> <goal>\` → \`handoff verify <id> <destination> confirm-source-stopped\` → \`handoff accept <id>\` → \`handoff continue <id>\` — 持久化交接；status/packet/cancel 可查詢／釋放`,
@@ -4165,6 +4189,7 @@ function consoleHelpText(): string {
     "card merge <id> [--method squash|merge|rebase] — L2：合併卡片開著的 PR。只有專案政策 L2、卡片 done、最新 review 通過且 head 與 PR 一致、沒有 open finding、CI 全綠、PR 可合併且最新、沒有動到敏感路徑才會合併（bridge 第一次自己 merge）；不成立就列出所有原因、什麼都不做；預設 squash；合併之後約一分鐘內由既有輪詢記 merged 並清理 worktree；不部署、不重啟",
     "card policy [專案] — 查看專案政策（每個專案的自動化等級 L0／L1／L2；唯讀，政策檔在 plugin 設定目錄）",
     "card recreate <id> — 卡片被刪除但任務還在跑時，從任務紀錄重建卡片",
+    "usage [pane-or-profile-id] — 被動讀取目前 workspace 的 CLI usage（不送指令）",
     "quota status [pane] / quota report <pane> <available|limited|exhausted|unknown> <budget-group> [valid-seconds] — 明確額度回報",
     "failover arm <source> <candidate1,candidate2> <goal-and-constraints> — 保存候選優先序與任務",
     "failover status [id] / failover run <id> confirm-source-stopped / failover cancel <id> — 檢視／驗證切換／取消",

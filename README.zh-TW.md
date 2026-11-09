@@ -190,7 +190,7 @@ Agent 完成後，回覆會更新原本的 progress message；預設不會另外
 
 臨時啟動 Agent：`agent start <machine:agent:model:level> [--cwd <路徑>]`（Discord 加 `/herdr`）。省略的 `machine`／`agent` 沿用目前 Agent，省略的 `model`／`level` 用 CLI 預設，例如 `agent start :codex:gpt-6.1-sol:medium`。不自動 `agent use`、不自動確認信任提示。見 `SPEC.md`、ISSUE-114（尚未實機驗證）。
 
-agy 的信任提示（ISSUE-113，已實作、待實機驗收；使用者預先授權）：bridge 啟動本機 agy 前，會把**自己建立的卡片 worktree** 的完整路徑加入 agy 的 `trustedWorkspaces`，卡片清理時只移除它自己加的那一筆；不信任 `agent start --cwd` 或其他路徑，遠端 agy 仍需人工處理，bridge 不對 pane 送按鍵。
+agy 的信任提示（ISSUE-113，已實作、待實機驗收；使用者預先授權）：bridge 啟動本機 agy 前，會把**自己建立的卡片 worktree** 的完整路徑加入 agy 的 `trustedWorkspaces`，卡片清理時只移除它自己加的那一筆；不信任 `agent start --cwd` 或其他路徑，遠端 agy 仍需人工處理，bridge 不對 pane 送按鍵。例外：你在 `config.json` 的 `agyTrustedDirectories` 明列的絕對路徑（預設空），本機 agy 的工作目錄正好等於其中一個時，bridge 也會補進信任清單，且不會自動移除。
 
 ### 選擇 Agent
 
@@ -362,3 +362,5 @@ Agent 可在最終回覆中單獨一行寫 `[[discord-attach: /絕對路徑]]`�
 ### 卡片上的角色紀錄（ISSUE-127，2026-11-08，待實機驗收）
 
 新流程的 `card show <id>` 會以一行「角色紀錄」顯示 Lead、Team 的每個 assignment id、reviewer／fixer 各輪對應的 Agent 種類，以及已知 model。完整 machine／profile／task 或輪次保存在流程紀錄。沒有角色事件的舊卡顯示「沒有角色紀錄」，不回填、不猜模型；重送事件去重，寫入失敗只記 console。尚未部署或在 live bridge 實機驗證。PR 內文角色摘要本輪未加入，通知與 merge／review／CI 守門維持原行為。
+
+`usage`／`usage <確切 pane 或 profile id>`（Discord：`/herdr usage`）以純文字表格列出目前授權 workspace 的 pane、設定 profiles 與不可達的設定遠端，沿用 `quota status` 授權。所有狀態（含 idle/done）只讀畫面，不送指令或按鍵。Codex 僅解析完整底列（如 `5h 35% left · weekly 85% left`），保留原字樣；其他來源不可讀就列 `unknown` 與原因。Profile 必須安全核對綁定 session 才讀 pane。每列含機器、目標、種類、usage、來源與取得時間（本次畫面讀取嘗試，非供應商更新時間）。不估算、不輸出 credentials、不寫 quota observation、不觸發 failover。其他 CLI adapter 與真實 Discord／Herdr／CLI 驗收待完成（ISSUE-128）。

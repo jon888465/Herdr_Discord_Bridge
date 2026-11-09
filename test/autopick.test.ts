@@ -16,7 +16,7 @@ import {
   type PolicyLevel,
 } from "../src/policy.js";
 
-const REPO = "/Users/jon/git_wk/Herdr_Discord_Bridge";
+const REPO = "/Users/example/git_wk/Herdr_Discord_Bridge";
 
 function policyFor(level: PolicyLevel, lead = "claude"): Policy {
   const parsed = parsePolicy(

@@ -5,6 +5,7 @@ import { stripAnsi } from "./format.js";
 
 export interface CliOutputAdapter {
   modelCommand(model: string): string;
+  parseUsage?(screen: string): string | undefined;
   /** 啟動參數的推理強度；沒有已確認的參數就不實作（拒絕，不猜）。 */
   levelArgs?(level: string): string[];
   extractLatestResponse(
@@ -484,7 +485,44 @@ const grokAdapter = new GrokCliAdapter();
 const claudeAdapter = new ClaudeCliAdapter();
 const piAdapter = new PiCliAdapter();
 
-const codexAdapter = new MarkerCliAdapter(["› ", "❯ "], "/model", (level) => [
+class CodexCliAdapter extends MarkerCliAdapter {
+  parseUsage(screen: string): string | undefined {
+    // 只看畫面底部最後幾行裡「完整」的狀態列（可帶模型名稱前綴，其後的快捷鍵提示行在它下面），
+    // 只回傳用量字樣本身；不輸出任意對話內容，也不輸出模型名稱。
+    const bottom = stripAnsi(screen)
+      .replace(/\r/g, "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(-4);
+    for (const line of bottom.reverse()) {
+      const match =
+        /^(?:[^·]{1,60} · )?(\d+h (?:100|[0-9]{1,2})% left · weekly (?:100|[0-9]{1,2})% left)$/.exec(
+          line,
+        );
+      if (match) return match[1];
+    }
+    return undefined;
+  }
+}
+
+export function usageKind(kind: string | undefined): string {
+  const identified = identifyCli(kind);
+  return identified.adapter === genericAdapter ? "unknown" : identified.kind;
+}
+
+export function passiveUsage(
+  kind: string | undefined,
+  screen: string,
+): string | undefined {
+  try {
+    return adapterFor(kind).parseUsage?.(screen);
+  } catch {
+    return undefined;
+  }
+}
+
+const codexAdapter = new CodexCliAdapter(["› ", "❯ "], "/model", (level) => [
   "-c",
   `model_reasoning_effort=${level}`,
 ]);

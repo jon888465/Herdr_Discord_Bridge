@@ -62,17 +62,30 @@ export class HerdrClient {
     private readonly socketPath = resolveSocketPath(),
     private readonly defaultTimeoutMs = 5000,
     private readonly reconnectBaseMs = 250,
-    private agyTrust?: Pick<AgyWorktreeTrust, "beforeLaunch" | "cleanup">,
+    private agyTrust?: Pick<
+      AgyWorktreeTrust,
+      "beforeLaunch" | "beforeLaunchConfigured" | "cleanup"
+    >,
   ) {}
 
   /** ISSUE-113：agy 的卡片 worktree 預先信任（沒有注入就不做任何事）。 */
   setAgyTrust(
-    manager: Pick<AgyWorktreeTrust, "beforeLaunch" | "cleanup">,
+    manager: Pick<
+      AgyWorktreeTrust,
+      "beforeLaunch" | "beforeLaunchConfigured" | "cleanup"
+    >,
   ): void {
     this.agyTrust = manager;
   }
   prepareWorkspaceTrust(kind: string, paneId: string, cwd?: string): void {
     this.agyTrust?.beforeLaunch(kind, paneId, cwd);
+  }
+  prepareConfiguredDirectoryTrust(
+    kind: string,
+    paneId: string,
+    cwd?: string,
+  ): void {
+    this.agyTrust?.beforeLaunchConfigured(kind, paneId, cwd);
   }
   cleanupWorkspaceTrust(cardId: string, cwd: string): void {
     this.agyTrust?.cleanup(cardId, cwd);

@@ -1,8 +1,27 @@
 # Known Issues
 
+## ISSUE-128：缺少 Agent usage 唯讀查詢（REQ-20261106-usage-query）
+
+更新：2026-11-08。狀態：重新開啟後再修正、待驗收（PR #172 已 merge、bridge 以 e69828f 重啟後實機查詢發現真實 codex 畫面讀不到用量，已另開 PR 修正）。
+
+**實機發現（2026-11-08，本機，bridge 載入 PR #172 後，`wk use w3` 再 `usage`）：**指令可用，profile 列、遠端機器列與跨 workspace 拒絕都符合設計；但 codex pane `w3:p3` 顯示 `unknown (no readable passive usage for this CLI)`，而它的畫面底部其實有用量。真實底部是 `  GPT-6.1-Sol low · 5h 64% left · weekly 67% left`，其下還有一行 `  ← for agents · ? for shortcuts …` 的快捷鍵提示。**根因（已確認）：**原 `parseUsage` 只看最後一個非空列，且要求整列恰為 `5h N% left · weekly N% left`，但真實畫面用量在倒數第二列且前面有模型名稱，所以真實 codex 永遠讀不到；單元測試用的是合成格式，沒有抓到。**修正：**改成在底部最後 4 個非空列找整列恰為（可帶模型名稱前綴的）用量格式的那一列，只輸出用量字樣、不輸出模型名稱，並新增真實畫面佈局的測試；原本「用量列後面還有其他文字就拒絕」的案例因真實畫面本來就有提示行而移除。測試：`npm run build` 通過、`test/usage.test.ts` 5/5 pass（2026-11-08）；**修正後實機驗證（2026-11-08，本機，bridge 以 main `143ec57`〔含 PR #173〕重啟後，console `wk use w3` 再 `usage`）：**codex pane `w3:p3` 顯示 `5h 64% left · weekly 67% left`，來源 `bottom status line (visible snapshot; CLI freshness unknown)`；claude pane `w3:p1` 顯示 `unknown (no readable passive usage for this CLI)`；`profile:*` 列與 `agy-pod` 列為 `unknown`（附原因）。**尚未驗證：**Discord `/herdr usage`、遠端機器上的 pane、忙碌（working／blocked）codex pane 的讀取；仍待使用者驗收。
+
+症狀／預期：原本只有 quota status 的操作者觀察，無法彙整 CLI usage；應以 console `usage [pane-or-profile-id]`／Discord `/herdr usage [pane-or-profile-id]` 查詢，無資料則 unknown，不干擾 Agent。重現環境：本卡 worktree，假 Herdr／Discord 單元測試；尚未在真實 Discord／Herdr／CLI 驗證。
+
+已確認根因：原本未有 usage command 或 adapter hook，不是 quota status 能量測的資料。修正範圍：共用指令、SHORT_COMMANDS、獨立只讀 usage table、adapter parseUsage、profile exact session 唯讀查找、遠端連線狀態；沿用 quota status 選定 workspace 與 allowlist，跨 workspace／未知／歧義拒絕。每列機器、目標、種類、原 usage 字樣／單位、來源、本次擷取嘗試時間。Codex 僅接受完整最後非空狀態列，其他種類無安全來源時 unknown；解析拋錯與讀取失敗逐列降級，不輸出任意畫面／錯誤內容。不估算、不讀 credentials／帳號／API key／billing，不寫 observations，不觸發 failover。
+
+三項預設決策：①目前選定的授權 workspace＋設定遠端；遠端 pane 仍限該 workspace，不可達機器 unknown，已連線但該 workspace 無 pane 也明示 unknown。②v1 全部只被動讀取，working／blocked／idle／done 都不送 usage 指令或按鍵。③僅純文字表格，無 JSON。
+
+資料限制：fetched-at 是畫面／連線查詢時間，不代表 provider 更新時間；source 明載 CLI freshness unknown，不保證畫面額度即時。沒有 usage 快取；遠端快取只有 pane metadata，不顯示為目前用量。Profile 只有設定未啟動、綁定不確定、session 無法安全核對都 unknown，不按名稱／種類猜綁定；claude／agy／pi 被動解析另案，無主動 /usage 支援。
+
+測試（2026-11-08，本機）：初次 `npm run typecheck` 因缺少 tsc 失敗，`npm ci --ignore-scripts` 後解除。第一輪 `npm run typecheck`、`npm test` 通過（1522 tests，1521 pass、0 fail、1 skipped）；補 profile／remote 測試前的 `npm run build` 與 `node --test dist/test/usage.test.js` 通過（3/3）。最終版本 `npm run typecheck`、`npm run build`、`npm run lint`、`git diff --check` 全部 exit 0；`npm test > /tmp/usage-query-acceptance.log 2>&1`（內含 build）exit 0：1524 tests，1523 pass、0 fail、1 skipped（既有略過），耗時 66.8 秒。usage 專項 4 tests 與 profile session 查找測試均通過。
+
+未驗證／下一步：原始碼已實作；未部署、未重啟，執行中 bridge 版本未核對，舊訊息不補送。Lead 部署後需驗收兩端路由／授權、busy 不送鍵、Codex 真實底列、遠端斷線與 profile session 綁定；尚未實機驗證 Discord／Herdr／CLI，不得視 build／unit test 為端到端驗收。不修改 config.json／policy.yml，不 commit／push。
+
+
 ## ISSUE-127：卡片缺少角色與實際 Agent 的對應（REQ-20261108-role-agents）
 
-更新日期：2026-11-08。狀態：已修正、待驗收。**尚未在 live bridge／Discord／Herdr／CLI 實機驗證；舊卡與舊事件不補寫角色。**
+更新日期：2026-11-08。狀態：**已驗收**（使用者 2026-11-08 明確表示驗收）。**實機驗證（2026-11-08，本機 macOS，bridge 以 main `35e56cf`〔含 PR #166〕重啟後）：**驗收卡 `REQ-20261108-role-ledger-live`（PR #168，已關閉不 merge）由 autopick 跑完，流程紀錄依序寫入 `role_assigned`：lead＝claude／local、impl＝codex／local／profile `helper`、verify＝claude／local／profile `claude`、review＝codex／local／profile `reviewer`，以及 reviewer 第 1、2 輪＝codex／local；`card show` 的「角色紀錄」列出同樣六筆。該卡的 review 兩輪皆 `inconclusive`，原因是第 3 條驗收條件要看 `card show`，reviewer 只看得到 PR diff（卡片設計問題，非程式缺陷）。舊卡與舊事件不補寫角色。
 
 症狀／預期：原本 `assigned` 只含 Lead 種類，review／fix 事件不含執行者，Team assignment 的 Worker 身分只在 task journal；卡片應能查到每次角色由誰擔任。重現環境：本機 worktree、假 Herdr／Git port，無真實服務。已確認根因：原事件契約與 card show 沒有角色事件或投影，啟動流程沒有接到卡片帳本。
 
@@ -43,6 +62,8 @@
 **已確認根因：**codex 的 workspace-write 沙箱不允許測試用的 Unix socket；每個 Worker 都是新開的 codex，先前「允許一次」的授權不會延續，所以每次都會再問。
 
 **決定（使用者 2026-11-08）：**`agentProfiles` 中 `helper`（codex，實作與驗證的 Worker）的 `args` 設為 `["--dangerously-bypass-approvals-and-sandbox"]`（無沙箱、不問批准）。`reviewer` 這個 codex profile 與 Lead、`agent start`、其他 Agent 種類**都沒有改**。設定在使用者的 `config.json`（備份 `config.json.bak-codexperm-20261108`，旁邊有註解提醒）；沒有改程式。
+
+**追加（使用者 2026-11-08 稍晚）：**`reviewer`（codex，review／verify）也套用同樣參數。再現：卡片 `REQ-20261106-usage-query` 的 verify 被派到 `reviewer` profile，完整 `npm test` 在沙箱下 `listen EPERM`，pane（`w54:p3`）停在「是否允許在 sandbox 外重跑 npm test」的確認提示，Herdr 狀態 `blocked`，等滿 30 分鐘後 verify 逾時，task 失敗。備份 `config.json.bak-reviewerperm-20261108`，旁邊同樣有註解提醒。Lead 目前是 claude（`policy.yml` 的 `autopick_lead`），沒有 codex Lead profile，所以沒有 Lead 需要改。`agent start` 與其他 Agent 種類仍沒有改。**這次追加尚未驗證**：設定改了，但 bridge 尚未重啟載入，也還沒有以新設定跑過 verify。
 
 **實測（2026-11-08，本機，探針 tab，已關閉）：**以該旗標啟動 codex，直接 `idle`、`interactive_ready: true`，沒有多出確認畫面；請它在 `/tmp` 建立並關閉一個 Unix socket 監聽，回報 `listening`，沒有任何權限提示，沒有殘留檔案。
 
@@ -2521,7 +2542,7 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 ### live 驗收紀錄
 
-**2026-11-03 live 驗收：主流程與清理通過。** 環境：本機 macOS，main `fe8ee56`（PR #36），`scripts/run.sh -r` 重新編譯並重啟 bridge；目標是拋棄式 repo `/Users/jon/tmp/wt-accept-repo`（一個 commit），驗收卡片 `REQ-20261103-wt-accept`。使用者操作 Discord 並貼上終端機截圖（Agent 已讀取）；**使用者沒有貼回覆原文**，以下由 Agent 事後從 bridge 狀態檔、卡片檔、Herdr 與 git 取得證據。
+**2026-11-03 live 驗收：主流程與清理通過。** 環境：本機 macOS，main `fe8ee56`（PR #36），`scripts/run.sh -r` 重新編譯並重啟 bridge；目標是拋棄式 repo `~/tmp/wt-accept-repo`（一個 commit），驗收卡片 `REQ-20261103-wt-accept`。使用者操作 Discord 並貼上終端機截圖（Agent 已讀取）；**使用者沒有貼回覆原文**，以下由 Agent 事後從 bridge 狀態檔、卡片檔、Herdr 與 git 取得證據。
 
 - **`card assign --worktree`（使用者在 Discord 執行）：** 卡片檔有 `## 異動專案`（repo、分支 `card/REQ-20261103-wt-accept`、worktree 路徑 `~/.herdr/worktrees/wt-accept-repo/card-req-20261103-wt-accept`、base `03364e63f79f`）與紀錄 `worktree_created`（01:46:12Z）、`assigned`、`started`（同秒）、`completed`（01:46:22Z）；狀態 `done`。索引 `card-worktrees.json` 有該卡（workspace `w14`、來源 `w13`）。`git worktree list` 與分支都存在。截圖顯示 Lead 收到的是新 worktree workspace 裡的 Agent 提示（`<<<CARD_DATA>>>` 內容，回覆「收到」）。
 - **Agent 沒有被信任提示擋住**：`worktree_created` 與 `started` 同一秒，表示 Agent 當下已是 idle，與先前拋棄式 repo 實測的 `blocked` 不同。**原因未確認**（可能 `~/.herdr/worktrees` 底下已被信任）。因此「blocked 時停下並說明」的實機路徑**沒有被這次驗收涵蓋**（只有自動化測試）。
@@ -2596,7 +2617,7 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 **2026-11-03 live 驗收：通過。** 環境：本機 macOS，main `c893fd1`（PR #39），`scripts/run.sh -r` 重啟 bridge。以下全部由 Agent 在 bridge console 輸入並觀察；Discord 端沒有操作。使用者明確授權（2026-11-03）Agent 在設定目錄建立驗收用的 `policy.yml`、驗完刪除；已刪除，`card policy` 回到「檔案不存在」。
 
-- **實際路徑：** bridge 以 Herdr plugin 執行，`card policy` 印出的路徑是 `/Users/jon/.config/herdr/plugins/config/herdr-discord-bridge/policy.yml`（與 `config.json` 同目錄），**不是** SPEC 原本寫的預設 `~/.config/herdr-discord-bridge/policy.yml`（那是環境變數沒設時的後備路徑）。已修正 SPEC 與 README。
+- **實際路徑：** bridge 以 Herdr plugin 執行，`card policy` 印出的路徑是 `~/.config/herdr/plugins/config/herdr-discord-bridge/policy.yml`（與 `config.json` 同目錄），**不是** SPEC 原本寫的預設 `~/.config/herdr-discord-bridge/policy.yml`（那是環境變數沒設時的後備路徑）。已修正 SPEC 與 README。
 - **沒有檔案：** `card policy` →「專案政策檔不存在…所有專案都是 L0（不 push）」，預設等級 L0。
 - **合法檔案（權限 600，`local:Herdr_Discord_Bridge: L1`、`local:wt-accept-repo: L2`）：** 「專案政策已載入」，列出預設 L0 與兩個專案的等級；`card policy local:wt-accept-repo` → `L2`；`card policy local:Unlisted` →「L0（沒列出，用預設等級）」。
 - **不合法（`default: L3`）：** 「專案政策檔不合法」，訊息為 `line 2: invalid level for "default"…`，並說明已改用安全預設（全部 L0）；`card policy local:wt-accept-repo` → `L0（沒列出，用預設等級）；政策檔有問題，目前用安全預設（全部 L0）`——即使該專案在檔案中原本寫 L2，也沒有被採用。
@@ -3361,8 +3382,8 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 - **這證明：** 修正沒有弄壞 codex 的正常串流（退回 parser 仍正確回覆）；hook 事件確實帶錯 pane。**這沒證明：** 「hook 可信時仍被採用」（沒有任何 live codex pane 的 session 對得上，無法驗）；「`w4:p1` 不會貼到別人的回覆」（`w4:p1` 當時不是 codex）。
 
 **`w4:p1` 實機驗收（2026-11-05，本機 macOS，bridge 載入 main `2e729fb`，使用者同意在 `w4:p1` 啟動 codex）：**
-1. 在 `w4:p1`（`python_test`）啟動 codex（`codex -a on-request -s read-only`）：它自己的 session `01a1aa56-…`，rollout 工作目錄 `/Users/jon/git_wk/python_test` = pane 工作目錄 → `hookReplyTrusted = true`（hook 可信時被採用的對照組）。
-2. 在另一個 workspace（本 repo）新開 codex 並送一個提問：`w4:p1` 的 `agent_session` 被覆蓋成 `01a1aa57-…`，其 rollout 工作目錄是 `/Users/jon/git_wk/Herdr_Discord_Bridge`，≠ `w4:p1` 的 `python_test` → `hookReplyTrusted = false`（**重現出 ISSUE-088／090 的錯位狀態**）。
+1. 在 `w4:p1`（`python_test`）啟動 codex（`codex -a on-request -s read-only`）：它自己的 session `01a1aa56-…`，rollout 工作目錄 `~/git_wk/python_test` = pane 工作目錄 → `hookReplyTrusted = true`（hook 可信時被採用的對照組）。
+2. 在另一個 workspace（本 repo）新開 codex 並送一個提問：`w4:p1` 的 `agent_session` 被覆蓋成 `01a1aa57-…`，其 rollout 工作目錄是 `~/git_wk/Herdr_Discord_Bridge`，≠ `w4:p1` 的 `python_test` → `hookReplyTrusted = false`（**重現出 ISSUE-088／090 的錯位狀態**）。
 3. 用 bridge console（`wk use w4`、`agent use w4:p1`）對 `w4:p1` 送「只回覆 w4-own-reply」，並在 1 秒後讓另一個 codex 回「foreign-2」。console 出現 `hook Stop session=01a1aa57 pane=w4:p1 chars=9`（別人的回覆，剛好等於 `w4:p1` 被覆蓋後的 session）與 `hook Stop session=01a1aa56 pane=w4:p1 chars=102`（`w4:p1` 自己的），最後**貼出的是 `w4-own-reply`**。修正前，`streamAgent` 會對 `w4:p1` 採用 session `01a1aa57` 的 hook 訊息（`foreign-2`），這就是隱患；修正後該訊息被忽略、改走畫面 parser，回覆正確。
 - 附帶發現：我用 `herdr pane run` 在 `w4:p1` 輸入 `codex -a on-request -s read-only` 後，codex 的畫面上第一則使用者訊息就是這串指令文字，它因此自己做了一次網路搜尋（唯讀沙箱、無檔案變更）後回到 idle。**原因未確認**（推測是我輸入時前景已有 codex 在接收輸入；我事前讀到的畫面是 shell 提示字元，可能是過時的）。屬我的操作疏失，已告知使用者；沒有造成設定或檔案變更。
 - 收尾：關掉我開的測試 workspace，路由切回 `w1:p1`；`w4:p1` 的 codex 依使用者要求保持執行。
@@ -3834,7 +3855,9 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 ## ISSUE-113：agy 在新的 worktree 資料夾會停在「信任資料夾」提示，profile 啟動不就緒，錯誤訊息沒指出要去哪個 pane 處理
 
-更新日期：2026-11-08。狀態：已修正、待驗收（選項 (b)，使用者 2026-11-07 明確決定的預先授權）；**2026-11-08 已做一次實機驗證（見下方「實機驗證」），仍待使用者驗收**；先前：待決定（已知限制，靠使用者手動確認）。
+更新日期：2026-11-08。狀態：已驗收（選項 (b)，使用者 2026-11-07 明確決定的預先授權）；**2026-11-08 已做一次實機驗證（見下方「實機驗證」），使用者同日驗收通過（狀態：已驗收）**；先前：待決定（已知限制，靠使用者手動確認）。
+
+**追加（使用者 2026-11-08 要求，已實作、尚未實機驗證）：**查 agy usage 時，`agent start agy` 在 `~/git_wk`（不是卡片 worktree）啟動，停在信任提示（Antigravity CLI 不繼承上層目錄的信任，家目錄 `~` 已在清單內也一樣）。使用者先要求手動把 `~/git_wk` 加入 `trustedWorkspaces`（備份 `agy-settings-pre-gitwk-20261108.json`，之後 agy 啟動無提示），再要求 bridge 的自動預先授權也涵蓋此目錄。做法：`config.json` 新增 `agyTrustedDirectories`（絕對路徑陣列，預設空，設定在不進 git 的使用者 `config.json`）；本機 agy 的 cwd 正好等於其中一個正規路徑時（卡片流程與 console／Discord `agent start` 都適用；`agent start` 對卡片 worktree 與其他 `--cwd` 仍不預先授權），bridge 缺才補、不自動移除、沒有所有權紀錄；不信任上層／子目錄／symlink／`/`／家目錄／相對路徑／不存在的目錄，遠端 agy 與其他 CLI 不適用，卡片 worktree 的授權與清理不變。測試（2026-11-08）：`test/agy-worktree-trust.test.ts` 新增 3 項（含 `agent start` 路徑）。**實機（2026-11-08，本機，bridge 以 main `c3f8fcd` 重啟後）：**第一版（PR #175）實測失敗——console `agent start agy`（含 `--cwd`）仍停在信任提示、設定檔沒變，**根因（已確認）：**`agent start` 一律 `skipWorkspaceTrust: true`（為了不信任任意 `--cwd`），新增的明列目錄檢查沒被呼叫；PR #176 讓 `agent start` 只走明列目錄那一段。修正後把設定檔暫時還原成不含該目錄的備份，再 `agent start agy`：bridge 記 `agy trusted directory added`、設定檔多一筆、agy 啟動沒有信任提示（pane `w3:p9`）。**尚未驗證：**重複啟動不重複（僅單元測試）、遠端 agy。這是比「只信任自己建立的卡片 worktree」更大的授權範圍，由使用者明列在 config 控制。
 
 使用者可見症狀：agy 驗證卡 `REQ-20261106-agy-verify` 第一次執行時，Lead 的計畫正確（`implement` 給 `profile:agy`），但 agy pane `w3X:p2` 停在 Antigravity CLI 的選單 `Do you trust the contents of this project? > Yes, I trust this folder / No, exit`。bridge 的 `waitUntilReady` 等約 30 秒後回報 `started Agent does not match requested profile/workspace or is not ready`（09:44:19Z），implement 失敗，review、verify 因依賴它也失敗，task 在 09:44:31Z 失敗。訊息沒有提到是信任提示，也沒有指出是哪個 pane。
 
@@ -3842,7 +3865,7 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 重現／環境：2026-11-06，本機 macOS，Antigravity CLI 1.4.12；每張卡的 worktree 都是新資料夾（`~/.herdr/worktrees/<repo>/card-<id>`）。
 
-已確認根因：agy 的信任清單 `~/.gemini/antigravity-cli/settings.json` 的 `trustedWorkspaces` **只比對完整路徑，不含子資料夾**：清單裡雖然已有上層 `/Users/jon/.herdr/worktrees/Herdr_Discord_Bridge`，仍然會詢問；過去 7 張卡的 worktree 也都是各自一條。因此每張卡的 worktree 對 agy 都要信任一次。Claude 不受影響，是因為它信任了上層的 `git_wk`。
+已確認根因：agy 的信任清單 `~/.gemini/antigravity-cli/settings.json` 的 `trustedWorkspaces` **只比對完整路徑，不含子資料夾**：清單裡雖然已有上層 `~/.herdr/worktrees/Herdr_Discord_Bridge`，仍然會詢問；過去 7 張卡的 worktree 也都是各自一條。因此每張卡的 worktree 對 agy 都要信任一次。Claude 不受影響，是因為它信任了上層的 `git_wk`。
 
 處理：使用者在 pane 確認「Yes, I trust this folder」（我依使用者明確授權送出 Enter），agy 把該路徑寫進 `trustedWorkspaces`。清理（`card cleanup`、刪分支、關 workspace）後重跑，同一張卡的 worktree 路徑固定，已信任過所以第二次沒有再問；重跑成功，見 ISSUE-107 的實機證據。
 

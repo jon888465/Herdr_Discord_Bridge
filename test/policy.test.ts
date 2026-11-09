@@ -222,7 +222,7 @@ const withAutopick = [
   "  local:Herdr_Discord_Bridge: L2",
   "  local:Other: L1",
   "autopick:",
-  "  local:Herdr_Discord_Bridge: /Users/jon/git_wk/Herdr_Discord_Bridge",
+  "  local:Herdr_Discord_Bridge: /Users/example/git_wk/Herdr_Discord_Bridge",
   "",
 ].join("\n");
 
@@ -230,7 +230,7 @@ test("autopick lists the projects to pick cards for, with each repo path and one
   const result = parsePolicy(withAutopick);
   assert.ok(result.ok);
   assert.deepEqual(result.policy.autopick, {
-    "local:Herdr_Discord_Bridge": "/Users/jon/git_wk/Herdr_Discord_Bridge",
+    "local:Herdr_Discord_Bridge": "/Users/example/git_wk/Herdr_Discord_Bridge",
   });
   assert.equal(result.policy.autopickLead, "codex");
   assert.equal(autopickFor(result.policy, "local:Herdr_Discord_Bridge")?.level, "L2");
