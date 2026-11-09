@@ -188,7 +188,7 @@ export function roleEvent(identity: RoleIdentity, time: string): CardEvent {
           identity.machine,
           identity.profileId ?? null,
           identity.model ?? null,
-          ...(identity.leadSelection ? [identity.leadSelection] : []),
+          // leadSelection 不進 ID：main 的角色回呼（帶選擇依據）與 assignCard（不帶）是同一個 Lead，必須去重成一筆。
         ]),
       )
       .digest("hex")

@@ -574,3 +574,15 @@ test("Lead role records card versus policy selection with the actual kind", () =
     );
   }
 });
+
+test("Lead role event id ignores leadSelection so the main callback and assignCard dedupe to one record", () => {
+  const identity = {
+    role: "lead" as const,
+    agent: "pi",
+    machine: "local",
+    taskId: "task-1",
+  };
+  const bare = roleEvent(identity, base.time).eventId;
+  for (const leadSelection of ["card", "policy"] as const)
+    assert.equal(roleEvent({ ...identity, leadSelection }, base.time).eventId, bare);
+});
