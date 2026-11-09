@@ -2,7 +2,7 @@
 
 ## ISSUE-137：Lead／Worker 首次 prompt 在 Herdr 登記完成前回 agent_not_ready
 
-更新日期：2026-11-09。狀態：已修正、待驗收。
+更新日期：2026-11-09。狀態：已驗收（2026-11-09，範圍：pi 當 Lead 一次實機成功，見「實機驗收」段；請求 A 已指認為卡片通知；其他 Agent 種類、非 Lead 角色的重試未被觸發也未驗）。
 
 **使用者可見症狀／重現環境：**2026-11-09 卡片 `REQ-20261109-pi-lead-live`（`lead: pi`）開始後約 1 秒 blocked：`herdr agent.prompt: agent_not_ready agent w5V:p1 is not an active named agent`。本輪使用假 port 重現，沒有實機驗證 pi 當 Lead。
 
@@ -26,6 +26,14 @@
 - A 是「另一個程式路徑」：只因為它早於 `turn_dispatched`，而 `runTeamTurn` 的送出在其後；也可能是 journal 事件寫入與請求送出的相對順序和我的理解不同。
 - 兩個請求都沒有把 prompt 送進 pi：依據是 pi 的 session 資料夾當時是空的、畫面沒有對話；這**不足以證明** A（回 `ok`）沒有送達，可能是 pi 當時還沒寫 session 檔、畫面也還沒重繪。A 回 `ok` 的原因不明。
 
+**實機驗收（2026-11-09，本機 macOS，bridge 為 main `945ccd6`（#198）merge 後重啟的程序；`policy.yml` 為 `autopick_lead: claude, codex, agy, pi`，`config.json` 的 pi profile 為了測試宣告了 `implementation`（兩者都是這次測試期間改的，備份 `policy.yml.bak-pi-gate-20261109`、`config.json.bak-pi-impl-20261109`，是否保留待使用者決定））：**重測卡 `REQ-20261109-pi-lead-retest`（`lead: pi`，新增一個一行檔案）：08:50:59Z 撿起，08:51:03Z `role_assigned` 為 `lead：pi；…；leadSelection=card`；08:51:04.702Z pi 的規劃 prompt（`w5Z:p1`，5686 字）被 Herdr 回 error（`agent_not_ready`），#198 的重試在 08:51:05.3Z 再送一次，08:51:19.7Z 回 `ok`（約 14 秒，是 Herdr 等 pi 完成規劃那一回合）；pi 規劃出 6 個派工（`implement-card-file`、`review-card-file`、`identify-author-session`、`complete-independent-review`、`verify-current-card-artifact`、`verify-with-accepted-evidence-schema`，**全由 codex 執行**，全部 `done`），Team 問題數 0、64 個事件；08:56:32Z task `completed`；08:56:59Z commit `03e2b73`；08:57:07Z 開 PR #200（只改一個檔案，內容 `ok`）；08:57:14Z reviewer（codex）第 1 輪 `pass`；08:59:05Z bridge 自動 squash merge `20faaf7`；09:00:01Z `cleanup_done`，worktree 與 Lead workspace 都已移除。**全程沒有手動介入。**
+
+**請求 A 的身分（已確認，取代上方的未確認）：**重測時新加的追蹤紀錄 `agent.prompt prompt target=w5D:p1 chars=117 ts=1794214264678` 顯示，與 pi 的規劃 prompt（`…264702`）同時出現的另一個請求，**目標是 `notify` 對象的 Claude pane `w5D:p1`，不是 pi**——它是卡片通知（`notify: agent:w5D:p1:…`），回 `ok`。上次失敗那張卡 `REQ-20261109-pi-lead-live` 的流程紀錄也有「Agent sending：已認領」與「Agent 通知已送出」都在 07:56:53Z，與請求 A（`…013112`）的時間吻合。所以先前「同一個 pane 兩個 `agent.prompt`」是誤讀：Herdr 日誌沒有目標欄位，兩個請求其實是兩個不同的 pane；不是 bridge 重複送出，也沒有重複送出的 bug。這解釋了「A 回 `ok` 但 pi 什麼都沒收到」。**追蹤紀錄的 `via=` 欄位實測沒用**（非同步呼叫下是空的或只有 `Object`），有用的是 `target`、`chars`、`ts`；建議之後移除或修正 `via`。
+
+**這個驗收沒有證明的：**只有一張極簡卡、一次；pi 只當 Lead，所有實作、審查、驗證都是 codex，所以不代表 pi 能擔任其他角色；`agent_not_ready` 重試只在 pi 這一次被觸發過，其他 Agent 種類沒有被觸發；Herdr 「拒收」的契約（被拒的 prompt 確定沒送進去）仍是推論，這次的結果（重試後只被執行一次）與它相符但不是證明。
+
+**（以下是 #198 merge 當時的未確認狀態，已由上方實機驗收取代，保留作為歷史）**
+
 **未確認（驗收條件 1 在這個 PR 無法完成，審查第 3 輪 F4 指出）：**請求 A 由哪個函式送出，讀碼無法指認（`dispatchPrompt` 的六個呼叫者、`console-agent`、通知路徑都不在 `card assign --worktree --coding` 的明顯流程裡）。為了下一次能直接指認，本 PR 在 `HerdrClient` 每次送 `agent.prompt` 時印一行 console 紀錄（`agent.prompt <prompt|prompt+wait|send-fallback> target=… chars=… ts=<毫秒> via=<呼叫位置>`，不含 prompt 內容；`ts` 可對 Herdr 日誌請求 id 裡的毫秒），重測 pi 當 Lead 時就能在 bridge console 對出 A。
 
 **修正範圍：**僅 runTeamTurn 首次派送，在 baseline 與 beforeDispatch 之後有界迴圈，turn_dispatched 一次；重用 agent-start.ts 已匯出的 Clock（該檔無須修改），context 可注入 clock、timeout、interval，預設 15 秒／500 ms。僅重試 HerdrError agent_not_ready，睡眠與 atomic wait 受 turn 剩餘時間約束，每次重試檢查 abort，睡眠可取消。ok（含 undefined）停止，stalled 沿用 marker，其他錯誤原樣丟出。HerdrClient、其他 prompt 呼叫端與 Agent kinds 不變。同步 SPEC 與 CONTEXT。
@@ -46,7 +54,7 @@
 
 **Review 修正（round 2，F1／F3，2026-11-09）：**reviewer 再次要求補上兩個 agent.prompt 的逐次來源。再次搜尋 ~/.config、~/.herdr、~/Library/Logs、/tmp 及 ~/.config/herdr-discord-bridge（hooks.sock、send.sock、state、tunnels），除本 repo 的測試與文件外沒有任何檔案含 w5V:p1，仍沒有原 task journal／完整 request log。此條需要現場資料，無法由修改程式或文件取得，來源維持「未確認」，不以推測改寫為已確認；驗收條件 1 的來源追查部分仍未完成，留待取得 journal 後處理。
 
-**未驗證／下一步：**沒有實機驗證 pi 當 Lead；Lead 需取得原 task journal／完整 request log，確認兩次請求來源與 Herdr 拒收契約，部署／重啟後重跑原卡。原始碼修正不等同 Discord／Herdr／CLI 端到端成功；執行中的 bridge 未部署、未重啟，舊失敗 prompt／訊息不補送。本輪不 commit、不 push、不使用 GitHub。
+**（歷史，已由實機驗收取代）未驗證／下一步：**沒有實機驗證 pi 當 Lead；Lead 需取得原 task journal／完整 request log，確認兩次請求來源與 Herdr 拒收契約，部署／重啟後重跑原卡。原始碼修正不等同 Discord／Herdr／CLI 端到端成功；執行中的 bridge 未部署、未重啟，舊失敗 prompt／訊息不補送。本輪不 commit、不 push、不使用 GitHub。
 
 ## ISSUE-136：卡片通知在對象的 Agent 顯示忙碌時排隊，延遲很久才送出（`REQ-20261109-agy-lead-live`）
 
@@ -160,6 +168,8 @@
 code-review（high，2026-11-09，只當參考，不是 bridge 的 review）：9 項發現，已修 5 項（worktree 的 blocked 也等待、通報以卡片加原因為 key、`leadRejection` 改用 `autopickFor`、等待訊息用 `role` 取代字串替換、還原格式雜訊）。**原審查未修項目（2026-11-09 ISSUE-132 已補卡片拒絕事件，待實機驗收）：**拒絕原因原本只有 console 警告；`doneAsReady` 轉接不帶 port 的選用 trust 方法、去重不與 reviewer 等待共用（Lead 與 reviewer 是不同 pane，影響低）；等待用真實計時而非注入的 `sleep`／`now`；開放條件只看 `implementation`、不看 `review`（刻意，使用者選項 2）；`done` 啟動即算就緒（與原本來源路徑一致）。
 
 實機驗收（2026-11-09，本機 macOS，bridge 為 main `88e1ce6`（#189）merge 後重啟的程序；`policy.yml` 暫時設為 `autopick_lead: claude, codex`（備份 `policy.yml.bak-live-20261109`，驗收後已改回單一值 `claude`），`config.json` 沒改）：測試卡 `REQ-20261109-lead-live-codex`（`lead: codex`，改一個 `docs/card-runs/` 檔案）由 codex 當 Lead 走完：06:54:39Z 撿起，Lead workspace `w5J`（`autopick-codex-<卡片 id>`）與卡片 worktree `w5K`，06:54:50Z task 開始，06:59:31Z `completed`，06:59:40Z commit `a773038`，06:59:47Z 開 PR #191，CI 兩平台綠，squash merge `1448d51`，07:04:40Z 記 `merged` 與 `cleanup_done`，worktree 與 `w5J` 都已關閉。這證明 codex 當 Lead 時，來源 Lead 啟動與 worktree 第二次 Lead 啟動都沒有被「沒就緒」拒絕（我沒有直接觀察到 working 狀態，只看到 `w5J` 閒置、`w5K` 為 unknown 後流程正常往下走），label 與收尾清理在真實 bridge 上有效。**過程中不是全自動：**claude 當 reviewer 兩輪 `inconclusive`（見 ISSUE-134），loop 退回人工；我用 `card review --agent codex` 重試（第 3 輪 `pass`，07:03:59Z）並手動 `card merge`。**未驗：**agy、pi 的開放條件（宣告前不撿、宣告後撿）與當 Lead、claude 當 reviewer。
+
+pi 實機驗收（見 ISSUE-137 的「實機驗收」段）：pi 當 Lead 的第 1 次（`REQ-20261109-pi-lead-live`）因第一個 prompt 被 Herdr 拒收失敗，修正後第 2 次（`REQ-20261109-pi-lead-retest`，PR #200）成功走完 task、review、自動 merge 與收尾；限制同上（一次、極簡任務、pi 只當 Lead）。
 
 agy 實機驗收（2026-11-09，本機 macOS，bridge 為 main `ae356aa` 之後重啟的程序，`policy.yml` 為 `autopick_lead: claude, codex, agy`（使用者決定驗證後保留 agy，備份 `policy.yml.bak-agy-live-20261109` 是加入 agy 之前的版本），`config.json` 沒改（agy profile 本來就宣告 `implementation`））：測試卡 `REQ-20261109-agy-lead-live`（`lead: agy`，新增 `docs/card-runs/` 一個一行檔案）：07:38:22Z 撿起，Lead workspace `w5R`（`autopick-agy-<卡片 id>`）；07:38:33Z `role_assigned` 為 `lead：agy；…；leadSelection=card`，task journal 的 Lead 種類也是 agy；agy 規劃的計畫被 bridge 解析成功（`impl-1` codex 實作、`rev-1` codex review、`ver-1` claude 驗證，全部完成，Team 問題數 0，32 個事件）；07:40:29Z task `completed`；07:41:24Z commit `f64aeb4`；07:41:32Z 開 PR #196（只改一個檔案，內容 `ok`）；07:41:50Z reviewer（codex）第 1 輪 `pass`；07:44:04Z bridge 自動 squash merge `9875e8f`；07:44:24Z `cleanup_done`，worktree、agy 信任項目與 Lead workspace 都已移除；全程沒有手動介入，來源 Lead 啟動沒有停在信任提示。**這個結果能證明的有限：**只有一次、最簡單的任務；agy 只需要產出一個小計畫，沒有檢驗多輪、長 JSON、review 退回修正或 agy 當 reviewer 的情境；來源資料夾沒有被信任提示擋住的原因沒查（可能是先前已被信任，`agyTrustedDirectories` 只列 `/Users/jon/git_wk` 且不含子目錄）；ISSUE-130 記的幾個讀碼缺口（session 回寫、hook fallback、非 codex 長 JSON）這次沒有發作，但沒有被證明不存在；pi 完全沒涵蓋。
 

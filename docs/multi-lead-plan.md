@@ -4,7 +4,7 @@
 
 > 所有角色（不只 Lead）的整體目標與矩陣見 [Agent 角色矩陣](agent-role-matrix.md)。
 
-> **本文是規劃，不代表 agy、pi 已可靠地當 Lead。** P0 有程式與單元測試；agy 在 2026-11-09 有一次極簡卡走完的實機證據（見 P1），pi 從未當過 Lead。所有結論附日期，沒有實機證據的項目明載「未驗證」。
+> **本文是規劃，不代表 agy、pi 已可靠地當 Lead。** P0 有程式與單元測試；agy 在 2026-11-09 有一次極簡卡走完的實機證據（見 P1），pi 在 2026-11-09 有一次極簡卡走完的實機證據（見 P3）。所有結論附日期，沒有實機證據的項目明載「未驗證」。
 
 ## 範圍
 
@@ -49,7 +49,7 @@ Lead 是 agy 或 pi 時，`config.json` 的 `agentProfiles` 必須有**同種類
 | P0 | 四種 Lead、agy／pi 開放條件、Lead 啟動等待（來源與 worktree） | **已實作，僅單元測試**：`npm run check` 為 1605 tests／1604 pass／0 fail／1 skipped，`npm run lint` 通過（2026-11-09，本機） |
 | P1 | **agy 當 Lead 的驗證卡**（見下） | **已完成一次（2026-11-09）**：極簡卡走完 PR 與自動 merge；步驟 1「先確認開放條件會擋」沒有做（`config.json` 的 agy 本來就宣告 `implementation`），所以開放條件對 agy 的「擋」這一側沒有實機驗證 |
 | P2 | agy 長期保留為 autopick Lead 並累積更多卡 | **進行中**：使用者決定保留 agy 在 `autopick_lead`（2026-11-09）；目前只有 P1 那一張，需要更多、較複雜的卡才算累積 |
-| P3 | **pi 重複 P1、P2**。pi 連 Worker 都沒驗過，順序是先驗 pi 當 Worker，再驗當 Lead | 未開始 |
+| P3 | **pi 重複 P1、P2**。原本建議先驗 pi 當 Worker 再驗當 Lead，實際先驗了 Lead | **Lead 已成功一次（2026-11-09）**：第 1 次失敗（ISSUE-137，第一個 prompt 被 Herdr 拒收），#198 修正後第 2 次走完 PR #200 並自動 merge；pi 只當 Lead、所有實作都是 codex，**pi 當 Worker 與其他角色仍未驗** |
 
 **P1 步驟（agy 當 Lead，確保真的是 agy）：**
 
@@ -71,7 +71,7 @@ Lead 是 agy 或 pi 時，`config.json` 的 `agentProfiles` 必須有**同種類
 ## 風險
 
 - agy 在新資料夾的信任提示可能讓 Lead 啟動卡住；bridge 不會替人確認。
-- pi 沒有任何 coding 證據，P3 可能發現大量缺口。
+- pi 當 Worker 的 coding 與其他角色沒有證據，P3 的後續可能發現大量缺口；pi 當 Lead 只有一次極簡卡。
 - L2 專案下 Lead 失敗後的卡可能留下未 commit 的 worktree（REQ-20261109-codex-lead-agy 實際發生過），要人工處理。
 - 開放條件只看使用者的宣告，宣告錯誤時 bridge 不會攔。
 
@@ -79,5 +79,6 @@ Lead 是 agy 或 pi 時，`config.json` 的 `agentProfiles` 必須有**同種類
 
 - [x] P1：agy 當 Lead 走完一張無害卡（2026-11-09，PR #196，附環境與限制，見上）。
 - [ ] P2：agy 當 autopick Lead 在更多、較複雜的卡上走到 PR（目前只有一張極簡卡）。
-- [ ] P3：pi 當 Worker、再當 Lead 的同等證據。
+- [x] P3（Lead 部分）：pi 當 Lead 走完一張無害卡（2026-11-09，PR #200，限制見上）。
+- [ ] P3（Worker 部分）：pi 當 Worker 的同等證據。
 - [ ] 以上完成前，文件與 issue 都標「待驗收」，不宣稱 agy、pi 可當 Lead。

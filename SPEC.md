@@ -773,7 +773,7 @@ Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*
 
 - `autopick_lead` 接受 claude、codex、agy、pi 的逗號分隔有序清單（單一值相容）；省略仍是 claude，未知值拒絕並列出四種。種類清單、型別與 label（`autopick-<kind>-<卡片 id>`，最多 60 字元）共用 `src/policy.ts`，ISSUE-129 的收尾也用同一份。reviewer 偏好不變（codex Lead 用 claude，其餘用 codex），真正的依據仍是作者與 reviewer 不同 session 的 gate。
 - **開放條件：**agy、pi 當 Lead 需要 `config.json` 的 `agentProfiles` 有同種類、且 `capabilities` 含 `implementation` 的 profile（`leadGateFor`，使用者表示該種類的 coding 已驗證）；沒達到就不撿，每張卡依原因記一次 `failed`（`autopick_stopped`）事件，console 同步顯示，不改用別的 Lead。claude、codex 不需要。這不是安全邊界，能改 `config.json` 的人就能宣告，bridge 也不判斷它們是否真的能當 Lead。
-- **啟動等待補充（ISSUE-137）：**idle／done 不保證 active named agent 登記完成，Team 第一個 prompt 可有界重試；**沒有實機驗證 pi 當 Lead**（本次修正未做真機驗收）。
+- **啟動等待補充（ISSUE-137）：**idle／done 不保證 active named agent 登記完成，Team 第一個 prompt 可有界重試；2026-11-09 已實機驗證：pi 當 Lead 的重測卡 `REQ-20261109-pi-lead-retest`（PR #200）第一個 prompt 被拒後重試成功，task 完成並自動 merge；只有這一次、極簡任務，pi 只當 Lead，不代表 pi 能擔任其他角色。
 - **啟動等待：**Lead 啟動回來是 working 時等到就緒（`waitUntilReady`，`doneAsReady` 把 done 當 idle，working → done 轉態也算）。來源 workspace 與 `prepareCardWorktree` 的第二次啟動共用；working 或 blocked（已知安全更新提示可跳過）都會等，信任、權限、登入仍要人處理；逾時、blocked 或等待丟錯時維持「Agent 還沒準備好、不啟動任務、卡片仍是 ready」。
 - 多候選與卡片指定契約見下節；agy 有一次極簡卡走完 PR 與自動 merge 的實機證據（2026-11-09，PR #196），pi 的 2026-11-09 Lead 嘗試於首次 prompt 失敗（ISSUE-137），尚無成功實機驗收；規劃與階段見 `docs/multi-lead-plan.md`。
 
