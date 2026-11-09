@@ -53,6 +53,8 @@
 
 **第 3 輪 review 修正（2026-11-09，F3）：**根因（已確認）：同步只發生在 `streamAgent`；回合開始時沒有 session、停機或抓取重試期間才首次登記 session、且抓取最終失敗時，沒有任何程式會同步，pending 紀錄永遠拒絕可信 Stop。修正：`relayRecoveredStreams` 自己辨識合法轉移——回合開始時無 session 而現在首次登記，或 codex／agy／pi 在回合開始後才建立新 session（與 `streamAgent` 同一套 `sessionCreatedSince` 判斷）——記 log、持久化新 session 後補送；其他 session 變更（例如 claude 換 session）仍拒絕。測試（2026-11-09，本機，假 port）：`node --test dist/test/stream-resume-lost-reply.test.js` 20/20 pass；原「手動 updateSession 後才補送」的測試改成不經 `streamAgent` 同步、直接由補送路徑辨識首次登記並持久化。全套與實機尚未驗證。
 
+**已知限制（2026-11-09，第 5 輪 review F4，使用者決定不在本 PR 處理）：**`relayRecoveredStreams` 查詢 Herdr 拋錯（暫時故障）時該筆直接結束，沒有重試；之後只有 bridge 啟動或別的 Stop 事件才會再觸發補送，所以若那是唯一的最後 Stop 又恰逢查詢故障，pending 回覆不會送出。第 5 輪 review 對 7 項驗收條件皆為通過，F2、F3 已不再被提出。下一步：另開卡為補送加有限次、可注入計時的重試與「無後續 Stop」測試。
+
 **限制／下一步：**尚未實機驗證 Discord／Herdr；原始碼與 build 已完成，執行中的 bridge 未部署、未重啟，交 Lead 安排實機重啟續傳／補送驗收。送前認領後若當機或補送失敗（含部分送出），為避免重複不自動再送；寫盤失敗不送。紀錄沿用 24 小時有效期，新回合取代同 terminal 的舊紀錄。bridge 停機期間未收到的 hook 不會憑空恢復；舊版本已刪除的記錄與既有遺失訊息無法追溯補送。未 commit、未 push，未連真實 Discord／GitHub，未執行 herdr 指令。
 
 ## ISSUE-125：codex Worker 反覆停在 `npm test` 的權限提示逾時失敗，改為 helper 暫時最大權限（需提醒：目前仍在 VM）
