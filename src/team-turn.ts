@@ -12,8 +12,8 @@ import type { AgentRecord, ReadSource } from "./types.js";
 import type { OrchestrationPort } from "./team-orchestration.js";
 
 export interface TeamTurnContext {
-  taskId: string;
-  phase: "planning" | "assignment" | "synthesis";
+  taskId?: string;
+  phase?: "planning" | "assignment" | "synthesis";
   assignmentId?: string;
   signal?: AbortSignal;
   beforeDispatch?: () => void;
@@ -74,18 +74,15 @@ export async function runTeamTurn(
     `Opening marker (first line): ${begin}`,
     "Between them put only the requested result. Do not repeat these instructions.",
     context
-      ? "Debug context: taskId=" +
-        context.taskId +
-        " phase=" +
-        context.phase +
-        " assignmentId=" +
-        (context.assignmentId || "-") +
-        " paneId=" +
-        agent.pane_id +
-        " agent=" +
-        (agent.agent || "unknown") +
-        " session=" +
-        sessionKey(agent)
+      ? [
+          "Debug context:",
+          ...(context.taskId ? [`taskId=${context.taskId}`] : []),
+          ...(context.phase ? [`phase=${context.phase}`] : []),
+          `assignmentId=${context.assignmentId || "-"}`,
+          `paneId=${agent.pane_id}`,
+          `agent=${agent.agent || "unknown"}`,
+          `session=${sessionKey(agent)}`,
+        ].join(" ")
       : "Debug context: paneId=" +
         agent.pane_id +
         " agent=" +

@@ -124,7 +124,10 @@ function wrappedPort(waits: AgentRecord[]) {
       if (!prompt) return "";
       const begin = prompt.match(/BRIDGE_BEGIN_[a-f0-9]+/)![0];
       const end = prompt.match(/BRIDGE_END_[a-f0-9]+/)![0];
-      return `${begin}\n{"assignments":[{"id":"a1","acces\ns":"write"}]}\n${end}`;
+      const frame = `${begin}\n{"assignments":[{"id":"a1","acces\ns":"write"}]}\n${end}`;
+      return waits[0]?.agent === "claude"
+        ? "⏺ " + frame.split("\n").join("\n  ")
+        : frame;
     },
   };
   const markers = () => ({
@@ -292,4 +295,95 @@ test("codex never takes its session from Herdr's agent_session, only from its ro
     { ...codex, agent_session: session("hook-pane-session") },
   ]);
   assert.equal(result.session, undefined);
+});
+
+// ISSUE-134: card callers have hook context without a Team task id or phase.
+test("card hook context preserves complete review JSON and omits missing debug fields", async () => {
+  const { createTurnHookFinal } = await import("../src/turn-hook-final.js");
+  const { HookEventStore } = await import("../src/hook-events.js");
+  const agent = { ...base, agent: "claude" };
+  const events = new HookEventStore();
+  const full = JSON.stringify({
+    verdict: "pass",
+    summary: "complete review ".repeat(20),
+    findings: [],
+  });
+  const wrapped = full.replace("complete review", "complete\nreview");
+  let prompt = "";
+  const port: OrchestrationPort = {
+    promptAgent: async (_target, text) => {
+      prompt = text;
+      events.record({
+        event: "Stop",
+        sessionId: "review-session",
+        paneId: agent.pane_id,
+        message: frame(full),
+      });
+    },
+    waitAgent: async () => agent,
+    readAgent: async () =>
+      prompt ? "⏺ " + frame(wrapped).split("\n").join("\n  ") : "",
+  };
+  function frame(body: string) {
+    return `${prompt.match(/BRIDGE_BEGIN_[a-f0-9]+/)![0]}\n${body}\n${prompt.match(/BRIDGE_END_[a-f0-9]+/)![0]}`;
+  }
+  const result = await runTeamTurn(agent, "review", port, 2000, 20, {
+    hookFinal: createTurnHookFinal({ claude: "auto" }, events),
+  });
+  assert.equal(result.text, full);
+  assert.notEqual(result.text, wrapped);
+  assert.equal(result.terminal, false);
+  const debug = prompt
+    .split("\n")
+    .find((line) => line.startsWith("Debug context:"))!;
+  assert.doesNotMatch(debug, /undefined|taskId=|phase=/);
+});
+
+test("shared hook lookup falls back to screen for missing messages and never reads hooks in parser mode", async () => {
+  const { createTurnHookFinal } = await import("../src/turn-hook-final.js");
+  const agent = { ...base, agent: "claude" };
+  for (const mode of ["auto", "parser"] as const) {
+    let lookups = 0;
+    const events = {
+      stopSince: () => {
+        lookups++;
+        return undefined;
+      },
+      stopForPane: () => {
+        lookups++;
+        return undefined;
+      },
+    };
+    const { port } = wrappedPort([agent]);
+    const result = await runTeamTurn(agent, "review", port, 2000, 20, {
+      hookFinal: createTurnHookFinal({ claude: mode }, events),
+    });
+    assert.equal(result.terminal, true);
+    assert.match(result.text, /acces\ns/);
+    assert.equal(lookups > 0, mode === "auto");
+  }
+});
+
+test("Team engine and both card flows wire the shared hook lookup", async () => {
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(
+    new URL("../../src/main.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    source,
+    /createTurnHookFinal\(config\.hookTransport, hookEvents\)/,
+  );
+  for (const name of ["fixCard:", "reviewPullRequest:"]) {
+    const start = source.indexOf(name);
+    assert.ok(start >= 0);
+    const turn = source.slice(
+      start,
+      source.indexOf("return { state: turn.state", start),
+    );
+    assert.match(
+      turn,
+      /runTeamTurn\([\s\S]*runtime\.config\.outputLines,\s*\{\s*hookFinal: createTurnHookFinal\(\s*runtime\.config\.hookTransport,\s*hookEvents,/,
+    );
+  }
 });
