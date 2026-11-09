@@ -1,5 +1,26 @@
 # Known Issues
 
+## ISSUE-129：卡片結束後留下 autopick Lead workspace（REQ-20261109-autopick-lead-cleanup）
+
+更新日期：2026-11-09。狀態：已修正、待驗收。
+
+症狀：autopick stopped／failed 後人工接手完成或取消卡片，Lead workspace 留著；bridge 重啟後原有 close handle 遺失。預期：卡片結束或 cleanup 成功後，以持久化身分安全關閉 Lead，不影響其他 workspace 或 cleanup 結果。
+
+重現／環境：2026-11-09 本機 worktree，以假 Herdr port 與實體暫存卡片檔重現；本輪沒有 live 重現。已確認根因（讀碼）：原本只在 reached 使用記憶體 LeadHandle.close，卡片未記錄 workspace id，cleanup 只處理 card worktree。
+
+修正範圍：autopick 開 workspace 後立即寫 frontmatter id／label；CardStore／parser／serializer 支援，外部 import 清除。手動／merge cleanup 與每分鐘終態掃描共用安全關閉函式，僅記錄 id＋現況相同且符合本卡的 autopick label 放行；in_progress 保留，活動中的 autopick 延後掃描，未結束 stopped／failed 保留，reached 不變。缺失、改名、API 錯誤只警告，不影響 cleanup 結果，不尋找其他 workspace。
+
+測試（2026-11-09）：相關 `npm run build && node --test dist/test/card-cleanup.test.js dist/test/autopick-wiring.test.js` 通過，23 tests／23 pass／0 fail。涵蓋建立後持久化與寫入失敗、fresh CardStore 模擬重啟、done／cancelled／ready cleanup／in_progress、只關 Lead、不動 Worker／reviewer／個人 workspace、查詢缺失／標籤不符／查詢或 close 失敗只記 log 且 cleanup recording 不變。首次 build 因未安裝依賴找不到 tsc，`npm ci --ignore-scripts` 後解除。完整檢查（2026-11-09）：`npm run lint`、`npm run typecheck`、`npm test`、`npm run build` 均通過；完整套件 1538 tests／1537 pass／0 fail／1 skipped（既有略過）。之後補外部匯入 metadata 清除測試及掃描錯誤保護，再跑 `npm run lint && npm run typecheck && npm run build` 與 `node --test dist/test/card-cleanup.test.js dist/test/autopick-wiring.test.js dist/test/card-import.test.js`，39 tests／39 pass／0 fail（2026-11-09）。完整套件數字不包含最後新增的 import 測試；最後版本以相關測試再驗證。`git diff --check` 通過（2026-11-09）。
+
+Review 修正（2026-11-09，f1／f2；保留上述初版驗證歷史）：review 發現 f1，merge cleanup 可先關 Lead，之後 reached 再 close 得到 workspace not found，使成功 merge 被回報 failed。以假 port、實體暫存卡片及真正 `runAutopick`／`closeAutopickLead` 重現交錯。根因已確認：兩條關閉路徑未協調。本項因 review 重新開啟調查後已修正，狀態維持「已修正、待驗收」：close 失敗後查詢 workspace.list，僅在合法清單確認該 id 不存在時記警告並視為成功；workspace 仍在、回應不合法或查詢失敗仍保留原錯誤，其他 reached 行為與 cleanup 結果不變。f2 為 SPEC 舊段落仍寫名稱僅顯示／cleanup 不變／無 autopick 政策即不做事，現已同步為 label 守門、結束卡片 Lead cleanup 與不依政策啟用與否的終態掃描。新增交錯回歸測試及拒絕誤吞 close 錯誤的測試。相關 `npm run build && node --test dist/test/autopick-wiring.test.js`：15 tests／15 pass／0 fail（2026-11-09）。Review 修正後完整檢查（2026-11-09）：`npm run lint`、`npm run typecheck`、`npm run build`、`npm test` 全部 exit 0；完整套件 1543 tests／1542 pass／0 fail／1 skipped（既有略過）；`git diff --check` 通過（2026-11-09）。
+
+Review2 文件修正（2026-11-09，f3）：README 的舊 autopick／merge cleanup／card cleanup 段落未同步，仍宣稱無 autopick 政策就不做事、無條件保留來源 workspace，與 SPEC 及 README 的 Lead 收尾段落矛盾。本項經 review2 重新檢查並修正：明載 done／cancelled 每分鐘掃描不受 autopick 政策區塊有無影響、活動中的 autopick 延後掃描；cleanup 以卡片記錄 id 與本卡 autopick label 核對後關 Lead，其餘來源 workspace 保留；in_progress 與未結束且未成功 cleanup 的 stopped／failed 保留，缺失／不符／失敗只記 log。狀態維持「已修正、待驗收」。本輪只改 README.zh-TW.md 與本紀錄，未改程式碼；已對照 SPEC、以 grep 檢查 README 舊矛盾敘述並執行 `git diff --check`，均通過（2026-11-09）。純文件修正未重跑 build 或測試，上述測試數字為先前執行證據。
+
+Review3 文件修正（2026-11-09，f4）：SPEC 的 PR merge 自動清理段落仍無條件宣稱來源 workspace 不關閉，根因為舊段落漏同步；經 review3 重新檢查後補上 ISSUE-129 的記錄 id／label 核對、失敗只記 log、不改 cleanup 結果及其餘 workspace 保留例外。狀態維持「已修正、待驗收」。已對照 SPEC 命名／Lead 收尾段落與 src/main.ts 的 merge cleanup：只有每分鐘終態掃描在 autopick 執行中延後，merge cleanup 可先關 Lead，reached 以確認已不存在即成功處理；本輪未將尚未實作的「merge cleanup 延後」寫成現況，也未改程式碼。全面搜尋 SPEC.md、README.zh-TW.md、docs/known-issues.md 的 `不關閉|保留.*workspace|workspace.*保留|什麼都不做|不關.*workspace`，逐項檢視：README 已有例外；一般 routing／restart／pane／usage 與拒絕操作敘述無關，保留；舊 ISSUE-062／065／096／119 補現況註記，日期與原驗收證據不變。內容檢查及 `git diff --check` 通過（2026-11-09）。純文件變更未重跑 build／測試；執行中 bridge 未部署／重啟，未端到端驗收。
+
+未驗證／下一步：原始碼已修改；執行中的 bridge 尚未部署／重啟，未做 Discord／Herdr／CLI 端到端驗收。Lead 需重啟後驗證完成／取消、重啟續清、人工改名與其他 workspace 保留。沒有 metadata 的舊卡不回填，不補送舊訊息。（撰寫此紀錄時尚未 commit；commit、PR 與 merge 以 PR 紀錄為準。）
+
+
 ## ISSUE-128：缺少 Agent usage 唯讀查詢（REQ-20261106-usage-query）
 
 更新：2026-11-08。狀態：重新開啟後再修正、待驗收（PR #172 已 merge、bridge 以 e69828f 重啟後實機查詢發現真實 codex 畫面讀不到用量，已另開 PR 修正）。
@@ -2530,6 +2551,8 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 使用者可見行為：見 SPEC「隔離 worktree」與 `card cleanup`。
 
+現況補充（2026-11-09，ISSUE-129，已修正、待驗收）：以下保留 ISSUE-062 當時的需求與驗收歷史；現行 cleanup 對有卡片記錄且通過 id／label 核對的 autopick Lead 有關閉例外，其餘來源 workspace 保留。
+
 預期行為：`card assign <id> --worktree` 在目前 thread Agent 所在 repo 建立 `card/<id>` 分支的 worktree 與 workspace、啟動同種 Agent、切換路由、記錄到卡片、啟動任務；Agent 被擋住時不啟動任務並說明；`card cleanup <id>` 永不強制、髒檢出保留、不刪分支、不關來源 workspace；沒帶旗標的流程完全不變。
 
 根因／修正範圍：不適用（新功能）。新增 `src/card-worktrees.ts`、`src/card-worktree-flow.ts`；`src/card-command.ts`（`--worktree`、`cleanup`）；`src/main.ts`（接線、git 輔助、`agent.start` 輪詢、授權）。
@@ -2693,6 +2716,8 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 來源：追蹤清單 E11（使用者 2026-11-03：「如果卡片有 merge 了那就應該清理」）。接在 ISSUE-064（`card pr`）之後，補上「PR 被 merge」這條 live 尚未驗證的路徑。
 
 使用者可見行為：bridge 開出的 PR 被 merge 後（輪詢最多延遲約 60 秒），卡片寫入 `merged`、自動清理 worktree，並在原 thread 通知。見 SPEC「PR merge 後自動清理」。
+
+現況補充（2026-11-09，ISSUE-129，已修正、待驗收）：以下保留 ISSUE-065 的原需求與實機證據；現行 merge cleanup 可關閉卡片記錄且通過 id／label 核對的 autopick Lead，其餘來源 workspace 保留。
 
 預期行為：只有 merge 觸發（關閉不清理）；`merged` 事件含 merge commit 與推斷的方式（merge／squash／rebase）；清理永不強制、髒檢出保留並寫 `cleanup_pending`、分支與來源 workspace 保留；清理失敗只說明並提示手動 `card cleanup`；merge 方式取得失敗只回報問題。
 
@@ -3520,6 +3545,8 @@ H4 脈絡：這是自動串接最小的摩擦；已選用（1）的單卡同步�
 
 第一部分的內容（2026-11-05）：`src/policy.ts` 新增 `autopick_lead`、`autopick:` 區塊與 `autopickFor`；autopick 的專案必須也明確列在 `projects`（不能靠 `default`，避免寬鬆的 default 讓工作自己開始）；路徑必須是絕對路徑、不可有 `..` 或控制字元。`src/autopick.ts`：`pickNext`（ready、宣告的專案被選用、先建立的先做、略過已試過的）、`runAutopick`（依等級依序執行並在每個停止條件停下）、`createAutopicker`（一次一張、不重試、政策檔有問題不撿）。所有外部動作經注入的 `AutopickSteps`，所以邏輯可以單元測試。
 
+現況補充（2026-11-09，ISSUE-129，已修正、待驗收）：以下為 ISSUE-096 初版設計歷史；現在未選用政策只是不撿新卡，仍每分鐘掃描終態卡；未結束且未成功 cleanup 的 stopped／failed 保留現場，in_progress 一律不關 Lead，結束卡片的 Lead 收尾依 ISSUE-129。
+
 安全設計：失敗或需要人就停下、保留 Lead 的 workspace 與 worktree；不重試（同一個程序內已試過的卡不再撿）；L2 的 merge 仍完全受 `card merge` 的守門（獨立 review、CI、PR 乾淨、不動敏感路徑）；沒有選用就什麼都不做。
 
 測試（2026-11-05，本機 macOS，非 CI）：`test/policy.test.ts` 新增 5 項（autopick 區塊與 Lead 種類、沒有區塊時政策物件形狀不變、Lead 預設 claude 且只收 claude／codex、autopick 專案必須在 projects 明確列出、路徑與重複的檢查）；`test/autopick.test.ts` 新增 11 項（選卡規則、legacy `project` 欄位、略過已試過的、L2 完整順序並在最後關閉 Lead、Lead 為 codex 時 reviewer 為 claude、L1 停在 PR 且 L0 停在 commit 都不 merge、失敗時停止並保留 Lead、task 未完成／卡片沒變 done／loop 沒 merge 都停下等人、Lead 開不起來就什麼都不做、排程器一次一張且不重試、政策檔缺少或不合法時不撿）。暫時破壞 L1 的停止條件時對應測試**失敗**（紅）。`node --test --test-timeout=60000 dist/test/*.test.js` → 1177 tests、1176 pass、0 fail、1 skip（既有）；`npm run lint` ok。
@@ -4010,6 +4037,8 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 ## ISSUE-119：自動建立的 workspace／pane 未顯示實際 Agent 種類（REQ-20261107-agent-naming）
 
 更新日期：2026-11-07。狀態：已修正、待驗收。
+
+現況補充（2026-11-09，ISSUE-129，已修正、待驗收）：以下為 ISSUE-119 命名變更當時的範圍與驗證歷史；現行 Lead cleanup 另以卡片記錄 id 加上 label 現況核對守門，label 不再僅供顯示；不依名稱搜尋其他 workspace。
 
 使用者可見症狀：autopick Lead workspace 原本只有 `autopick-<卡片 id>`；reviewer、profile Worker、`agent start` pane 未標示種類與角色，側欄難以辨認。預期名稱包含實際種類，workspace 保留卡片及 `autopick-` 前綴、最多 60 字元；名稱不作為關閉身分。
 

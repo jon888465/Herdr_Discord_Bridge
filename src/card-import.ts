@@ -51,6 +51,8 @@ export function importCard(text: string, options: ImportOptions): ImportResult {
   if (options.existingIds.has(built.card.id))
     return fail(`card ${built.card.id} already exists`, "exists");
   const card = { ...built.card };
+  delete card.autopick_workspace_id;
+  delete card.autopick_workspace_label;
   // Imported destinations are untrusted; the command records its own Discord thread.
   if (card.notify !== undefined) {
     delete card.notify;

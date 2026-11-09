@@ -24,6 +24,8 @@ export interface Card {
   updated: string;
   source?: string;
   notify?: string;
+  autopick_workspace_id?: string;
+  autopick_workspace_label?: string;
   project?: string;
   /** `<機器 id>:<repo 目錄名>`，由 bridge 寫入（ADR-0002 決定 4）。 */
   projects?: string[];
@@ -51,6 +53,8 @@ const KNOWN_KEYS = new Set<string>([
   ...REQUIRED_KEYS,
   "source",
   "notify",
+  "autopick_workspace_id",
+  "autopick_workspace_label",
   "project",
   "projects",
   "tasks",
@@ -471,6 +475,16 @@ export function buildCard(
       const value = asString("notify", fields.get("notify"));
       if (!parseNotifyTarget(value)) reject("invalid notify destination");
       card.notify = value;
+    }
+    for (const key of [
+      "autopick_workspace_id",
+      "autopick_workspace_label",
+    ] as const) {
+      if (fields.has(key)) {
+        const value = asString(key, fields.get(key));
+        if (!/^[A-Za-z0-9_-]{1,100}$/.test(value)) reject(`invalid ${key}`);
+        card[key] = value;
+      }
     }
     if (fields.has("source"))
       card.source = asString("source", fields.get("source"));

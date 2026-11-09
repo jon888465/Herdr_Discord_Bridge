@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { LEDGER_MAX_FILE_BYTES, type Card } from "../src/card.js";
-import { recordCleanupOnCard } from "../src/card-cleanup.js";
+import { closeAutopickLead, recordCleanupOnCard } from "../src/card-cleanup.js";
 import { CardStore } from "../src/card-store.js";
 
 const ID = "REQ-20261103-work";
@@ -26,6 +26,7 @@ const info = {
 };
 const now = () => "2026-11-03T09:00:00Z";
 
+const roots = new WeakMap<CardStore, string>();
 function store(): CardStore {
   const root = path.join(
     fs.mkdtempSync(path.join(os.tmpdir(), "card-cleanup-")),
@@ -33,6 +34,7 @@ function store(): CardStore {
   );
   const cards = new CardStore(root, { maxFileBytes: LEDGER_MAX_FILE_BYTES });
   cards.create(card);
+  roots.set(cards, root);
   return cards;
 }
 
@@ -91,3 +93,89 @@ test("recording the same result again changes nothing, and a missing card or sto
     exists: false,
   });
 });
+
+// Fresh CardStore instances model a bridge restart: no LeadHandle is available.
+for (const status of ["done", "cancelled", "ready", "in_progress"]) {
+  test(`persisted Lead cleanup gates ${status} and only closes the recorded Lead`, async () => {
+    const cards = store();
+    const read = cards.read(ID);
+    assert.ok(read.ok);
+    assert.ok(cards.update(ID, read.hash, (c) => ({ ...c, status })).ok);
+    assert.ok(
+      cards.recordAutopickWorkspace(ID, "wLead", `autopick-claude-${ID}`).ok,
+    );
+    const restarted = new CardStore(roots.get(cards)!);
+    const closed: unknown[] = [];
+    const port = {
+      listWorkspaces: async () => [
+        { workspace_id: "wWorker", label: `card-${ID}` },
+        { workspace_id: "wReviewer", label: "reviewer" },
+        { workspace_id: "wUser", label: "personal" },
+        { workspace_id: "wLead", label: `autopick-claude-${ID}` },
+      ],
+      request: async (_method: string, params?: Record<string, unknown>) => {
+        closed.push(params);
+      },
+    };
+    await closeAutopickLead(restarted, ID, port);
+    assert.equal(closed.length, ["done", "cancelled"].includes(status) ? 1 : 0);
+    closed.length = 0;
+    await closeAutopickLead(restarted, ID, port, true);
+    assert.deepEqual(
+      closed,
+      status === "in_progress" ? [] : [{ workspace_id: "wLead" }],
+    );
+  });
+}
+
+for (const scenario of [
+  "missing",
+  "mismatch",
+  "close failure",
+  "lookup failure",
+  "invalid record",
+]) {
+  test(`Lead ${scenario} only logs and preserves cleanup result`, async () => {
+    const cards = store();
+    assert.ok(
+      cards.recordAutopickWorkspace(
+        ID,
+        "wLead",
+        scenario === "invalid record" ? "personal" : `autopick-claude-${ID}`,
+      ).ok,
+    );
+    const logs: string[] = [];
+    let closes = 0;
+    const result = { removed: true as const, ...info };
+    const before = recordCleanupOnCard(cards, ID, result, now);
+    await closeAutopickLead(
+      cards,
+      ID,
+      {
+        listWorkspaces: async () => {
+          if (scenario === "lookup failure") throw new Error("offline");
+          return scenario === "missing"
+            ? []
+            : [
+                {
+                  workspace_id: "wLead",
+                  label:
+                    scenario === "mismatch"
+                      ? "personal"
+                      : `autopick-claude-${ID}`,
+                },
+              ];
+        },
+        request: async () => {
+          closes++;
+          throw new Error("close failed");
+        },
+      },
+      true,
+      (message) => logs.push(message),
+    );
+    assert.equal(logs.length, 1);
+    assert.equal(closes, scenario === "close failure" ? 1 : 0);
+    assert.deepEqual(recordCleanupOnCard(cards, ID, result, now), before);
+  });
+}

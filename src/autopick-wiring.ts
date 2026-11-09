@@ -16,6 +16,7 @@ export interface AutopickWiringDeps {
   port: AgentStartPort;
   /** 以自動撿卡的身分執行一個 console 指令（例如 `card commit <id>`），回傳印出的文字；失敗丟錯誤。 */
   command(text: string): Promise<string>;
+  recordLeadWorkspace(cardId: string, workspaceId: string, label: string): void;
   taskIdForCard(cardId: string): string | undefined;
   taskState(taskId: string): { state: string; detail?: string } | undefined;
   cardStatus(cardId: string): string | undefined;
@@ -64,13 +65,14 @@ export function createAutopickSteps(deps: AutopickWiringDeps): AutopickSteps {
       if (!stat.isDirectory())
         throw new Error(`repo 路徑不是資料夾：${job.repoPath}`);
 
+      const label = agentDisplayName({
+        kind: job.lead,
+        role: "autopick",
+        cardId: job.card.id,
+      });
       const created = (await deps.port.request("workspace.create", {
         cwd: job.repoPath,
-        label: agentDisplayName({
-          kind: job.lead,
-          role: "autopick",
-          cardId: job.card.id,
-        }),
+        label,
         focus: false,
       })) as {
         workspace?: { workspace_id?: string };
@@ -81,11 +83,34 @@ export function createAutopickSteps(deps: AutopickWiringDeps): AutopickSteps {
       if (!workspaceId || !paneId)
         throw new Error("workspace.create 的回應缺少 workspace 或 pane id");
       const close = async () => {
-        await deps.port.request("workspace.close", {
-          workspace_id: workspaceId,
-        });
+        try {
+          await deps.port.request("workspace.close", {
+            workspace_id: workspaceId,
+          });
+        } catch (error) {
+          // Merge cleanup may already have closed this Lead before loop returns.
+          // Only confirmed absence is success; query failures and other close errors retain the original failure.
+          const current = (await deps.port
+            .request("workspace.list")
+            .catch(() => undefined)) as
+            { workspaces?: { workspace_id: string }[] } | undefined;
+          if (
+            Array.isArray(current?.workspaces) &&
+            current.workspaces.every(
+              (w) => typeof w?.workspace_id === "string",
+            ) &&
+            !current.workspaces.some((w) => w.workspace_id === workspaceId)
+          ) {
+            console.warn(
+              `autopick Lead ${job.card.id}: workspace already closed`,
+            );
+            return;
+          }
+          throw error;
+        }
       };
       try {
+        deps.recordLeadWorkspace(job.card.id, workspaceId, label);
         const lead = await startAgentInPane(deps.port, {
           paneId,
           kind: job.lead,

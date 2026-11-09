@@ -53,3 +53,53 @@ export function recordCleanupOnCard(
     ...(project.ok ? {} : { projectError: project.error }),
   };
 }
+
+/** Only a persisted Lead identity and a current matching label authorize closing. */
+export async function closeAutopickLead(
+  store: CardStore | undefined,
+  id: string,
+  port: {
+    listWorkspaces(): Promise<import("./types.js").WorkspaceRecord[]>;
+    request(
+      method: string,
+      params?: Record<string, unknown>,
+      options?: { retries?: number },
+    ): Promise<unknown>;
+  },
+  cleanupCompleted = false,
+  log: (message: string) => void = console.warn,
+): Promise<void> {
+  try {
+    const read = store?.read(id);
+    if (!read?.ok) return;
+    const card = read.card;
+    if (card.status === "in_progress") return;
+    if (!cleanupCompleted && !["done", "cancelled"].includes(card.status))
+      return;
+    const workspaceId = card.autopick_workspace_id;
+    const label = card.autopick_workspace_label;
+    if (!workspaceId || !label) return;
+    if (
+      !["claude", "codex"].some(
+        (kind) => label === `autopick-${kind}-${id}`.slice(0, 60),
+      )
+    ) {
+      log(`autopick Lead cleanup ${id}: invalid recorded label`);
+      return;
+    }
+    const workspace = (await port.listWorkspaces()).find(
+      (w) => w.workspace_id === workspaceId,
+    );
+    if (!workspace || workspace.label !== label) {
+      log(`autopick Lead cleanup ${id}: workspace missing or label mismatch`);
+      return;
+    }
+    await port.request(
+      "workspace.close",
+      { workspace_id: workspaceId },
+      { retries: 0 },
+    );
+  } catch {
+    log(`autopick Lead cleanup ${id}: lookup or close failed`);
+  }
+}

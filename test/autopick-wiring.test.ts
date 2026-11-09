@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
+import fs from "node:fs";
+import path from "node:path";
+import { CardStore } from "../src/card-store.js";
+import { closeAutopickLead } from "../src/card-cleanup.js";
+import { runAutopick } from "../src/autopick.js";
 import {
   createAutopickSteps,
   type AutopickWiringDeps,
@@ -50,6 +55,7 @@ function harness(over: Partial<AutopickWiringDeps> = {}, leadStatus = "idle") {
       commands.push(text);
       return "ok";
     },
+    recordLeadWorkspace: () => {},
     taskIdForCard: () => "task-1",
     taskState: () => ({ state: "completed" }),
     cardStatus: () => "done",
@@ -61,7 +67,7 @@ function harness(over: Partial<AutopickWiringDeps> = {}, leadStatus = "idle") {
     pollMs: 1000,
     ...over,
   };
-  return { steps: createAutopickSteps(deps), requests, commands };
+  return { steps: createAutopickSteps(deps), requests, commands, deps };
 }
 
 test("the Lead gets its own workspace in the repo, is started there, and the autopick route points at it", async () => {
@@ -254,4 +260,113 @@ for (const kind of ["codex", "claude"] as const) {
       });
     }
   });
+}
+
+test("records Lead identity before starting work and fails closed on persistence failure", async () => {
+  const recorded: string[][] = [];
+  const h = harness({
+    recordLeadWorkspace: (...args) => {
+      recorded.push(args);
+    },
+  });
+  await h.steps.startLead(job());
+  assert.deepEqual(recorded, [
+    ["REQ-20261105-x", "w9", "autopick-claude-REQ-20261105-x"],
+  ]);
+  const failed = harness({
+    recordLeadWorkspace: () => {
+      throw new Error("disk");
+    },
+  });
+  await assert.rejects(failed.steps.startLead(job()), /disk/);
+  assert.equal(
+    failed.requests.some((r) => r.method === "agent.start"),
+    false,
+  );
+  assert.equal(failed.requests.at(-1)?.method, "workspace.close");
+});
+
+test("merge cleanup closes Lead before reached without turning a successful merge into failed", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "autopick-race-"));
+  try {
+    const cards = new CardStore(root);
+    const card: Card = {
+      id: "REQ-20261105-race",
+      type: "requirement",
+      status: "done",
+      title: "race",
+      version: 1,
+      created: "2026-11-05",
+      updated: "2026-11-05",
+      body: "# race\n",
+    };
+    assert.ok(cards.create(card).ok);
+    const h = harness();
+    let exists = true;
+    let closes = 0;
+    const port = {
+      ...h.deps.port,
+      listWorkspaces: async () =>
+        exists
+          ? [{ workspace_id: "w9", label: `autopick-claude-${card.id}` }]
+          : [],
+      request: async (method: string, params?: Record<string, unknown>) => {
+        if (method === "workspace.close") {
+          closes++;
+          if (!exists) throw new Error("workspace not found");
+          exists = false;
+          return {};
+        }
+        if (method === "workspace.list")
+          return { workspaces: await port.listWorkspaces() };
+        return h.deps.port.request(method, params);
+      },
+    };
+    const steps = createAutopickSteps({
+      ...h.deps,
+      port,
+      recordLeadWorkspace: (id, workspace, label) => {
+        assert.ok(cards.recordAutopickWorkspace(id, workspace, label).ok);
+      },
+    });
+    steps.loop = async () => {
+      await closeAutopickLead(cards, card.id, port, true);
+      assert.equal(exists, false);
+      return { merged: true, text: "merged" };
+    };
+    const report = await runAutopick(job({ card, level: "L2" }), steps);
+    assert.equal(closes, 2);
+    assert.equal(report.outcome, "reached");
+    assert.equal(report.lastStep, "loop");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+for (const snapshot of [
+  { workspaces: [{ workspace_id: "w9" }] },
+  {},
+  { workspaces: [null] },
+]) {
+  test(
+    "reached close still fails unless workspace absence is confirmed: " +
+      JSON.stringify(snapshot),
+    async () => {
+      const h = harness();
+      const steps = createAutopickSteps({
+        ...h.deps,
+        port: {
+          ...h.deps.port,
+          request: async (method, params) => {
+            if (method === "workspace.close") throw new Error("close denied");
+            if (method === "workspace.list") return snapshot;
+            return h.deps.port.request(method, params);
+          },
+        },
+      });
+      const report = await runAutopick(job({ level: "L0" }), steps);
+      assert.equal(report.outcome, "failed");
+      assert.match(report.reason ?? "", /close denied/);
+    },
+  );
 }

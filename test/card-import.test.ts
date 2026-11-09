@@ -137,3 +137,16 @@ test("inherited object property names are not valid card types", () => {
     if (!result.ok) assert.match(result.error, /"type"/, type);
   }
 });
+
+test("external cards cannot supply autopick workspace ownership", () => {
+  const result = importCard(
+    foreign.replace(
+      "version: 2",
+      "version: 2\nautopick_workspace_id: wUser\nautopick_workspace_label: autopick-claude-REQ-20261030-example",
+    ),
+    options,
+  );
+  assert.ok(result.ok);
+  assert.equal(result.card.autopick_workspace_id, undefined);
+  assert.equal(result.card.autopick_workspace_label, undefined);
+});
