@@ -2,6 +2,8 @@
 
 日期：2026-11-09。卡片 `REQ-20261109-autopick-four-leads`，issue 見 [ISSUE-130](known-issues.md)。
 
+> 所有角色（不只 Lead）的整體目標與矩陣見 [Agent 角色矩陣](agent-role-matrix.md)。
+
 > **本文是規劃，不代表 agy、pi 已可靠地當 Lead。** P0 有程式與單元測試；agy 在 2026-11-09 有一次極簡卡走完的實機證據（見 P1），pi 從未當過 Lead。所有結論附日期，沒有實機證據的項目明載「未驗證」。
 
 ## 範圍
