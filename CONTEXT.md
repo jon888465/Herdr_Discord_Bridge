@@ -187,4 +187,4 @@ ISSUE-127（2026-11-08，待實機驗收）：新增 role_assigned 固定模板�
 
 ## 多種 Lead 第一階段
 
-[ISSUE-130](docs/known-issues.md)：2026-11-09 四種 autopick_lead 政策、來源啟動等待與 ISSUE-129 cleanup 已修正、待驗收，預設 claude；agy／pi 明確選用不改 Worker 自動候選或 notify。2026-11-09 補：`autopick_lead` 可列多個、卡片可用 `lead:` 指定（限政策清單內），第二次 worktree Lead 啟動也會等 working（皆待實機驗收）。session 更新、hook fallback、非 codex terminal JSON unwrap 亦待調查；agy／pi 多輪 --coding 尚未實機驗收，未部署／重啟。契約見 SPEC.md「多種 Lead 第一階段」。
+[ISSUE-130](docs/known-issues.md)：2026-11-09 四種 autopick_lead 政策、來源啟動等待與 ISSUE-129 cleanup 已修正、待驗收，預設 claude；agy／pi 明確選用不改 Worker 自動候選或 notify。2026-11-09 補（規劃見 [docs/multi-lead-plan.md](docs/multi-lead-plan.md)，agy、pi 當 Lead 要先在 config.json 宣告 implementation）：`autopick_lead` 可列多個、卡片可用 `lead:` 指定（限政策清單內），第二次 worktree Lead 啟動也會等 working（皆待實機驗收）。session 更新、hook fallback、非 codex terminal JSON unwrap 亦待調查；agy／pi 多輪 --coding 尚未實機驗收，未部署／重啟。契約見 SPEC.md「多種 Lead 第一階段」。

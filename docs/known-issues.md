@@ -2,7 +2,7 @@
 
 ## ISSUE-130：四種 Lead 的政策、啟動等待與收尾（REQ-20261109-codex-lead-agy）
 
-更新日期：2026-11-09。狀態：已修正、待驗收（四種政策、多 Lead 清單、卡片 `lead:`、來源與 worktree 的 Lead 等待及 cleanup；僅單元測試，無任何 CLI 實機驗收）。
+更新日期：2026-11-09。狀態：已修正、待驗收（四種政策、多 Lead 清單、卡片 `lead:`、agy／pi 開放條件、來源與 worktree 的 Lead 等待及 cleanup；僅單元測試，無任何 CLI 實機驗收）。
 
 症狀／預期：agy／pi 不能被設為 autopick Lead，codex 初始化 working 被立即拒絕；預期四種可明確選用、等待就緒並安全清理。重現／環境：本機 worktree 讀碼及假 Herdr port 測試，未啟動真實 CLI。已確認根因：policy 與 cleanup label 白名單只有 claude／codex，autopick 只檢查啟動當下狀態。
 
@@ -19,11 +19,15 @@
 
 多 Lead 與卡片指定（2026-11-09，接手 worktree 後補，使用者要求「autopick lead 可設多個、一次仍只做一張卡」「lead 也可被卡片指定」）：`autopick_lead` 接受逗號分隔的清單（不可重複，單一值舊寫法照常），第一個是預設；卡片新增選用 frontmatter `lead:`，只能選政策清單內的種類，清單外時不撿並在 console 記一次拒絕原因、不改用別的 Lead，卡片也不能繞過專案選用與等級（避免 Agent 寫卡片提權）。`card policy` 會列出全部 Lead 與預設。選擇規則先採最單純的：卡片指定優先，否則取清單第一個；**沒有輪流、沒有 quota／可用性換人、Lead 起不來時不換下一個**，這是刻意的第一版，仍待使用者確認（見需求卡待確認）。
 
+開放條件（review F1，使用者 2026-11-09 選項 2）：agy、pi 當 Lead 需要 `config.json` 的 `agentProfiles` 有同種類、且 `capabilities` 含 `implementation` 的 profile（`leadGateFor`，`src/coding-roster.ts`），套用在卡片指定與清單預設兩種來源；沒達到不撿、每張卡記一次原因、不改用別的 Lead；claude、codex 不需要。這不是安全邊界。目標是讓 agy、pi 都能通過這個檢查，分階段見 `docs/multi-lead-plan.md`（P1 起都未開始）。
+
+review 第 1 輪（reviewer 看的是 PR #185 的 diff，head `47afad4`，`changes_requested`）：F1 開放條件（上段，已實作）；F2 缺規劃文件（已補 `docs/multi-lead-plan.md`）；F3 文件未同步，是拆 PR 的副作用（文件在另一個 PR，reviewer 只看到程式 diff，不是程式問題）；F4 worktree 等待只涵蓋啟動當下是 done，working → done 轉態會等到逾時（已修：`doneAsReady` 轉接，來源與 worktree 共用，並補測試）。
+
 第二次 worktree Lead 啟動（2026-11-09 補）：`prepareCardWorktree` 新增選用依賴 `awaitReady`，啟動回來仍是 working 時等待（main.ts 接 `waitUntilReady`），逾時、blocked 或丟錯時維持原本不啟動任務的處理；done 視為就緒。共用 `src/agent-ready.ts` 未改，來源 Lead 等待仍以固定 port adapter 將 done 視為 settled（未清理）。
 
-新增測試（2026-11-09，本機 worktree）：`test/policy.test.ts`（清單解析、重複／空項目／未知值拒絕、單一舊寫法、卡片 lead 在清單內外）、`test/autopick.test.ts`（`pickNext` 的卡片 lead、`leadRejection`、拒絕只報一次）、`test/card-serialize.test.ts`（`lead` 序列化與格式錯誤拒絕）、`test/card-worktree-flow.test.ts`（working 等待、逾時／丟錯、done）。`npm run check`（typecheck 加 build 加完整測試）：1603 tests／1602 pass／0 fail／1 skipped；`npm run lint` 通過。`npm run format:check` 報 52 個檔案有格式警告，未確認 main 是否本來就有，也沒有為了它改不相關檔案。
+新增測試（2026-11-09，本機 worktree）：`test/policy.test.ts`（清單解析、重複／空項目／未知值拒絕、單一舊寫法、卡片 lead 在清單內外）、`test/autopick.test.ts`（`pickNext` 的卡片 lead、`leadRejection`、拒絕只報一次）、`test/card-serialize.test.ts`（`lead` 序列化與格式錯誤拒絕）、`test/card-worktree-flow.test.ts`（working 等待、逾時／丟錯、done）。`npm run check`（typecheck 加 build 加完整測試，PR #185 head `1ee5239`）：1608 tests／1607 pass／0 fail／1 skipped；`npm run lint` 通過。另新增 `test/agent-ready.test.ts`（working → done 轉態、轉接只有一個物件）、`test/coding-roster.test.ts`（`leadGateFor`）與 `test/autopick.test.ts`（開放條件下不撿、不改用別的 Lead、只通報一次）。`npm run format:check` 報 52 個檔案有格式警告，未確認 main 是否本來就有，也沒有為了它改不相關檔案。
 
-未驗證／下一步：四種 CLI 當 Lead 的啟動、agy／pi 多輪規劃／review／verify／synthesis、hook 與 terminal 長 JSON、通知及完成／取消／重啟續清／改名保留；多 Lead 清單與卡片 `lead:` 在真實 bridge 的撿卡；agy／pi 當 Lead 沒有額外的開放條件檢查，只靠政策檔由使用者明確選用。本輪未改使用者的 `policy.yml`、未部署、未重啟；原始碼與 build 不等於執行中 bridge，舊任務／訊息不補送。
+未驗證／下一步：四種 CLI 當 Lead 的啟動、agy／pi 多輪規劃／review／verify／synthesis、hook 與 terminal 長 JSON、通知及完成／取消／重啟續清／改名保留；多 Lead 清單與卡片 `lead:` 在真實 bridge 的撿卡；agy／pi 的開放條件只檢查 `capabilities` 宣告，bridge 不判斷它們是否真的能當 Lead；agy、pi 從未當過 Lead，pi 連 Worker 的 coding 證據都沒有。本輪未改使用者的 `policy.yml`、未部署、未重啟；原始碼與 build 不等於執行中 bridge，舊任務／訊息不補送。
 
 
 ## ISSUE-129：卡片結束後留下 autopick Lead workspace（REQ-20261109-autopick-lead-cleanup）

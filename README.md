@@ -387,7 +387,7 @@ Card role history (2026-11-08, ISSUE-127; live acceptance pending): `card show <
 
 ## 多種 Lead 第一階段（2026-11-09，ISSUE-130，待實機驗收）
 
-政策 `autopick_lead` 可明確選 claude、codex、agy、pi，且可列多個（逗號分隔，例如 `claude, codex`；不可重複），預設仍為 claude；未知值拒絕。清單第一個是預設 Lead，卡片可用 `lead:` 欄位指定清單內的種類；卡片指定清單以外的種類時 bridge 不撿這張卡並在 console 記一次拒絕原因，不會改用別的 Lead，卡片也不能繞過政策檔的專案選用與等級（一次仍只做一張卡）。agy／pi Lead 是明確選用，不表示其 Worker coding 能力已驗收；Worker 自動候選規則不變，analysis-only agy 與 pi 不自動入池。來源 Lead 啟動等待 working → idle／done，blocked 只跳過已知安全更新提示，信任／權限／登入仍需人處理；啟動失敗清理剛建立的來源 workspace。Lead 使用 CLI 預設設定，不繼承 Worker profile 的 model／args。
+政策 `autopick_lead` 可明確選 claude、codex、agy、pi，且可列多個（逗號分隔，例如 `claude, codex`；不可重複），預設仍為 claude；未知值拒絕。清單第一個是預設 Lead，卡片可用 `lead:` 欄位指定清單內的種類；卡片指定清單以外的種類時 bridge 不撿這張卡並在 console 記一次拒絕原因，不會改用別的 Lead，卡片也不能繞過政策檔的專案選用與等級（一次仍只做一張卡）。agy、pi 當 Lead 需要 `config.json` 的 `agentProfiles` 有同種類、且 `capabilities` 含 `implementation` 的 profile（使用者表示該種類的 coding 已驗證），否則不撿並記一次原因，不改用別的 Lead；claude、codex 不需要。規劃見 docs/multi-lead-plan.md。agy／pi Lead 是明確選用，不表示其 Worker coding 能力已驗收；Worker 自動候選規則不變，analysis-only agy 與 pi 不自動入池。來源 Lead 啟動等待 working → idle／done，blocked 只跳過已知安全更新提示，信任／權限／登入仍需人處理；啟動失敗清理剛建立的來源 workspace。Lead 使用 CLI 預設設定，不繼承 Worker profile 的 model／args。
 
 ISSUE-129 cleanup 同時核對四種 Lead 的卡片持久化 id 與現況 label，沿用 `autopick-<kind>-<id>`、60 字元上限、in_progress 保留與不依名稱搜尋；notify 維持原來源。此輪不改實際 policy／config，不部署或重啟。agy／pi Lead 的多輪 --coding、長 JSON 回讀、Discord 端到端與新增種類的實機 cleanup 尚未驗收；已知 session 更新、hook fallback、非 codex terminal JSON unwrap 缺口與後續驗收見 docs/known-issues.md 的 ISSUE-130（docs 目錄內見 known-issues.md）。
 
