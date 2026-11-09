@@ -2752,7 +2752,10 @@ function startAutopick(runtime: Runtime): () => void {
       event: "failed",
       code:
         result.outcome === "stopped" ? "autopick_stopped" : "autopick_failed",
-      reason: `${result.lastStep}：${result.reason ?? ""}`.slice(0, 200),
+      reason:
+        result.lastStep === "loop"
+          ? `loop：${Array.from(result.reason ?? "").slice(0, 194).join("")}`
+          : `${result.lastStep}：${result.reason ?? ""}`.slice(0, 200),
       time: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
       eventId: `autopick-${result.lastStep}-${Date.now()}`,
     });

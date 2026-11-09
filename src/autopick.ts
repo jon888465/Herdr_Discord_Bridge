@@ -122,6 +122,51 @@ export interface AutopickReport {
   log: string[];
 }
 
+/** Extract the actionable stop reason from `card loop` output. */
+export function loopStopReason(text: string, maxChars = 194): string {
+  const starts = [...text.matchAll(/^原因：/gm)];
+  const normalize = (value: string) =>
+    value.replace(/[\u0000-\u001F\u007F\s]+/g, " ").trim();
+  const chars = (value: string, keepTail: boolean) => {
+    const points = Array.from(value);
+    return (keepTail ? points.slice(-maxChars) : points.slice(0, maxChars)).join("");
+  };
+  if (starts.length) {
+    const start = (starts.at(-1)?.index ?? 0) + "原因：".length;
+    const tail = text.slice(start);
+    const end = tail.indexOf("\n卡片的狀態維持在這一步之後：");
+    let reason = normalize(end < 0 ? tail : tail.slice(0, end));
+    if (/inconclusive/i.test(reason)) {
+      const details = [...text.matchAll(/^inconclusive 的原因：(.+)$/gm)];
+      const detail = normalize(details.at(-1)?.[1] ?? "");
+      if (detail && !reason.includes(detail))
+        reason += `（inconclusive 的原因：${detail}）`;
+    }
+    return chars(reason, false);
+  }
+  const stopMarkers = [...text.matchAll(/^loop (?:停下來了|結束)：/gm)];
+  if (stopMarkers.length) {
+    const start = stopMarkers.at(-1)?.index ?? 0;
+    const section = text
+      .slice(start)
+      .replace(/\n卡片的狀態維持在這一步之後：[\s\S]*$/, "");
+    let reason = normalize(section);
+    if (/inconclusive/i.test(reason)) {
+      const details = [...text.matchAll(/^inconclusive 的原因：(.+)$/gm)];
+      const detail = normalize(details.at(-1)?.[1] ?? "");
+      if (detail && !reason.includes(detail))
+        reason += `（inconclusive 的原因：${detail}）`;
+    }
+    return chars(reason, false);
+  }
+  const inconclusiveDetails = [...text.matchAll(/^inconclusive 的原因：(.+)$/gm)];
+  if (inconclusiveDetails.length) {
+    const detail = normalize(inconclusiveDetails.at(-1)?.[1] ?? "");
+    return chars(`inconclusive 的原因：${detail}`, false);
+  }
+  return chars(normalize(text), true);
+}
+
 /** reviewer 偏好：codex Lead 用 claude，其餘用 codex；真正的作者／reviewer session 獨立性仍由 gate 核對。 */
 function reviewerFor(lead: AutopickLead): string {
   return lead === "codex" ? "claude" : "codex";
@@ -198,7 +243,8 @@ export async function runAutopick(
     step = "loop";
     const loop = await steps.loop(id, reviewerFor(job.lead));
     log.push("loop");
-    if (!loop.merged) return report("stopped", "loop", loop.text);
+    if (!loop.merged)
+      return report("stopped", "loop", loopStopReason(loop.text));
     await lead.close();
     return report("reached", "loop");
   } catch (error) {

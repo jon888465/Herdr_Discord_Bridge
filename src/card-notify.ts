@@ -60,13 +60,15 @@ export function notificationReason(event: LogEntry): string {
   // ISSUE-124：回合逾時導致的失敗（文字同時含 blocked 等字樣）要明確分類為等待逾時。
   if (event.event === "failed" && event.text.includes("等待逾時"))
     return "等待逾時";
+  if (/Lead「[^」]+」(不在政策候選清單內|尚未開放)/.test(event.text))
+    return "Lead 不可用";
   const categories: string[] = [];
   for (const [pattern, label] of [
     [/敏感|sensitive/, "敏感路徑"],
     [/政策|L[012]/, "專案政策"],
     [/CI|checks/, "CI 條件"],
     [/review|finding/, "review 條件"],
-    [/head|commit/, "版本條件"],
+    [/head|commit(?! 留在 worktree)/, "版本條件"],
     [/conflict|衝突|DIRTY/, "分支衝突"],
     [/blocked|權限|信任/, "等待人工處理"],
     [/取消|停止|cancel/, "停止要求"],

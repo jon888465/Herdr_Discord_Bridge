@@ -76,7 +76,7 @@
 
 ## ISSUE-135：卡片事件通知的標題把「Lead 不在候選清單」說成「專案政策未滿足」
 
-更新日期：2026-11-09。狀態：待調查（現象已實機觀察；根因尚未讀碼確認；沒有修正）。
+更新日期：2026-11-09。狀態：已修正、待驗收。先前狀態與觀察保留於下方歷史；根因現已由程式碼確認。
 
 **使用者可見症狀：**測試卡 `REQ-20261109-lead-live-reject`（`lead: pi`，不在 `autopick_lead: claude, codex` 內）被拒絕時，卡片的事件原因正確寫「Lead『pi』不在政策候選清單內，不撿這張卡」，但 `notify` 對象收到的通知標題是「autopick_stopped · 專案政策未滿足」。這不是專案等級或專案選用的問題，標題會誤導使用者去查專案政策。
 
@@ -84,9 +84,11 @@
 
 **重現／環境：**2026-11-09，本機 macOS，bridge 為 main `88e1ce6` 的程序，通知送到 Agent pane（先排隊、Agent 空閒後送達）。
 
-**已確認根因：**未確認。推測通知依事件原因文字裡的「政策」兩個字歸類成「專案政策未滿足」，我沒有讀通知分類的程式。
+**已確認根因（讀碼，2026-11-09）：**`src/card-notify.ts` 的 `notificationReason` 依序套用分類表，通用 `/政策|L[012]/` 在 Lead 拒絕句中先命中，故回傳「專案政策未滿足」。敏感路徑句同時含 `commit` 時，原 `/head|commit/` 又加上「版本條件」。
 
-**修正範圍：**無（只記錄）。**未驗證／下一步：**是否其他以「政策」開頭的原因（例如 agy、pi 未開放）也會被同樣歸類；要先讀 `src/card-notify.ts` 的歸類規則。
+**修正範圍（2026-11-09）：**Lead「不在政策候選清單內」及「尚未開放」在分類表前特別回傳「Lead 不可用」；版本分類排除「commit 留在 worktree」，使敏感路徑 fix 停止不被錯加版本條件。新增分類及通知訊息測試。
+
+**驗證（2026-11-09）：**`npm run check` 通過：typecheck、build 成功，測試共 1634 tests／1633 pass／0 fail／1 skipped；`git diff --check` 通過。**沒有實機驗證：**執行中的 bridge 未重啟，Discord／Herdr／CLI 情境待驗收；歷史通知不會重新發送。
 
 ## ISSUE-134：claude 當 reviewer 時，回覆「不是單一 JSON 物件」，兩輪都 `inconclusive`，review 退回人工
 
@@ -112,7 +114,7 @@
 
 ## ISSUE-133：`autopick_stopped` 的原因只留 loop 輸出的前 200 字，真正的停止原因被截掉，通知因此誤導
 
-更新日期：2026-11-09。狀態：待調查（根因已由讀碼加實例確認；尚未修正、沒有測試、沒有重現程式）。
+更新日期：2026-11-09。狀態：已修正、待驗收。先前重現與根因證據保留於下方歷史。
 
 **使用者可見症狀：**卡片 `REQ-20261109-multi-lead-card-lead`（PR #189）已在 06:41:19Z 通過第 2 輪 review，真正擋住自動 merge 的只有敏感路徑 `src/policy.ts`（設計上要人工 merge）。但 06:41:54Z 寫進卡片的 `failed`／`autopick_stopped` 事件，原因是「loop：review 完成：… PR #189（head e1a3174b2a24）· 第 1 輪 … 判定：changes_requested …」，是**第 1 輪**的結果；bridge 據此通知「review 條件、版本條件未滿足」，與實際狀況（`pass`、head 一致，只剩敏感路徑）不符。
 
@@ -124,13 +126,15 @@
 
 **影響：**使用者從通知會以為 review 或版本沒過，可能多做不必要的處理。實際只有這一次觀察，不知道其他 loop 停止情境是否同樣被截。
 
-**修正範圍：**無（只記錄）。建議方向：停止原因改取 loop 的結構化停止理由或輸出的最後一段，而不是開頭；事件原因的截斷要保留停止理由。要先決定 loop 結果是否要回傳結構化的 `stopReason`。
+**修正範圍（2026-11-09）：**`src/autopick.ts` 新增 `loopStopReason`，取最後 `原因：` 區塊，inconclusive 時附最後一筆底層原因；缺少原因標記則先取最後的 loop 停止區塊（剔除卡片狀態提示），沒有結構化停止標記但有 inconclusive 原因時取最後一筆該原因，兩者皆無才取正規化輸出尾端。結果最多 194 字，讓 main 的 `loop：` 前綴後不超過 200 字。`src/main.ts` 仍以 200 字為事件上限。新增敏感路徑、兩輪 inconclusive 及尾端 fallback 測試，並透過 CardStore 檢查記錄原因與通知分類。
+
+**驗證（2026-11-09）：**`npm run check` 通過：typecheck、build 成功，測試共 1634 tests／1633 pass／0 fail／1 skipped；`git diff --check` 通過。**沒有實機驗證：**執行中的 bridge 未重啟，Discord／Herdr／CLI 情境待驗收；歷史通知不會重新發送。
 
 **第二個實例（2026-11-09，卡片 `REQ-20261109-lead-live-codex`，PR #191）：**claude 當 reviewer 兩輪 `inconclusive` 後，卡片的 `failed`／`autopick_stopped` 原因只顯示「第 1 輪」的標題與「inconclusive 的原因：rev」就被截斷；完整原因「reviewer 的回覆不是單一 JSON 物件」是從 bridge console 才看到的（見 ISSUE-134）。
 
 **暫行做法：**看卡片流程紀錄的 `merge_blocked`／`loop_stopped` 事件與 bridge console 的完整輸出，不要只看 `autopick_stopped` 的原因文字。
 
-**未驗證／下一步：**沒有測試；是否其他停止原因（CI 紅、review 沒過）也被截斷，要另外檢查。
+**修正前未驗證紀錄（2026-11-09）：**當時沒有測試；是否其他停止原因也被截斷仍待確認。此段已由上方 2026-11-09 修正與自動化驗證更新；目前仍待實機驗收。
 
 ## ISSUE-132：自動撿卡缺少多候選、卡片指定與 Lead 選擇來源
 
