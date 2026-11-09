@@ -5,7 +5,7 @@
 // 不另開後門。為了不動到使用者自己的 console 路由，自動流程用另一個使用者 id（`autopick`）。
 
 import { autopickLeadLabel } from "./policy.js";
-import { waitUntilReady } from "./agent-ready.js";
+import { doneAsReady, waitUntilReady } from "./agent-ready.js";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import { startAgentInPane, type AgentStartPort } from "./agent-start.js";
@@ -35,19 +35,8 @@ export interface AutopickWiringDeps {
 const TERMINAL = ["completed", "failed", "cancelled"];
 
 export function createAutopickSteps(deps: AutopickWiringDeps): AutopickSteps {
-  // The shared reviewer wait currently recognizes idle only. For Lead readiness,
-  // done is equally settled; keep one adapter per steps instance so update skips
-  // retain their once-per-pane guard across repeated waits.
-  const readyPort: AgentStartPort = {
-    request: (method, params, options) =>
-      deps.port.request(method, params, options),
-    listAgentsWithWorkspaceNames: async () =>
-      (await deps.port.listAgentsWithWorkspaceNames()).map((agent) =>
-        agent.agent_status === "done"
-          ? { ...agent, agent_status: "idle" }
-          : agent,
-      ),
-  };
+  // 共用的等待只認 idle；Lead 啟動後 working → done 也算就緒（見 doneAsReady）。
+  const readyPort = doneAsReady(deps.port);
   const pollMs = deps.pollMs ?? 3000;
   const taskTimeoutMs = deps.taskTimeoutMs ?? 45 * 60 * 1000;
   // ISSUE-095：卡片檔每 60 秒才同步一次，所以要等得比一個掃描週期久。

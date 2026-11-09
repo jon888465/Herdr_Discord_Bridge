@@ -1,6 +1,6 @@
 import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { waitUntilReady } from "../src/agent-ready.js";
+import { doneAsReady, waitUntilReady } from "../src/agent-ready.js";
 import type { AgentStartPort } from "../src/agent-start.js";
 import type { AgentRecord } from "../src/types.js";
 
@@ -197,4 +197,22 @@ test("a skipped update prompt is returned so callers can record it", async (t) =
     paneId: pane.paneId,
     key: "3",
   });
+});
+
+// Lead 啟動後可能先 working、再直接變 done（REQ-20261109-codex-lead-agy，review F4）。
+test("the plain wait never treats done as ready, but the done-as-ready adapter does after a working → done transition", async () => {
+  const { deps } = fixture([{}], [agent("codex", "done")]);
+  const plain = await waitUntilReady(deps, pane, agent("codex", "working"));
+  assert.equal(plain.ok, false);
+  const adapted = await waitUntilReady(
+    { ...deps, panePort: doneAsReady(deps.panePort) },
+    pane,
+    agent("codex", "working"),
+  );
+  assert.equal(adapted.ok, true);
+});
+
+test("the done-as-ready adapter is one object per port, so the once-per-pane update guard keeps working", () => {
+  const { deps } = fixture([{}]);
+  assert.equal(doneAsReady(deps.panePort), doneAsReady(deps.panePort));
 });

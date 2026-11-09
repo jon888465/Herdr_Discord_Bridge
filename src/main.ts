@@ -39,7 +39,7 @@ import {
   prepareCardWorktree,
 } from "./card-worktree-flow.js";
 import { startAgentInPane } from "./agent-start.js";
-import { waitUntilReady } from "./agent-ready.js";
+import { doneAsReady, waitUntilReady } from "./agent-ready.js";
 import {
   parseAgentStartArgs,
   runAgentStart,
@@ -941,7 +941,7 @@ export async function handleCommand(
               startAgent: (input) => startAgentInPane(runtime.herdr, input),
               awaitReady: async (agent) => {
                 const ready = await waitUntilReady(
-                  { panePort: runtime.herdr },
+                  { panePort: doneAsReady(runtime.herdr) },
                   { paneId: agent.pane_id, terminalId: agent.terminal_id },
                   agent,
                 );

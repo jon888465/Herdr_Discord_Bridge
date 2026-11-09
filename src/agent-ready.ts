@@ -25,6 +25,30 @@ export type ReadyResult =
 
 const skippedPanes = new WeakMap<AgentStartPort, Set<string>>();
 
+const settledPorts = new WeakMap<AgentStartPort, AgentStartPort>();
+
+/**
+ * 讓 `waitUntilReady`（只認 idle）把 `done` 也當成就緒：Lead 啟動後可能先 working、再直接變 done。
+ * 每個底層 port 只建一個轉接，這樣 `skippedPanes`（依 port 去重）在重複等待之間仍然有效。
+ */
+export function doneAsReady(port: AgentStartPort): AgentStartPort {
+  let adapted = settledPorts.get(port);
+  if (!adapted) {
+    adapted = {
+      request: (method, params, options) =>
+        port.request(method, params, options),
+      listAgentsWithWorkspaceNames: async () =>
+        (await port.listAgentsWithWorkspaceNames()).map((agent) =>
+          agent.agent_status === "done"
+            ? { ...agent, agent_status: "idle" }
+            : agent,
+        ),
+    };
+    settledPorts.set(port, adapted);
+  }
+  return adapted;
+}
+
 const READY_TIMEOUT_MS = 30_000;
 const READY_POLL_MS = 1_000;
 
@@ -136,7 +160,8 @@ export async function waitUntilReady(
         reason: "等待 reviewer 就緒時，它的 pane 不見了（消失或被換掉）",
       });
     agent = current;
-    if (agent.agent_status === "idle") return withSkip({ ok: true as const, agent });
+    if (agent.agent_status === "idle")
+      return withSkip({ ok: true as const, agent });
     if (agent.agent_status === "blocked") {
       const handled = await skipKnownUpdate(deps, pane.paneId, agent.agent);
       updateSkip = handled.skip ?? updateSkip;
