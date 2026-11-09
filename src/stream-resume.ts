@@ -16,7 +16,10 @@ export interface ActiveStreamRecord {
   prompt: string;
   baselineOutput: string;
   startedAt: number;
-  /** 原回合的 agent session（`kind:value`）；沒有 session 時省略。補送時用來確認仍是同一個回合。 */
+  /**
+   * 原回合的 agent session（`kind:value`）；回合開始時沒有 session 記成空字串，欄位不存在表示舊版紀錄。
+   * 回合中 session 合法轉移（首次登記、同回合新建）時由 `updateSession` 同步，補送時才比對得過。
+   */
   sessionKey?: string;
   recovery?: "pending" | "claimed";
 }
@@ -75,6 +78,14 @@ export class StreamResumeStore {
       }
     if (dropped) this.save();
     return [...this.records.values()];
+  }
+
+  /** 同回合合法換 session 時同步紀錄，讓重啟後的補送仍認得這個回合。 */
+  updateSession(terminalId: string, sessionKey: string): void {
+    const record = this.records.get(terminalId);
+    if (!record || record.sessionKey === sessionKey) return;
+    record.sessionKey = sessionKey;
+    this.save();
   }
 
   /** Claim before sending: uncertain delivery must never be repeated after restart. */

@@ -30,6 +30,8 @@
 
 **Review 修正（2026-11-08，f1／f2／f3）：**f1 在 Agent 查詢、fetchMessage（成功或拋錯）、重試 sleep 之後重查 activeStreams 與 store 原紀錄所有權，失去所有權就記 terminal／pane／原因並停止，不覆寫新回合；補送在查詢、信任檢查後同樣重查，防止新 final 貼到舊 thread。f2 補送改用一般 final 的 splitFinalMarkdown，保留標註與禁止 mention，驗證長 code fence 平衡與連續 emoji surrogate pair 完整。f3 清除到期紀錄時記 terminal／pane／「紀錄逾期」，原 24 小時邊界不變。三項均先新增失敗測試：f1 為 43 pass／4 fail，f2 為 47 pass／2 fail，f3 為 49 pass／1 fail；修正後使用上述相同 build 與四檔 node --test 命令，最終 50/50 pass、0 fail（新增檔共 15 項），無應用程式 stdout。過程中一次 build 因所有權檢查誤插位置出現 TS2304／TS1107，已移至正確位置，最終 build 通過。尚未實機驗證，實際 fetchMessage 原因仍未確認。
 
+**第 2 輪 review 修正（2026-11-09，F2，由 Lead 接手，因 fixer 沒有產出）：**根因（已確認）：補送嚴格比對 `sessionKey`，但它只在送出 prompt 時寫入；`streamAgent` 合法接受「回合中首次登記 session」或「同回合新建 session」時沒有同步，重啟後的可信 Stop 會被永久拒絕；沒有該欄位的舊紀錄也會拒絕有 session 的 Agent。修正：`StreamResumeStore.updateSession` 在 `streamAgent` 兩個合法轉移點同步並持久化；回合開始時沒有 session 記成空字串（與「欄位不存在＝舊版紀錄」區分）；舊版紀錄無從比對，維持 #170 之前的行為（只靠 Stop 事件的 session 與 startedAt 篩選）。同回合轉移之外的 session 變更仍拒絕補送。測試（2026-11-09，本機，假 port）：`node --test dist/test/stream-resume-lost-reply.test.js` 20/20 pass；新增 4 項（updateSession 持久化、首次登記補送、舊紀錄、`streamAgent` 實際寫入）；暫時停用同步後 `streamAgent` 那項轉紅、還原後轉綠。全套與實機尚未驗證。
+
 **限制／下一步：**尚未實機驗證 Discord／Herdr；原始碼與 build 已完成，執行中的 bridge 未部署、未重啟，交 Lead 安排實機重啟續傳／補送驗收。送前認領後若當機或補送失敗（含部分送出），為避免重複不自動再送；寫盤失敗不送。紀錄沿用 24 小時有效期，新回合取代同 terminal 的舊紀錄。bridge 停機期間未收到的 hook 不會憑空恢復；舊版本已刪除的記錄與既有遺失訊息無法追溯補送。未 commit、未 push，未連真實 Discord／GitHub，未執行 herdr 指令。
 
 ## ISSUE-125：codex Worker 反覆停在 `npm test` 的權限提示逾時失敗，改為 helper 暫時最大權限（需提醒：目前仍在 VM）

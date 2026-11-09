@@ -2972,7 +2972,7 @@ async function dispatchPrompt(
       prompt,
       baselineOutput,
       startedAt: Date.now(),
-      sessionKey: agentSessionKey(agent),
+      sessionKey: agentSessionKey(agent) ?? "",
     });
     void streamAgent(
       agent,
@@ -3289,10 +3289,21 @@ export async function relayApprovalFollowup(
   return false;
 }
 
-function agentSessionKey(agent: AgentRecord): string | undefined {
+function agentSessionKey(
+  agent: AgentRecord,
+): string | undefined {
   const s = agent.agent_session as
     { kind?: string; value?: string } | undefined;
   return s ? `${s.kind ?? ""}:${s.value ?? ""}` : undefined;
+}
+
+function persistTrackedSession(
+  runtime: Runtime,
+  initial: AgentRecord,
+  session: unknown,
+): void {
+  const key = agentSessionKey({ ...initial, agent_session: session });
+  if (key) runtime.streamResume?.updateSession(initial.terminal_id, key);
 }
 
 export const STREAM_RESUME_FETCH_ATTEMPTS = 3;
@@ -3347,7 +3358,11 @@ export async function relayRecoveredStreams(runtime: Runtime): Promise<void> {
       )
         continue;
       if (streamOwnershipLost(runtime, record)) continue;
-      if (agentSessionKey(agent) !== record.sessionKey) {
+      // 舊版紀錄沒有 sessionKey：無從比對，維持先前行為（只由 Stop 事件的 session 與時間篩選）。
+      if (
+        record.sessionKey !== undefined &&
+        (agentSessionKey(agent) ?? "") !== record.sessionKey
+      ) {
         console.warn(
           `Stream not recovered terminal=${record.terminalId} pane=${record.paneId}: agent session changed`,
         );
@@ -3565,6 +3580,7 @@ export async function streamAgent(
         `${initial.agent} session first registered during turn pane=${initial.pane_id}; following new session`,
       );
       trackedSession = candidate!.agent_session;
+      persistTrackedSession(runtime, initial, trackedSession);
     } else if (
       sameLocation &&
       !sessionMatches &&
@@ -3579,6 +3595,7 @@ export async function streamAgent(
         `${initial.agent} session created during turn pane=${initial.pane_id}; following new session`,
       );
       trackedSession = candidate.agent_session;
+      persistTrackedSession(runtime, initial, trackedSession);
     }
     if (
       !sameLocation ||

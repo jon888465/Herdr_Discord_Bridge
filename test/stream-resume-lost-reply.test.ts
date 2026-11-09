@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resumeStreams } from "../src/main.js";
+import { resumeStreams, streamAgent } from "../src/main.js";
 import { hookEvents } from "../src/hook-events.js";
 import { StreamResumeStore } from "../src/stream-resume.js";
 
@@ -512,4 +512,89 @@ test("f1: a session switched in the same pane never recovers into the old thread
   await relayRecoveredStreams(f.typed);
   assert.equal(f.sent.length, 1);
   assert.match(f.sent[0]!, /original answer/);
+});
+
+function addRecord(
+  f: ReturnType<typeof fixture>,
+  name: string,
+  sessionKey?: string,
+) {
+  f.store.add({
+    terminalId: name,
+    paneId: name,
+    channelId: "original-thread",
+    progressMessageId: "progress",
+    prompt: "q",
+    baselineOutput: "",
+    startedAt: Date.now() - 10,
+    ...(sessionKey === undefined ? {} : { sessionKey }),
+  });
+}
+
+test("f2: updateSession persists a legal session transfer and ignores a no-op", (t) => {
+  const f = fixture(t, "persist");
+  addRecord(f, "persist", "");
+  f.store.updateSession("persist", "id:first");
+  f.store.updateSession("missing", "id:x");
+  assert.equal(
+    new StreamResumeStore(f.path).list()[0]?.sessionKey,
+    "id:first",
+  );
+});
+
+test("f2: a first session registered during the turn is recovered once it is persisted", async (t) => {
+  const f = fixture(t, "first");
+  const a = f.agent as Record<string, unknown>;
+  addRecord(f, "first", ""); // 送出時沒有 session
+  await resumeStreams(f.typed, async () => {});
+  a.agent_session = { kind: "id", value: "first" };
+  f.stop("answer after first registration");
+  await relayRecoveredStreams(f.typed);
+  assert.deepEqual(f.sent, [], "尚未同步 session 時仍拒絕");
+  f.store.updateSession("first", "id:first"); // streamAgent 跟隨新 session 時會做的事
+  await relayRecoveredStreams(f.typed);
+  assert.equal(f.sent.length, 1);
+  assert.match(f.sent[0]!, /answer after first registration/);
+});
+
+test("f2: a legacy record without sessionKey does not reject an Agent that has a session", async (t) => {
+  const f = fixture(t, "legacy");
+  const a = f.agent as Record<string, unknown>;
+  a.agent_session = { kind: "id", value: "legacy" };
+  addRecord(f, "legacy"); // 舊版紀錄：沒有 sessionKey 欄位
+  await resumeStreams(f.typed, async () => {});
+  f.stop("legacy answer");
+  await relayRecoveredStreams(f.typed);
+  assert.equal(f.sent.length, 1);
+  assert.match(f.sent[0]!, /legacy answer/);
+});
+
+test("f2: streamAgent persists a first session registered during the turn", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const f = fixture(t, "follow");
+  const agent = f.agent as Record<string, unknown>;
+  addRecord(f, "follow", "");
+  const runtime = {
+    ...f.runtime,
+    config: { streamIntervalMs: 2000, outputLines: 40, hookTransport: {} },
+    discord: {
+      ...f.runtime.discord,
+      postOutput: async () => {},
+    },
+  } as unknown as Parameters<typeof streamAgent>[2];
+  const task = streamAgent(
+    { ...agent } as never,
+    {} as Parameters<typeof streamAgent>[1],
+    runtime,
+    "q",
+    "",
+  );
+  agent.agent_session = { kind: "id", value: "follow" };
+  f.stop("final");
+  t.mock.timers.tick(2000);
+  await task;
+  assert.equal(
+    new StreamResumeStore(f.path).list()[0]?.sessionKey,
+    "id:follow",
+  );
 });
