@@ -10,7 +10,18 @@
 
 **已確認根因（2026-11-09 讀碼）：**bridge 原本沒有處理 agent_not_ready，錯誤直接結束 turn；autopick-wiring.ts 使用的 waitUntilReady 只檢查 agent_status，不保證 Herdr 已登記 active named agent。**未確認推論：**pi 在 Herdr 登記完成前就顯示 idle／done。另假設 agent_not_ready 表示 Herdr 沒有接受 prompt，為推論（Herdr 契約未讀）；accepted 計數測試依此前提建模，不是真實 Herdr 收件證明。
 
-**兩個 agent.prompt 請求來源：未確認。**2026-11-09 已讀取／搜尋 ~/.config/herdr/herdr-server.log，未找到 w5V:p1 或 agent_not_ready；在 ~/.config/herdr、預設 ~/.config/herdr-discord-bridge/state/team-tasks、~/.herdr 與 ~/Library/Application Support 未找到該 task journal。候選包括 team-turn.ts 單一派送點、src/herdr.ts 的 isMissingMethod fallback、card-notify。讀碼確認 fallback 只在 missing method 觸發，agent_not_ready 本身不觸發該 fallback；無法指認實際兩次各由誰送出，需現場 journal／完整 server request log。
+**兩個 agent.prompt 請求來源：部分確認（2026-11-09，Agent 在實機 task journal 與 Herdr 伺服器日誌取得證據）。**先前（fixer）搜尋失敗的原因：找錯了目錄。執行中的 bridge 的狀態目錄是 `~/.local/state/herdr/plugins/herdr-discord-bridge`（由 `HERDR_PLUGIN_STATE_DIR` 決定），task journal 在其 `team-tasks/task-e07c60cf-8005-4128-9ced-ef7875127c7a.json`；Herdr 日誌在 `~/.config/herdr/herdr-server.log`（記請求 id 與方法，沒有 pane id，所以搜不到 w5V:p1）。
+
+07:56:53（UTC）的時間對照：
+- `.112` 請求 A（`herdr-discord-1794211013112`）送出，Herdr 記 received。
+- `.231` journal `turn_dispatched`。
+- `.251` 請求 B（`…013251`）送出（Herdr 記 received 在 .3619）。
+- `.3627` 請求 B 回 error（`agent_not_ready`）；`.363`、`.377` journal 兩筆 `task_failed`。
+- `.4157` 請求 A 才回 `ok`，此時 task 已失敗。
+
+**已確認：**請求 B 是 Team 引擎的規劃 prompt（`runTeamTurn` 在送出 prompt 之前才呼叫 `beforeDispatch` 記 `turn_dispatched`，B 在其後 20 ms）；task 的失敗由 B 的 error 造成（error 回來與 `task_failed` 相差約 1 ms）。請求 A 早於 `turn_dispatched` 119 ms，不在 `runTeamTurn` 的送出順序裡，是**另一個程式路徑**送的。pi 的 session 資料夾當時是空的、畫面沒有對話，所以兩個請求都沒有真的把 prompt 送進 pi（A 回 `ok` 的原因不明）。
+
+**未確認：**請求 A 由哪個函式送出，讀碼無法指認（`dispatchPrompt` 的六個呼叫者、`console-agent`、通知路徑都不在 `card assign --worktree --coding` 的明顯流程裡）。為了下一次能直接指認，本 PR 在 `HerdrClient` 每次送 `agent.prompt` 時印一行 console 紀錄（`agent.prompt <prompt|prompt+wait|send-fallback> target=… chars=… ts=<毫秒> via=<呼叫位置>`，不含 prompt 內容；`ts` 可對 Herdr 日誌請求 id 裡的毫秒），重測 pi 當 Lead 時就能在 bridge console 對出 A。
 
 **修正範圍：**僅 runTeamTurn 首次派送，在 baseline 與 beforeDispatch 之後有界迴圈，turn_dispatched 一次；重用 agent-start.ts 已匯出的 Clock（該檔無須修改），context 可注入 clock、timeout、interval，預設 15 秒／500 ms。僅重試 HerdrError agent_not_ready，睡眠與 atomic wait 受 turn 剩餘時間約束，每次重試檢查 abort，睡眠可取消。ok（含 undefined）停止，stalled 沿用 marker，其他錯誤原樣丟出。HerdrClient、其他 prompt 呼叫端與 Agent kinds 不變。同步 SPEC 與 CONTEXT。
 
@@ -18,7 +29,9 @@
 
 **Review 修正（retry-deadline-1，P2，2026-11-09）：**重新開啟後修正完成，狀態維持「已修正、待驗收」。reviewer 發現原 marker 觀察期限在 atomic prompt 返回後重新起算，只扣除 dispatch 前的 retryElapsed，未扣除 atomic wait；原先「受回合上限限制」的驗證不完整。reviewer 的唯讀重現為 120 ms 上限、30 ms 重試等待、接著 stalled 且無 marker，總耗時 212 ms。修正為回合進入時計算一次固定 deadline；重試、atomic wait、後續 waitAgent／marker 觀察及 hook grace 共用同一 clock 與剩餘預算，不在 stalled 後重設期限。ok／stalled 不重送、其他錯誤不重試、abort 與 beforeDispatch 一次的契約不變。新增兩個假 clock 回歸案例：30 ms 重試後 atomic 消耗 60 ms／90 ms，再 stalled 且無 marker；斷言總計恰 120 ms、observation 預算分別僅 30 ms／不再等待，兩次嘗試但僅一次 accepted。首次 npm run check 因新增 fake waitAgent 的可選 timeout 型別未縮窄而 typecheck 失敗（exit 2，測試未執行，0 pass／0 fail），補上 timeout 存在檢查後重跑 npm run check 通過（2026-11-09，exit 0）：typecheck／build 通過，1629 tests／1628 pass／0 fail／1 skipped；兩個 retry-deadline-1 假 clock 案例皆通過。git diff --check 通過（2026-11-09）。
 
-**Review 修正（round 1，F2，2026-11-09）：**reviewer 唯讀重現：100 ms 預算、baseline 耗時 120 ms 仍送出一次 prompt。修正為每次派送前（含第一次）檢查回合期限，用盡即失敗並說明「未送出」；新增假 clock 測試斷言 0 次派送。npm run check 通過（2026-11-09，exit 0）：1630 tests／1629 pass／0 fail／1 skipped。F1（兩個請求來源）仍需現場 journal，未能取得，維持未確認。
+**Review 修正（round 1，F2，2026-11-09）：**reviewer 唯讀重現：100 ms 預算、baseline 耗時 120 ms 仍送出一次 prompt。修正為每次派送前（含第一次）檢查回合期限，用盡即失敗並說明「未送出」；新增假 clock 測試斷言 0 次派送。npm run check 通過（2026-11-09，exit 0）：1630 tests／1629 pass／0 fail／1 skipped。F1（兩個請求來源）當時未取得 journal；之後由 Agent 取得並補在上方「兩個 agent.prompt 請求來源」段（部分確認：B 是引擎、A 未指認）。
+
+**更正（2026-11-09，Agent）：**下一段 round 2 說「搜尋 … 沒有任何檔案含 w5V:p1」是因為搜錯目錄（見上方「兩個 agent.prompt 請求來源」段）。
 
 **Review 修正（round 2，F1／F3，2026-11-09）：**reviewer 再次要求補上兩個 agent.prompt 的逐次來源。再次搜尋 ~/.config、~/.herdr、~/Library/Logs、/tmp 及 ~/.config/herdr-discord-bridge（hooks.sock、send.sock、state、tunnels），除本 repo 的測試與文件外沒有任何檔案含 w5V:p1，仍沒有原 task journal／完整 request log。此條需要現場資料，無法由修改程式或文件取得，來源維持「未確認」，不以推測改寫為已確認；驗收條件 1 的來源追查部分仍未完成，留待取得 journal 後處理。
 

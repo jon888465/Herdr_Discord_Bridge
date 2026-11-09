@@ -201,3 +201,53 @@ test("approval falls back when Herdr 0.9 rejects agent.send as an unknown varian
   await new Promise<void>((resolve) => server.close(() => resolve()));
   fs.rmSync(directory, { recursive: true, force: true });
 });
+
+test("each agent.prompt request leaves one trace line with target, size, time and caller, and never the prompt text", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "herdr-trace-"));
+  const socketPath = path.join(directory, "herdr.sock");
+  const server = net.createServer((socket) => {
+    let buffer = "";
+    socket.on("data", (chunk) => {
+      buffer += chunk.toString();
+      const newline = buffer.indexOf("\n");
+      if (newline < 0) return;
+      const request = JSON.parse(buffer.slice(0, newline)) as { id: string };
+      socket.write(JSON.stringify({ id: request.id, result: {} }) + "\n");
+    });
+  });
+  await new Promise<void>((resolve, reject) =>
+    server.listen(socketPath, () => resolve()).once("error", reject),
+  );
+  const lines: string[] = [];
+  t.mock.method(console, "log", (line: unknown) => lines.push(String(line)));
+  const client = new HerdrClient(socketPath, 1000, 1);
+  async function planningTurn(): Promise<void> {
+    await client.promptAgent("w5V:p1", "secret prompt body");
+    await client.promptAgentAndWait("w5V:p1", "secret prompt body", 1000);
+  }
+  const before = Date.now();
+  await planningTurn();
+  assert.equal(lines.length, 2);
+  assert.match(
+    lines[0],
+    /^agent\.prompt prompt target=w5V:p1 chars=18 ts=\d+ via=/,
+  );
+  assert.match(
+    lines[1],
+    /^agent\.prompt prompt\+wait target=w5V:p1 chars=18 ts=\d+ via=/,
+  );
+  assert.match(
+    lines[0],
+    /planningTurn/,
+    "the caller function name is recorded",
+  );
+  for (const line of lines) {
+    assert.ok(
+      !line.includes("secret prompt body"),
+      "prompt text must not be logged",
+    );
+    assert.ok(Number(/ts=(\d+)/.exec(line)![1]) >= before);
+  }
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  fs.rmSync(directory, { recursive: true, force: true });
+});
