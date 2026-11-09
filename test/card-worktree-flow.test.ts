@@ -383,3 +383,55 @@ test("prepare starts the Agent with a Herdr-valid name even for a long card id (
   assert.equal(names.length, 1);
   assert.match(names[0], HERDR_AGENT_NAME);
 });
+
+// codex 當 Lead 時，新 workspace 的 Agent 啟動回來還是 working（REQ-20261109-codex-lead-agy）。
+test("an Agent that is still working at start is awaited, and the ready one is used", async () => {
+  const working = { ...started, agent_status: "working" };
+  const ready = { ...started, agent_status: "idle" };
+  const { deps, log } = setup({
+    startAgent: async () => working,
+    awaitReady: async (agent) => {
+      log.push(`await:${agent.agent_status}`);
+      return ready;
+    },
+  });
+  const result = await prepareCardWorktree(deps, CARD);
+  assert.equal(result.agentReady, true);
+  assert.equal(result.agent, ready);
+  assert.ok(log.includes("await:working"));
+});
+
+test("an Agent that never becomes ready keeps the not-ready result instead of failing, and a done Agent counts as ready", async () => {
+  const working = { ...started, agent_status: "working" };
+  for (const awaitReady of [
+    async () => undefined,
+    async () => {
+      throw new Error("boom");
+    },
+  ]) {
+    const { deps } = setup({ startAgent: async () => working, awaitReady });
+    const result = await prepareCardWorktree(deps, CARD);
+    assert.equal(result.agentReady, false);
+    assert.equal(result.agent, working);
+  }
+  const { deps } = setup({
+    startAgent: async () => ({ ...started, agent_status: "done" }),
+  });
+  assert.equal((await prepareCardWorktree(deps, CARD)).agentReady, true);
+});
+
+test("an Agent that starts blocked on a skippable prompt is awaited the same way as a working one", async () => {
+  const blocked = { ...started, agent_status: "blocked" };
+  const ready = { ...started, agent_status: "idle" };
+  const seen: string[] = [];
+  const { deps } = setup({
+    startAgent: async () => blocked,
+    awaitReady: async (agent) => {
+      seen.push(agent.agent_status);
+      return ready;
+    },
+  });
+  const result = await prepareCardWorktree(deps, CARD);
+  assert.deepEqual(seen, ["blocked"]);
+  assert.equal(result.agentReady, true);
+});

@@ -45,6 +45,11 @@ export interface PrepareDeps {
     name: string;
     cwd?: string;
   }): Promise<AgentRecord>;
+  /**
+   * 啟動回來時 Agent 還在初始化（例如 codex 先是 working）或卡在已知更新提示（blocked，可跳過）時，等它就緒；
+   * 沒有提供就維持只看啟動回傳的狀態。逾時或仍 blocked 時回傳 undefined，沿用原本「還沒準備好、不啟動任務」的處理。
+   */
+  awaitReady?(agent: AgentRecord): Promise<AgentRecord | undefined>;
   worktrees: Pick<CardWorktreeStore, "active" | "record">;
   authorize(workspaceId: string): void;
   switchRoute(workspaceId: string, agent: AgentRecord): void;
@@ -128,6 +133,13 @@ export async function prepareCardWorktree(
       created.path,
     );
   }
+  if (["working", "blocked"].includes(agent.agent_status) && deps.awaitReady) {
+    try {
+      agent = (await deps.awaitReady(agent)) ?? agent;
+    } catch {
+      /* 等不到就維持啟動回傳的狀態，由呼叫端說明 */
+    }
+  }
   // 路由一律切過去：Agent 在等人確認時，人處理完仍可在這個 thread 直接 `card assign`。
   deps.switchRoute(created.workspaceId, agent);
   return {
@@ -137,7 +149,7 @@ export async function prepareCardWorktree(
     repoPath,
     baseSha,
     agent,
-    agentReady: agent.agent_status === "idle",
+    agentReady: ["idle", "done"].includes(agent.agent_status),
   };
 }
 

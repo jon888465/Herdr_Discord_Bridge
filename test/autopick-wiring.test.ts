@@ -237,7 +237,7 @@ test("ISSUE-101: a merge is recognised even when progress lines come before the 
   );
 });
 
-for (const kind of ["codex", "claude"] as const) {
+for (const kind of ["claude", "codex", "agy", "pi"] as const) {
   test(`autopick ${kind} label preserves kind, prefix and card head within 60 characters`, async () => {
     for (const id of ["REQ-short", "REQ-" + "x".repeat(100) + "-TAIL"]) {
       const { steps, requests } = harness();
@@ -370,3 +370,90 @@ for (const snapshot of [
     },
   );
 }
+
+for (const kind of ["claude", "codex", "agy", "pi"] as const) {
+  for (const settled of ["idle", "done"] as const) {
+    test(`${kind} waits for working -> ${settled} before routing`, async () => {
+      const h = harness({ readyPollMs: 1 });
+      let reads = 0;
+      h.deps.port.listAgentsWithWorkspaceNames = async () => [
+        {
+          pane_id: "w9:p1",
+          terminal_id: "t",
+          workspace_id: "w9",
+          agent: kind,
+          agent_status: reads++ === 0 ? "working" : settled,
+        } as AgentRecord,
+      ];
+      await h.steps.startLead(job({ lead: kind }));
+      assert.ok(reads >= 2);
+      assert.equal(
+        h.requests.find((r) => r.method === "agent.start")?.params?.kind,
+        kind,
+      );
+      assert.deepEqual(h.commands, ["wk use w9", "agent use w9:p1"]);
+    });
+  }
+}
+test("startup timeout closes only the new Lead and does not route", async () => {
+  const h = harness({ readyTimeoutMs: 0 }, "working");
+  await assert.rejects(h.steps.startLead(job()), /Lead.*沒有就緒/);
+  assert.deepEqual(h.commands, []);
+  assert.equal(h.requests.at(-1)?.method, "workspace.close");
+});
+
+for (const kind of ["claude", "codex", "agy", "pi"] as const) {
+  test(`${kind} startup blocked preserves approval safety and closes the source workspace`, async () => {
+    const h = harness({}, "blocked");
+    h.deps.port.listAgentsWithWorkspaceNames = async () => [
+      {
+        pane_id: "w9:p1",
+        terminal_id: "t",
+        workspace_id: "w9",
+        agent: kind,
+        agent_status: "blocked",
+      } as AgentRecord,
+    ];
+    await assert.rejects(
+      h.steps.startLead(job({ lead: kind })),
+      /Lead.*blocked/,
+    );
+    assert.equal(
+      h.requests.some((r) => r.method === "pane.send_keys"),
+      false,
+    );
+    assert.equal(h.requests.at(-1)?.method, "workspace.close");
+    assert.deepEqual(h.commands, []);
+  });
+}
+test("Lead uses only the known Codex update skip and waits after it", async () => {
+  const h = harness({ readyPollMs: 1 });
+  let skipped = false;
+  const request = h.deps.port.request;
+  h.deps.port.request = async (method, params, options) => {
+    if (method === "agent.read")
+      return {
+        text: skipped ? "ready" : "Update available\nSkip until next version",
+      };
+    if (method === "pane.send_keys") {
+      assert.deepEqual(params, { pane_id: "w9:p1", keys: ["3"] });
+      assert.equal(options?.retries, 0);
+      assert.equal(skipped, false);
+      skipped = true;
+      return {};
+    }
+    return request(method, params, options);
+  };
+  h.deps.port.listAgentsWithWorkspaceNames = async () => [
+    {
+      pane_id: "w9:p1",
+      terminal_id: "t",
+      workspace_id: "w9",
+      agent: "codex",
+      agent_status: skipped ? "idle" : "blocked",
+    } as AgentRecord,
+  ];
+  await h.steps.startLead(job({ lead: "codex" }));
+  assert.equal(skipped, true);
+  assert.deepEqual(h.commands, ["wk use w9", "agent use w9:p1"]);
+});

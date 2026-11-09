@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   createAutopicker,
+  leadRejection,
   pickNext,
   runAutopick,
   type AutopickJob,
@@ -118,7 +119,7 @@ function fakeSteps(over: Partial<AutopickSteps> = {}) {
 
 function job(
   level: PolicyLevel,
-  lead: "claude" | "codex" = "claude",
+  lead: "claude" | "codex" | "agy" | "pi" = "claude",
 ): AutopickJob {
   return {
     card: card("REQ-20261105-x"),
@@ -298,9 +299,144 @@ test("a policy that is missing, invalid or unsafe picks nothing", () => {
 });
 
 test("a failed picked notification never prevents autopick execution", async () => {
-  let commands=0,picked=0;const reports:AutopickReport[]=[];
-  const picker=createAutopicker({policy:()=>({status:"loaded",policy:policyFor("L0"),file:"/policy"}),readyCards:()=>[card("REQ-20261107-notify")],
-    onPicked:async()=>{picked++;throw Error("notification unavailable");},
-    steps:{startLead:async()=>({close:async()=>{}}),command:async()=>{commands++;return "";},waitTask:async()=>({completed:true,detail:""}),waitCardDone:async()=>true,loop:async()=>({merged:true,text:""})},onReport:r=>{reports.push(r);}});
-  await picker.tick();assert.equal(picked,1);assert.equal(commands,2);assert.equal(reports[0].outcome,"reached");
+  let commands = 0,
+    picked = 0;
+  const reports: AutopickReport[] = [];
+  const picker = createAutopicker({
+    policy: () => ({
+      status: "loaded",
+      policy: policyFor("L0"),
+      file: "/policy",
+    }),
+    readyCards: () => [card("REQ-20261107-notify")],
+    onPicked: async () => {
+      picked++;
+      throw Error("notification unavailable");
+    },
+    steps: {
+      startLead: async () => ({ close: async () => {} }),
+      command: async () => {
+        commands++;
+        return "";
+      },
+      waitTask: async () => ({ completed: true, detail: "" }),
+      waitCardDone: async () => true,
+      loop: async () => ({ merged: true, text: "" }),
+    },
+    onReport: (r) => {
+      reports.push(r);
+    },
+  });
+  await picker.tick();
+  assert.equal(picked, 1);
+  assert.equal(commands, 2);
+  assert.equal(reports[0].outcome, "reached");
+});
+
+for (const kind of ["claude", "codex", "agy", "pi"] as const) {
+  test(`${kind} Lead keeps the explicit reviewer preference and closes on L2 success`, async () => {
+    const h = fakeSteps();
+    const report = await runAutopick(job("L2", kind), h.steps);
+    assert.equal(report.outcome, "reached");
+    assert.ok(
+      h.calls.includes(
+        `loop REQ-20261105-x ${kind === "codex" ? "claude" : "codex"}`,
+      ),
+    );
+    assert.equal(h.closed(), 1);
+  });
+}
+
+// agy、pi 的開放條件（REQ-20261109-autopick-four-leads）：沒達到不撿、不改用別的 Lead、每張卡只通報一次。
+test("a Lead that is not open is neither picked nor replaced, and the reason is reported once per card", () => {
+  const parsed = parsePolicy(
+    [
+      "version: 1",
+      "autopick_lead: agy",
+      "projects:",
+      "  local:Herdr_Discord_Bridge: L1",
+      "autopick:",
+      `  local:Herdr_Discord_Bridge: ${REPO}`,
+      "",
+    ].join("\n"),
+  );
+  assert.ok(parsed.ok);
+  const ready = card("REQ-20261105-g1");
+  const closed = (kind: string) => (kind === "agy" ? "未宣告" : undefined);
+  assert.equal(pickNext(parsed.policy, [ready], new Set(), closed), undefined);
+  assert.match(
+    leadRejection(parsed.policy, ready, closed) ?? "",
+    /agy.*未宣告/,
+  );
+  assert.equal(
+    leadRejection(
+      parsed.policy,
+      card("REQ-20261105-g2", { status: "draft" }),
+      closed,
+    ),
+    undefined,
+  );
+  assert.equal(
+    leadRejection(
+      parsed.policy,
+      card("REQ-20261105-g3", { projects: ["local:NotPicked"] }),
+      closed,
+    ),
+    undefined,
+  );
+  assert.equal(
+    pickNext(parsed.policy, [ready])?.lead,
+    "agy",
+    "no gate, no check",
+  );
+  const open = pickNext(parsed.policy, [ready], new Set(), () => undefined);
+  assert.equal(open?.lead, "agy");
+  const rejected: string[] = [];
+  const picker = createAutopicker({
+    policy: () => loaded(parsed.policy),
+    readyCards: () => [ready],
+    steps: fakeSteps().steps,
+    onReport: () => undefined,
+    leadGate: closed,
+    onRejected: (c) => rejected.push(c.id),
+  });
+  assert.equal(picker.tick(), undefined);
+  assert.equal(picker.tick(), undefined);
+  assert.deepEqual(rejected, ["REQ-20261105-g1"]);
+});
+
+test("a rejection is reported again when the reason changes, because the policy is reloaded every tick", () => {
+  const make = (lead: string) => {
+    const parsed = parsePolicy(
+      [
+        "version: 1",
+        `autopick_lead: ${lead}`,
+        "projects:",
+        "  local:Herdr_Discord_Bridge: L1",
+        "autopick:",
+        `  local:Herdr_Discord_Bridge: ${REPO}`,
+        "",
+      ].join("\n"),
+    );
+    assert.ok(parsed.ok);
+    return parsed.policy;
+  };
+  let current = make("agy");
+  const rejected: string[] = [];
+  const ready = card("REQ-20261105-r1");
+  const picker = createAutopicker({
+    policy: () => loaded(current),
+    readyCards: () => [ready],
+    steps: fakeSteps().steps,
+    onReport: () => undefined,
+    leadGate: (kind) => `${kind} 未宣告`,
+    onRejected: (_card, reason) => rejected.push(reason),
+  });
+  picker.tick();
+  picker.tick();
+  current = make("pi");
+  picker.tick();
+  assert.equal(rejected.length, 2);
+  assert.match(rejected[0], /agy/);
+  assert.match(rejected[1], /pi/);
 });

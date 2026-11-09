@@ -15,7 +15,7 @@
 //     local:Herdr_Discord_Bridge: L1
 //
 // H2 自動撿卡（使用者 2026-11-05 決定）：政策檔明確選用才會有任何專案被自動撿卡——
-//   autopick_lead: claude          # 全域一個，claude 或 codex（預設 claude）
+//   autopick_lead: claude          # 全域一個，claude、codex、agy 或 pi（預設 claude）；agy、pi 要先通過開放條件
 //   autopick:
 //     local:Herdr_Discord_Bridge: /path/to/Herdr_Discord_Bridge   # 專案 → repo 絕對路徑
 // 規則：autopick 的專案必須也明確列在 projects 裡（不能靠 default，避免寬鬆的 default 讓工作自己開始）；
@@ -28,7 +28,12 @@ import fs from "node:fs";
 import { PROJECT_NAME } from "./card.js";
 
 export type PolicyLevel = "L0" | "L1" | "L2";
-export type AutopickLead = "claude" | "codex";
+export const AUTOPICK_LEADS = ["claude", "codex", "agy", "pi"] as const;
+export type AutopickLead = (typeof AUTOPICK_LEADS)[number];
+
+export function autopickLeadLabel(kind: AutopickLead, cardId: string): string {
+  return `autopick-${kind}-${cardId}`.slice(0, 60);
+}
 export interface Policy {
   default: PolicyLevel;
   projects: Record<string, PolicyLevel>;
@@ -55,7 +60,6 @@ const TOP_KEYS = [
   "autopick_lead",
 ];
 const MAX_AUTOPICK = 20;
-const AUTOPICK_LEADS: readonly string[] = ["claude", "codex"];
 
 export type ParsePolicyResult =
   { ok: true; policy: Policy } | { ok: false; error: string };
@@ -94,8 +98,14 @@ export function parsePolicy(text: string): ParsePolicyResult {
       seen.add(key);
       section = key === "projects" || key === "autopick" ? key : undefined;
       if (key === "autopick_lead") {
-        if (value === undefined || !AUTOPICK_LEADS.includes(value))
-          return fail(n, 'invalid "autopick_lead"; use claude or codex');
+        if (
+          value === undefined ||
+          !AUTOPICK_LEADS.some((kind) => kind === value)
+        )
+          return fail(
+            n,
+            `invalid "autopick_lead"; use ${AUTOPICK_LEADS.join(", ")}`,
+          );
         policy.autopickLead = value as AutopickLead;
       } else if (key === "version") {
         if (value !== "1")

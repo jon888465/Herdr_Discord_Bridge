@@ -179,3 +179,35 @@ for (const scenario of [
     assert.deepEqual(recordCleanupOnCard(cards, ID, result, now), before);
   });
 }
+
+for (const kind of ["claude", "codex", "agy", "pi"] as const) {
+  for (const scenario of ["valid", "renamed", "wrong-card"] as const) {
+    test(`${kind} cleanup requires persisted and current labels for this card: ${scenario}`, async () => {
+      const cards = store();
+      const label = `autopick-${kind}-${scenario === "wrong-card" ? "REQ-other" : ID}`;
+      assert.ok(cards.recordAutopickWorkspace(ID, "wLead", label).ok);
+      const closed: unknown[] = [];
+      await closeAutopickLead(
+        new CardStore(roots.get(cards)!),
+        ID,
+        {
+          listWorkspaces: async () => [
+            {
+              workspace_id: "wLead",
+              label: scenario === "renamed" ? "personal" : label,
+            },
+          ],
+          request: async (_method, params) => {
+            closed.push(params);
+          },
+        },
+        false,
+        () => {},
+      );
+      assert.deepEqual(
+        closed,
+        scenario === "valid" ? [{ workspace_id: "wLead" }] : [],
+      );
+    });
+  }
+}
