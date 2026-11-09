@@ -20,6 +20,8 @@
 
 **Review 修正（round 1，F2，2026-11-09）：**reviewer 唯讀重現：100 ms 預算、baseline 耗時 120 ms 仍送出一次 prompt。修正為每次派送前（含第一次）檢查回合期限，用盡即失敗並說明「未送出」；新增假 clock 測試斷言 0 次派送。npm run check 通過（2026-11-09，exit 0）：1630 tests／1629 pass／0 fail／1 skipped。F1（兩個請求來源）仍需現場 journal，未能取得，維持未確認。
 
+**Review 修正（round 2，F1／F3，2026-11-09）：**reviewer 再次要求補上兩個 agent.prompt 的逐次來源。再次搜尋 ~/.config、~/.herdr、~/Library/Logs、/tmp 及 ~/.config/herdr-discord-bridge（hooks.sock、send.sock、state、tunnels），除本 repo 的測試與文件外沒有任何檔案含 w5V:p1，仍沒有原 task journal／完整 request log。此條需要現場資料，無法由修改程式或文件取得，來源維持「未確認」，不以推測改寫為已確認；驗收條件 1 的來源追查部分仍未完成，留待取得 journal 後處理。
+
 **未驗證／下一步：**沒有實機驗證 pi 當 Lead；Lead 需取得原 task journal／完整 request log，確認兩次請求來源與 Herdr 拒收契約，部署／重啟後重跑原卡。原始碼修正不等同 Discord／Herdr／CLI 端到端成功；執行中的 bridge 未部署、未重啟，舊失敗 prompt／訊息不補送。本輪不 commit、不 push、不使用 GitHub。
 
 ## ISSUE-136：卡片通知在對象的 Agent 顯示忙碌時排隊，延遲很久才送出（`REQ-20261109-agy-lead-live`）
