@@ -48,10 +48,22 @@ export function pickNext(
     );
   for (const card of ordered)
     for (const project of declaredProjects(card)) {
-      const enabled = autopickFor(policy, project);
+      const enabled = autopickFor(policy, project, card.lead);
       if (enabled) return { card, project, ...enabled };
     }
   return undefined;
+}
+
+/** 卡片指定的 Lead 不在政策清單內：回傳拒絕原因（只有被政策選用的專案才算），否則 undefined。 */
+export function leadRejection(policy: Policy, card: Card): string | undefined {
+  if (card.status !== "ready" || card.lead === undefined) return undefined;
+  const selected = declaredProjects(card).some(
+    (project) => policy.autopick && Object.hasOwn(policy.autopick, project),
+  );
+  if (!selected) return undefined;
+  const allowed = policy.autopickLeads ?? [policy.autopickLead ?? "claude"];
+  if (allowed.some((kind) => kind === card.lead)) return undefined;
+  return `卡片指定的 Lead「${card.lead}」不在政策檔 autopick_lead（${allowed.join("、")}）內，不撿這張卡；改卡片的 lead 或政策檔後重啟 bridge`;
 }
 
 export type AutopickStep =
@@ -89,7 +101,7 @@ export interface AutopickReport {
   log: string[];
 }
 
-/** 與作者不同種類的 reviewer（H4 用 codex 審 claude 與 codex 混合的作者）。 */
+/** reviewer 偏好：codex Lead 用 claude，其餘用 codex；真正的作者／reviewer session 獨立性仍由 gate 核對。 */
 function reviewerFor(lead: AutopickLead): string {
   return lead === "codex" ? "claude" : "codex";
 }
@@ -181,6 +193,8 @@ export interface AutopickerDeps {
   /** 每張卡做完（不論結果）呼叫一次，接線層用來通知與記錄。 */
   onReport(report: AutopickReport): void | Promise<void>;
   onError?(error: unknown): void;
+  /** 卡片指定的 Lead 不被允許時，每張卡只通知一次。 */
+  onRejected?(card: Card, reason: string): void;
 }
 
 /**
@@ -189,6 +203,7 @@ export interface AutopickerDeps {
  */
 export function createAutopicker(deps: AutopickerDeps) {
   const attempted = new Set<string>();
+  const rejected = new Set<string>();
   let running: Promise<void> | undefined;
   return {
     get busy(): boolean {
@@ -198,7 +213,15 @@ export function createAutopicker(deps: AutopickerDeps) {
       if (running) return undefined;
       const loaded = deps.policy();
       if (loaded.status !== "loaded") return undefined;
-      const job = pickNext(loaded.policy, deps.readyCards(), attempted);
+      const cards = deps.readyCards();
+      for (const card of cards) {
+        const reason = leadRejection(loaded.policy, card);
+        if (reason && !rejected.has(card.id)) {
+          rejected.add(card.id);
+          deps.onRejected?.(card, reason);
+        }
+      }
+      const job = pickNext(loaded.policy, cards, attempted);
       if (!job) return undefined;
       attempted.add(job.card.id);
       running = (async () => {

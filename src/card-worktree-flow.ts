@@ -45,6 +45,11 @@ export interface PrepareDeps {
     name: string;
     cwd?: string;
   }): Promise<AgentRecord>;
+  /**
+   * 啟動回來時 Agent 還在初始化（例如 codex 先是 working）時，等它就緒；沒有提供就維持只看啟動回傳的狀態。
+   * 逾時或 blocked 時回傳 undefined，沿用原本「還沒準備好、不啟動任務」的處理。
+   */
+  awaitReady?(agent: AgentRecord): Promise<AgentRecord | undefined>;
   worktrees: Pick<CardWorktreeStore, "active" | "record">;
   authorize(workspaceId: string): void;
   switchRoute(workspaceId: string, agent: AgentRecord): void;
@@ -128,6 +133,13 @@ export async function prepareCardWorktree(
       created.path,
     );
   }
+  if (agent.agent_status === "working" && deps.awaitReady) {
+    try {
+      agent = (await deps.awaitReady(agent)) ?? agent;
+    } catch {
+      /* 等不到就維持啟動回傳的狀態，由呼叫端說明 */
+    }
+  }
   // 路由一律切過去：Agent 在等人確認時，人處理完仍可在這個 thread 直接 `card assign`。
   deps.switchRoute(created.workspaceId, agent);
   return {
@@ -137,7 +149,7 @@ export async function prepareCardWorktree(
     repoPath,
     baseSha,
     agent,
-    agentReady: agent.agent_status === "idle",
+    agentReady: ["idle", "done"].includes(agent.agent_status),
   };
 }
 
@@ -153,14 +165,14 @@ export function agentNameForCard(cardId: string): string {
   const name = `card-${cardId.toLowerCase()}`;
   if (name.length <= AGENT_NAME_MAX) return name;
   const hash = createHash("sha256").update(cardId).digest("hex").slice(0, 4);
-  const prefix = name
-    .slice(0, AGENT_NAME_MAX - 5)
-    .replace(/[-_]+$/, "");
+  const prefix = name.slice(0, AGENT_NAME_MAX - 5).replace(/[-_]+$/, "");
   return `${prefix}-${hash}`;
 }
 
 export interface CleanupDeps {
-  port: WorktreePort & { cleanupWorkspaceTrust?(cardId: string, cwd: string): void };
+  port: WorktreePort & {
+    cleanupWorkspaceTrust?(cardId: string, cwd: string): void;
+  };
   worktrees: Pick<CardWorktreeStore, "active" | "markRemoved">;
   deauthorize(workspaceId: string): void;
   now(): string;

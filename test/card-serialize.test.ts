@@ -300,3 +300,14 @@ test("tasks is written after projects and before links, and round trips", () => 
   const reread = parseCard(result.text, "REQ-20261030-example.md");
   assert.deepEqual(reread.ok ? reread.card : reread.error, card);
 });
+
+test("a card lead survives serialize and parse, and a malformed lead is rejected", () => {
+  const result = serializeCard({ ...minimal, lead: "codex" });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.match(result.text, /^lead: "?codex"?$/m);
+  const reread = parseCard(result.text, "REQ-20261030-example.md");
+  assert.equal(reread.ok ? reread.card.lead : null, "codex");
+  const bad = result.text.replace(/^lead: .*$/m, 'lead: "Codex!"');
+  assert.equal(parseCard(bad, "REQ-20261030-example.md").ok, false);
+});

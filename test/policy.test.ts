@@ -233,7 +233,10 @@ test("autopick lists the projects to pick cards for, with each repo path and one
     "local:Herdr_Discord_Bridge": "/Users/example/git_wk/Herdr_Discord_Bridge",
   });
   assert.equal(result.policy.autopickLead, "codex");
-  assert.equal(autopickFor(result.policy, "local:Herdr_Discord_Bridge")?.level, "L2");
+  assert.equal(
+    autopickFor(result.policy, "local:Herdr_Discord_Bridge")?.level,
+    "L2",
+  );
   assert.equal(autopickFor(result.policy, "local:Other"), undefined);
 });
 
@@ -241,19 +244,28 @@ test("without an autopick block nothing is picked, and the parsed policy keeps i
   const result = parsePolicy(valid);
   assert.ok(result.ok);
   assert.equal("autopick" in result.policy, false);
-  assert.equal(autopickFor(result.policy, "local:Herdr_Discord_Bridge"), undefined);
+  assert.equal(
+    autopickFor(result.policy, "local:Herdr_Discord_Bridge"),
+    undefined,
+  );
 });
 
-test("the Lead kind defaults to claude and only claude or codex are accepted", () => {
+test("the Lead kind defaults to claude and all four Lead kinds are accepted", () => {
   const result = parsePolicy(
     "version: 1\nprojects:\n  local:A: L1\nautopick:\n  local:A: /repo/a\n",
   );
   assert.ok(result.ok);
   assert.equal(autopickFor(result.policy, "local:A")?.lead, "claude");
-  assert.equal(
-    parsePolicy("version: 1\nautopick_lead: agy\n").ok,
-    false,
-  );
+  for (const kind of ["claude", "codex", "agy", "pi"]) {
+    const parsed = parsePolicy(`version: 1\nautopick_lead: ${kind}\n`);
+    assert.ok(parsed.ok);
+    assert.equal(parsed.policy.autopickLead, kind);
+  }
+  for (const kind of ["unknown", "AGY", "", "claude|pi"]) {
+    const parsed = parsePolicy(`version: 1\nautopick_lead: ${kind}\n`);
+    assert.equal(parsed.ok, false);
+    assert.match(!parsed.ok ? parsed.error : "", /claude, codex, agy, pi/);
+  }
 });
 
 test("autopick is refused for a project that has no explicit level, so a permissive default can never start work by itself", () => {
@@ -274,4 +286,50 @@ test("autopick paths must be absolute, free of .. and control characters, and pr
     "  local:A: /repo/a\n  local:A: /repo/b",
   ])
     assert.equal(parsePolicy(base + bad + "\n").ok, false, bad);
+});
+
+// 多個 Lead（REQ-20261109-codex-lead-agy，使用者 2026-11-09）：清單第一個是預設，卡片的 lead 只能選清單內的。
+const multiLead = (lead: string) =>
+  [
+    "version: 1",
+    `autopick_lead: ${lead}`,
+    "projects:",
+    "  local:A: L1",
+    "autopick:",
+    "  local:A: /repo/a",
+    "",
+  ].join("\n");
+
+test("autopick_lead accepts several distinct kinds; the first is the default and a card may pick one of the listed kinds", () => {
+  const parsed = parsePolicy(multiLead("claude, codex,agy"));
+  assert.ok(parsed.ok);
+  assert.deepEqual(parsed.policy.autopickLeads, ["claude", "codex", "agy"]);
+  assert.equal(parsed.policy.autopickLead, "claude");
+  assert.equal(autopickFor(parsed.policy, "local:A")?.lead, "claude");
+  assert.equal(autopickFor(parsed.policy, "local:A", "agy")?.lead, "agy");
+});
+
+test("a card lead outside the policy list, or a pi lead the policy does not list, is not picked and never falls back to another Lead", () => {
+  const parsed = parsePolicy(multiLead("claude, codex"));
+  assert.ok(parsed.ok);
+  assert.equal(autopickFor(parsed.policy, "local:A", "pi"), undefined);
+  assert.equal(autopickFor(parsed.policy, "local:A", "agy"), undefined);
+});
+
+test("a single legacy autopick_lead value still works, and without the key only claude is allowed", () => {
+  const single = parsePolicy(multiLead("codex"));
+  assert.ok(single.ok);
+  assert.deepEqual(single.policy.autopickLeads, ["codex"]);
+  assert.equal(autopickFor(single.policy, "local:A", "claude"), undefined);
+  const none = parsePolicy(
+    "version: 1\nprojects:\n  local:A: L1\nautopick:\n  local:A: /repo/a\n",
+  );
+  assert.ok(none.ok);
+  assert.equal(autopickFor(none.policy, "local:A", "claude")?.lead, "claude");
+  assert.equal(autopickFor(none.policy, "local:A", "codex"), undefined);
+});
+
+test("autopick_lead rejects duplicates, empty items and unknown kinds in a list", () => {
+  for (const lead of ["claude, claude", "claude,", ", codex", "claude, gpt"])
+    assert.equal(parsePolicy(multiLead(lead)).ok, false, lead);
 });

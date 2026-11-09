@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   createAutopicker,
+  leadRejection,
   pickNext,
   runAutopick,
   type AutopickJob,
@@ -118,7 +119,7 @@ function fakeSteps(over: Partial<AutopickSteps> = {}) {
 
 function job(
   level: PolicyLevel,
-  lead: "claude" | "codex" = "claude",
+  lead: "claude" | "codex" | "agy" | "pi" = "claude",
 ): AutopickJob {
   return {
     card: card("REQ-20261105-x"),
@@ -298,9 +299,93 @@ test("a policy that is missing, invalid or unsafe picks nothing", () => {
 });
 
 test("a failed picked notification never prevents autopick execution", async () => {
-  let commands=0,picked=0;const reports:AutopickReport[]=[];
-  const picker=createAutopicker({policy:()=>({status:"loaded",policy:policyFor("L0"),file:"/policy"}),readyCards:()=>[card("REQ-20261107-notify")],
-    onPicked:async()=>{picked++;throw Error("notification unavailable");},
-    steps:{startLead:async()=>({close:async()=>{}}),command:async()=>{commands++;return "";},waitTask:async()=>({completed:true,detail:""}),waitCardDone:async()=>true,loop:async()=>({merged:true,text:""})},onReport:r=>{reports.push(r);}});
-  await picker.tick();assert.equal(picked,1);assert.equal(commands,2);assert.equal(reports[0].outcome,"reached");
+  let commands = 0,
+    picked = 0;
+  const reports: AutopickReport[] = [];
+  const picker = createAutopicker({
+    policy: () => ({
+      status: "loaded",
+      policy: policyFor("L0"),
+      file: "/policy",
+    }),
+    readyCards: () => [card("REQ-20261107-notify")],
+    onPicked: async () => {
+      picked++;
+      throw Error("notification unavailable");
+    },
+    steps: {
+      startLead: async () => ({ close: async () => {} }),
+      command: async () => {
+        commands++;
+        return "";
+      },
+      waitTask: async () => ({ completed: true, detail: "" }),
+      waitCardDone: async () => true,
+      loop: async () => ({ merged: true, text: "" }),
+    },
+    onReport: (r) => {
+      reports.push(r);
+    },
+  });
+  await picker.tick();
+  assert.equal(picked, 1);
+  assert.equal(commands, 2);
+  assert.equal(reports[0].outcome, "reached");
+});
+
+for (const kind of ["claude", "codex", "agy", "pi"] as const) {
+  test(`${kind} Lead keeps the explicit reviewer preference and closes on L2 success`, async () => {
+    const h = fakeSteps();
+    const report = await runAutopick(job("L2", kind), h.steps);
+    assert.equal(report.outcome, "reached");
+    assert.ok(
+      h.calls.includes(
+        `loop REQ-20261105-x ${kind === "codex" ? "claude" : "codex"}`,
+      ),
+    );
+    assert.equal(h.closed(), 1);
+  });
+}
+
+test("a card's lead selects the Lead kind when the policy allows it, otherwise the card is rejected once and not picked", async () => {
+  const parsed = parsePolicy(
+    [
+      "version: 1",
+      "autopick_lead: claude, codex",
+      "projects:",
+      "  local:Herdr_Discord_Bridge: L1",
+      "autopick:",
+      `  local:Herdr_Discord_Bridge: ${REPO}`,
+      "",
+    ].join("\n"),
+  );
+  assert.ok(parsed.ok);
+  const policy = parsed.policy;
+  assert.equal(
+    pickNext(policy, [card("REQ-20261105-a", { lead: "codex" })])?.lead,
+    "codex",
+  );
+  assert.equal(pickNext(policy, [card("REQ-20261105-b")])?.lead, "claude");
+  const bad = card("REQ-20261105-c", { lead: "agy" });
+  assert.equal(pickNext(policy, [bad]), undefined);
+  assert.match(leadRejection(policy, bad) ?? "", /agy.*claude、codex/);
+  assert.equal(leadRejection(policy, card("REQ-20261105-d")), undefined);
+  assert.equal(
+    leadRejection(
+      policy,
+      card("REQ-20261105-e", { lead: "agy", status: "draft" }),
+    ),
+    undefined,
+  );
+  const rejected: string[] = [];
+  const picker = createAutopicker({
+    policy: () => loaded(policy),
+    readyCards: () => [bad],
+    steps: fakeSteps().steps,
+    onReport: () => undefined,
+    onRejected: (c) => rejected.push(c.id),
+  });
+  assert.equal(picker.tick(), undefined);
+  assert.equal(picker.tick(), undefined);
+  assert.deepEqual(rejected, ["REQ-20261105-c"], "reported once per card");
 });

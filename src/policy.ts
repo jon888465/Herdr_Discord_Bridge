@@ -15,7 +15,7 @@
 //     local:Herdr_Discord_Bridge: L1
 //
 // H2 自動撿卡（使用者 2026-11-05 決定）：政策檔明確選用才會有任何專案被自動撿卡——
-//   autopick_lead: claude          # 全域一個，claude 或 codex（預設 claude）
+//   autopick_lead: claude, codex   # claude、codex、agy、pi，可列多個（預設 claude）；第一個是預設，卡片的 `lead` 只能選清單內的；一次仍只做一張卡
 //   autopick:
 //     local:Herdr_Discord_Bridge: /path/to/Herdr_Discord_Bridge   # 專案 → repo 絕對路徑
 // 規則：autopick 的專案必須也明確列在 projects 裡（不能靠 default，避免寬鬆的 default 讓工作自己開始）；
@@ -28,14 +28,21 @@ import fs from "node:fs";
 import { PROJECT_NAME } from "./card.js";
 
 export type PolicyLevel = "L0" | "L1" | "L2";
-export type AutopickLead = "claude" | "codex";
+export const AUTOPICK_LEADS = ["claude", "codex", "agy", "pi"] as const;
+export type AutopickLead = (typeof AUTOPICK_LEADS)[number];
+
+export function autopickLeadLabel(kind: AutopickLead, cardId: string): string {
+  return `autopick-${kind}-${cardId}`.slice(0, 60);
+}
 export interface Policy {
   default: PolicyLevel;
   projects: Record<string, PolicyLevel>;
   /** 專案 → repo 絕對路徑；沒有 autopick 區塊時整個欄位不存在。 */
   autopick?: Record<string, string>;
-  /** 自動撿卡時 bridge 自己開的 Lead 種類；只有設定過才存在，預設 claude。 */
+  /** 自動撿卡預設的 Lead 種類（`autopick_lead` 清單的第一個）；只有設定過才存在，預設 claude。 */
   autopickLead?: AutopickLead;
+  /** `autopick_lead` 允許的全部 Lead 種類（依設定順序）；卡片的 `lead` 只能從這裡選。 */
+  autopickLeads?: AutopickLead[];
 }
 
 export const DEFAULT_POLICY: Policy = Object.freeze({
@@ -55,7 +62,6 @@ const TOP_KEYS = [
   "autopick_lead",
 ];
 const MAX_AUTOPICK = 20;
-const AUTOPICK_LEADS: readonly string[] = ["claude", "codex"];
 
 export type ParsePolicyResult =
   { ok: true; policy: Policy } | { ok: false; error: string };
@@ -94,9 +100,20 @@ export function parsePolicy(text: string): ParsePolicyResult {
       seen.add(key);
       section = key === "projects" || key === "autopick" ? key : undefined;
       if (key === "autopick_lead") {
-        if (value === undefined || !AUTOPICK_LEADS.includes(value))
-          return fail(n, 'invalid "autopick_lead"; use claude or codex');
-        policy.autopickLead = value as AutopickLead;
+        const kinds = (value ?? "").split(",").map((item) => item.trim());
+        if (
+          value === undefined ||
+          kinds.some(
+            (kind) => !AUTOPICK_LEADS.some((known) => known === kind),
+          ) ||
+          new Set(kinds).size !== kinds.length
+        )
+          return fail(
+            n,
+            `invalid "autopick_lead"; use one or more distinct of ${AUTOPICK_LEADS.join(", ")}, separated by commas`,
+          );
+        policy.autopickLeads = kinds as AutopickLead[];
+        policy.autopickLead = policy.autopickLeads[0];
       } else if (key === "version") {
         if (value !== "1")
           return fail(n, 'unsupported version; only "version: 1" is known');
@@ -186,13 +203,18 @@ export function levelFor(policy: Policy, projectName: string): PolicyLevel {
 export function autopickFor(
   policy: Policy,
   projectName: string,
+  requestedLead?: string,
 ): { repoPath: string; level: PolicyLevel; lead: AutopickLead } | undefined {
   if (!policy.autopick || !Object.hasOwn(policy.autopick, projectName))
     return undefined;
+  const allowed = policy.autopickLeads ?? [policy.autopickLead ?? "claude"];
+  // 卡片指定的 Lead 不在政策清單內就不撿（回傳 undefined），不默默改用別的 Lead，也不能靠卡片提權。
+  const lead = requestedLead ?? allowed[0];
+  if (!allowed.some((kind) => kind === lead)) return undefined;
   return {
     repoPath: policy.autopick[projectName],
     level: levelFor(policy, projectName),
-    lead: policy.autopickLead ?? "claude",
+    lead: lead as AutopickLead,
   };
 }
 

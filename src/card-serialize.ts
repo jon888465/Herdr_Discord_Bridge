@@ -76,6 +76,7 @@ export function serializeCard(
   ];
   if (card.notify !== undefined)
     lines.push(`notify: ${formatString(card.notify)}`);
+  if (card.lead !== undefined) lines.push(`lead: ${formatString(card.lead)}`);
   for (const key of [
     "autopick_workspace_id",
     "autopick_workspace_label",

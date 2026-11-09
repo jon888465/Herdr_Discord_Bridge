@@ -24,6 +24,8 @@ export interface Card {
   updated: string;
   source?: string;
   notify?: string;
+  /** 這張卡要用的自動撿卡 Lead 種類；只能是政策檔 `autopick_lead` 允許的其中一個（由撿卡時核對）。 */
+  lead?: string;
   autopick_workspace_id?: string;
   autopick_workspace_label?: string;
   project?: string;
@@ -53,6 +55,7 @@ const KNOWN_KEYS = new Set<string>([
   ...REQUIRED_KEYS,
   "source",
   "notify",
+  "lead",
   "autopick_workspace_id",
   "autopick_workspace_label",
   "project",
@@ -475,6 +478,11 @@ export function buildCard(
       const value = asString("notify", fields.get("notify"));
       if (!parseNotifyTarget(value)) reject("invalid notify destination");
       card.notify = value;
+    }
+    if (fields.has("lead")) {
+      const value = asString("lead", fields.get("lead"));
+      if (!/^[a-z]{2,16}$/.test(value)) reject("invalid lead");
+      card.lead = value;
     }
     for (const key of [
       "autopick_workspace_id",

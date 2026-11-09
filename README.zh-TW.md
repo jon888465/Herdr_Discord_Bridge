@@ -259,7 +259,7 @@ Lead 自行決定角色、是否委派，以及依報告追加工作，無固定
 
 ## Durable Team Task（Phase 1）
 
-E14 自動候選（2026-11-06，ISSUE-107 第 1／3 部分）：`--coding` 沒有指定 Worker 時，會自動啟用 claude／codex profile，以及 `capabilities` 含 `implementation` 或 `review` 的 agy profile，合計至少兩個才啟用。有指定 Worker 時不自動加入；agy 未宣告 capabilities、空清單或只有 `analysis` 時維持不啟用，pi 不論 capabilities 都不啟用。capabilities 只決定是否自動入池，不是角色守門，誰寫誰審仍由 Lead 決定。**目前只完成第 1 部分；第 2 部分 agy session 登記與第 3 部分 reviewer 獨立性尚未完成，agy 尚不可用，使用者不應現在開啟 agy 選用。**
+E14 自動候選（2026-11-06，ISSUE-107 第 1／3 部分）：`--coding` 沒有指定 Worker 時，會自動啟用 claude／codex profile，以及 `capabilities` 含 `implementation` 或 `review` 的 agy profile，合計至少兩個才啟用。有指定 Worker 時不自動加入；agy 未宣告 capabilities、空清單或只有 `analysis` 時維持不啟用，pi 不論 capabilities 都不啟用。capabilities 只決定是否自動入池，不是角色守門，誰寫誰審仍由 Lead 決定。agy session 登記與 reviewer 獨立性已有原始碼及單元測試支援，完整實機 coding 驗收仍未完成（ISSUE-107）。
 
 `team ask <prompt>` 保存任務、Lead/session、凍結 roster、Assignment、事件與報告。`team ask --coding <prompt>` 才啟用本機 Git coding 驗收：單一 writer、不同已知 session review、版本指紋相符的 review／test 證據。Review 或 verify 期間工作樹若改變，該證據不算通過。旗標不會從 prompt 文字推論。它不 commit、不 push，write scope 也不是作業系統鎖。見 [本機 coding workflow](docs/coding-workflow-proposal.md) 與 ISSUE-025。
 `team status [task-id]` 查看目前 workspace 的持久狀態；`team cancel <task-id>` 取消整個任務。Discord 使用 `/herdr` 前綴。
@@ -367,3 +367,13 @@ Agent 可在最終回覆中單獨一行寫 `[[discord-attach: /絕對路徑]]`�
 
 
 Autopick Lead 收尾（2026-11-09，ISSUE-129，已驗收）：新建的 Lead workspace id／label 會持久化到卡片。`card cleanup`／merge cleanup 在卡片為 done／cancelled 或 worktree cleanup 成功後，依卡片記錄的 workspace id 查詢現況，僅在記錄與現況 label 完全相同且符合該卡 `autopick-<lead>-<卡片 id>`（沿用 60 字元上限）時關閉 Lead；其餘來源 workspace 仍保留。done／cancelled 終態卡每分鐘掃描，即使政策沒有 `autopick:` 區塊也會執行；本程序 autopick 執行中則延後掃描。in_progress 一律不關；stopped／failed 且卡片未結束、不曾成功 cleanup 時保留現場。reached 仍呼叫 `lead.close()`；若 cleanup 已先關閉，查詢確認該 id 已不存在則視為完成。找不到、標籤不符、查詢或關閉失敗只記 log、不影響 cleanup 結果。Worker／reviewer 與個人 workspace 不在此收尾範圍。重啟後可讀卡片繼續清理；沒有 metadata 的舊卡不回填。已於 2026-11-09 重啟 bridge 並實機驗收（取消、重啟續清、人工改名保留、其他 workspace 保留；未驗證項見 ISSUE-129）；Discord 端到端未驗。
+
+
+## 多種 Lead 第一階段（2026-11-09，ISSUE-130，待實機驗收）
+
+政策 `autopick_lead` 可明確選 claude、codex、agy、pi，且可列多個（逗號分隔，例如 `claude, codex`；不可重複），預設仍為 claude；未知值拒絕。清單第一個是預設 Lead，卡片可用 `lead:` 欄位指定清單內的種類；卡片指定清單以外的種類時 bridge 不撿這張卡並在 console 記一次拒絕原因，不會改用別的 Lead，卡片也不能繞過政策檔的專案選用與等級（一次仍只做一張卡）。agy／pi Lead 是明確選用，不表示其 Worker coding 能力已驗收；Worker 自動候選規則不變，analysis-only agy 與 pi 不自動入池。來源 Lead 啟動等待 working → idle／done，blocked 只跳過已知安全更新提示，信任／權限／登入仍需人處理；啟動失敗清理剛建立的來源 workspace。Lead 使用 CLI 預設設定，不繼承 Worker profile 的 model／args。
+
+ISSUE-129 cleanup 同時核對四種 Lead 的卡片持久化 id 與現況 label，沿用 `autopick-<kind>-<id>`、60 字元上限、in_progress 保留與不依名稱搜尋；notify 維持原來源。此輪不改實際 policy／config，不部署或重啟。agy／pi Lead 的多輪 --coding、長 JSON 回讀、Discord 端到端與新增種類的實機 cleanup 尚未驗收；已知 session 更新、hook fallback、非 codex terminal JSON unwrap 缺口與後續驗收見 docs/known-issues.md 的 ISSUE-130（docs 目錄內見 known-issues.md）。
+
+
+目前限制：來源 Lead workspace 與 `card assign --worktree` 的第二次 Lead 啟動都會等 working → idle／done（2026-11-09 已補，待實機驗收）。多 Lead 清單、卡片 `lead:` 與四種 Lead 都只有單元測試證據，沒有任何 CLI 的端到端驗收；不能把政策解析或單元測試通過當作四種 autopick 端到端可用；細節與 2026-11-09 測試證據見 ISSUE-130。

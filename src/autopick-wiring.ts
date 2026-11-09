@@ -4,7 +4,8 @@
 // 為什麼用 console 指令：`card assign／commit／pr／loop` 的每個守門都在指令裡，自動流程走同一條路，
 // 不另開後門。為了不動到使用者自己的 console 路由，自動流程用另一個使用者 id（`autopick`）。
 
-import { agentDisplayName } from "./cli-adapter.js";
+import { autopickLeadLabel } from "./policy.js";
+import { waitUntilReady } from "./agent-ready.js";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import { startAgentInPane, type AgentStartPort } from "./agent-start.js";
@@ -24,6 +25,8 @@ export interface AutopickWiringDeps {
   allowedWorkspaceIds: string[];
   sleep(ms: number): Promise<void>;
   now(): number;
+  readyTimeoutMs?: number;
+  readyPollMs?: number;
   taskTimeoutMs?: number;
   cardDoneTimeoutMs?: number;
   pollMs?: number;
@@ -32,6 +35,19 @@ export interface AutopickWiringDeps {
 const TERMINAL = ["completed", "failed", "cancelled"];
 
 export function createAutopickSteps(deps: AutopickWiringDeps): AutopickSteps {
+  // The shared reviewer wait currently recognizes idle only. For Lead readiness,
+  // done is equally settled; keep one adapter per steps instance so update skips
+  // retain their once-per-pane guard across repeated waits.
+  const readyPort: AgentStartPort = {
+    request: (method, params, options) =>
+      deps.port.request(method, params, options),
+    listAgentsWithWorkspaceNames: async () =>
+      (await deps.port.listAgentsWithWorkspaceNames()).map((agent) =>
+        agent.agent_status === "done"
+          ? { ...agent, agent_status: "idle" }
+          : agent,
+      ),
+  };
   const pollMs = deps.pollMs ?? 3000;
   const taskTimeoutMs = deps.taskTimeoutMs ?? 45 * 60 * 1000;
   // ISSUE-095：卡片檔每 60 秒才同步一次，所以要等得比一個掃描週期久。
@@ -65,11 +81,7 @@ export function createAutopickSteps(deps: AutopickWiringDeps): AutopickSteps {
       if (!stat.isDirectory())
         throw new Error(`repo 路徑不是資料夾：${job.repoPath}`);
 
-      const label = agentDisplayName({
-        kind: job.lead,
-        role: "autopick",
-        cardId: job.card.id,
-      });
+      const label = autopickLeadLabel(job.lead, job.card.id);
       const created = (await deps.port.request("workspace.create", {
         cwd: job.repoPath,
         label,
@@ -117,9 +129,20 @@ export function createAutopickSteps(deps: AutopickWiringDeps): AutopickSteps {
           name: `hdb-autopick-${randomUUID().slice(0, 8)}`,
           cwd: job.repoPath,
         });
-        if (!["idle", "done"].includes(lead.agent_status))
+        const ready = await waitUntilReady(
+          {
+            panePort: readyPort,
+            readyTimeoutMs: deps.readyTimeoutMs,
+            readyPollMs: deps.readyPollMs,
+          },
+          { paneId, terminalId: lead.terminal_id },
+          lead.agent_status === "done"
+            ? { ...lead, agent_status: "idle" }
+            : lead,
+        );
+        if (!ready.ok)
           throw new Error(
-            `Lead（${job.lead}）沒有就緒，狀態是 ${lead.agent_status}；可能卡在信任資料夾或登入提示`,
+            `Lead（${job.lead}）沒有就緒：${ready.reason.replaceAll("reviewer", "Lead")}`,
           );
         await deps.command(`wk use ${workspaceId}`);
         await deps.command(`agent use ${paneId}`);

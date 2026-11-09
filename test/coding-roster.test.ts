@@ -142,6 +142,9 @@ test("the no-Worker error says agy is opt-in via capabilities and pi is unverifi
       /agy/.test(error.message) &&
       /implementation/.test(error.message) &&
       /review/.test(error.message) &&
-      /pi/.test(error.message),
+      /pi/.test(error.message) &&
+      /已有程式支援/.test(error.message) &&
+      /實機驗收尚未完成/.test(error.message) &&
+      !/第 2、3 部分尚未完成/.test(error.message),
   );
 });

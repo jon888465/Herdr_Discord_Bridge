@@ -21,7 +21,7 @@ import {
 } from "./card.js";
 import type { CardAssignment } from "./card-assignments.js";
 import { recordCleanupOnCard } from "./card-cleanup.js";
-import { levelFor, type LoadedPolicy } from "./policy.js";
+import { levelFor, type LoadedPolicy, type Policy } from "./policy.js";
 import type { Card } from "./card.js";
 import type { CommitOutcome } from "./card-commit.js";
 import type { CleanupResult, PreparedWorktree } from "./card-worktree-flow.js";
@@ -1226,7 +1226,7 @@ function showPolicy(args: string[], deps: CardCommandDeps): string {
   const picks = Object.entries(loaded.policy.autopick ?? {});
   if (picks.length) {
     lines.push(
-      `自動撿卡（Lead：${loaded.policy.autopickLead ?? "claude"}；一次一張；做到哪一步由專案等級決定）：`,
+      `自動撿卡（Lead：${leadSummary(loaded.policy)}；一次一張；做到哪一步由專案等級決定）：`,
     );
     for (const [name, repoPath] of picks)
       lines.push(`- ${name} → ${repoPath}（${loaded.policy.projects[name]}）`);
@@ -1474,4 +1474,12 @@ export async function runCardCommand(
   }
   // 卡片可能來自 Mantis 等外部內容；顯示到 Discord 前一律過機敏遮蔽。
   return redactSecrets(text);
+}
+
+/** 單一 Lead 維持原本的顯示；多個時列出全部並標出預設（清單第一個）。 */
+function leadSummary(policy: Policy): string {
+  const leads = policy.autopickLeads ?? [policy.autopickLead ?? "claude"];
+  return leads.length === 1
+    ? leads[0]
+    : `${leads.join("、")}，預設 ${leads[0]}，卡片可用 lead 欄位指定`;
 }

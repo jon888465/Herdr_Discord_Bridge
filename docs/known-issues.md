@@ -1,6 +1,34 @@
 # Known Issues
 
+## ISSUE-130：四種 Lead 的政策、啟動等待與收尾（REQ-20261109-codex-lead-agy）
+
+更新日期：2026-11-09。狀態：已修正、待驗收（四種政策、多 Lead 清單、卡片 `lead:`、來源與 worktree 的 Lead 等待及 cleanup；僅單元測試，無任何 CLI 實機驗收）。
+
+症狀／預期：agy／pi 不能被設為 autopick Lead，codex 初始化 working 被立即拒絕；預期四種可明確選用、等待就緒並安全清理。重現／環境：本機 worktree 讀碼及假 Herdr port 測試，未啟動真實 CLI。已確認根因：policy 與 cleanup label 白名單只有 claude／codex，autopick 只檢查啟動當下狀態。
+
+修正範圍：共用四種 Lead 常數／型別／label，政策未知值 fail closed、預設 claude；接 waitUntilReady；保留 reviewer 偏好、獨立 session gate、Worker 自動入池、原始 notify 及 ISSUE-129 全部關閉守門。不修改使用者 policy／config。
+
+未修正的待調查缺口（2026-11-09 讀碼確認，實際影響尚未重現）：
+
+- runTeamTask 沒有把第 0 輪新登記的 session 回寫 input.lead，fresh agy 後續輪次仍可能使用 null session。
+- main.ts hookFinal 有 session 時只查 stopSince，無結果不 fallback stopForPane，可能退回 terminal scraping。
+- parseAssignmentPlan 只有 codex 的 terminal fallback 做 JSON 硬換行 unwrap；非 codex 長 JSON 可能失敗。
+- agy／pi Lead 從未有多輪 --coding 完整實機驗收，本階段不宣稱可可靠跑完整自動流程。
+
+驗證（2026-11-09，本機，假 Herdr port，未呼叫真實 CLI）：首次 npm run typecheck 因尚未安裝依賴找不到 tsc（exit 127）；npm ci --ignore-scripts 成功後解除。npm run typecheck、npm run build、npm run lint、npm test 均 exit 0；完整套件 1595 tests／1594 pass／0 fail／1 skipped（既有略過）。先前核心五檔 policy、autopick-wiring、autopick、card-cleanup、coding-roster 的 node --test 為 112 tests／112 pass；之後新增四種 blocked 與已知 Codex 更新提示案例，已包含在上述完整套件。git diff --check 通過。涵蓋四種 policy／命名、working → idle／done、blocked／timeout、安全更新跳過、四種 label cleanup、改名／錯卡拒絕，以及 pi／analysis-only agy Worker 排除規則。
+
+多 Lead 與卡片指定（2026-11-09，接手 worktree 後補，使用者要求「autopick lead 可設多個、一次仍只做一張卡」「lead 也可被卡片指定」）：`autopick_lead` 接受逗號分隔的清單（不可重複，單一值舊寫法照常），第一個是預設；卡片新增選用 frontmatter `lead:`，只能選政策清單內的種類，清單外時不撿並在 console 記一次拒絕原因、不改用別的 Lead，卡片也不能繞過專案選用與等級（避免 Agent 寫卡片提權）。`card policy` 會列出全部 Lead 與預設。選擇規則先採最單純的：卡片指定優先，否則取清單第一個；**沒有輪流、沒有 quota／可用性換人、Lead 起不來時不換下一個**，這是刻意的第一版，仍待使用者確認（見需求卡待確認）。
+
+第二次 worktree Lead 啟動（2026-11-09 補）：`prepareCardWorktree` 新增選用依賴 `awaitReady`，啟動回來仍是 working 時等待（main.ts 接 `waitUntilReady`），逾時、blocked 或丟錯時維持原本不啟動任務的處理；done 視為就緒。共用 `src/agent-ready.ts` 未改，來源 Lead 等待仍以固定 port adapter 將 done 視為 settled（未清理）。
+
+新增測試（2026-11-09，本機 worktree）：`test/policy.test.ts`（清單解析、重複／空項目／未知值拒絕、單一舊寫法、卡片 lead 在清單內外）、`test/autopick.test.ts`（`pickNext` 的卡片 lead、`leadRejection`、拒絕只報一次）、`test/card-serialize.test.ts`（`lead` 序列化與格式錯誤拒絕）、`test/card-worktree-flow.test.ts`（working 等待、逾時／丟錯、done）。`npm run check`（typecheck 加 build 加完整測試）：1603 tests／1602 pass／0 fail／1 skipped；`npm run lint` 通過。`npm run format:check` 報 52 個檔案有格式警告，未確認 main 是否本來就有，也沒有為了它改不相關檔案。
+
+未驗證／下一步：四種 CLI 當 Lead 的啟動、agy／pi 多輪規劃／review／verify／synthesis、hook 與 terminal 長 JSON、通知及完成／取消／重啟續清／改名保留；多 Lead 清單與卡片 `lead:` 在真實 bridge 的撿卡；agy／pi 當 Lead 沒有額外的開放條件檢查，只靠政策檔由使用者明確選用。本輪未改使用者的 `policy.yml`、未部署、未重啟；原始碼與 build 不等於執行中 bridge，舊任務／訊息不補送。
+
+
 ## ISSUE-129：卡片結束後留下 autopick Lead workspace（REQ-20261109-autopick-lead-cleanup）
+
+2026-11-09 多 Lead 擴充：cleanup label 白名單改與 policy 共用四種 Lead 及 60 字元命名；原 id／label、in_progress、不依名稱搜尋守門全保留。新增 agy／pi 範圍為已修正、待驗收；下方原 claude 實機驗收歷史保留，不代表新增種類已驗收。新測試證據見 ISSUE-130。
 
 更新日期：2026-11-09。狀態：已驗收（2026-11-09，範圍與未驗證項見「實機驗收」段）。
 
@@ -4018,21 +4046,21 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 ## ISSUE-117：自動撿卡的 Lead 設成 codex 時，`startLead` 一定失敗（只看 `agent.start` 當下的狀態，codex 啟動後先是 working）
 
-更新日期：2026-11-07。狀態：待決定（根因已由讀碼確認、尚未修正；目前不要把 `autopick_lead` 設成 codex）。
+更新日期：2026-11-09。狀態：已修正、待驗收（來源 startLead 與第二次 worktree Lead 啟動都已補等待；檢查結果見 ISSUE-130，無 CLI 實機驗收）。下列 2026-11-07 為先前未修正時的診斷歷史，保留重現證據；本次未做 CLI 實機驗收。
 
 使用者可見症狀：2026-11-06，使用者要求把 `policy.yml` 的 `autopick_lead` 從 `claude` 改成 `codex`（備份 `policy.yml.bak-lead-20261106`），bridge 重啟後 `card policy` 顯示「Lead：codex」。ready 的卡 `REQ-20261107-small-pane-tab` 在 16:27:28Z 被撿起，立刻失敗（`autopick_failed`）：`lead：Lead（codex）沒有就緒，狀態是 working；可能卡在信任資料夾或登入提示`。bridge 依設計在失敗時關掉剛開的 workspace，所以事後沒有現場可看，無法確認當時是否真的有提示；卡片留在 `ready`。
 
 預期行為：Lead 為 codex 時，等 codex 完成初始化（`working` → `idle`）再開始，與 `agent start`、`card review` 的 reviewer 一致；真的卡在信任或登入提示（`blocked`）時才失敗。
 
-已確認根因（讀碼，2026-11-07）：`src/autopick-wiring.ts` 的 `startLead` 呼叫 `startAgentInPane` 後，只檢查它**回傳的** `lead.agent_status` 是否為 `idle` 或 `done`，不輪詢；codex 啟動後先是 `working`（ISSUE-079 已記錄「`agent.start` 回來時 Agent 常常還在初始化，實測 codex 啟動後先是 working」，`src/agent-ready.ts` 的 `waitUntilReady` 就是為此寫的，但 `startLead` 沒用它）。claude 啟動即 `idle`，所以只有 claude 當 Lead 能過。**尚未做的驗證：**沒有用 codex 重跑一次並保存當時的 pane 畫面，無法排除「同時也真的有提示」；也沒有用測試重現。
+已確認根因（讀碼，2026-11-07）：`src/autopick-wiring.ts` 的 `startLead` 呼叫 `startAgentInPane` 後，只檢查它**回傳的** `lead.agent_status` 是否為 `idle` 或 `done`，不輪詢；codex 啟動後先是 `working`（ISSUE-079 已記錄「`agent.start` 回來時 Agent 常常還在初始化，實測 codex 啟動後先是 working」，`src/agent-ready.ts` 的 `waitUntilReady` 就是為此寫的，但 `startLead` 沒用它）。claude 啟動即 `idle`，所以只有 claude 當 Lead 能過。**尚未做的驗證：**沒有用 codex 重跑一次並保存當時的 pane 畫面，無法排除「同時也真的有提示」；當時也沒有用測試重現；2026-11-09 已補假 port regression，見 ISSUE-130。
 
 影響：`autopick_lead: codex` 目前不可用；測試 `Lead 為 codex 時 reviewer 為 claude`（`test/autopick.test.ts`）只用假 steps，沒有涵蓋 `startLead` 對 `working` 的處理，所以單元測試沒抓到。
 
-修正範圍：無（只記錄）。建議：`startLead` 改用 `waitUntilReady`（同 `agent start`），`blocked` 或逾時才失敗並說明，並加測試涵蓋「回傳 working 後變 idle 成功、blocked 失敗、逾時失敗」。要先把 `autopick_lead` 改回 `claude` 才能用自動撿卡跑這張修正卡。
+修正範圍（2026-11-09）：來源 workspace 的 `startLead` 已接 `waitUntilReady`，新增 working → idle／done、blocked、逾時與安全更新提示測試；執行結果見 ISSUE-130。第二次 worktree Lead 啟動的同類缺口（`prepareCardWorktree` 直接以啟動回傳狀態判斷 agentReady）已在 2026-11-09 補上等待，見 ISSUE-130，待實機驗收。
 
-未驗證：其他 Lead 種類（agy、pi 目前不被政策接受）；修好後 codex 當 Lead 的完整卡片流程（規劃、`card review` 改用 claude 當 reviewer）仍沒有實機證據。
+未驗證：政策現已接受 agy／pi；四種 Lead 的新增啟動路徑與 codex 當 Lead 的完整卡片流程（規劃、`card review` 改用 claude 當 reviewer）仍沒有實機證據。
 
-關聯（2026-11-07）：ISSUE-118 僅讓共用 `waitUntilReady` 跳過已知更新提示，不自動處理信任／權限，也未修正本 issue 的偵測／接線問題；本 issue 狀態不變。
+關聯（2026-11-07）：ISSUE-118 僅讓共用 `waitUntilReady` 跳過已知更新提示，不自動處理信任／權限，也未修正本 issue 的偵測／接線問題；歷史狀態由 2026-11-09 的修正與 ISSUE-130 驗證紀錄取代。
 
 ## ISSUE-118：Agent 啟動時被已知 CLI 更新提示擋住（REQ-20261107-skip-update-prompt）
 
@@ -4048,7 +4076,7 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 測試（2026-11-07，本機 sandbox，假 port）：先新增成功路徑測試，`npm run build && node --test dist/test/agent-ready.test.js` 得到預期 red（1 fail，原實作回 blocked）；實作後相關測試 21/21 pass，0 fail。涵蓋成功後就緒、提示持續與同 pane 重入不重送、輪詢中 blocked、agy／claude 信任、權限／未知、讀取失敗與無效資料、更新混合敏感字樣、種類不符、送達不確定、送後讀取失敗，以及直接掃清單無信任／權限／登入字樣。最終檢查命令：`npm run typecheck`、`npm run build`、`node --test dist/test/agent-ready.test.js dist/test/update-prompts.test.js`。完整套件未執行，因 Unix-socket 測試在 sandbox 會 EPERM（ISSUE-115）。最初 build 因未安裝依賴而找不到 tsc，`npm ci --ignore-scripts` 後解除。
 
-未驗證／下一步：**尚未實機驗證** Discord／Herdr／codex；claude、agy 與其他 CLI 更新提示皆未涵蓋／未驗證，不得猜畫面或按鍵。autopick `startLead` 與 profile pool 使用獨立等待流程，未接線此共用函式，本輪不擴大範圍，ISSUE-117 仍待處理；ISSUE-116 的 idle 誤判也未修正。尚未部署或重啟執行中的 bridge；build 通過不代表 runtime 已更新，舊的失敗任務／訊息不會補送。Lead 應安排重啟後的真實更新選單與信任提示驗收。
+未驗證／下一步：**尚未實機驗證** Discord／Herdr／codex；claude、agy 與其他 CLI 更新提示皆未涵蓋／未驗證，不得猜畫面或按鍵。2026-11-09 autopick `startLead` 已接線共用等待（ISSUE-130，待實機驗收）；profile pool 仍使用獨立等待流程；ISSUE-116 的 idle 誤判也未修正。尚未部署或重啟執行中的 bridge；build 通過不代表 runtime 已更新，舊的失敗任務／訊息不會補送。Lead 應安排重啟後的真實更新選單與信任提示驗收。
 
 
 ## ISSUE-119：自動建立的 workspace／pane 未顯示實際 Agent 種類（REQ-20261107-agent-naming）

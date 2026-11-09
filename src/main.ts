@@ -39,6 +39,7 @@ import {
   prepareCardWorktree,
 } from "./card-worktree-flow.js";
 import { startAgentInPane } from "./agent-start.js";
+import { waitUntilReady } from "./agent-ready.js";
 import {
   parseAgentStartArgs,
   runAgentStart,
@@ -938,6 +939,14 @@ export async function handleCommand(
               repoRoot: gitRepoRoot,
               headSha: gitHeadSha,
               startAgent: (input) => startAgentInPane(runtime.herdr, input),
+              awaitReady: async (agent) => {
+                const ready = await waitUntilReady(
+                  { panePort: runtime.herdr },
+                  { paneId: agent.pane_id, terminalId: agent.terminal_id },
+                  agent,
+                );
+                return ready.ok ? ready.agent : undefined;
+              },
               worktrees: lazyCardWorktrees(),
               authorize: (id) =>
                 authorizeBridgeWorkspace(
@@ -2752,6 +2761,8 @@ function startAutopick(runtime: Runtime): () => void {
       sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
       now: () => Date.now(),
     }),
+    onRejected: (card, reason) =>
+      console.warn(`自動撿卡 ${card.id}：${reason}`),
     onPicked: (job) => {
       new CardStore(rootDir, { maxFileBytes: LEDGER_MAX_FILE_BYTES }).appendLog(
         job.card.id,
