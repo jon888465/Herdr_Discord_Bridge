@@ -28,7 +28,9 @@ test("StreamResumeStore persists records across instances and removes them (ISSU
   );
 });
 
-test("StreamResumeStore drops records older than 24h and ignores corrupt files", () => {
+test("StreamResumeStore drops records older than 24h and ignores corrupt files", (t) => {
+  t.mock.method(console, "log", () => {});
+  t.mock.method(console, "warn", () => {});
   const file = join(mkdtempSync(join(tmpdir(), "sr-")), "active.json");
   const store = new StreamResumeStore(file);
   store.add(record("old", Date.now() - 90000000));

@@ -33,7 +33,7 @@ const card = (patch: Partial<Card> = {}): Card => ({
     "### local:repo",
     "",
     "- 機器：local",
-    "- repo：/Users/jon/git_wk/repo",
+    "- repo：/Users/example/git_wk/repo",
     `- 分支：${BRANCH}`,
     "- base：03364e63f79f",
     "",
@@ -42,8 +42,8 @@ const card = (patch: Partial<Card> = {}): Card => ({
 });
 
 const worktree = {
-  repoPath: "/Users/jon/git_wk/repo",
-  path: "/Users/jon/.herdr/worktrees/repo/card-req-20261103-work",
+  repoPath: "/Users/example/git_wk/repo",
+  path: "/Users/example/.herdr/worktrees/repo/card-req-20261103-work",
   branch: BRANCH,
 };
 
@@ -127,7 +127,7 @@ test("a done card with commits on a policy-L1 project gets its branch pushed and
     base: "main",
     branch: BRANCH,
     repo: "jon888465/Herdr_Discord_Bridge",
-    repoPath: "/Users/jon/git_wk/repo",
+    repoPath: "/Users/example/git_wk/repo",
     sensitivePaths: [],
   });
   const push = log.findIndex((line) => line.includes(" push "));

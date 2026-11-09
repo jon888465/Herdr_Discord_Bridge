@@ -715,9 +715,9 @@ test("recreate creates the cards directory when it is gone, and refuses an unsaf
 
 const preparedWorktree = {
   workspaceId: "w9",
-  path: "/Users/jon/.herdr/worktrees/repo/card-req-20261102-work",
+  path: "/Users/example/.herdr/worktrees/repo/card-req-20261102-work",
   branch: "card/REQ-20261102-work",
-  repoPath: "/Users/jon/git_wk/repo",
+  repoPath: "/Users/example/git_wk/repo",
   baseSha: "0123456789abcdef0123456789abcdef01234567",
   agent: { agent: "claude", pane_id: "w9:p1", agent_status: "idle" },
   agentReady: true,
@@ -750,7 +750,7 @@ test("assign --worktree prepares the worktree first, records the project and the
   assert.ok(
     read.ok &&
       read.card.body.includes(
-        "- worktree：/Users/jon/.herdr/worktrees/repo/card-req-20261102-work",
+        "- worktree：/Users/example/.herdr/worktrees/repo/card-req-20261102-work",
       ),
   );
   const log = store.readLog("REQ-20261102-work");
@@ -1046,13 +1046,13 @@ test("card policy shows which projects are opted in to auto-pick, with the repo,
   const policy = {
     default: "L0" as const,
     projects: { "local:Foo": "L2" as const },
-    autopick: { "local:Foo": "/Users/jon/git_wk/Foo" },
+    autopick: { "local:Foo": "/Users/example/git_wk/Foo" },
     autopickLead: "codex" as const,
   };
   const { run } = setup({ policy: () => loadedPolicy("loaded", policy) });
   const text = await run("policy");
   assert.match(text, /自動撿卡（Lead：codex；一次一張/);
-  assert.match(text, /- local:Foo → \/Users\/jon\/git_wk\/Foo（L2）/);
+  assert.match(text, /- local:Foo → \/Users\/example\/git_wk\/Foo（L2）/);
 
   const plain = setup({ policy: () => loadedPolicy("loaded") });
   assert.doesNotMatch(await plain.run("policy"), /自動撿卡/);
@@ -1079,7 +1079,7 @@ const prOutcome = {
   base: "main",
   branch: "card/REQ-20261102-work",
   repo: "jon888465/Herdr_Discord_Bridge",
-  repoPath: "/Users/jon/git_wk/Herdr_Discord_Bridge",
+  repoPath: "/Users/example/git_wk/Herdr_Discord_Bridge",
   sensitivePaths: [] as string[] | null,
 };
 

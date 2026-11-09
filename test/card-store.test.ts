@@ -877,7 +877,7 @@ import type { ProjectInfo } from "../src/card-projects.js";
 
 const fooInfo: ProjectInfo = {
   machine: "local",
-  repoPath: "/Users/jon/git_wk/Foo",
+  repoPath: "/Users/example/git_wk/Foo",
   branch: "card/REQ-20261101-created",
 };
 
@@ -892,7 +892,7 @@ test("recordProject writes the section, adds the name to projects and bumps upda
   assert.ok(
     read.ok &&
       read.card.body.includes(
-        "## 異動專案\n\n### local:Foo\n\n- 機器：local\n- repo：/Users/jon/git_wk/Foo\n- 分支：card/REQ-20261101-created\n",
+        "## 異動專案\n\n### local:Foo\n\n- 機器：local\n- repo：/Users/example/git_wk/Foo\n- 分支：card/REQ-20261101-created\n",
       ),
   );
   assert.ok(read.ok && read.card.body.startsWith("# 新建立的卡片\n"));

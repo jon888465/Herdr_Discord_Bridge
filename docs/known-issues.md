@@ -56,13 +56,29 @@ Review3 文件修正（2026-11-09，f4）：SPEC 的 PR merge 自動清理段落
 
 ## ISSUE-126：bridge 重啟後進行中的 Discord 串流被靜默丟掉，最後回覆沒有送到 Discord（REQ-20261108-discord-reply-lost）
 
-2026-11-08。狀態：待調查（根因只是假設，尚未修正）。
+更新日期：2026-11-08。狀態：已修正、待驗收。**尚未實機驗證**。
 
-**症狀：**使用者從 Discord 下指令，Agent 在**同一個回合內重啟 bridge**（`scripts/run.sh -r`）後，最後一則回覆沒有出現在 Discord；使用者在手機的 Herdr 畫面看得到它（附圖：`.herdr-discord-bridge/attachments/message-xbhkZw/1.png`，畫面文字有重疊亂碼，像同一段文字被重繪兩次交疊，**與遺失是否相關未確認**）。
+**症狀／預期：**使用者在 Discord 驅動的同一回合內重啟 bridge 後，Herdr 看得到最後回覆、Discord 沒收到。預期續傳失敗須記原因，之後受信任的 Stop 最後回覆仍可補貼到原 thread。
 
-**已確認的事實（讀碼與狀態檔，2026-11-08）：**重啟後 console 只有 `hook Stop … chars=896`（最後回覆的 hook 事件有到），沒有前幾次重啟都有的 `Resuming stream …`；`src/main.ts` 的 `resumeStreams` 在 agent 或進度訊息（`discord.fetchMessage`）抓不到時直接 `store.remove()`，**不寫任何 log**，也不區分「訊息真的被刪」與「Gateway 未就緒等暫時性失敗」；串流被移除後沒有補送機制，`active-streams.json` 之後的 `baselineOutput` 也已含這則回覆，不會當成新內容。
+**原始證據（2026-11-08）：**重啟後 console 只有 `hook Stop … chars=896`，沒有 `Resuming stream …`；附圖 `.herdr-discord-bridge/attachments/message-xbhkZw/1.png` 的終端文字重疊與 Discord 遺失是否相關仍未確認。
 
-**未確認：**重啟當下 `fetchMessage` 實際回傳什麼、為什麼。已開卡 `REQ-20261108-discord-reply-lost`：先以假 port 重現，再加 log、暫時性失敗的有限重試與「受信任的最後回覆補送」。在修好前，Agent 若在 Discord 驅動的回合內重啟 bridge，請重啟後再用 `herdr-discord-send` 補送最後結果。
+**測試證實的根因（2026-11-08，假 Herdr／Discord port）：**原 resumeStreams 在 fetchMessage 回 undefined 時靜默刪除記錄，後續 Stop 沒有補送路徑；新增重現測試先得到 0 則而非 1 則的預期失敗。adapter 原本吞掉所有 fetch 錯誤，無法區分確定不存在與暫時故障。**真實重啟當下 fetchMessage 實際回傳 undefined 或拋出什麼、其原因仍未確認**；測試只證實此程式路徑可造成遺失，未證實它就是該次實機事件的成因。
+
+**修正範圍：**src/main.ts 記錄所有不續傳分支的 terminal／pane／原因；undefined 與暫時錯誤最多抓取 3 次、間隔 2000ms（匯出常數、可注入 sleep），Unknown Message／404 不重試。src/discord.ts 保留抓取錯誤，補送沿用分段／長度與禁止 mention 的策略。src/hook-events.ts 提供 Stop 訂閱，啟動時已有的事件也查詢；src/stream-resume.ts 在同一 active-streams.json 保留 pending／claimed。放棄續傳後僅對原 terminal／pane、session（或無 session 時的 pane）匹配且通過既有 hookReplyTrusted、auto 模式的非空最後回覆，新貼「bridge 重啟後補送」到原 thread。送前持久化認領，並行、重複事件與再重啟不重送；無回覆／不可信回覆不送，失敗只記 log、不影響其他串流。授權、allowlist、mention 守門、ISSUE-120 通知均未放寬或修改；未修改 config.json、policy.yml。
+
+**測試（2026-11-08，本機，僅假 port）：**首次 build 因未安裝依賴找不到 tsc，以 `npm ci --ignore-scripts` 安裝後解除。先執行 `npm run build && node --test dist/test/stream-resume-lost-reply.test.js` 得預期 red（0 pass／1 fail）；修正後新增測試 8/8 pass。初版相關檢查命令：`npm run build`；`node --test dist/test/stream-resume-lost-reply.test.js dist/test/stream-resume.test.js dist/test/response-delivery.test.js dist/test/response-stream.test.js`，43/43 pass、0 fail。涵蓋重試成功／用盡、undefined、Unknown Message／404 不重試、agent 不見與已有串流 log、信任守門、無最後回覆、重複與再重啟、失敗隔離、分段與 allowedMentions；新測試攔截 console.log／warn／error，既有 response-delivery 測試也攔截，避免應用程式 log 污染 stdout。未跑全套 npm test。
+
+**Review 修正（2026-11-08，f1／f2／f3）：**f1 在 Agent 查詢、fetchMessage（成功或拋錯）、重試 sleep 之後重查 activeStreams 與 store 原紀錄所有權，失去所有權就記 terminal／pane／原因並停止，不覆寫新回合；補送在查詢、信任檢查後同樣重查，防止新 final 貼到舊 thread。f2 補送改用一般 final 的 splitFinalMarkdown，保留標註與禁止 mention，驗證長 code fence 平衡與連續 emoji surrogate pair 完整。f3 清除到期紀錄時記 terminal／pane／「紀錄逾期」，原 24 小時邊界不變。三項均先新增失敗測試：f1 為 43 pass／4 fail，f2 為 47 pass／2 fail，f3 為 49 pass／1 fail；修正後使用上述相同 build 與四檔 node --test 命令，最終 50/50 pass、0 fail（新增檔共 15 項），無應用程式 stdout。過程中一次 build 因所有權檢查誤插位置出現 TS2304／TS1107，已移至正確位置，最終 build 通過。尚未實機驗證，實際 fetchMessage 原因仍未確認。
+
+**第 2 輪 review 修正（2026-11-09，F2，由 Lead 接手，因 fixer 沒有產出）：**根因（已確認）：補送嚴格比對 `sessionKey`，但它只在送出 prompt 時寫入；`streamAgent` 合法接受「回合中首次登記 session」或「同回合新建 session」時沒有同步，重啟後的可信 Stop 會被永久拒絕；沒有該欄位的舊紀錄也會拒絕有 session 的 Agent。修正：`StreamResumeStore.updateSession` 在 `streamAgent` 兩個合法轉移點同步並持久化；回合開始時沒有 session 記成空字串（與「欄位不存在＝舊版紀錄」區分）；舊版紀錄無從比對，維持 #170 之前的行為（只靠 Stop 事件的 session 與 startedAt 篩選）。同回合轉移之外的 session 變更仍拒絕補送。測試（2026-11-09，本機，假 port）：`node --test dist/test/stream-resume-lost-reply.test.js` 20/20 pass；新增 4 項（updateSession 持久化、首次登記補送、舊紀錄、`streamAgent` 實際寫入）；暫時停用同步後 `streamAgent` 那項轉紅、還原後轉綠。全套與實機尚未驗證。
+
+**第 3 輪 review 修正（2026-11-09，F3）：**根因（已確認）：同步只發生在 `streamAgent`；回合開始時沒有 session、停機或抓取重試期間才首次登記 session、且抓取最終失敗時，沒有任何程式會同步，pending 紀錄永遠拒絕可信 Stop。修正：`relayRecoveredStreams` 自己辨識合法轉移——回合開始時無 session 而現在首次登記，或 codex／agy／pi 在回合開始後才建立新 session（與 `streamAgent` 同一套 `sessionCreatedSince` 判斷）——記 log、持久化新 session 後補送；其他 session 變更（例如 claude 換 session）仍拒絕。測試（2026-11-09，本機，假 port）：`node --test dist/test/stream-resume-lost-reply.test.js` 20/20 pass；原「手動 updateSession 後才補送」的測試改成不經 `streamAgent` 同步、直接由補送路徑辨識首次登記並持久化。全套與實機尚未驗證。
+
+**已知限制（2026-11-09，第 5 輪 review F4，使用者決定不在本 PR 處理）：**`relayRecoveredStreams` 查詢 Herdr 拋錯（暫時故障）時該筆直接結束，沒有重試；之後只有 bridge 啟動或別的 Stop 事件才會再觸發補送，所以若那是唯一的最後 Stop 又恰逢查詢故障，pending 回覆不會送出。第 5 輪 review 對 7 項驗收條件皆為通過，F2、F3 已不再被提出。下一步：另開卡為補送加有限次、可注入計時的重試與「無後續 Stop」測試。
+
+**實機結果（2026-11-09，本機，bridge 以 main `367b552`〔含 #170〕重啟後）：**使用者從 Discord 對 `w1:p1` 傳「跑 sleep 60 然後回答 ok」，進度訊息出現後重啟 bridge。console 記 `Resuming stream terminal=… pane=w1:p1`（一般續傳，進度訊息抓得到），回答送出後收到 `hook Stop`、`active-streams.json` 清空，沒有 `Stream not resumed`／`not recovered`；使用者確認 Discord 收到最後回覆、只有一則。這筆紀錄由舊 bridge 寫入、沒有 `sessionKey`，也順帶走過舊版紀錄路徑。**尚未實機驗證：**ISSUE-126 原本的失敗情境（重啟時進度訊息抓不到，走「bridge 重啟後補送」）沒有被製造出來，補送路徑、重試用盡與 session 轉移仍只有假 port 測試；實際 `fetchMessage` 當時的回傳也仍未確認。因此維持「已修正、待驗收」，不標已驗收。下一步：製造進度訊息抓不到的情境（例如回合中刪掉進度訊息再重啟）驗補送路徑。
+
+**限制／下一步：**尚未實機驗證 Discord／Herdr；原始碼與 build 已完成，執行中的 bridge 未部署、未重啟，交 Lead 安排實機重啟續傳／補送驗收。送前認領後若當機或補送失敗（含部分送出），為避免重複不自動再送；寫盤失敗不送。紀錄沿用 24 小時有效期，新回合取代同 terminal 的舊紀錄。bridge 停機期間未收到的 hook 不會憑空恢復；舊版本已刪除的記錄與既有遺失訊息無法追溯補送。未 commit、未 push，未連真實 Discord／GitHub，未執行 herdr 指令。
 
 ## ISSUE-125：codex Worker 反覆停在 `npm test` 的權限提示逾時失敗，改為 helper 暫時最大權限（需提醒：目前仍在 VM）
 
@@ -2555,7 +2571,7 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 ### live 驗收紀錄
 
-**2026-11-03 live 驗收：主流程與清理通過。** 環境：本機 macOS，main `fe8ee56`（PR #36），`scripts/run.sh -r` 重新編譯並重啟 bridge；目標是拋棄式 repo `/Users/jon/tmp/wt-accept-repo`（一個 commit），驗收卡片 `REQ-20261103-wt-accept`。使用者操作 Discord 並貼上終端機截圖（Agent 已讀取）；**使用者沒有貼回覆原文**，以下由 Agent 事後從 bridge 狀態檔、卡片檔、Herdr 與 git 取得證據。
+**2026-11-03 live 驗收：主流程與清理通過。** 環境：本機 macOS，main `fe8ee56`（PR #36），`scripts/run.sh -r` 重新編譯並重啟 bridge；目標是拋棄式 repo `~/tmp/wt-accept-repo`（一個 commit），驗收卡片 `REQ-20261103-wt-accept`。使用者操作 Discord 並貼上終端機截圖（Agent 已讀取）；**使用者沒有貼回覆原文**，以下由 Agent 事後從 bridge 狀態檔、卡片檔、Herdr 與 git 取得證據。
 
 - **`card assign --worktree`（使用者在 Discord 執行）：** 卡片檔有 `## 異動專案`（repo、分支 `card/REQ-20261103-wt-accept`、worktree 路徑 `~/.herdr/worktrees/wt-accept-repo/card-req-20261103-wt-accept`、base `03364e63f79f`）與紀錄 `worktree_created`（01:46:12Z）、`assigned`、`started`（同秒）、`completed`（01:46:22Z）；狀態 `done`。索引 `card-worktrees.json` 有該卡（workspace `w14`、來源 `w13`）。`git worktree list` 與分支都存在。截圖顯示 Lead 收到的是新 worktree workspace 裡的 Agent 提示（`<<<CARD_DATA>>>` 內容，回覆「收到」）。
 - **Agent 沒有被信任提示擋住**：`worktree_created` 與 `started` 同一秒，表示 Agent 當下已是 idle，與先前拋棄式 repo 實測的 `blocked` 不同。**原因未確認**（可能 `~/.herdr/worktrees` 底下已被信任）。因此「blocked 時停下並說明」的實機路徑**沒有被這次驗收涵蓋**（只有自動化測試）。
@@ -2630,7 +2646,7 @@ B'. **補測：刪卡後 `team cancel`（通過）**（`REQ-20261102-del-cancel2
 
 **2026-11-03 live 驗收：通過。** 環境：本機 macOS，main `c893fd1`（PR #39），`scripts/run.sh -r` 重啟 bridge。以下全部由 Agent 在 bridge console 輸入並觀察；Discord 端沒有操作。使用者明確授權（2026-11-03）Agent 在設定目錄建立驗收用的 `policy.yml`、驗完刪除；已刪除，`card policy` 回到「檔案不存在」。
 
-- **實際路徑：** bridge 以 Herdr plugin 執行，`card policy` 印出的路徑是 `/Users/jon/.config/herdr/plugins/config/herdr-discord-bridge/policy.yml`（與 `config.json` 同目錄），**不是** SPEC 原本寫的預設 `~/.config/herdr-discord-bridge/policy.yml`（那是環境變數沒設時的後備路徑）。已修正 SPEC 與 README。
+- **實際路徑：** bridge 以 Herdr plugin 執行，`card policy` 印出的路徑是 `~/.config/herdr/plugins/config/herdr-discord-bridge/policy.yml`（與 `config.json` 同目錄），**不是** SPEC 原本寫的預設 `~/.config/herdr-discord-bridge/policy.yml`（那是環境變數沒設時的後備路徑）。已修正 SPEC 與 README。
 - **沒有檔案：** `card policy` →「專案政策檔不存在…所有專案都是 L0（不 push）」，預設等級 L0。
 - **合法檔案（權限 600，`local:Herdr_Discord_Bridge: L1`、`local:wt-accept-repo: L2`）：** 「專案政策已載入」，列出預設 L0 與兩個專案的等級；`card policy local:wt-accept-repo` → `L2`；`card policy local:Unlisted` →「L0（沒列出，用預設等級）」。
 - **不合法（`default: L3`）：** 「專案政策檔不合法」，訊息為 `line 2: invalid level for "default"…`，並說明已改用安全預設（全部 L0）；`card policy local:wt-accept-repo` → `L0（沒列出，用預設等級）；政策檔有問題，目前用安全預設（全部 L0）`——即使該專案在檔案中原本寫 L2，也沒有被採用。
@@ -3397,8 +3413,8 @@ live 驗收（2026-11-04，第 3 輪，bridge 載入 main `57a90d9`，codex-cli 
 - **這證明：** 修正沒有弄壞 codex 的正常串流（退回 parser 仍正確回覆）；hook 事件確實帶錯 pane。**這沒證明：** 「hook 可信時仍被採用」（沒有任何 live codex pane 的 session 對得上，無法驗）；「`w4:p1` 不會貼到別人的回覆」（`w4:p1` 當時不是 codex）。
 
 **`w4:p1` 實機驗收（2026-11-05，本機 macOS，bridge 載入 main `2e729fb`，使用者同意在 `w4:p1` 啟動 codex）：**
-1. 在 `w4:p1`（`python_test`）啟動 codex（`codex -a on-request -s read-only`）：它自己的 session `01a1aa56-…`，rollout 工作目錄 `/Users/jon/git_wk/python_test` = pane 工作目錄 → `hookReplyTrusted = true`（hook 可信時被採用的對照組）。
-2. 在另一個 workspace（本 repo）新開 codex 並送一個提問：`w4:p1` 的 `agent_session` 被覆蓋成 `01a1aa57-…`，其 rollout 工作目錄是 `/Users/jon/git_wk/Herdr_Discord_Bridge`，≠ `w4:p1` 的 `python_test` → `hookReplyTrusted = false`（**重現出 ISSUE-088／090 的錯位狀態**）。
+1. 在 `w4:p1`（`python_test`）啟動 codex（`codex -a on-request -s read-only`）：它自己的 session `01a1aa56-…`，rollout 工作目錄 `~/git_wk/python_test` = pane 工作目錄 → `hookReplyTrusted = true`（hook 可信時被採用的對照組）。
+2. 在另一個 workspace（本 repo）新開 codex 並送一個提問：`w4:p1` 的 `agent_session` 被覆蓋成 `01a1aa57-…`，其 rollout 工作目錄是 `~/git_wk/Herdr_Discord_Bridge`，≠ `w4:p1` 的 `python_test` → `hookReplyTrusted = false`（**重現出 ISSUE-088／090 的錯位狀態**）。
 3. 用 bridge console（`wk use w4`、`agent use w4:p1`）對 `w4:p1` 送「只回覆 w4-own-reply」，並在 1 秒後讓另一個 codex 回「foreign-2」。console 出現 `hook Stop session=01a1aa57 pane=w4:p1 chars=9`（別人的回覆，剛好等於 `w4:p1` 被覆蓋後的 session）與 `hook Stop session=01a1aa56 pane=w4:p1 chars=102`（`w4:p1` 自己的），最後**貼出的是 `w4-own-reply`**。修正前，`streamAgent` 會對 `w4:p1` 採用 session `01a1aa57` 的 hook 訊息（`foreign-2`），這就是隱患；修正後該訊息被忽略、改走畫面 parser，回覆正確。
 - 附帶發現：我用 `herdr pane run` 在 `w4:p1` 輸入 `codex -a on-request -s read-only` 後，codex 的畫面上第一則使用者訊息就是這串指令文字，它因此自己做了一次網路搜尋（唯讀沙箱、無檔案變更）後回到 idle。**原因未確認**（推測是我輸入時前景已有 codex 在接收輸入；我事前讀到的畫面是 shell 提示字元，可能是過時的）。屬我的操作疏失，已告知使用者；沒有造成設定或檔案變更。
 - 收尾：關掉我開的測試 workspace，路由切回 `w1:p1`；`w4:p1` 的 codex 依使用者要求保持執行。
@@ -3874,7 +3890,7 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 更新日期：2026-11-08。狀態：已驗收（選項 (b)，使用者 2026-11-07 明確決定的預先授權）；**2026-11-08 已做一次實機驗證（見下方「實機驗證」），使用者同日驗收通過（狀態：已驗收）**；先前：待決定（已知限制，靠使用者手動確認）。
 
-**追加（使用者 2026-11-08 要求，已實作、尚未實機驗證）：**查 agy usage 時，`agent start agy` 在 `/Users/jon/git_wk`（不是卡片 worktree）啟動，停在信任提示（Antigravity CLI 不繼承上層目錄的信任，家目錄 `/Users/jon` 已在清單內也一樣）。使用者先要求手動把 `/Users/jon/git_wk` 加入 `trustedWorkspaces`（備份 `agy-settings-pre-gitwk-20261108.json`，之後 agy 啟動無提示），再要求 bridge 的自動預先授權也涵蓋此目錄。做法：`config.json` 新增 `agyTrustedDirectories`（絕對路徑陣列，預設空，設定在不進 git 的使用者 `config.json`）；本機 agy 的 cwd 正好等於其中一個正規路徑時（卡片流程與 console／Discord `agent start` 都適用；`agent start` 對卡片 worktree 與其他 `--cwd` 仍不預先授權），bridge 缺才補、不自動移除、沒有所有權紀錄；不信任上層／子目錄／symlink／`/`／家目錄／相對路徑／不存在的目錄，遠端 agy 與其他 CLI 不適用，卡片 worktree 的授權與清理不變。測試（2026-11-08）：`test/agy-worktree-trust.test.ts` 新增 2 項；bridge 載入此變更後的實機啟動**尚未驗證**。這是比「只信任自己建立的卡片 worktree」更大的授權範圍，由使用者明列在 config 控制。
+**追加（使用者 2026-11-08 要求，已實作、尚未實機驗證）：**查 agy usage 時，`agent start agy` 在 `~/git_wk`（不是卡片 worktree）啟動，停在信任提示（Antigravity CLI 不繼承上層目錄的信任，家目錄 `~` 已在清單內也一樣）。使用者先要求手動把 `~/git_wk` 加入 `trustedWorkspaces`（備份 `agy-settings-pre-gitwk-20261108.json`，之後 agy 啟動無提示），再要求 bridge 的自動預先授權也涵蓋此目錄。做法：`config.json` 新增 `agyTrustedDirectories`（絕對路徑陣列，預設空，設定在不進 git 的使用者 `config.json`）；本機 agy 的 cwd 正好等於其中一個正規路徑時（卡片流程與 console／Discord `agent start` 都適用；`agent start` 對卡片 worktree 與其他 `--cwd` 仍不預先授權），bridge 缺才補、不自動移除、沒有所有權紀錄；不信任上層／子目錄／symlink／`/`／家目錄／相對路徑／不存在的目錄，遠端 agy 與其他 CLI 不適用，卡片 worktree 的授權與清理不變。測試（2026-11-08）：`test/agy-worktree-trust.test.ts` 新增 3 項（含 `agent start` 路徑）。**實機（2026-11-08，本機，bridge 以 main `c3f8fcd` 重啟後）：**第一版（PR #175）實測失敗——console `agent start agy`（含 `--cwd`）仍停在信任提示、設定檔沒變，**根因（已確認）：**`agent start` 一律 `skipWorkspaceTrust: true`（為了不信任任意 `--cwd`），新增的明列目錄檢查沒被呼叫；PR #176 讓 `agent start` 只走明列目錄那一段。修正後把設定檔暫時還原成不含該目錄的備份，再 `agent start agy`：bridge 記 `agy trusted directory added`、設定檔多一筆、agy 啟動沒有信任提示（pane `w3:p9`）。**尚未驗證：**重複啟動不重複（僅單元測試）、遠端 agy。這是比「只信任自己建立的卡片 worktree」更大的授權範圍，由使用者明列在 config 控制。
 
 使用者可見症狀：agy 驗證卡 `REQ-20261106-agy-verify` 第一次執行時，Lead 的計畫正確（`implement` 給 `profile:agy`），但 agy pane `w3X:p2` 停在 Antigravity CLI 的選單 `Do you trust the contents of this project? > Yes, I trust this folder / No, exit`。bridge 的 `waitUntilReady` 等約 30 秒後回報 `started Agent does not match requested profile/workspace or is not ready`（09:44:19Z），implement 失敗，review、verify 因依賴它也失敗，task 在 09:44:31Z 失敗。訊息沒有提到是信任提示，也沒有指出是哪個 pane。
 
@@ -3882,7 +3898,7 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 重現／環境：2026-11-06，本機 macOS，Antigravity CLI 1.4.12；每張卡的 worktree 都是新資料夾（`~/.herdr/worktrees/<repo>/card-<id>`）。
 
-已確認根因：agy 的信任清單 `~/.gemini/antigravity-cli/settings.json` 的 `trustedWorkspaces` **只比對完整路徑，不含子資料夾**：清單裡雖然已有上層 `/Users/jon/.herdr/worktrees/Herdr_Discord_Bridge`，仍然會詢問；過去 7 張卡的 worktree 也都是各自一條。因此每張卡的 worktree 對 agy 都要信任一次。Claude 不受影響，是因為它信任了上層的 `git_wk`。
+已確認根因：agy 的信任清單 `~/.gemini/antigravity-cli/settings.json` 的 `trustedWorkspaces` **只比對完整路徑，不含子資料夾**：清單裡雖然已有上層 `~/.herdr/worktrees/Herdr_Discord_Bridge`，仍然會詢問；過去 7 張卡的 worktree 也都是各自一條。因此每張卡的 worktree 對 agy 都要信任一次。Claude 不受影響，是因為它信任了上層的 `git_wk`。
 
 處理：使用者在 pane 確認「Yes, I trust this folder」（我依使用者明確授權送出 Enter），agy 把該路徑寫進 `trustedWorkspaces`。清理（`card cleanup`、刪分支、關 workspace）後重跑，同一張卡的 worktree 路徑固定，已信任過所以第二次沒有再問；重跑成功，見 ISSUE-107 的實機證據。
 
