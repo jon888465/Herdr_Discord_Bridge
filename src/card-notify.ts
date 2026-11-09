@@ -62,9 +62,17 @@ export function notificationReason(event: LogEntry): string {
     return "等待逾時";
   if (/Lead「[^」]+」(不在政策候選清單內|尚未開放)/.test(event.text))
     return "Lead 不可用";
-  if (/敏感|sensitive/.test(event.text)) return "敏感路徑未滿足";
+  // ISSUE-133：autopick 因敏感路徑停下時，原因文字常帶著 review／head 字樣（loop 輸出的摘要），
+  // 不能再標成 review、版本條件；只限這個事件，其他事件的分類維持原本（可同時命中多類）。
+  if (
+    event.event === "failed" &&
+    event.text.includes("autopick_stopped") &&
+    /敏感|sensitive/.test(event.text)
+  )
+    return "敏感路徑未滿足";
   const categories: string[] = [];
   for (const [pattern, label] of [
+    [/敏感|sensitive/, "敏感路徑"],
     [/政策|L[012]/, "專案政策"],
     [/CI|checks/, "CI 條件"],
     [/review|finding/, "review 條件"],

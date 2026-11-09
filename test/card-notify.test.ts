@@ -394,16 +394,12 @@ test("ISSUE-135 Lead rejection notices use Lead-specific classification", async 
   }
 });
 
-test("sensitive-path stop notices do not add review or version classifications", (t) => {
-  for (const [n, text] of [
-    ["merge", "card merge 拒絕：這個 PR 動到敏感路徑：src/policy.ts"],
+test("an autopick_stopped sensitive-path stop is not labelled with review or version conditions", (t) => {
+  for (const [n, reason] of [
+    ["merge", "loop：card merge 拒絕：這個 PR 動到敏感路徑：src/policy.ts"],
     [
       "merge-with-review-head",
       "loop：第 2 輪 review pass（head e1a3174b2a24），card merge 拒絕：這個 PR 動到敏感路徑：.github/workflows/review.yml",
-    ],
-    [
-      "fix",
-      "修正動到敏感路徑：src/policy.ts。新 commit 留在 worktree、沒有 push，請人檢查後再 `card pr`",
     ],
   ]) {
     const s = setup(t);
@@ -411,11 +407,40 @@ test("sensitive-path stop notices do not add review or version classifications",
       event: "failed",
       eventId: `sensitive-${n}`,
       time: s.deps.now(),
-      text,
+      text: `失敗：autopick_stopped；原因：${reason}`,
     };
     assert.equal(notificationReason(event), "敏感路徑未滿足");
-    assert.ok(!notificationReason(event).includes("review 條件"));
-    assert.ok(!notificationReason(event).includes("版本條件"));
     s.store.appendLog(id, [event]);
   }
+});
+
+test("sensitive wording in other events keeps the existing multi-category classification", (t) => {
+  const s = setup(t);
+  const make = (event: string, text: string) => ({
+    event,
+    eventId: `other-${event}-${text.length}`,
+    time: s.deps.now(),
+    text,
+  });
+  // 既有行為：不是 autopick_stopped 的事件照舊可以同時命中多個類別，標題含各自的類別。
+  assert.equal(
+    notificationReason(
+      make(
+        "failed",
+        "修正動到敏感路徑：src/policy.ts。新 commit 留在 worktree",
+      ),
+    ),
+    "敏感路徑、版本條件未滿足",
+  );
+  assert.equal(
+    notificationReason(make("merge_blocked", "敏感路徑與 CI checks 未滿足")),
+    "敏感路徑、CI 條件未滿足",
+  );
+  assert.equal(
+    notificationReason(
+      make("failed", "失敗：autopick_stopped；原因：CI checks 失敗"),
+    ),
+    "CI 條件未滿足",
+  );
+  s.store.appendLog(id, [make("failed", "x")]);
 });

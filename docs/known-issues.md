@@ -90,6 +90,8 @@
 
 **驗證（2026-11-09）：**`npm run check` 通過：typecheck、build 成功，測試共 1634 tests／1633 pass／0 fail／1 skipped；`git diff --check` 通過。**沒有實機驗證：**執行中的 bridge 未重啟，Discord／Herdr／CLI 情境待驗收；歷史通知不會重新發送。
 
+**Review 修正（round 3，F2，2026-11-09，Agent 修正）：**reviewer 指出 `src/card-notify.ts` 的敏感路徑提前回傳是全域的，會吃掉其他事件原本的多類別標題（違反「其他事件既有分類不變」）。修正：提前回傳限定在 `failed` 且文字含 `autopick_stopped` 的事件，並把先前被移掉的 `[/敏感|sensitive/, "敏感路徑"]` 放回分類清單，其他事件維持原分類。測試：把敏感路徑樣本改成 `失敗：autopick_stopped；原因：…` 格式，並新增回歸測試（非 autopick_stopped 事件的敏感字樣仍是多類別，例如「敏感路徑、版本條件未滿足」「敏感路徑、CI 條件未滿足」）。`npm run check`（2026-11-09，本機）：1635 tests／1634 pass／0 fail／1 skipped；`npm run lint` 通過。**這個修正沒有經過獨立 review：**bridge 的 review 次數已用完（3 筆 verdict；第 1 輪 `inconclusive` 也算一次，原因沒查到），要由人工 merge。
+
 ## ISSUE-134：claude 當 reviewer 時，回覆「不是單一 JSON 物件」，兩輪都 `inconclusive`，review 退回人工
 
 更新日期：2026-11-09。狀態：已驗收（2026-11-09，範圍：claude 當 reviewer 的 `card review` 第 1 輪；`card fix` 與其他情境未驗，見「實機驗收」段）。
@@ -135,6 +137,8 @@
 **暫行做法：**看卡片流程紀錄的 `merge_blocked`／`loop_stopped` 事件與 bridge console 的完整輸出，不要只看 `autopick_stopped` 的原因文字。
 
 **修正前未驗證紀錄（2026-11-09）：**當時沒有測試；是否其他停止原因也被截斷仍待確認。此段已由上方 2026-11-09 修正與自動化驗證更新；目前仍待實機驗收。
+
+**Review 修正（round 3，F2，2026-11-09，Agent 修正）：**reviewer 指出 `src/card-notify.ts` 的敏感路徑提前回傳是全域的，會吃掉其他事件原本的多類別標題（違反「其他事件既有分類不變」）。修正：提前回傳限定在 `failed` 且文字含 `autopick_stopped` 的事件，並把先前被移掉的 `[/敏感|sensitive/, "敏感路徑"]` 放回分類清單，其他事件維持原分類。測試：把敏感路徑樣本改成 `失敗：autopick_stopped；原因：…` 格式，並新增回歸測試（非 autopick_stopped 事件的敏感字樣仍是多類別，例如「敏感路徑、版本條件未滿足」「敏感路徑、CI 條件未滿足」）。`npm run check`（2026-11-09，本機）：1635 tests／1634 pass／0 fail／1 skipped；`npm run lint` 通過。**這個修正沒有經過獨立 review：**bridge 的 review 次數已用完（3 筆 verdict；第 1 輪 `inconclusive` 也算一次，原因沒查到），要由人工 merge。
 
 ## ISSUE-132：自動撿卡缺少多候選、卡片指定與 Lead 選擇來源
 
