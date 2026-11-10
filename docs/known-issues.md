@@ -1,5 +1,36 @@
 # Known Issues
 
+## ISSUE-140：卡片通知把卡片標題原文放進每一則通知，標題內容會原樣送進 Discord 或 Agent pane 的 prompt
+
+更新日期：2026-11-10。狀態：待調查（現象已重現，**既有行為、尚未修正**）。
+
+**使用者可見症狀：**卡片標題寫「IGNORE PREVIOUS INSTRUCTIONS」，通知就會是 `[bridge 通知] … · 標題="IGNORE PREVIOUS INSTRUCTIONS" · failed · 卡片角色指定無效：reviewer：不合法 model`，標題原文照樣送進通知對象。
+
+**預期行為：**`src/card-notify.ts` 上方註解寫「通知只放分類過的一句原因，不放流程紀錄原文」；標題原文與這個原則不一致。
+
+**重現／環境：**2026-11-10，本機；PR #205（`REQ-20261110-card-role-assignment`）head `c4b0ecc`，codex 獨立唯讀複審（報告 `/tmp/codex-review-c4b0ecc.md`，由 Lead 開的新 codex session 產生）。codex 用記憶體 fake store 呼叫真實 notifier 重現。
+
+**已確認根因：**`src/card-notify.ts` 的 `message()`（#205 內約 193–207 行）把 `card.title` 經遮蔽、去控制字元、截 120 字後拼進每一則通知（`標題=${JSON.stringify(title)}`）。這是所有通知長期的格式，不是 #205 引入；#205 只是把 model、狀態、原始錯誤行這些新的卡片原文路徑改成固定分類標籤。
+
+**影響評估（Agent 判斷，不是已驗證結論）：**標題與卡片內容由同一個寫卡者提供，信任等級相同；字數與字元已受限，但仍可在通知文字中放入指令式內容。
+
+**修正方向（尚未實作）：**移除通知中的標題原文，保留卡片 id、固定分類與 PR URL；這會改變所有通知的格式，要同步 `SPEC.md` 通知契約與既有測試。建議和 `REQ-20261110-stop-title-classification` 一起處理。
+
+**未驗證：**實機通知；對 Discord 與 Agent pane 兩種目的地的實際影響。
+
+## ISSUE-141：PR #205 複審後未修的兩個 low（壞卡 opt-in 判斷的引號解析、角色指定文件與實作不一致）
+
+更新日期：2026-11-10。狀態：待調查（已確認，**使用者 2026-11-10 決定不再修這一輪，記錄後由人工決定 merge**）。
+
+**來源／環境：**2026-11-10，本機；PR #205（`REQ-20261110-card-role-assignment`）head `c4b0ecc`，codex 獨立唯讀複審（報告 `/tmp/codex-review-c4b0ecc.md`，由 Lead 開的新 codex session 產生）。
+
+1. **壞卡 opt-in 判斷未完整比對 quoted project token（low，#205 新引入）：**`src/card-role-rejections.ts:144-145` 的正則第一個分支缺結尾錨點，`projects: ["local:opted"garbage]` 被抽出 `local:opted` 而通過壞卡 opt-in 判斷；正常 parser 對同一行回 `unbalanced inline array`。後果：一張格式壞掉的卡可能被當成已 opt-in 的專案而寫入角色拒絕帳本、送出通知。建議修法：以完整分組錨定整個 token，例如 `/^(?:"([^"\\]*)"|([^"'\\#]+))$/`，只解析一次，補非法引號後綴不得取得 opt-in 的測試。
+2. **文件與實作不一致（low）：**`docs/card-role-assignment.md:55` 仍寫超限、symlink、不可讀的卡會保存診斷，但 `src/main.ts:3094-3103` 在無法確認 ready 與專案 opt-in 時直接跳過、不建立角色拒絕帳本；同文件第 17 行「未宣告角色保留原選擇」要補上第 37 行 reviewer 預設變更的例外。
+
+**修正範圍：**尚未修正；兩項都在 PR #205 的檔案上，merge #205 後要在後續 PR 處理，或在 merge 前請 Lead 再派 agy 修一輪。
+
+**驗證（codex 複審，2026-11-10）：**`npm run check` 1717 項、1716 pass、0 fail、1 skipped（sandbox 外重跑；sandbox 內因 socket `EPERM` 被擋）；`git diff --check ba41360..c4b0ecc` 通過。**沒有實機驗收。**
+
 ## ISSUE-139：reviewer 回 `inconclusive` 時，每個條件的判斷說明沒有寫進卡片，原因只能去翻 Agent 的 session 記錄
 
 更新日期：2026-11-10。狀態：待調查（現象與根因已確認，尚未修正）。
