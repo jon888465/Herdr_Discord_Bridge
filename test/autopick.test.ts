@@ -1,8 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   createAutopicker,
   leadRejection,
+  loopStopReason,
   pickNext,
   runAutopick,
   type AutopickJob,
@@ -10,6 +14,8 @@ import {
   type AutopickSteps,
 } from "../src/autopick.js";
 import type { Card } from "../src/card.js";
+import { CardStore } from "../src/card-store.js";
+import { notificationReason } from "../src/card-notify.js";
 import {
   parsePolicy,
   type LoadedPolicy,
@@ -224,6 +230,72 @@ test("an unfinished task, a card that never becomes done, or a loop that did not
   assert.equal(loopReport.lastStep, "loop");
   assert.match(loopReport.reason ?? "", /CI/);
   assert.equal(noMerge.closed(), 0);
+});
+
+test("loop stop reason uses the final cause, retaining inconclusive detail and tail fallback", async () => {
+  const sensitive = `review 完成：REQ-20261109-multi-lead-card-lead · PR #189（head e1a3174b2a24）· 第 1 輪\n判定：changes_requested\n${"舊摘要 ".repeat(30)}\nreview 完成：PR #189 · 第 2 輪\n判定：pass\nloop 停下來了：（共 4 個步驟，停在 merge）。\n原因：card merge 拒絕或失敗：不 merge PR #189（1 項條件不成立）：\n- 這個 PR 動到敏感路徑：src/policy.ts。這類 PR 一律由人 merge，不自動 merge\n卡片的狀態維持在這一步之後：merge`;
+  const detail = "reviewer 的回覆不是單一 JSON 物件";
+  const inconclusive = `review 完成：PR #191 · 第 1 輪\n判定：inconclusive\ninconclusive 的原因：${detail}\nreview 完成：PR #191 · 第 2 輪\n判定：inconclusive\nloop 停下來了：（共 2 個步驟，停在 inconclusive）。\n原因：同一個 head 的 review 連續 2 次 inconclusive（沒有可修的結論），退回人工處理\n卡片的狀態維持在這一步之後：inconclusive`;
+  const longStructured = `${"第 1 輪 review 判定：changes_requested 舊摘要。".repeat(12)}\nloop 停下來了：（共 2 個步驟，停在 inconclusive）。\ninconclusive 的原因：${detail}\n卡片的狀態維持在這一步之後：inconclusive`;
+  const longUnstructured = `${"第 1 輪 review 判定：changes_requested 舊摘要。".repeat(12)}${"早期輸出內容。".repeat(30)}最末停止原因`;
+  assert.match(loopStopReason(sensitive), /敏感路徑：src\/policy\.ts/);
+  const inconclusiveReason = loopStopReason(inconclusive);
+  assert.match(inconclusiveReason, /同一個 head 的 review 連續 2 次 inconclusive/);
+  assert.ok(inconclusiveReason.includes(detail));
+  assert.ok(!inconclusiveReason.includes("第 1 輪"));
+  assert.ok(!inconclusiveReason.endsWith("inconclusive 的原因：rev"));
+  const structuredReason = loopStopReason(longStructured);
+  assert.ok(Array.from(structuredReason).length <= 194);
+  assert.ok(structuredReason.startsWith("loop 停下來了："));
+  assert.ok(structuredReason.includes(detail));
+  assert.ok(!structuredReason.includes("第 1 輪"));
+  const unstructuredReason = loopStopReason(longUnstructured);
+  assert.ok(Array.from(unstructuredReason).length <= 194);
+  assert.ok(unstructuredReason.endsWith("最末停止原因"));
+  assert.ok(!unstructuredReason.includes("第 1 輪"));
+
+  const { steps } = fakeSteps({ loop: async () => ({ merged: false, text: sensitive }) });
+  const report = await runAutopick(job("L2"), steps);
+  assert.equal(report.outcome, "stopped");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "autopick-stop-"));
+  try {
+    const store = new CardStore(dir);
+    const created = store.create(card("REQ-20261105-autopick-stop"));
+    assert.ok(created.ok, JSON.stringify(created));
+    assert.ok(store.recordEvent("REQ-20261105-autopick-stop", { event: "failed", code: "autopick_stopped", reason: `loop：${report.reason}`, time: "2026-11-09T00:00:00Z", eventId: "loop-stop-test" }).ok);
+    const inconclusiveReport = await runAutopick(
+      job("L2"),
+      fakeSteps({ loop: async () => ({ merged: false, text: inconclusive }) }).steps,
+    );
+    assert.ok(inconclusiveReport.reason?.includes(detail));
+    assert.ok(store.recordEvent("REQ-20261105-autopick-stop", { event: "failed", code: "autopick_stopped", reason: `loop：${inconclusiveReport.reason}`, time: "2026-11-09T00:00:01Z", eventId: "loop-inconclusive-test" }).ok);
+    const structuredReport = await runAutopick(
+      job("L2"),
+      fakeSteps({ loop: async () => ({ merged: false, text: longStructured }) }).steps,
+    );
+    assert.ok(store.recordEvent("REQ-20261105-autopick-stop", { event: "failed", code: "autopick_stopped", reason: `loop：${structuredReport.reason}`, time: "2026-11-09T00:00:02Z", eventId: "loop-structured-test" }).ok);
+    const recorded = store.readLog("REQ-20261105-autopick-stop");
+    assert.ok(recorded.ok);
+    const entry = recorded.entries.find((e) => e.eventId === "loop-stop-test");
+    assert.ok(entry);
+    assert.ok(entry.text.length <= 200);
+    assert.match(entry.text, /敏感路徑/);
+    assert.equal(notificationReason(entry), "敏感路徑未滿足");
+    const inconclusiveEntry = recorded.entries.find((e) => e.eventId === "loop-inconclusive-test");
+    assert.ok(inconclusiveEntry);
+    assert.ok(inconclusiveEntry.text.length <= 200);
+    assert.match(inconclusiveEntry.text, /同一個 head 的 review 連續 2 次 inconclusive/);
+    assert.ok(inconclusiveEntry.text.includes(detail));
+    assert.ok(!inconclusiveEntry.text.includes("第 1 輪"));
+    const structuredEntry = recorded.entries.find((e) => e.eventId === "loop-structured-test");
+    assert.ok(structuredEntry);
+    assert.ok(structuredEntry.text.length <= 200);
+    assert.ok(structuredEntry.text.includes("loop 停下來了："));
+    assert.ok(structuredEntry.text.includes(detail));
+    assert.ok(!structuredEntry.text.includes("第 1 輪"));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("if the Lead cannot be started nothing else runs", async () => {

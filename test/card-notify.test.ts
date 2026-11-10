@@ -6,7 +6,7 @@ import path from "node:path";
 import { CardStore } from "../src/card-store.js";
 import { parseCard, type Card } from "../src/card.js";
 import { serializeCard } from "../src/card-serialize.js";
-import { createCardNotifier } from "../src/card-notify.js";
+import { createCardNotifier, notificationReason } from "../src/card-notify.js";
 
 const id = "REQ-20261107-notify",
   url = "https://github.com/owner/repo/pull/42";
@@ -366,4 +366,81 @@ test("ISSUE-124 非逾時失敗的分類不變", async (t) => {
     .map(([, text]) => text)
     .find((text) => text.includes("failed"))!;
   assert.ok(msg.includes("review 條件、等待人工處理未滿足"));
+});
+
+test("ISSUE-135 Lead rejection notices use Lead-specific classification", async (t) => {
+  for (const [n, text] of [
+    ["candidate", "Lead「pi」不在政策候選清單內，不撿這張卡"],
+    [
+      "closed",
+      "Lead「pi」尚未開放，不撿這張卡：config.json 的 agentProfiles 沒有宣告 implementation；改完 config.json 後重啟 bridge",
+    ],
+  ]) {
+    const s = setup(t, "discord:12345");
+    const event = {
+      event: "failed",
+      eventId: `lead-${n}`,
+      time: s.deps.now(),
+      text: `autopick_stopped：${text}`,
+    };
+    assert.equal(notificationReason(event), "Lead 不可用");
+    s.store.appendLog(id, [event]);
+    await s.notifier.tick();
+    const msg = s.discord
+      .map(([, content]) => content)
+      .find((content) => content.includes("autopick_stopped"))!;
+    assert.ok(msg.includes("Lead 不可用"), msg);
+    assert.ok(!msg.includes("專案政策"), msg);
+  }
+});
+
+test("an autopick_stopped sensitive-path stop is not labelled with review or version conditions", (t) => {
+  for (const [n, reason] of [
+    ["merge", "loop：card merge 拒絕：這個 PR 動到敏感路徑：src/policy.ts"],
+    [
+      "merge-with-review-head",
+      "loop：第 2 輪 review pass（head e1a3174b2a24），card merge 拒絕：這個 PR 動到敏感路徑：.github/workflows/review.yml",
+    ],
+  ]) {
+    const s = setup(t);
+    const event = {
+      event: "failed",
+      eventId: `sensitive-${n}`,
+      time: s.deps.now(),
+      text: `失敗：autopick_stopped；原因：${reason}`,
+    };
+    assert.equal(notificationReason(event), "敏感路徑未滿足");
+    s.store.appendLog(id, [event]);
+  }
+});
+
+test("sensitive wording in other events keeps the existing multi-category classification", (t) => {
+  const s = setup(t);
+  const make = (event: string, text: string) => ({
+    event,
+    eventId: `other-${event}-${text.length}`,
+    time: s.deps.now(),
+    text,
+  });
+  // 既有行為：不是 autopick_stopped 的事件照舊可以同時命中多個類別，標題含各自的類別。
+  assert.equal(
+    notificationReason(
+      make(
+        "failed",
+        "修正動到敏感路徑：src/policy.ts。新 commit 留在 worktree",
+      ),
+    ),
+    "敏感路徑、版本條件未滿足",
+  );
+  assert.equal(
+    notificationReason(make("merge_blocked", "敏感路徑與 CI checks 未滿足")),
+    "敏感路徑、CI 條件未滿足",
+  );
+  assert.equal(
+    notificationReason(
+      make("failed", "失敗：autopick_stopped；原因：CI checks 失敗"),
+    ),
+    "CI 條件未滿足",
+  );
+  s.store.appendLog(id, [make("failed", "x")]);
 });
