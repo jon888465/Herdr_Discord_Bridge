@@ -1,3 +1,4 @@
+import { readCardRejection } from "./card-role-rejections.js";
 import {
   roleSummary,
   roleEvent,
@@ -49,6 +50,7 @@ import { CardStore } from "./card-store.js";
 import { redactSecrets } from "./redact.js";
 
 export interface CardCommandDeps {
+  validateRoleCard?: (card: Card) => void;
   /** `<stateDirectory>/cards`。 */
   rootDir: string;
   today: () => string;
@@ -67,7 +69,11 @@ export interface CardCommandDeps {
   /** 以卡片產生的 prompt 啟動 Team 任務；失敗要丟出錯誤（此時卡片不會被改動）。 */
   startTask: (
     prompt: string,
-    options: { coding: boolean; cardId?: string },
+    options: {
+      coding: boolean;
+      cardId?: string;
+      expectedRoles?: Card["roles"];
+    },
   ) => Promise<{
     taskId: string;
     lead: {
@@ -108,6 +114,7 @@ export interface CardCommandDeps {
       agent?: string;
       round: number;
       onRoleAssigned?: (identity: RoleIdentity) => void;
+      recordRoleStrict?: (identity: RoleIdentity) => void | Promise<void>;
     },
   ) => Promise<ReviewRun>;
   /**
@@ -121,6 +128,7 @@ export interface CardCommandDeps {
       round: number;
       findings: OpenFinding[];
       onRoleAssigned?: (identity: RoleIdentity) => void;
+      recordRoleStrict?: (identity: RoleIdentity) => void | Promise<void>;
     },
   ) => Promise<FixFlowResult>;
   /**
@@ -182,7 +190,10 @@ export function updateSkipEventId(
   time: string,
 ): string {
   const pane = paneId.replace(/[^A-Za-z0-9_-]/g, "-");
-  return `update-skip-${kind}-r${round}-${pane}-${time.replace(/\D/g, "").slice(-9)}`.slice(0, 64);
+  return `update-skip-${kind}-r${round}-${pane}-${time.replace(/\D/g, "").slice(-9)}`.slice(
+    0,
+    64,
+  );
 }
 
 function shorten(value: string, limit: number): string {
@@ -265,7 +276,10 @@ function showCard(args: string[], deps: CardCommandDeps): string {
   if (!store || !read) throw new Error(`找不到卡片 ${id}`);
   if (!read.ok) {
     if (read.code === "not_found") throw new Error(`找不到卡片 ${id}`);
-    throw new Error(read.error);
+    const diagnostic = readCardRejection(deps.rootDir, id);
+    throw new Error(
+      `${read.error}${diagnostic ? `\n拒絕診斷：${diagnostic.reason}；通知=${diagnostic.delivery}；嘗試=${diagnostic.attempts}` : ""}`,
+    );
   }
   const { card } = read;
 
@@ -330,7 +344,9 @@ function showCard(args: string[], deps: CardCommandDeps): string {
       );
     }
     if (counts.open > findings.open.length)
-      lines.push(`…還有 ${counts.open - findings.open.length} 筆 open，完整內容請開卡片檔`);
+      lines.push(
+        `…還有 ${counts.open - findings.open.length} 筆 open，完整內容請開卡片檔`,
+      );
   }
 
   const log = store.readLog(id);
@@ -437,6 +453,11 @@ async function assignCard(
       throw new Error(
         `卡片 ${id} 的狀態是 ${card.status}；只有 ready 的卡片可以指派${card.status === "in_progress" ? "（已在進行中）" : ""}`,
       );
+    if (card.roles) {
+      if (!coding) throw new Error("卡片角色指定需要 --coding");
+      if (!deps.validateRoleCard) throw new Error("卡片角色驗證介面不存在");
+      deps.validateRoleCard(card);
+    }
     rememberThread(store, id, deps);
     const built = buildAssignmentPrompt(card);
     if (!built.ok) throw new Error(built.error);
@@ -458,7 +479,11 @@ async function assignCard(
 
     let task: Awaited<ReturnType<CardCommandDeps["startTask"]>>;
     try {
-      task = await deps.startTask(built.prompt, { coding, cardId: id });
+      task = await deps.startTask(built.prompt, {
+        coding,
+        cardId: id,
+        ...(card.roles ? { expectedRoles: structuredClone(card.roles) } : {}),
+      });
     } catch (error) {
       if (!prepared) throw error;
       throw new Error(
@@ -808,6 +833,18 @@ async function reviewStep(
     const run = await deps.reviewPullRequest(read.card, {
       ...(agent !== undefined ? { agent } : {}),
       round,
+      ...(read.card.roles
+        ? {
+            recordRoleStrict: (identity: RoleIdentity) => {
+              const written = store.recordEvent(
+                id,
+                roleEvent(identity, deps.now()),
+              );
+              if (!written.ok)
+                throw new Error(`卡片角色紀錄失敗，未派工：${written.error}`);
+            },
+          }
+        : {}),
       onRoleAssigned: (identity) =>
         recordRoleSafely(() =>
           store.recordEvent(id, roleEvent(identity, deps.now())),
@@ -852,7 +889,12 @@ async function reviewStep(
         for (const batch of parseFindings(latest.card.body))
           for (const item of batch.findings)
             if (item.status === "fixed") {
-              const moved = store.setFindingStatus(id, item.id, "resolved", today);
+              const moved = store.setFindingStatus(
+                id,
+                item.id,
+                "resolved",
+                today,
+              );
               if (moved.ok) resolved.push(item.id);
               else warnings.push(`${item.id} 標為 resolved：${moved.error}`);
             }
@@ -868,7 +910,9 @@ async function reviewStep(
       text: [
         text,
         ...(resolved.length > 0
-          ? [`先前標為 fixed 的 finding 已確認：已標為 resolved：${resolved.join("、")}`]
+          ? [
+              `先前標為 fixed 的 finding 已確認：已標為 resolved：${resolved.join("、")}`,
+            ]
           : []),
         ...warnings.map((warning) => `⚠️ 卡片更新失敗：${warning}`),
       ].join("\n"),
@@ -933,6 +977,18 @@ async function fixStep(
     const result = await deps.fixCard(read.card, {
       ...(agent !== undefined ? { agent } : {}),
       round: check.reviewRound,
+      ...(read.card.roles
+        ? {
+            recordRoleStrict: (identity: RoleIdentity) => {
+              const written = store.recordEvent(
+                id,
+                roleEvent(identity, deps.now()),
+              );
+              if (!written.ok)
+                throw new Error(`卡片角色紀錄失敗，未派工：${written.error}`);
+            },
+          }
+        : {}),
       onRoleAssigned: (identity) =>
         recordRoleSafely(() =>
           store.recordEvent(id, roleEvent(identity, deps.now())),
@@ -997,9 +1053,10 @@ async function fixStep(
     );
     return {
       kind: "fixed",
-      text: [text, ...warnings.map((warning) => `⚠️ 卡片更新失敗：${warning}`)].join(
-        "\n",
-      ),
+      text: [
+        text,
+        ...warnings.map((warning) => `⚠️ 卡片更新失敗：${warning}`),
+      ].join("\n"),
       sensitivePaths: outcome.sensitivePaths,
     };
   }
@@ -1026,7 +1083,9 @@ async function loopCardCommand(
     const target = args[1];
     if (!isCardId(target)) throw new Error(`${target} 不是合法的卡片 id`);
     if (!reviewing.has(target))
-      throw new Error(`卡片 ${target} 沒有在跑的 review、修正或 loop（沒有在跑）`);
+      throw new Error(
+        `卡片 ${target} 沒有在跑的 review、修正或 loop（沒有在跑）`,
+      );
     loopStops.add(target);
     return `已要求停止 ${target} 的 loop：進行中的步驟會先做完，之後不再往下。`;
   }

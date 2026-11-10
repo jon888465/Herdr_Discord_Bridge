@@ -26,6 +26,53 @@ export interface NotifyDeps {
   log(text: string): void;
 }
 
+/** Shared by normal ledger notifications and malformed-card diagnostics. */
+export interface NotificationPanePort {
+  listAgents(): Promise<AgentRecord[]>;
+  readAgent(id: string, source: "visible", lines: number): Promise<string>;
+}
+export async function readNotificationPane(
+  port: NotificationPanePort,
+  id: string,
+): Promise<AgentRecord | undefined> {
+  const pane = (await port.listAgents()).find((p) => p.pane_id === id);
+  if (!pane || !["idle", "done"].includes(pane.agent_status)) return pane;
+  const screen = await port.readAgent(id, "visible", 80);
+  if (
+    /trust|permission|approval|allow once|skip until next version|Do you want|是否允許|信任|選擇.*選項/i.test(
+      screen,
+    )
+  )
+    return { ...pane, agent_status: "blocked" };
+  // Reading the screen is asynchronous: never return an identity that changed meanwhile.
+  const current = (await port.listAgents()).find((p) => p.pane_id === id);
+  if (
+    !current ||
+    current.terminal_id !== pane.terminal_id ||
+    current.agent !== pane.agent
+  )
+    return undefined;
+  return current;
+}
+export async function assertNotificationTargetReady(
+  port: NotificationPanePort,
+  target: { pane: string; terminal: string; agent: string },
+): Promise<void> {
+  for (let check = 0; check < 2; check++) {
+    const pane = await readNotificationPane(port, target.pane);
+    if (
+      !pane ||
+      pane.pane_id !== target.pane ||
+      pane.terminal_id !== target.terminal ||
+      pane.agent !== target.agent ||
+      !["idle", "done"].includes(pane.agent_status)
+    )
+      throw new Error(
+        "notification target unavailable, replaced or blocked; retry later",
+      );
+  }
+}
+
 const EVENTS = new Set([
   "autopick_picked",
   "pr_opened",
@@ -43,6 +90,8 @@ const MAX_DISCORD_ATTEMPTS = 3;
 
 /** 通知只放分類過的一句原因，不放流程紀錄原文（可能含卡片內容或 finding 全文）。 */
 export function notificationReason(event: LogEntry): string {
+  if (event.event === "failed" && event.text.includes("卡片角色指定無效："))
+    return event.text.slice(event.text.indexOf("卡片角色指定無效："));
   if (event.event === "review_verdict")
     return (
       /changes_requested|inconclusive|pass/.exec(event.text)?.[0] ??

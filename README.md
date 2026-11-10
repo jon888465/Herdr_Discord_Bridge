@@ -383,3 +383,32 @@ Remote Agents use the parser unless the machine sets `hookSocket` (an absolute p
 Card role history (2026-11-08, ISSUE-127; live acceptance pending): `card show <id>` lists the Lead, each Lead-planned Team assignment id and actual Worker, and reviewer/fixer rounds with agent kind and known model. Machine, profile and task/round facts remain in the ledger. Old cards are not backfilled; absent history displays `沒有角色紀錄`. Duplicate role events are skipped and write failures only log to console. No role summary is added to PR bodies or notifications. Runtime deployment and live bridge verification are pending.
 
 `usage` or `usage <exact-pane-or-profile-id>` (Discord: `/herdr usage`) prints a plain-text usage snapshot for the selected authorized workspace, configured profiles, and unreachable configured machines. It shares `quota status` workspace authorization. All panes, including idle/done, are read passively; no commands or keys are sent. Codex's complete bottom status row (e.g. `5h 35% left · weekly 85% left`) is preserved; unsupported/unreadable sources show `unknown` with a reason. Profiles require a safely matching bound session. Columns include machine, target, kind, usage, source and fetch time; fetch time is the screen-read attempt, not provider freshness. No estimates, credentials, quota observations or failover actions. Other CLI passive adapters and real Discord/Herdr/CLI acceptance remain pending (ISSUE-128).
+
+### Card role assignments (source implemented; live acceptance pending)
+
+<!-- prettier-ignore -->
+```yaml
+roles: {implement: "local:claude:sonnet", reviewer: "local:agy", fixer: "local:claude"}
+```
+
+Six roles are supported: implement, diagnose, review, verify, reviewer, fixer.
+Each quoted value is `machine:agent:model`; omitted dimensions retain the existing
+selection/default (`":claude"`, `"::sonnet"`, `"local"`). Cards without `roles`
+keep existing behavior. Cards with roles require `card assign --coding`.
+Models must match an enabled configured profile of the same agent kind; its
+modelFlag/args are used. This is an administrator allowlist, not a provider model
+catalog. New launches reject resume/session binding/model override arguments.
+CLI `--agent` / loop `--fix-agent` cannot conflict with a card agent assignment.
+Each constrained assignment and each review/fix round starts a fresh session.
+
+Machine delivery in this change is declaration, validation and enforced **local**
+execution. Unknown machines are rejected; configured remote machines are also
+rejected before picking with the actual unsupported-machine reason. Cross-machine
+card execution and pi Workers remain unsupported. Invalid declarations retain
+queryable rejection diagnostics; malformed cards use a separate persistent
+`.role-rejections` store, with retrying notifications through strictly validated
+routes. `card show` exposes the reason/delivery status. `role_assigned` records
+machine, agent, known model and per-dimension sources using the bounded v2 format.
+See `docs/card-role-assignment.md` and ISSUE-138 in `docs/known-issues.md` for the
+contract, retry semantics and three live acceptance cards still required after
+merge/restart. Unit tests do not establish live acceptance.

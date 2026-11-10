@@ -806,3 +806,21 @@ Autopick 建立 Lead workspace 後、啟動 Agent 前，把 id 與實際 label �
 一次仍只開一個 Lead、只做一張卡。選定 Lead 啟動失敗就記 autopick_failed，絕不嘗試下一個候選；尚未建立任務的卡仍是 ready，本程序不重試。Task 的 ISSUE-127 `role_assigned` 保留實際 agent 種類，Lead 額外記 `leadSelection=card|policy`，來源在撿卡時凍結，不在執行途中重讀政策推測；手動 card assign 仍使用目前路由的 Lead，不套用此欄位，舊事件不補寫。
 
 PR #189（`88e1ce6`）已於 2026-11-09 merge，並重啟 bridge 載入（`card policy` 顯示政策載入正常）；Discord／Herdr／CLI 實機驗收仍待辦，尤其 agy／pi 的 coding 證據要求不變。
+
+
+### 卡片角色 machine／agent／model（2026-11-10，ISSUE-138，已修正、待驗收）
+
+`roles: {implement: "local:claude:sonnet", reviewer: "local:agy"}` 為一層 inline map；只接受 implement、diagnose、review、verify、reviewer、fixer。每個值是 machine:agent:model，只拆前兩個冒號；省略段落不約束該維度，model 可含冒號。空／重複／未知角色、非字串拒絕；未宣告 roles 時既有行為完全不變。有 roles 的 card assign 必須 --coding；每個已派出的角色都受約束，不能用非 coding assignment／Lead synthesis 繞過。
+
+本卡 machine 範圍由 Lead 決定為「宣告＋驗證＋local 強制執行」。未知 machine 報不存在；已配置 remote 報「卡片流程尚未支援 machine X」，在撿卡前拒絕，不 fallback 到 local；不代表跨機器實際執行已完成。agent／model 必須有同 kind 已開放配置 profile；model 是管理者允許清單，不保證供應商可用。沿用選中 profile 的 modelFlag／args，不猜參數；新流程禁止 resume／session 綁定及 model 覆寫。agy 需 implementation／review opt-in，pi Worker 尚未開放；無宣告卡的 roster 不變。
+
+完整語法、預設、快照與拒絕契約見 docs/card-role-assignment.md。autopick／manual assign 開 workspace／worktree 前驗證所有角色，task 開始凍結約束與候選；review／fix／loop 每輪重新驗證。Lead prompt 帶指定；整份計畫先以 coding.role 核對，不符即 plan_rejected、零 acquire。每個指定 assignment 新 session、不重用不同 model 的 binding，readiness 後及送 prompt 前核對實際身分；未知 model 的既有 session 不能滿足指定。保留 Team codex／agy 既有延後 session 驗證。
+
+card review／fix／loop 的 CLI agent 與卡片指定衝突時開 pane 前拒絕；每輪新 pane、禁止 resume，已知作者同 session 拒絕。無 roles 保留舊 best-effort；有 roles 的 Worker／reviewer／fixer 在送 prompt 前 strict 寫 role_assigned，失敗不送並清理可核對 owned terminal 的 pane。v2 保留舊摘要前綴，以 cr、s、ss、me 編碼 codingRole、source、三維 selectionSources、modelEvidence；assignmentId 由 role alias 還原，不重複印；不印 profileId。完整合法最長值仍≤300字，不提高限制、不截斷 model；hash 納入新 metadata，舊事件不改。事件表示身分已準備，不代表已送 prompt／成功完成。
+
+壞卡不經正常卡片帳本：獨立 `.role-rejections/<id>.json` 持久診斷、card show 可查。只接受可信 filename／唯一嚴格 id、ready、notify 路由；不重寫壞卡，symlink／超限／不可讀不推測路由。寫入失敗掃描重試、通知 pending 續試（含重啟），sent 去重；送達不確定或 sent 寫失敗可重複，無可信路由保存 no_trusted_route。通知保留實際錯誤分類與原因。
+
+實機驗收仍須 merge、重啟後三張測試卡與 pane model 證據，見 ISSUE-138；未完成不得標已驗收。
+
+
+ISSUE-138 r1 修正契約（2026-11-10，仍待實機驗收）：profile.model 省略時允許 CLI 預設的可觀察 model，保留值並標 observed；只有明確配置 model 才要求相等。fresh Worker cleanup 區分派工前失敗／確認完成（可關閉 owned terminal）與執行中 blocked／逾時／送達不明（保留 pane／session，由既有任務停止／清理處理，問題可回覆續接）。每次實際 prompt 嘗試前重新驗 terminal／session／model，包含 agent_not_ready 重試；beforeDispatch 事件仍只一次。角色拒絕只適用 ready 且 autopickFor 政策選用的 eligible 卡；draft／done／未 opt-in 卡不記事件不通知。壞卡 Agent 通知與正常 notifier 共用完整選單檢查，兩次送前核對，且讀畫面後再確認身分／狀態。文件 roles 範例必須是 parser 可讀的單行 inline map，以 prettier-ignore 保護並由回歸測試解析。

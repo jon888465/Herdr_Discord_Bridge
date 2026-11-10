@@ -1,3 +1,9 @@
+import type { RoleCleanupReason } from "./card-role-session.js";
+import {
+  assertRoleMatches,
+  roleMetadata,
+  type RoleSnapshot,
+} from "./card-role-assignment.js";
 import {
   roleIdentity,
   recordRoleSafely,
@@ -114,6 +120,9 @@ export type OrchestrationEvent = {
 };
 
 export interface TeamTaskInput {
+  roleSnapshot?: RoleSnapshot;
+  recordRoleStrict?: (identity: RoleIdentity) => void | Promise<void>;
+  validateRoleActor?: (actor: AgentRecord) => Promise<void>;
   onRoleAssigned?: (identity: RoleIdentity) => void;
   origin?: { guildId: string; channelId: string; threadId?: string };
   taskId: string;
@@ -140,7 +149,12 @@ export interface TeamTaskInput {
   codingHooks?: CodingHooks;
   acquireWorker?: (
     worker: AgentRecord,
-  ) => Promise<{ agent: AgentRecord; continuity: string }>;
+    assignment?: AssignmentPlan["assignments"][number],
+  ) => Promise<{
+    agent: AgentRecord;
+    continuity: string;
+    cleanup?: (reason?: RoleCleanupReason) => Promise<void>;
+  }>;
   /**
    * ISSUE-107：Worker 的回合完成、且回合內驗證過它的 session（例如 agy 處理完第一個 prompt 才被登記）。
    * profile Worker 用它更新 pool 的綁定；codex 的 rollout session 不是 Herdr session，不會呼叫。
@@ -307,6 +321,8 @@ export async function runTeamTask(
     let planRejection = "";
     // Rejections keep the work round, but each planning attempt consumes maxRounds.
     let planningRound = 0;
+    if (input.roleSnapshot && !input.coding)
+      throw new Error("卡片角色指定需要 --coding");
     let gateNotices = 0;
     let gateNotice: string[] = [];
     for (let round = 0; ; round++) {
@@ -369,6 +385,7 @@ export async function runTeamTask(
                 artifactIds: input.codingHooks!.artifactIds(),
               }
             : undefined,
+          input.roleSnapshot,
         );
         if (
           plan.assignments.length > 16 ||
@@ -601,11 +618,14 @@ async function runAssignment(
   // 只有真正進入 Worker 回合（runTeamTurn）之後的逾時才算「回合逾時」；
   // 派工前取得 Worker 的 RPC（例如 agent.list）逾時不是，原樣回報，不套用回合上限與 worktree 提示。
   let inTurn = false;
+  let cleanup: ((reason?: RoleCleanupReason) => Promise<void>) | undefined;
+  let cleanupReason: RoleCleanupReason = "before_dispatch_failure";
   try {
     input.signal?.throwIfAborted();
     const acquired = input.acquireWorker
-      ? await input.acquireWorker(worker)
+      ? await input.acquireWorker(worker, assignment)
       : { agent: worker, continuity: "unknown" };
+    cleanup = acquired.cleanup;
     input.signal?.throwIfAborted();
     worker = acquired.agent;
     if (
@@ -623,13 +643,38 @@ async function runAssignment(
     });
     if (!["idle", "done"].includes(worker.agent_status))
       throw new Error(`Worker is ${worker.agent_status}`);
-    recordRoleSafely(() =>
-      input.onRoleAssigned?.(
-        roleIdentity(workerRole(assignment.id), worker, {
+    if (input.roleSnapshot) {
+      const role = assignment.coding!.role;
+      const constraint = input.roleSnapshot.roles[role];
+      if (constraint) assertRoleMatches(role, constraint, worker);
+      if (!input.recordRoleStrict)
+        throw new Error("卡片角色紀錄介面不存在，未派工");
+      await input.recordRoleStrict({
+        ...roleIdentity(workerRole(assignment.id), worker, {
           taskId: input.taskId,
         }),
-      ),
-    );
+        ...roleMetadata(
+          role,
+          constraint,
+          worker,
+          "lead",
+          worker.modelEvidence === "launch"
+            ? "launch"
+            : worker.model
+              ? "observed"
+              : "unknown",
+        ),
+        assignmentId: assignment.id,
+      });
+    } else
+      recordRoleSafely(() =>
+        input.onRoleAssigned?.(
+          roleIdentity(workerRole(assignment.id), worker, {
+            taskId: input.taskId,
+          }),
+        ),
+      );
+    if (input.roleSnapshot) await input.validateRoleActor?.(worker);
     input.codingHooks?.onAssignmentStart(assignment, worker);
     startedAt = Date.now();
     inTurn = true;
@@ -649,19 +694,38 @@ async function runAssignment(
         beforeComplete: input.beforeTurnComplete,
         hookFinal: input.hookFinal,
         observeSession: input.coding === true || Boolean(input.onWorkerSession),
-        beforeDispatch: () =>
-          emit({
-            type: "turn_dispatched",
-            taskId: input.taskId,
-            agent: worker,
-            phase: "assignment",
-            assignmentId: assignment.id,
-          }),
+        beforePromptAttempt:
+          input.roleSnapshot || cleanup
+            ? async () => {
+                if (input.roleSnapshot) await input.validateRoleActor?.(worker);
+                cleanupReason = "uncertain";
+              }
+            : undefined,
+        beforeDispatch: input.roleSnapshot
+          ? async () => {
+              await input.validateRoleActor?.(worker);
+              emit({
+                type: "turn_dispatched",
+                taskId: input.taskId,
+                agent: worker,
+                phase: "assignment",
+                assignmentId: assignment.id,
+              });
+            }
+          : () =>
+              emit({
+                type: "turn_dispatched",
+                taskId: input.taskId,
+                agent: worker,
+                phase: "assignment",
+                assignmentId: assignment.id,
+              }),
       },
       input.onQuestion
         ? (current) => input.onQuestion!(current, "assignment", assignment.id)
         : undefined,
     );
+    cleanupReason = settled.state === "blocked" ? "blocked" : "completed";
     input.signal?.throwIfAborted();
     emit({
       type: "turn_settled",
@@ -715,6 +779,8 @@ async function runAssignment(
       report: observed,
     };
   } catch (error) {
+    if (inTurn && error instanceof Error && isTurnDeadlineError(error))
+      cleanupReason = "timeout";
     if (input.signal?.aborted) throw error;
     const detail =
       error instanceof Error
@@ -741,6 +807,8 @@ async function runAssignment(
       report: "",
       blocker: detail,
     };
+  } finally {
+    await cleanup?.(cleanupReason);
   }
 }
 
@@ -786,7 +854,9 @@ export function validateAssignmentPlan(
     findingIds: string[];
     artifactIds: string[];
   },
+  roleSnapshot?: RoleSnapshot,
 ): void {
+  if (roleSnapshot && !coding) throw new Error("卡片角色指定需要 coding 計畫");
   const workerPanes = new Set(workers.map((worker) => worker.pane_id));
   const ids = new Set<string>();
   for (const assignment of plan.assignments) {
@@ -799,6 +869,20 @@ export function validateAssignmentPlan(
       throw new Error(
         `Worker ${assignment.workerPaneId} is not in the Team roster`,
       );
+    if (roleSnapshot) {
+      if (!assignment.coding)
+        throw new Error("卡片角色指定不可用非 coding assignment 繞過");
+      const role = assignment.coding.role;
+      const actor = workers.find((w) => w.pane_id === assignment.workerPaneId)!;
+      const c = roleSnapshot.roles[role];
+      if (c) {
+        assertRoleMatches(role, c, actor);
+        if (actor.roleTarget !== role)
+          throw new Error(`角色 ${role} 必須使用該角色列出的新 session target`);
+      }
+      if (actor.roleTarget && actor.roleTarget !== role)
+        throw new Error("不可跨角色使用 role target");
+    }
     if (!assignment.instruction.trim())
       throw new Error(`Assignment ${assignment.id} has no instruction`);
   }
@@ -855,7 +939,7 @@ function planningInstruction(input: TeamTaskInput): string {
   const workers = input.workers
     .map(
       (worker) =>
-        `${worker.pane_id} (${worker.agent || "unknown"}; ${JSON.stringify(worker.profile ?? {})})`,
+        `${worker.pane_id} (${worker.agent || "unknown"}; ${JSON.stringify(input.roleSnapshot ? { model: worker.model, profileId: (worker.profile as { id?: string } | undefined)?.id, machine: worker.machine ?? "local", roleTarget: worker.roleTarget } : (worker.profile ?? {}))})`,
     )
     .join(", ");
   return [
@@ -863,6 +947,12 @@ function planningInstruction(input: TeamTaskInput): string {
     `Task ID: ${input.taskId}`,
     `Human task: ${input.prompt}`,
     `Available Worker panes: ${workers}`,
+    ...(input.roleSnapshot
+      ? [
+          `Bridge-enforced card role constraints: ${JSON.stringify(input.roleSnapshot.roles)}. Every assignment is checked by coding.role, not its id. Use matching role:<role>:<profile> targets for constrained roles. Constraints persist across replanning. Do not bypass by changing roles, non-coding assignments, or doing work in synthesis. Empty plans still require the coding acceptance gate.`,
+          `Role candidates (machine=local, model from frozen profile): ${JSON.stringify(Object.fromEntries(Object.entries(input.roleSnapshot.candidates).map(([role, profiles]) => [role, profiles?.map((p) => ({ id: p.id, kind: p.kind, model: p.model }))])))}`,
+        ]
+      : []),
     "Do not modify files while planning. Return ONLY JSON as the result body, inside the response transport markers.",
     "The JSON object must have an assignments array. Each assignment has id (unique string), workerPaneId (listed Worker target), instruction (concrete subtask), and dependsOn (array of assignment IDs).",
     "Worker targets may be existing panes or profile:<id> entries. Profiles start lazily only when selected. Assign only listed targets; do not invent IDs or assign yourself. Decide roles dynamically; there is no fixed coding/review pipeline.",

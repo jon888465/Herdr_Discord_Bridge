@@ -426,6 +426,11 @@ export class AgentPool {
     this.save();
     return true;
   }
+  /** Card strict-ledger failure releases only this acquisition, never other workers. */
+  releaseProfile(workspace: string, id: string, owner: string): void {
+    const key = `${workspace}/${id}`;
+    if (this.leases.get(key) === owner) this.leases.delete(key);
+  }
   release(owner: string): void {
     for (const [key, lease] of this.leases)
       if (lease === owner) this.leases.delete(key);

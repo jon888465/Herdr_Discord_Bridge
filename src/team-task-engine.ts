@@ -144,6 +144,9 @@ export class TeamTaskEngine {
       ...input,
       lead: structuredClone(input.lead),
       workers: structuredClone(input.workers),
+      ...(input.roleSnapshot
+        ? { roleSnapshot: structuredClone(input.roleSnapshot) }
+        : {}),
     };
     if (input.coding) {
       const cwd = input.lead.foreground_cwd || input.lead.cwd;
@@ -267,26 +270,31 @@ export class TeamTaskEngine {
                   }
                 }
               : undefined,
-            acquireWorker: async (worker) => {
+            acquireWorker: async (worker, assignment) => {
               controller.signal.throwIfAborted();
               const acquired = input.acquireWorker
-                ? await input.acquireWorker(worker)
-                : { agent: worker, continuity: "unknown" };
-              controller.signal.throwIfAborted();
-              const agent = acquired.agent;
-              if (
-                agent.workspace_id !== input.lead.workspace_id ||
-                agent.pane_id === input.lead.pane_id
-              )
-                throw new Error("invalid Worker identity");
-              const prior = workerOwners.get(agent.terminal_id);
-              if (prior && prior !== worker.pane_id)
-                throw new Error(
-                  "multiple roster entries refer to the same Worker session",
-                );
-              this.reserve(input.taskId, agent);
-              workerOwners.set(agent.terminal_id, worker.pane_id);
-              return acquired;
+                ? await input.acquireWorker(worker, assignment)
+                : { agent: worker, continuity: "unknown", cleanup: undefined };
+              try {
+                controller.signal.throwIfAborted();
+                const agent = acquired.agent;
+                if (
+                  agent.workspace_id !== input.lead.workspace_id ||
+                  agent.pane_id === input.lead.pane_id
+                )
+                  throw new Error("invalid Worker identity");
+                const prior = workerOwners.get(agent.terminal_id);
+                if (prior && prior !== worker.pane_id)
+                  throw new Error(
+                    "multiple roster entries refer to the same Worker session",
+                  );
+                this.reserve(input.taskId, agent);
+                workerOwners.set(agent.terminal_id, worker.pane_id);
+                return acquired;
+              } catch (error) {
+                await acquired.cleanup?.("before_dispatch_failure");
+                throw error;
+              }
             },
           },
           this.herdr,

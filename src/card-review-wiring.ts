@@ -1,3 +1,9 @@
+import {
+  preflightRoles,
+  resolveFlowRole,
+  type RoleContext,
+} from "./card-role-assignment.js";
+import { chooseReviewerKind } from "./review-pane.js";
 // `card review` 的前提檢查與組裝（追蹤清單 F5 階段 3d）：把卡片、worktree 索引、PR 索引、任務紀錄、政策、
 // GitHub 與 Herdr 接成一次 `runCardReview`。所有外部東西都由呼叫端注入，所以前提檢查可以單獨測試。
 // 前提不符合就丟出說明原因的錯誤（卡片不動、不開任何 pane）。
@@ -14,6 +20,7 @@ import { levelFor, type LoadedPolicy } from "./policy.js";
 import type { AgentRecord } from "./types.js";
 
 export interface ReviewWiringDeps {
+  roleContext?: RoleContext;
   worktrees: { active(cardId: string): CardWorktree | undefined };
   prs: { forCard(cardId: string): CardPullRequest[] };
   assignments: { forCard(cardId: string): Array<{ taskId: string }> };
@@ -33,6 +40,12 @@ export async function reviewCardPullRequest(
   card: Card,
   options: { agent?: string; round: number },
 ): Promise<ReviewRun> {
+  const snapshot = card.roles
+    ? preflightRoles(
+        card.roles,
+        deps.roleContext ?? { machineIds: [], profiles: [] },
+      )
+    : undefined;
   const entry = deps.worktrees.active(card.id);
   if (!entry)
     throw new Error(
@@ -89,8 +102,25 @@ export async function reviewCardPullRequest(
       agent: live.agent,
       paneId: live.pane_id,
       workspaceId: live.workspace_id,
+      session: live.agent_session,
     },
     worktreePath: entry.path,
+    ...(snapshot?.roles.reviewer
+      ? {
+          launch: resolveFlowRole(
+            snapshot,
+            "reviewer",
+            chooseReviewerKind({ authorKind: live.agent }).ok
+              ? (
+                  chooseReviewerKind({ authorKind: live.agent }) as {
+                    kind: string;
+                  }
+                ).kind
+              : undefined,
+            options.agent,
+          ),
+        }
+      : {}),
     ...(options.agent !== undefined ? { requestedKind: options.agent } : {}),
   });
   return {

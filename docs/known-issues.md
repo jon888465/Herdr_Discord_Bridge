@@ -1,5 +1,47 @@
 # Known Issues
 
+## ISSUE-138：卡片缺少六角色 machine／agent／model 指定與 bridge 強制守門
+
+更新日期：2026-11-10。狀態：已修正、待驗收（原始碼與自動化檢查完成；尚未實機驗收）。卡片：REQ-20261110-card-role-assignment。
+
+**症狀／預期：**舊卡只有 lead 指定；Worker 由 Lead 自選、reviewer／fixer 由臨時 CLI 指定，不能可控驗證角色矩陣。預期六角色可宣告 machine／agent／model，無宣告完全相容，無效指定在撿卡前拒絕且原因正確，Lead 不符派工被擋，流程記實際身分與來源。
+
+**已確認根因（2026-11-10 讀碼）：**Card／serializer 只有 lead；autopick 只驗 Lead；計畫驗證沒有角色約束、acquire 沒 assignment context；model 只有格式／flag 驗證而非同 kind 配置允許清單；CardStore 的正常帳本必須 parse 成功，壞卡被掃描排除；原角色紀錄無六角色／來源 metadata 且只有 best-effort。
+
+**修正範圍：**新增 card-role-assignment／card-role-session／card-role-rejections。roles inline map、同 kind 已開放 profile 及 modelFlag／args；preflight 與 manual assign；凍結候選、Lead prompt、整份計畫與實際 Worker 守門、每 assignment fresh session；review／fix／loop 卡片指定與 CLI 衝突；嚴格送出前角色紀錄與失敗清理；≤300字 v2 來源模板且舊模板／hash不變；壞卡獨立持久診斷、card show 查詢、通知重試。詳見 card-role-assignment.md。
+
+**範圍決定與限制：**Lead 明確決定本卡 machine 交付宣告＋驗證＋local 強制執行。已配置 remote 撿卡前明確拒絕「卡片流程尚未支援 machine X」，跨機器未實作／未驗收；pi Worker 不開放。配置允許 model 不保證供應商可用，保留 CLI 實際錯誤。無可信 notify 不猜路由；通知送達但 sent 寫入失敗可能重複。卡片宣告不等於每個角色已實機通過。
+
+**重現／測試環境：**2026-11-10，本機 macOS、此卡 worktree、fake Herdr ports／暫存卡片與 journal，未呼叫真 Agent、未讀 GitHub。原始 HEAD c0208815175e059b6aec824d1d2a7215993c01a4。初次 typecheck 因尚未安裝依賴找不到 tsc，npm ci --ignore-scripts 後解除；開發階段另修 optional 介面型別錯誤。新增測試曾抓到 role target 的三段 id 被誤判成 remote machine，已加明確 local；測試 fixture 的 session kind 與 Lead plan wire 格式已依既有協定修正，沒有修改任何既有測試。這些早期失敗不作最終通過證據。
+
+**驗證（2026-11-10，階段結果）：**既有未改測試 npm test：1635項／1634 pass／0 fail／1既有 skipped。新增核心與 flow 測試40項／40 pass／0 fail。送出前非同步身分守門接線時，既有 source-wiring 測試曾因 hookFinal 不再是 context 第一欄而失敗；保留原 hookFinal 欄位位置、把新守門放其後後解除，未修改既有測試。
+
+**w1 階段驗證（2026-11-10，本機）：**`npm run typecheck` exit 0；`npm run lint` exit 0（198個 TypeScript 檔）；`npm test` exit 0（含 build），1682項／1681 pass／0 fail／1既有 skipped，約63.5秒。比原套件新增47項，原有 test 檔案一行未改（`git diff --quiet -- test/` exit 0；兩個新測試檔為未追蹤新增）。`git diff --check` exit 0。fresh session 使用建立時 terminal 核對清理；strict 紀錄失敗僅釋放該 owned profile lease，保留既有 binding，不釋放其他 Worker。
+
+### r1 審查修正（2026-11-10，w2；狀態維持已修正、待驗收）
+
+r1 在 w1 通過自動化檢查後發現六項缺口，前一輪測試未涵蓋，保留上方歷史；這不是實機驗收通過後復發。本輪修正範圍：
+
+- r1-omitted-model：profile 未配置 model、actor 回報 CLI 預設 model 時誤拒並關 pane。只在 profile.model 存在時比對，省略時保留觀察值與 observed 證據。
+- r1-blocked-cleanup：fresh Worker finally 無條件關 pane，會丟失 blocked／待回答／逾時／送達不明的現場。新增 cleanup disposition，只有派工前失敗與確認完成可關閉，其他保留 session，既有停止／清理流程負責後續。以 durable question 實際 reply 及原 turn 續接測試確認。
+- r1-retry-identity：身分檢查只在重試迴圈外，agent_not_ready 等待期間換 terminal／session／model 仍可能收到第二次 prompt。新增每次實際嘗試前 hook；beforeDispatch 單次事件不變，Team／review／fix 均接線。
+- r1-ineligible-rejection：roleGate 對 draft／done／未 opt-in 卡也記事件通知。共用 ready＋autopickFor eligible 判定，非 eligible 零拒絕事件、零通知。
+- r1-malformed-notify-gate：壞卡通知缺完整選單檢查與讀畫面後身分／狀態複核。與正常 notifier 共用 gate，完整選單與兩次送前檢查；readAgent 期間替換 terminal／kind 或變忙碌／blocked 不送，保留 pending 重試。
+- r1-invalid-doc-example：主要 roles 範例被格式化為 parser 不支援的多行 map。改單行 inline map；契約與兩語 README 加 prettier-ignore，新增三份文件範例解析測試。
+
+**本輪重現與測試（2026-11-10）：**新增 test/card-role-r1.test.ts，既有測試（含 w1 新增檔）一行不改。先跑 `npm run build && node --test dist/test/card-role-r1.test.js`：6項／2 pass／4 fail，確認省略 model、非 eligible、重試與契約範例四項症狀。修正後第一輪22項／22 pass／0 fail；新增執行中 timeout／uncertain 與各維度重試替換檢查後，targeted 27項／27 pass／0 fail。所有測試均 fake port／暫存 journal，不呼叫真 Agent、不部署。
+
+**w2 最終驗證（2026-11-10，本機）：**`npm run typecheck` exit 0；`npm run lint` exit 0（199個 TypeScript 檔）；`npm test` exit 0（含 build），1709項／1708 pass／0 fail／1既有 skipped，約64.9秒。新增27項 r1 回歸測試；w2 開始時所有既有 test 檔案（含 w1 的兩份新增測試）SHA-256 核對未變。`git diff --check` exit 0；文件範例解析已包含於新測試。未使用 GitHub、未 commit／push／merge、未部署／重啟。狀態仍為已修正、待驗收；三張 merge／重啟後實機卡仍待 Lead 執行。
+
+**部署／未驗項目：**本輪未 commit／push／merge／重啟／部署，執行中的 bridge 尚未載入新版，歷史事件／失敗不補送。build／unit test 不代表 Discord／Herdr／CLI 實機驗收。
+
+**下一步（三張真卡仍待 Lead 在 merge 並重啟新版後執行）：**
+1. 無害一行檔案卡，至少兩角色不同 agent、至少一角色指定 model；保存 role_assigned，另取 pane／啟動紀錄證明實際 model。
+2. 不允許 agent／不合法 model 卡，證明撿卡前拒絕、零工作啟動，通知標題與原因正確。
+3. Lead 故意派出違反指定的計畫，證明 plan_rejected 且零違規 Worker prompt。
+
+每張都補卡 id、日期、環境、role_assigned 原文與結果到本 issue 及 agent-role-matrix；未完成維持已修正、待驗收，失敗則重新開啟，不得標已驗收。
+
 ## ISSUE-137：Lead／Worker 首次 prompt 在 Herdr 登記完成前回 agent_not_ready
 
 更新日期：2026-11-09。狀態：已驗收（2026-11-09，範圍：pi 當 Lead 一次實機成功，見「實機驗收」段；請求 A 已指認為卡片通知；其他 Agent 種類、非 Lead 角色的重試未被觸發也未驗）。

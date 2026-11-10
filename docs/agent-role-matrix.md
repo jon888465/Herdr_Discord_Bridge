@@ -50,7 +50,9 @@
 - reviewer 預設候選 `REVIEWER_KINDS = ["claude", "codex", "agy"]`，**不含 pi**；`--agent pi` 明確指定可以，bridge 只檢查格式（`src/review-pane.ts`）。
 - Lead：四種都被政策接受；agy、pi 要先在 `config.json` 宣告 `implementation`（目前兩者都已宣告，pi 是 2026-11-09 為測試加的）。
 
-**B. 設計缺口：**
+**B. 設計缺口（2026-11-10 更新）：**
+- REQ-20261110-card-role-assignment 已有原始碼實作（ISSUE-138，待驗收）：roles inline map 指定六角色 machine／agent／model、計畫與實際派工守門，reviewer／fixer 同樣套用；語法與限制見 card-role-assignment.md。無宣告保留原行為。machine 本卡只強制 local，已配置 remote 撿前明確拒絕；跨機器未支援，pi Worker 未開放。本次未部署／重啟／跑實機卡，不新增任何矩陣成功格。
+- 以下為此功能之前的缺口背景；不再表示原始碼完全沒有指定機制：
 - implement／diagnose／verify／review（task 內）**由 Lead 在計畫裡決定**，卡片與使用者沒有「指定某角色必須由某 Agent 扮演」的機制。要驗證「claude 當 implement」只能靠 Lead 剛好選到，沒有可控的方法。
 - reviewer 與作者要是不同 session 的規則，意味著每個 Agent 當 reviewer 都需要一個不同 session 的作者。
 
@@ -67,7 +69,7 @@
 | R0 | 本文與矩陣 | 本 PR |
 | R1 | **不需要新程式就能驗證的格子**：`card review --agent agy`（agy 當 reviewer）；`card loop --fix-agent codex`／`agy`（codex、agy 當 fixer）；~~pi 當 Lead 重測~~（**已於 2026-11-09 完成一次**，見註 4）；`card review --agent pi`（pi 當 reviewer） | 部分完成 |
 | R2 | **pi 納入 Worker 名單**：改 `coding-roster.ts` 的 pi 排除規則（需要使用者決定，因為目前是刻意寫死）；先驗 pi 當 implement／diagnose／verify | 未開始，需要決策 |
-| R3 | **可指定角色的機制**：讓卡片或使用者能指定某角色由某 Agent 扮演（例如卡片欄位或計畫提示），否則 implement、diagnose、verify、review（task 內）無法可控驗證 | 未開始，需要設計與決策 |
+| R3 | **可指定角色的機制**：roles 六角色指定，見 ISSUE-138 與 card-role-assignment.md；local 執行，remote 尚不支援 | 原始碼已實作、待三卡實機驗收（2026-11-10） |
 | R4 | **整張矩陣補齊**：依 R1 到 R3，每個還沒有證據的格子各跑一張無害卡，更新本文的矩陣與日期 | 未開始 |
 
 **R1 的具體方式（不需要新程式）：**
@@ -86,3 +88,14 @@
 ## 追蹤
 
 每完成一格，更新上面的矩陣（改次數、補日期與卡片 id），並在 `docs/known-issues.md` 對應的 ISSUE 記錄結果。本文件是追蹤表，不取代各 ISSUE 的驗收紀錄。
+
+
+## ISSUE-138 實機驗收待辦（2026-11-10）
+
+目前沒有三卡結果，不增加上表次數。merge 並重啟新版後，逐卡填 id、日期、環境、role_assigned 實際內容與結果：
+
+1. 無害一行檔案卡：至少兩角色不同 agent，一角色明確 model；以 pane／啟動紀錄獨立佐證 model。
+2. 無效 agent／model 卡：撿卡前拒絕、未啟動工作、通知標題與原因正確。
+3. Lead 故意不符卡片指定：plan_rejected 且零違規 Worker prompt。
+
+另核對 reviewer／fixer 的 fresh session。不把本機單元測試當成 remote／完整角色矩陣的實機證據。
