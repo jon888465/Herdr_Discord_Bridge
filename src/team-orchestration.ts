@@ -5,6 +5,7 @@ import {
   type RoleSnapshot,
 } from "./card-role-assignment.js";
 import {
+  ROLE,
   roleIdentity,
   recordRoleSafely,
   type RoleIdentity,
@@ -862,6 +863,10 @@ export function validateAssignmentPlan(
   for (const assignment of plan.assignments) {
     if (!assignment.id || ids.has(assignment.id))
       throw new Error("Assignment IDs must be unique and non-empty");
+    if (!ROLE.test(assignment.id) || !ROLE.test(workerRole(assignment.id)))
+      throw new Error(
+        `Assignment ID "${assignment.id}" must match /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$/`,
+      );
     ids.add(assignment.id);
     if (assignment.workerPaneId === lead.pane_id)
       throw new Error("Lead cannot own a Worker Assignment");

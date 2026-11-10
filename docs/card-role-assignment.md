@@ -22,19 +22,19 @@ roles: {implement: "local:claude:sonnet", diagnose: "local:codex", review: "loca
 
 model 是**管理者配置允許清單**：依 kind 與已開放 profile.model 比對，並沿用同一份 profile 的 modelFlag、args，不能只驗 model 後另猜啟動參數。這不保證供應商存在該 model 或帳號有權使用；CLI 拒絕保留實際錯誤，不 fallback。model 英數起頭，可含 `_ . / : + -`，最多 80 字；控制字元、空白、前導 `-` 拒絕。profile 的 resume／continue／session 綁定與 model 覆寫參數在新宣告流程拒絕；不改全域配置。
 
-省略 agent 而指定 model 時先收斂同種類合法候選，Lead 只能選相符 target；review／fix 預設種類不相容時選合法 model 候選，明確 CLI 不相容則拒絕。
+省略 agent 而指定 model 或只指定 machine（如 `"local"`）時先收斂同種類合法候選，Lead 只能選相符 target；review／fix 預設種類不在候選時選合法候選，明確 CLI 不相容則拒絕。
 
 ## 守門與快照
 
 1. parser／herdr-card-check 擋結構錯誤。
-2. autopick 只對 ready 且 autopickFor 政策選用專案的 eligible 卡，在 picked／開 workspace 前驗六角色；draft、done、未 opt-in 專案不產生角色拒絕事件或通知；manual assign 在建 worktree 前驗。autopick 開 Lead 前重讀指定卡，角色／Lead／ready 改變就拒絕；assign 建 worktree 後在 startTask 再比較角色宣告。
-3. 每次 task、review、fix 開始凍結 roles 與候選 profile；config 是程序載入的配置，改設定要重啟。後續不接受 Lead 修改約束；loop 每輪讀當時卡片重新驗證。政策與既有 PR／CI／merge gate 繼續各自驗證。
-4. Lead prompt 帶約束與候選 id／kind／model（不附 profile args）。validateAssignmentPlan 以 coding.role、bridge roster 檢查整份計畫；任何違規零 acquire，沿用有限重規劃與 plan_rejected。
+2. autopick 只對 ready 且 autopickFor 政策選用專案的 eligible 卡，在 picked／開 workspace 前驗六角色；draft、done、未 opt-in 專案不產生角色拒絕事件或通知（含壞卡拒絕掃描）；manual assign 在建 worktree 前驗。autopick 開 Lead 前重讀指定卡，角色（含原本無 roles 後被加上的情況）／Lead／ready 改變就拒絕；assign 建 worktree 後在 startTask 再比較角色宣告。
+3. 任務開始凍結 roles 與候選 profile（`task.roleSnapshot`）；config 是程序載入的配置，改設定要重啟。後續 review、fix、loop 一律以該任務凍結的 `roleSnapshot` 為準，不接受執行中的 Lead／Worker 改寫磁碟卡片來新增、移除或竄改約束。政策與既有 PR／CI／merge gate 繼續各自驗證。
+4. Lead prompt 帶約束與候選 id／kind／model（不附 profile args）。validateAssignmentPlan 以 coding.role、bridge roster 與 ROLE 格式檢查整份計畫（含 `assignment.id` 與 `workerRole(assignment.id)`）；任何違規零 acquire，沿用有限重規劃與 plan_rejected。
 5. 宣告角色使用 role:<role>:<profile> target，每個 assignment 新開 pane／session，沿用該 profile，不讀寫 AgentPool 既有 session binding。不共用不同角色／model 的 session；相同 profile id 的啟動也獨立。layout 啟動序列化，執行仍受既有 writer 與 dependency gate。
 6. readiness 後重讀 actual actor，驗 machine／kind／pane／terminal／已知 session；指定 model 要 launch 或 observed 證據，未知 model 的既有 session 不算符合。每次實際 prompt 嘗試前（含 agent_not_ready 拒收後的重試）再次查 terminal／session／model，beforeDispatch 仍只記事件一次；不改 Team codex／agy 的延後 session 觀察規則。
 7. 有 roles 的 Worker／reviewer／fixer 必須先成功寫角色紀錄才能送 prompt。派工前失敗零 prompt、關閉已知 owned terminal 的新 pane，確認正常完成後也可關閉；執行中 blocked、逾時、取消時未確認停止或送達不明則保留 pane／session，交由既有任務停止與清理規則處理，pending 問題可回覆原 session 續接。指定角色的新 session 不取得 pool lease，Engine task reservation 依既有終態釋放；未宣告角色沿用的 pool binding 遇 strict 紀錄失敗時，只釋放該 owner 的單一 profile lease，保留既有 pane／binding，不影響其他 Worker。terminal 被換掉不關閉，記 console 提醒；新啟動 blocked 或 readiness 未確認的 Worker 保留 pane 給人處理。
 
-card review 的 --agent、card fix 的 --agent，以及 loop 的 --agent／--fix-agent 不能覆蓋卡片明確 agent；一致可接受，不一致在開 pane 前拒絕。autopick reviewer 偏好是 default，卡片有 reviewer 宣告時不再傳衝突 CLI。每輪新 pane、fresh launch；禁止 resume。若已觀察到與作者相同 session，拒絕；未知 session 不假稱已證明獨立。Team 原有 codex／agy 結果端 session gate 不變。
+card review 的 --agent、card fix 的 --agent，以及 loop 的 --agent／--fix-agent 不能覆蓋卡片明確 agent；一致可接受，不一致在開 pane 前拒絕。autopick 在卡片有 `roles` 宣告時不再傳 `--agent` 給 `card loop`，使未宣告 `reviewer` 時的來源記為 `default` 而非 `CLI`。每輪新 pane、fresh launch；禁止 resume。若已觀察到與作者相同 session，拒絕；未知 session 不假稱已證明獨立。Team 原有 codex／agy 結果端 session gate 不變。
 
 ## 流程紀錄
 
@@ -44,7 +44,7 @@ card review 的 --agent、card fix 的 --agent，以及 loop 的 --agent／--fix
 impl-1：claude（sonnet）；machine=local；task=task-…；v=2,cr=i,s=C,ss=CCD,me=L
 ```
 
-codingRole：`cr=i/d/r/v`＝implement／diagnose／review／verify；reviewer／fixer 為 `-`。assignmentId 由 role 還原，不重複印：一般同 role；若原 id 是 lead（或 assignment- 前綴的 lead），role 多加一個 assignment-，還原移除一個前綴。source：`s=C/L/D/I`＝card／lead／default／CLI。selectionSources：`ss` 三碼依序 machine／agent／model，使用相同代碼。modelEvidence：`me=L/O/U`＝launch／observed／unknown。未知 model 不寫 model 值。
+codingRole：`cr=i/d/r/v`＝implement／diagnose／review／verify；reviewer／fixer 為 `-`。assignmentId 由 role 還原，不重複印：一般同 role；若原 id 是 lead（或 assignment- 前綴的 lead），role 多加一個 assignment-，還原移除一個前綴。source：`s=C/L/D/I`＝card／lead／default／CLI。selectionSources：`ss` 三碼依序 machine／agent／model，使用相同代碼（Lead 選了帶 model 的候選且卡片未約束 model 時，model 來源記 `L`）。modelEvidence：`me=L/O/U`＝launch／observed／unknown。未知 model 不寫 model 值。
 
 v2 僅 local 與四種 agent；role 最多64、model80、task64、round最大1000000，完整組合仍不超300字。profileId 不重複印入 v2，完整配置候選在 durable task。parser／serializer／輪替沿用300字與既有格式；model 不截斷。v2 hash 加入來源 metadata，避免舊的少 metadata 紀錄先寫後吃掉新資訊；同一完整事件仍去重。role_assigned 表示已準備派工身分，**不代表 prompt 已送達或任務完成**；後續失敗另記。
 
@@ -52,7 +52,7 @@ v2 僅 local 與四種 agent；role 最多64、model80、task64、round最大100
 
 正常 CardStore.readLog／appendLog 要 parse 成功，因此獨立寫 `<cards>/.role-rejections/<id>.json`（0700目錄／0600檔、原子替換），不修改壞卡。card show 解析失敗時顯示診斷原因、delivery、attempts。重啟後仍能查；修正後檔案變更產生新 fingerprint，不把舊原因當新結果。
 
-只從合法 filename、一般非 symlink 且≤1MiB的檔案、≤8KiB header、唯一且與 filename 相符的 id、唯一 ready 與可嚴格解析的 notify 取路由；不猜 malformed／重複的 id／notify。超限、symlink、不可讀、缺可信路由仍保存診斷、console 可見，不向不確定目的地傳送。卡片來源與格式不合法不會被重寫成有效卡。
+只從合法 filename、一般非 symlink 且≤1MiB的檔案、≤8KiB header、唯一且與 filename 相符的 id、唯一 ready、已選用 autopick 的專案（`projects`／`project`）與可嚴格解析的 notify 取路由；不猜 malformed／重複的 id／notify，未選用 autopick 的專案不記診斷也不通知。超限、symlink、不可讀、缺可信路由仍保存診斷、console 可見，不向不確定目的地傳送。通知原因使用分類標籤，不切片事件原文、不回顯未受信任的卡片原始行。卡片來源與格式不合法不會被重寫成有效卡。
 
 先持久化再送通知。寫入失敗每次掃描重試並 console 報錯；送達失敗保留 pending／attempts，下一次掃描及重啟續試，成功才 sent。Agent 忙碌／blocked 也屬待送；與正常 notifier 共用完整選單檢查（含 allow once、skip until next version、Do you want、選擇選項）；送前兩次核對 pane／terminal／kind／idle，每次讀畫面後再讀身分及狀態，讀取期間替換／轉忙碌不送。通知送達但 sent 寫入失敗可能重複，採至少一次語意，不宣稱 exactly once。沒有可信路由記 no_trusted_route，修復卡片後再處理。有效卡拒絕帳本寫入失敗不加入程序去重集合，下一輪重試。
 
@@ -65,3 +65,5 @@ merge、重啟新版後需跑三張真卡：兩角色不同 agent 且一角色�
 w1 階段自動化證據（2026-11-10）：typecheck、lint、npm test（含 build）、git diff --check 通過；1682 項、1681 pass、0 fail、1 既有 skipped。新增47項；未修改既有測試。這仍不是三張實機卡的驗收結果。
 
 r1 修正自動化證據（2026-11-10，w2）：新增27項回歸測試，targeted 27/27 pass；typecheck、lint、完整 npm test（含 build）與 git diff --check 通過，1709項／1708 pass／0 fail／1既有 skipped。原有測試含 w1 新增測試未修改；完整歷史見 ISSUE-138。沒有部署或實機驗收證據。
+
+r2 獨立 review 修正自動化證據（2026-11-10）：修正 PR #205 六項 findings（F1 只指定 machine 的 `resolveFlowRole` 候選 fallback、F2 review／fix／autopick 以任務凍結 `roleSnapshot` 為準不重讀被改寫的磁碟卡片、F3 通知與壞卡拒絕原因改分類標籤不帶卡片原始行且壞卡掃描補檢查 autopick 選用專案、F4 卡片有 `roles` 但未宣告 `reviewer` 時 autopick loop 不傳 `--agent` 且 Lead 選帶 model 候選時 `selectionSources.model` 記 `lead`、F5 `validateAssignmentPlan` 提前驗 `assignment.id` 與 `workerRole` 符合 `ROLE` 格式以觸發 `plan_rejected` 重規劃、F6 移除 `card-fix-wiring.ts` 未使用 import 並保留 `reviewInPane`／`fixInPane` 在 `roles` 分支拋錯時的 `closeNote` 與補接線層直接測試）；新增 `test/card-role-r2.test.ts` 6項測試（6/6 pass），既有測試一行未改；`npm run check`、`npm run lint`（200個 TypeScript 檔）與 `git diff --check` 通過，1715項／1714 pass／0 fail／1既有 skipped。狀態維持「已修正、待驗收」，尚未重啟或實機驗收。

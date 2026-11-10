@@ -833,18 +833,11 @@ async function reviewStep(
     const run = await deps.reviewPullRequest(read.card, {
       ...(agent !== undefined ? { agent } : {}),
       round,
-      ...(read.card.roles
-        ? {
-            recordRoleStrict: (identity: RoleIdentity) => {
-              const written = store.recordEvent(
-                id,
-                roleEvent(identity, deps.now()),
-              );
-              if (!written.ok)
-                throw new Error(`卡片角色紀錄失敗，未派工：${written.error}`);
-            },
-          }
-        : {}),
+      recordRoleStrict: (identity: RoleIdentity) => {
+        const written = store.recordEvent(id, roleEvent(identity, deps.now()));
+        if (!written.ok)
+          throw new Error(`卡片角色紀錄失敗，未派工：${written.error}`);
+      },
       onRoleAssigned: (identity) =>
         recordRoleSafely(() =>
           store.recordEvent(id, roleEvent(identity, deps.now())),
@@ -977,18 +970,11 @@ async function fixStep(
     const result = await deps.fixCard(read.card, {
       ...(agent !== undefined ? { agent } : {}),
       round: check.reviewRound,
-      ...(read.card.roles
-        ? {
-            recordRoleStrict: (identity: RoleIdentity) => {
-              const written = store.recordEvent(
-                id,
-                roleEvent(identity, deps.now()),
-              );
-              if (!written.ok)
-                throw new Error(`卡片角色紀錄失敗，未派工：${written.error}`);
-            },
-          }
-        : {}),
+      recordRoleStrict: (identity: RoleIdentity) => {
+        const written = store.recordEvent(id, roleEvent(identity, deps.now()));
+        if (!written.ok)
+          throw new Error(`卡片角色紀錄失敗，未派工：${written.error}`);
+      },
       onRoleAssigned: (identity) =>
         recordRoleSafely(() =>
           store.recordEvent(id, roleEvent(identity, deps.now())),

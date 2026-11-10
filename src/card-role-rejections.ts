@@ -3,7 +3,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { ensureCardsDirectory } from "./card-directory.js";
-import { isCardId, LEDGER_MAX_FILE_BYTES, parseNotifyTarget } from "./card.js";
+import {
+  isCardId,
+  LEDGER_MAX_FILE_BYTES,
+  parseNotifyTarget,
+  PROJECT_NAME,
+} from "./card.js";
+import { classifyRoleRejection } from "./card-notify.js";
+import { autopickFor, type LoadedPolicy } from "./policy.js";
 import { redactSecrets } from "./redact.js";
 
 export interface CardRejection {
@@ -73,7 +80,15 @@ function save(cards: string, value: CardRejection): void {
 export function malformedCardIdentity(
   cards: string,
   file: string,
-): { id: string; fingerprint: string; notify?: string } | undefined {
+):
+  | {
+      id: string;
+      fingerprint: string;
+      notify?: string;
+      status?: string;
+      projects?: string[];
+    }
+  | undefined {
   const id = path.basename(file, ".md");
   if (!isCardId(id) || path.basename(file) !== `${id}.md`) return;
   const checked = ensureCardsDirectory(cards, { create: false });
@@ -117,14 +132,41 @@ export function malformedCardIdentity(
       );
       return (m?.[1] ?? m?.[2])?.trim();
     };
+    const inlineProjects = (): string[] => {
+      const matches = header.filter((l) => /^\s*projects\s*:/.test(l));
+      if (matches.length !== 1) return [];
+      const m = /^projects: +\[([^\]]*)\]\s*(?:#.*)?$/.exec(matches[0]!);
+      if (!m) return [];
+      const body = m[1]!.trim();
+      if (!body) return [];
+      const out: string[] = [];
+      for (const part of body.split(",")) {
+        const item =
+          /^"(?:([^"\\]*))"|^([^"'\\#]+)$/.exec(part.trim())?.[1]?.trim() ??
+          /^"(?:([^"\\]*))"|^([^"'\\#]+)$/.exec(part.trim())?.[2]?.trim();
+        if (!item || !PROJECT_NAME.test(item)) return [];
+        out.push(item);
+      }
+      return out;
+    };
+    const validId = scalar("id") === id;
+    const status = validId ? scalar("status") : undefined;
+    const singleProject = validId ? scalar("project") : undefined;
+    const projects = validId
+      ? [
+          ...inlineProjects(),
+          ...(singleProject && PROJECT_NAME.test(singleProject)
+            ? [singleProject]
+            : []),
+        ]
+      : [];
     const notify = scalar("notify");
     return {
       id,
       fingerprint,
-      ...(scalar("id") === id &&
-      scalar("status") === "ready" &&
-      notify &&
-      parseNotifyTarget(notify)
+      ...(status ? { status } : {}),
+      ...(projects.length ? { projects } : {}),
+      ...(validId && status === "ready" && notify && parseNotifyTarget(notify)
         ? { notify }
         : {}),
     };
@@ -142,6 +184,42 @@ export function malformedCardIdentity(
     if (fd !== undefined) fs.closeSync(fd);
   }
 }
+export function malformedCardAutopickEligible(
+  cards: string,
+  file: string,
+  loaded: LoadedPolicy,
+): boolean {
+  if (loaded.status !== "loaded") return false;
+  const identity = malformedCardIdentity(cards, file);
+  if (!identity || identity.status !== "ready" || !identity.projects?.length)
+    return false;
+  return identity.projects.some((project) =>
+    Boolean(autopickFor(loaded.policy, project)),
+  );
+}
+export function classifyMalformedReason(reason: string): string {
+  if (reason.includes("卡片角色指定無效")) return classifyRoleRejection(reason);
+  if (reason.startsWith("unsupported frontmatter line"))
+    return "unsupported frontmatter line";
+  if (reason.startsWith("unknown status")) return "unknown status";
+  if (reason.startsWith("duplicate key ")) return "duplicate key";
+  if (reason.startsWith("unknown key ")) return "unknown key";
+  if (reason.startsWith("empty value for ")) return "empty value";
+  if (reason.startsWith('"tasks" has a duplicate entry'))
+    return '"tasks" has a duplicate entry';
+  if (reason.startsWith('"projects" has a duplicate entry'))
+    return '"projects" has a duplicate entry';
+  if (reason.startsWith("filename must be ")) return "filename mismatch";
+  if (
+    /^(?:missing|unterminated|frontmatter|card file|unsupported|empty|unquoted|nesting|unbalanced|invalid|expected|unknown role|"[a-z_.]+" (?:must|is|has|does|entries))/.test(
+      reason,
+    ) &&
+    !/[\r\n]/.test(reason) &&
+    reason.length <= 120
+  )
+    return redactSecrets(reason);
+  return "卡片格式或欄位無效";
+}
 export async function recordMalformedRejection(
   cards: string,
   file: string,
@@ -150,7 +228,7 @@ export async function recordMalformedRejection(
 ): Promise<void> {
   const identity = malformedCardIdentity(cards, file);
   if (!identity) return;
-  const safeReason = redactSecrets(reason)
+  const safeReason = classifyMalformedReason(reason)
     .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
     .slice(0, 200);
   const fingerprint = createHash("sha256")
@@ -161,7 +239,8 @@ export async function recordMalformedRejection(
     previous?.fingerprint === fingerprint
       ? previous
       : {
-          ...identity,
+          id: identity.id,
+          ...(identity.notify ? { notify: identity.notify } : {}),
           fingerprint,
           reason: safeReason,
           updatedAt: new Date().toISOString(),

@@ -44,7 +44,7 @@ export function parseCardRoles(value: unknown): CardRoles {
   const roles: CardRoles = {};
   for (const [name, raw] of Object.entries(value)) {
     if (!(CARD_ROLES as readonly string[]).includes(name))
-      roleError(name, "未知角色");
+      roleError("roles", "未知角色");
     if (typeof raw !== "string" || !raw)
       roleError(name, "必須是 machine:agent:model 字串");
     const first = raw.indexOf(":");
@@ -61,7 +61,7 @@ export function parseCardRoles(value: unknown): CardRoles {
     if (machine && !/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(machine))
       roleError(name, "不合法 machine");
     if (agent && !KINDS.includes(agent))
-      roleError(name, `不允許 agent ${agent}`);
+      roleError(name, "不允許 agent");
     if (model && !CARD_MODEL.test(model))
       roleError(name, "不合法 model（英數起頭、最多80字）");
     roles[name as CardRole] = {
@@ -227,7 +227,11 @@ export function roleMetadata(
     selectionSources: {
       machine: constraint?.machine ? "card" : "default",
       agent: constraint?.agent ? "card" : source,
-      model: constraint?.model ? "card" : "default",
+      model: constraint?.model
+        ? "card"
+        : source === "lead" && actor.model
+          ? "lead"
+          : "default",
     },
     modelEvidence: actor.model ? evidence : "unknown",
     ...(["implement", "diagnose", "review", "verify"].includes(role)
@@ -248,7 +252,7 @@ export function resolveFlowRole(
   const pool = snapshot.candidates[role] ?? [];
   const p =
     pool.find((p) => !kind || p.kind === kind) ??
-    (!cli && !c?.agent && c?.model ? pool[0] : undefined);
+    (!cli && !c?.agent ? pool[0] : undefined);
   if (!p)
     roleError(role, `沒有符合 agent ${kind ?? "預設"}／model 的可用 profile`);
   return structuredClone(p);

@@ -88,10 +88,57 @@ const EVENTS = new Set([
 const MAX_WRITE_FAILURES = 3;
 const MAX_DISCORD_ATTEMPTS = 3;
 
+const SAFE_ROLE_REJECTION_REASONS: readonly RegExp[] = [
+  /^必須是非空 inline map$/,
+  /^未知角色$/,
+  /^必須是 machine:agent:model 字串$/,
+  /^不可全部省略$/,
+  /^不合法 machine$/,
+  /^不允許 agent$/,
+  /^不合法 model（英數起頭、最多80字）$/,
+  /^不合法角色欄位$/,
+  /^agent (?:claude|codex|agy|pi|候選) 未開放（需要已配置可用 profile；pi Worker 尚未開放）$/,
+  /^不合法 model [A-Za-z0-9][A-Za-z0-9_./:+-]{0,79}(?:（須在同 kind 已開放 profile 的配置允許清單）)?$/,
+  /^profile [A-Za-z0-9_.-]{1,64} 的 model／modelFlag 不合法$/,
+  /^CLI agent (?:claude|codex|agy|pi) 與卡片 (?:claude|codex|agy|pi) 衝突$/,
+  /^沒有符合 agent (?:claude|codex|agy|pi|預設)／model 的可用 profile$/,
+];
+
+/** 角色拒絕原因只回傳固定分類標籤或受驗證結構，絕不直接切片事件／卡片原文。 */
+export function classifyRoleRejection(text: string): string {
+  const marker = "卡片角色指定無效：";
+  const index = text.indexOf(marker);
+  if (index < 0) return "卡片角色指定無效";
+  const tail = text.slice(index + marker.length).split("；")[0] ?? "";
+  const match =
+    /^(roles|implement|diagnose|review|verify|reviewer|fixer)：(.+)$/.exec(
+      tail,
+    );
+  if (!match) return "卡片角色指定無效";
+  const [, role, detail] = match;
+  if (SAFE_ROLE_REJECTION_REASONS.some((pattern) => pattern.test(detail!)))
+    return `卡片角色指定無效：${role}：${detail}`;
+  if (detail!.startsWith("不存在 machine "))
+    return `卡片角色指定無效：${role}：不存在 machine`;
+  if (detail!.startsWith("卡片流程尚未支援 machine "))
+    return `卡片角色指定無效：${role}：尚未支援遠端 machine`;
+  if (detail!.startsWith("派工不符：machine "))
+    return `卡片角色指定無效：${role}：派工不符：machine`;
+  if (detail!.startsWith("派工不符：agent "))
+    return `卡片角色指定無效：${role}：派工不符：agent`;
+  if (detail!.startsWith("派工不符：model "))
+    return `卡片角色指定無效：${role}：派工不符：model`;
+  if (detail!.startsWith("不允許 agent"))
+    return `卡片角色指定無效：${role}：不允許 agent`;
+  if (detail!.startsWith("不合法 model"))
+    return `卡片角色指定無效：${role}：不合法 model`;
+  return `卡片角色指定無效：${role}`;
+}
+
 /** 通知只放分類過的一句原因，不放流程紀錄原文（可能含卡片內容或 finding 全文）。 */
 export function notificationReason(event: LogEntry): string {
   if (event.event === "failed" && event.text.includes("卡片角色指定無效："))
-    return event.text.slice(event.text.indexOf("卡片角色指定無效："));
+    return classifyRoleRejection(event.text);
   if (event.event === "review_verdict")
     return (
       /changes_requested|inconclusive|pass/.exec(event.text)?.[0] ??

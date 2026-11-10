@@ -33,6 +33,19 @@ r1 在 w1 通過自動化檢查後發現六項缺口，前一輪測試未涵蓋�
 
 **w2 最終驗證（2026-11-10，本機）：**`npm run typecheck` exit 0；`npm run lint` exit 0（199個 TypeScript 檔）；`npm test` exit 0（含 build），1709項／1708 pass／0 fail／1既有 skipped，約64.9秒。新增27項 r1 回歸測試；w2 開始時所有既有 test 檔案（含 w1 的兩份新增測試）SHA-256 核對未變。`git diff --check` exit 0；文件範例解析已包含於新測試。未使用 GitHub、未 commit／push／merge、未部署／重啟。狀態仍為已修正、待驗收；三張 merge／重啟後實機卡仍待 Lead 執行。
 
+### PR #205 獨立 review 修正（r2，2026-11-10；狀態維持已修正、待驗收）
+
+獨立 review 對 PR #205（`ba41360`）提出六項 findings（F1–F6），本輪全部修正並補齊回歸測試：
+
+- **F1 [medium]（`src/card-role-assignment.ts` `resolveFlowRole` fallback）：**原本 `(!cli && !c?.agent && c?.model ? pool[0] : undefined)` 僅在宣告 `model` 時 fallback 至 `pool[0]`，導致只宣告 `machine`（如 `reviewer: "local"`）且預設種類不在已開放候選池時，preflight 通過但到 review／fix 階段才拋錯。改為 `!cli && !c?.agent ? pool[0] : undefined`，與 preflight 候選收斂一致（無任何已開放候選時仍在撿卡前由 `preflightRoles` 拒絕）。
+- **F2 [medium]（`src/card-review-wiring.ts`、`src/card-fix-wiring.ts`、`src/card-command.ts`、`src/main.ts` 凍結快照權威性）：**原本 review／fix 每輪重讀磁碟卡片的 `card.roles`，且 `validateJob`／`startTask` 在原本無 `roles` 時未防範後續被插入 `roles`，使執行中的 Lead／Worker 改寫磁碟卡片即可竄改 `reviewer`／`fixer` 約束。改為由 `ReviewWiringDeps`／`FixWiringDeps` 的 `taskRoleSnapshot` 讀取任務建立時凍結的 `roleSnapshot`（並以 `validateRoleSnapshot` 驗證）作為唯一權威來源，`card-command.ts` 無條件注入 `recordRoleStrict`，`main.ts` 的 `validateJob`、`autopickSelections` 與 `startTask` 亦比對 preflight 時的 `roles`（含原本 `undefined` 的情況），解除與設計文件「後續不接受 Lead 修改約束」的矛盾。
+- **F3 [medium]（`src/card.ts`、`src/card-notify.ts`、`src/card-role-rejections.ts`、`src/main.ts` 通知分類標籤與壞卡 autopick opt-in 檢查）：**`src/card.ts` 移除 `unsupported frontmatter line` 與 `unknown status` 對卡片原始行／值的回顯；`src/card-notify.ts` 新增 `classifyRoleRejection`、不再對含「卡片角色指定無效：」的事件直接 `.slice` 切片原文；`src/card-role-rejections.ts` 新增 `classifyMalformedReason` 與 `malformedCardAutopickEligible`，並在 `src/main.ts` 壞卡拒絕掃描前檢查卡片是否為 `status: ready` 且所屬 `projects`／`project` 已在 `policy.yml` 選用 autopick，未選用專案不記診斷也不發通知。
+- **F4 [low]（`src/autopick.ts`、`src/card-role-assignment.ts` 來源紀錄準確性）：**`src/autopick.ts` 在 `job.card.roles` 存在時不再將 `reviewerFor(job.lead)` 作為 `--agent` 傳給 `card loop`，使卡片有 `roles` 但未宣告 `reviewer` 時來源正確記為 `default` 而非 `CLI`；`src/card-role-assignment.ts` 的 `roleMetadata` 在 `source === "lead"` 且選中帶 `model` 的候選（卡片未約束 `model`）時，`selectionSources.model` 記為 `"lead"` 而非 `"default"`。
+- **F5 [low]（`src/card-events.ts`、`src/team-orchestration.ts` 提前驗證 `assignment.id`）：**匯出 `ROLE` 正則並在 `validateAssignmentPlan` 提前驗證 `assignment.id` 與 `workerRole(assignment.id)` 符合 `ROLE`（`/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$/`），使不合法的 `assignment.id` 在規劃階段即觸發 `plan_rejected` 重規劃，而非等到 Worker 執行時 `recordRoleStrict` 才失敗。
+- **F6 [low]（`src/card-fix-wiring.ts`、`src/card-review-flow.ts`、`src/card-fix-flow.ts`、`test/card-role-r2.test.ts` 接線清理與測試）：**移除 `src/card-fix-wiring.ts` 未使用的 `chooseReviewerKind` import；修正 `runCardReview`／`runCardFix` 在 `reviewInPane`／`fixInPane` 的 `roles` 分支拋錯時保留 `finally` 中 `closeReviewerPane` 的 `closed.note` 附加於錯誤訊息；新增 `test/card-role-r2.test.ts` 直接測試 `card-command.ts`、`reviewCardPullRequest`、`fixCardWorktree` 與 `runAutopick`。
+
+**r2 驗證（2026-11-10，本機）：**新增 `test/card-role-r2.test.ts` 共 6 項測試，既有測試檔案一行未改（`git diff -- test/card-role-assignment.test.ts test/card-role-flow.test.ts test/card-role-r1.test.ts` 為空）。`npm run check`（`npm run typecheck && npm test`）exit 0，1715項／1714 pass／0 fail／1既有 skipped；`npm run lint` exit 0（200個 TypeScript 檔）；`git diff --check` exit 0。狀態維持「已修正、待驗收」。
+
 **部署／未驗項目：**本輪未 commit／push／merge／重啟／部署，執行中的 bridge 尚未載入新版，歷史事件／失敗不補送。build／unit test 不代表 Discord／Herdr／CLI 實機驗收。
 
 **下一步（三張真卡仍待 Lead 在 merge 並重啟新版後執行）：**

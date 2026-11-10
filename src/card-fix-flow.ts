@@ -187,10 +187,11 @@ export async function runCardFix(
   }
 
   // 從這裡開始，pane 已經存在：不論發生什麼（含未預期的例外）都要關閉。
-  let outcome: Outcome;
+  let outcome: Outcome | undefined;
   // 例外：啟動時 blocked（BLOCKED_AT_START）要保留 pane 給人處理信任／權限提示。
   let closed: { closed: boolean; note?: string } = { closed: false };
   let keepPane = false;
+  let thrown: unknown;
   const skipped: { value?: UpdateSkip } = {};
   try {
     outcome = await fixInPane(deps, input, {
@@ -204,6 +205,8 @@ export async function runCardFix(
       outcome.kind === "done" &&
       outcome.outcome.kind === "failed" &&
       outcome.outcome.reason === BLOCKED_AT_START;
+  } catch (error) {
+    thrown = error;
   } finally {
     if (!keepPane)
       closed = await closeReviewerPane(deps.panePort, {
@@ -211,6 +214,16 @@ export async function runCardFix(
         terminalId: pane.terminalId,
       });
   }
+  if (thrown !== undefined) {
+    if (
+      closed.note &&
+      thrown instanceof Error &&
+      !thrown.message.includes(closed.note)
+    )
+      thrown.message = `${thrown.message}（${closed.note}）`;
+    throw thrown;
+  }
+  outcome = outcome!;
   const closeNote = keepPane
     ? "作者卡在啟動提示，已保留 pane 供人處理"
     : closed.note;

@@ -141,7 +141,7 @@ export interface RoleIdentity {
   round?: number;
 }
 
-const ROLE = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$/;
+export const ROLE = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$/;
 const MODEL = /^[A-Za-z0-9][A-Za-z0-9_./:+-]{0,79}$/;
 
 export function roleIdentity(

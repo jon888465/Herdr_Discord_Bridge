@@ -1,9 +1,13 @@
 import { parseNotifyTarget } from "./card.js";
-import { recordMalformedRejection } from "./card-role-rejections.js";
+import {
+  malformedCardAutopickEligible,
+  recordMalformedRejection,
+} from "./card-role-rejections.js";
 import {
   preflightRoles,
   roleTargets,
   type CardRole,
+  type CardRoles,
 } from "./card-role-assignment.js";
 import {
   assertReadyIdentity,
@@ -797,14 +801,33 @@ export async function handleCommand(
         notify: async (text) => {
           await runtime.discord.reply(context.message, text);
         },
-        fixCard: (card, options) =>
-          fixCardWorktree(
+        fixCard: (card, options) => {
+          const hasRoleGuard = () => {
+            const taskId = lazyCardAssignments().forCard(card.id).at(-1)?.taskId;
+            try {
+              return Boolean(
+                taskId
+                  ? runtime.tasks?.store.get(taskId).roleSnapshot
+                  : card.roles,
+              );
+            } catch {
+              return Boolean(card.roles);
+            }
+          };
+          return fixCardWorktree(
             {
               worktrees: lazyCardWorktrees(),
               assignments: lazyCardAssignments(),
               taskLead: (taskId) => {
                 try {
                   return runtime.tasks?.store.get(taskId).lead;
+                } catch {
+                  return undefined;
+                }
+              },
+              taskRoleSnapshot: (taskId) => {
+                try {
+                  return runtime.tasks?.store.get(taskId).roleSnapshot;
                 } catch {
                   return undefined;
                 }
@@ -828,7 +851,7 @@ export async function handleCommand(
                         runtime.config.hookTransport,
                         hookEvents,
                       ),
-                      ...(card.roles
+                      ...(hasRoleGuard()
                         ? {
                             beforePromptAttempt: async () => {
                               const live = (
@@ -862,9 +885,22 @@ export async function handleCommand(
             },
             card,
             options,
-          ),
-        reviewPullRequest: (card, options) =>
-          reviewCardPullRequest(
+          );
+        },
+        reviewPullRequest: (card, options) => {
+          const hasRoleGuard = () => {
+            const taskId = lazyCardAssignments().forCard(card.id).at(-1)?.taskId;
+            try {
+              return Boolean(
+                taskId
+                  ? runtime.tasks?.store.get(taskId).roleSnapshot
+                  : card.roles,
+              );
+            } catch {
+              return Boolean(card.roles);
+            }
+          };
+          return reviewCardPullRequest(
             {
               worktrees: lazyCardWorktrees(),
               prs: lazyCardPullRequests(),
@@ -872,6 +908,13 @@ export async function handleCommand(
               taskLead: (taskId) => {
                 try {
                   return runtime.tasks?.store.get(taskId).lead;
+                } catch {
+                  return undefined;
+                }
+              },
+              taskRoleSnapshot: (taskId) => {
+                try {
+                  return runtime.tasks?.store.get(taskId).roleSnapshot;
                 } catch {
                   return undefined;
                 }
@@ -898,7 +941,7 @@ export async function handleCommand(
                         runtime.config.hookTransport,
                         hookEvents,
                       ),
-                      ...(card.roles
+                      ...(hasRoleGuard()
                         ? {
                             beforePromptAttempt: async () => {
                               const live = (
@@ -930,7 +973,8 @@ export async function handleCommand(
             },
             card,
             options,
-          ),
+          );
+        },
         openPullRequest: async (card) => {
           const entry = lazyCardWorktrees().latest(card.id);
           if (!entry)
@@ -1086,14 +1130,21 @@ export async function handleCommand(
           if (card.roles) preflightRoles(card.roles, cardRoleContext(runtime));
         },
         startTask: async (prompt, options) => {
-          if (options.expectedRoles) {
+          const pickedRoles = options.cardId
+            ? autopickSelections.get(options.cardId)?.roles
+            : undefined;
+          const expectedRoles = pickedRoles ?? options.expectedRoles;
+          if (
+            options.cardId &&
+            (expectedRoles !== undefined ||
+              autopickSelections.has(options.cardId))
+          ) {
             const fresh = new CardStore(join(stateDirectory(), "cards"), {
               maxFileBytes: LEDGER_MAX_FILE_BYTES,
-            }).read(options.cardId!);
+            }).read(options.cardId);
             if (
               !fresh.ok ||
-              JSON.stringify(fresh.card.roles) !==
-                JSON.stringify(options.expectedRoles)
+              JSON.stringify(fresh.card.roles) !== JSON.stringify(expectedRoles)
             )
               throw new Error("卡片角色宣告在 preflight 後改變，未啟動任務");
           }
@@ -2878,7 +2929,7 @@ const AUTOPICK_INTERVAL_MS = 60 * 1000;
  */
 const autopickSelections = new Map<
   string,
-  { agent: string; leadSelection: "card" | "policy" }
+  { agent: string; leadSelection: "card" | "policy"; roles?: CardRoles }
 >();
 
 function startAutopick(runtime: Runtime): () => void {
@@ -2933,8 +2984,8 @@ function startAutopick(runtime: Runtime): () => void {
     },
     steps: createAutopickSteps({
       validateJob: (job) => {
-        if (!job.card.roles) return;
         const current = readCard(job.card.id);
+        if (!job.card.roles && !current?.roles) return;
         if (
           !current ||
           current.status !== "ready" ||
@@ -2942,7 +2993,8 @@ function startAutopick(runtime: Runtime): () => void {
           current.lead !== job.card.lead
         )
           throw new Error("卡片角色宣告在 preflight 後改變，未啟動 Lead");
-        preflightRoles(current.roles!, cardRoleContext(runtime));
+        if (current.roles)
+          preflightRoles(current.roles, cardRoleContext(runtime));
       },
       port: runtime.herdr,
       command,
@@ -2993,6 +3045,7 @@ function startAutopick(runtime: Runtime): () => void {
       autopickSelections.set(job.card.id, {
         agent: job.lead,
         leadSelection: job.leadSelection ?? "policy",
+        ...(job.card.roles ? { roles: structuredClone(job.card.roles) } : {}),
       });
       new CardStore(rootDir, { maxFileBytes: LEDGER_MAX_FILE_BYTES }).appendLog(
         job.card.id,
@@ -3020,8 +3073,13 @@ function startAutopick(runtime: Runtime): () => void {
       for (const { card } of cards.list().cards)
         await closeAutopickLead(cards, card.id, runtime.herdr);
       const listed = cards.list();
+      const loadedPolicy = loadPolicy(join(configDirectory(), "policy.yml"));
       for (const problem of listed.errors) {
         try {
+          if (
+            !malformedCardAutopickEligible(rootDir, problem.file, loadedPolicy)
+          )
+            continue;
           await recordMalformedRejection(
             rootDir,
             problem.file,

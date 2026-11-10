@@ -262,7 +262,7 @@ export async function runAutopick(
     step = "loop";
     const loop = await steps.loop(
       id,
-      job.card.roles?.reviewer ? "" : reviewerFor(job.lead),
+      job.card.roles ? "" : reviewerFor(job.lead),
     );
     log.push("loop");
     if (!loop.merged)
