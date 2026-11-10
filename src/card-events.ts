@@ -1,3 +1,4 @@
+import type { SelectionSource } from "./card-role-assignment.js";
 import { createHash } from "node:crypto";
 import { agentDisplayName } from "./cli-adapter.js";
 import type { AgentRecord } from "./types.js";
@@ -122,6 +123,15 @@ export type CardEvent = { time: string; eventId: string } & (
 /** Only explicit identity facts; never session history, prompts or output. */
 export interface RoleIdentity {
   role: string;
+  codingRole?: "implement" | "diagnose" | "review" | "verify";
+  assignmentId?: string;
+  source?: SelectionSource;
+  selectionSources?: {
+    machine: SelectionSource;
+    agent: SelectionSource;
+    model: SelectionSource;
+  };
+  modelEvidence?: "launch" | "observed" | "unknown";
   leadSelection?: "card" | "policy";
   agent: string;
   machine: string;
@@ -131,7 +141,7 @@ export interface RoleIdentity {
   round?: number;
 }
 
-const ROLE = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$/;
+export const ROLE = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$/;
 const MODEL = /^[A-Za-z0-9][A-Za-z0-9_./:+-]{0,79}$/;
 
 export function roleIdentity(
@@ -188,6 +198,15 @@ export function roleEvent(identity: RoleIdentity, time: string): CardEvent {
           identity.machine,
           identity.profileId ?? null,
           identity.model ?? null,
+          ...(identity.source
+            ? [
+                identity.codingRole,
+                identity.assignmentId,
+                identity.source,
+                identity.selectionSources,
+                identity.modelEvidence,
+              ]
+            : []),
           // leadSelection 不進 ID：main 的角色回呼（帶選擇依據）與 assignCard（不帶）是同一個 Lead，必須去重成一筆。
         ]),
       )
@@ -258,6 +277,75 @@ function render(fields: Fields): { text: string; suspicious: boolean } {
         fields.model === undefined
           ? ""
           : `（${text(fields, "model", MODEL, "model id, max 80")}）`;
+      if (fields.source !== undefined) {
+        // v2 has a proven <=300 character bound: local + supported kinds only;
+        // assignmentId aliases role, profile is omitted (not duplicated metadata).
+        oneOf(fields, "agent", ["claude", "codex", "agy", "pi"]);
+        oneOf(fields, "machine", ["local"]);
+        if (
+          fields.assignmentId !== undefined &&
+          fields.assignmentId !== role &&
+          !(
+            typeof fields.assignmentId === "string" &&
+            /^(?:assignment-)*lead$/i.test(fields.assignmentId) &&
+            role === `assignment-${fields.assignmentId}`
+          )
+        )
+          bad("assignmentId", "role alias");
+        const codes = { card: "C", lead: "L", default: "D", CLI: "I" } as const;
+        const sources = fields.selectionSources as Fields | undefined;
+        if (!sources) bad("selectionSources", "three sources");
+        const source =
+          codes[
+            oneOf(fields, "source", ["card", "lead", "default", "CLI"] as const)
+          ];
+        const ss = ["machine", "agent", "model"]
+          .map(
+            (k) =>
+              codes[
+                oneOf(sources, k, ["card", "lead", "default", "CLI"] as const)
+              ],
+          )
+          .join("");
+        const cr =
+          fields.codingRole === undefined
+            ? "-"
+            : (
+                {
+                  implement: "i",
+                  diagnose: "d",
+                  review: "r",
+                  verify: "v",
+                } as const
+              )[
+                oneOf(fields, "codingRole", [
+                  "implement",
+                  "diagnose",
+                  "review",
+                  "verify",
+                ] as const)
+              ];
+        const me = ({ launch: "L", observed: "O", unknown: "U" } as const)[
+          oneOf(fields, "modelEvidence", [
+            "launch",
+            "observed",
+            "unknown",
+          ] as const)
+        ];
+        const scope =
+          fields.taskId !== undefined
+            ? `；task=${text(fields, "taskId", TASK_ID, "task id")}`
+            : "";
+        const round =
+          fields.round !== undefined
+            ? `（第 ${integer(fields, "round", 1, 1_000_000)} 輪）`
+            : "";
+        if (!scope && !round) bad("scope", "task or round");
+        return {
+          text: `${role}${round}：${agent}${model}；machine=${machine}${scope}；v=2,cr=${cr},s=${source},ss=${ss},me=${me}`,
+          suspicious: false,
+        };
+      }
       const profile =
         fields.profileId === undefined
           ? ""

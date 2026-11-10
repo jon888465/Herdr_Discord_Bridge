@@ -1,3 +1,22 @@
+import { parseNotifyTarget } from "./card.js";
+import {
+  malformedCardAutopickEligible,
+  malformedCardIdentity,
+  recordMalformedRejection,
+} from "./card-role-rejections.js";
+import {
+  CARD_ROLES,
+  preflightRoles,
+  roleProfileEnabled,
+  roleTargets,
+  type CardRole,
+  type CardRoles,
+  type RoleContext,
+} from "./card-role-assignment.js";
+import {
+  assertReadyIdentity,
+  startCardRoleSession,
+} from "./card-role-session.js";
 import { usageTable } from "./usage.js";
 import {
   roleIdentity,
@@ -6,7 +25,11 @@ import {
   withProfileIdentity,
   type RoleIdentity,
 } from "./card-events.js";
-import { createCardNotifier } from "./card-notify.js";
+import {
+  createCardNotifier,
+  readNotificationPane,
+  assertNotificationTargetReady,
+} from "./card-notify.js";
 import { commitVerifiedVersion } from "./card-commit.js";
 import { hookReplyTrusted } from "./codex-session.js";
 import { hookModeFor, hookStatusText } from "./hook-status.js";
@@ -126,7 +149,11 @@ import {
   createConsoleContext,
 } from "./console.js";
 import { AUTOPICK_USER, createAutopickSteps } from "./autopick-wiring.js";
-import { leadRejectionEvent, createAutopicker, type AutopickReport } from "./autopick.js";
+import {
+  leadRejectionEvent,
+  createAutopicker,
+  type AutopickReport,
+} from "./autopick.js";
 import { ConsoleAgent } from "./console-agent.js";
 import {
   agentHeader,
@@ -778,8 +805,20 @@ export async function handleCommand(
         notify: async (text) => {
           await runtime.discord.reply(context.message, text);
         },
-        fixCard: (card, options) =>
-          fixCardWorktree(
+        fixCard: (card, options) => {
+          const hasRoleGuard = () => {
+            const taskId = lazyCardAssignments().forCard(card.id).at(-1)?.taskId;
+            try {
+              return Boolean(
+                taskId
+                  ? runtime.tasks?.store.get(taskId).roleSnapshot
+                  : card.roles,
+              );
+            } catch {
+              return Boolean(card.roles);
+            }
+          };
+          return fixCardWorktree(
             {
               worktrees: lazyCardWorktrees(),
               assignments: lazyCardAssignments(),
@@ -790,8 +829,17 @@ export async function handleCommand(
                   return undefined;
                 }
               },
+              taskRoleSnapshot: (taskId) => {
+                try {
+                  return runtime.tasks?.store.get(taskId).roleSnapshot;
+                } catch {
+                  return undefined;
+                }
+              },
               listAgents: () => runtime.herdr.listAgentsWithWorkspaceNames(),
+              roleContext: cardRoleContext(runtime),
               flow: {
+                recordRoleStrict: options.recordRoleStrict,
                 onRoleAssigned: options.onRoleAssigned,
                 panePort: runtime.herdr,
                 startAgent: (input) => startAgentInPane(runtime.herdr, input),
@@ -807,6 +855,29 @@ export async function handleCommand(
                         runtime.config.hookTransport,
                         hookEvents,
                       ),
+                      ...(hasRoleGuard()
+                        ? {
+                            beforePromptAttempt: async () => {
+                              const live = (
+                                await runtime.herdr.listAgentsWithWorkspaceNames()
+                              ).find((a) => a.pane_id === agent.pane_id);
+                              if (!live)
+                                throw new Error("卡片角色送出前 pane 已不存在");
+                              assertReadyIdentity(
+                                agent,
+                                live,
+                                agent.agent!,
+                                agent.workspace_id,
+                              );
+                              if (
+                                agent.model &&
+                                live.model &&
+                                agent.model !== live.model
+                              )
+                                throw new Error("卡片角色送出前 model 已改變");
+                            },
+                          }
+                        : {}),
                     },
                   );
                   return { state: turn.state, text: turn.text };
@@ -818,9 +889,22 @@ export async function handleCommand(
             },
             card,
             options,
-          ),
-        reviewPullRequest: (card, options) =>
-          reviewCardPullRequest(
+          );
+        },
+        reviewPullRequest: (card, options) => {
+          const hasRoleGuard = () => {
+            const taskId = lazyCardAssignments().forCard(card.id).at(-1)?.taskId;
+            try {
+              return Boolean(
+                taskId
+                  ? runtime.tasks?.store.get(taskId).roleSnapshot
+                  : card.roles,
+              );
+            } catch {
+              return Boolean(card.roles);
+            }
+          };
+          return reviewCardPullRequest(
             {
               worktrees: lazyCardWorktrees(),
               prs: lazyCardPullRequests(),
@@ -832,11 +916,20 @@ export async function handleCommand(
                   return undefined;
                 }
               },
+              taskRoleSnapshot: (taskId) => {
+                try {
+                  return runtime.tasks?.store.get(taskId).roleSnapshot;
+                } catch {
+                  return undefined;
+                }
+              },
               policy: () => loadPolicy(join(configDirectory(), "policy.yml")),
               listAgents: () => runtime.herdr.listAgentsWithWorkspaceNames(),
               fetchMaterial: (repo, number) =>
                 fetchReviewMaterial(defaultExec, repo, number),
+              roleContext: cardRoleContext(runtime),
               flow: {
+                recordRoleStrict: options.recordRoleStrict,
                 onRoleAssigned: options.onRoleAssigned,
                 panePort: runtime.herdr,
                 startAgent: (input) => startAgentInPane(runtime.herdr, input),
@@ -852,6 +945,29 @@ export async function handleCommand(
                         runtime.config.hookTransport,
                         hookEvents,
                       ),
+                      ...(hasRoleGuard()
+                        ? {
+                            beforePromptAttempt: async () => {
+                              const live = (
+                                await runtime.herdr.listAgentsWithWorkspaceNames()
+                              ).find((a) => a.pane_id === agent.pane_id);
+                              if (!live)
+                                throw new Error("卡片角色送出前 pane 已不存在");
+                              assertReadyIdentity(
+                                agent,
+                                live,
+                                agent.agent!,
+                                agent.workspace_id,
+                              );
+                              if (
+                                agent.model &&
+                                live.model &&
+                                agent.model !== live.model
+                              )
+                                throw new Error("卡片角色送出前 model 已改變");
+                            },
+                          }
+                        : {}),
                     },
                   );
                   return { state: turn.state, text: turn.text };
@@ -861,7 +977,8 @@ export async function handleCommand(
             },
             card,
             options,
-          ),
+          );
+        },
         openPullRequest: async (card) => {
           const entry = lazyCardWorktrees().latest(card.id);
           if (!entry)
@@ -1013,7 +1130,28 @@ export async function handleCommand(
             return undefined;
           }
         },
+        validateRoleCard: (card) => {
+          if (card.roles) preflightRoles(card.roles, cardRoleContext(runtime));
+        },
         startTask: async (prompt, options) => {
+          const pickedRoles = options.cardId
+            ? autopickSelections.get(options.cardId)?.roles
+            : undefined;
+          const expectedRoles = pickedRoles ?? options.expectedRoles;
+          if (
+            options.cardId &&
+            (expectedRoles !== undefined ||
+              autopickSelections.has(options.cardId))
+          ) {
+            const fresh = new CardStore(join(stateDirectory(), "cards"), {
+              maxFileBytes: LEDGER_MAX_FILE_BYTES,
+            }).read(options.cardId);
+            if (
+              !fresh.ok ||
+              JSON.stringify(fresh.card.roles) !== JSON.stringify(expectedRoles)
+            )
+              throw new Error("卡片角色宣告在 preflight 後改變，未啟動任務");
+          }
           started = await startTeamTask(
             prompt,
             options.coding,
@@ -1851,6 +1989,23 @@ async function teamRemove(
  * 解析 Lead 與 Workers、登記並啟動一個持久化的 Team 任務（`team ask` 與 `card assign` 共用）。
  * 任務一經登記就會執行；回傳的 `running` 在任務結束時 resolve。
  */
+export function cardRoleContext(runtime: {
+  config: {
+    machines: readonly { id: string }[];
+    agentProfiles?: Runtime["config"]["agentProfiles"];
+  };
+  pool?: { profiles: Runtime["config"]["agentProfiles"] };
+}): RoleContext {
+  const profiles = runtime.pool?.profiles ?? runtime.config.agentProfiles ?? [];
+  return {
+    machineIds: runtime.config.machines.map((m) => m.id),
+    profiles,
+    enabledProfileIds: profiles
+      .filter((p) => CARD_ROLES.some((role) => roleProfileEnabled(role, p)))
+      .map((p) => p.id),
+  };
+}
+
 async function startTeamTask(
   prompt: string,
   coding: boolean,
@@ -1863,6 +2018,17 @@ async function startTeamTask(
   workers: AgentRecord[];
   running: Promise<DurableTeamTask>;
 }> {
+  const roleCard = cardId
+    ? new CardStore(join(stateDirectory(), "cards"), {
+        maxFileBytes: LEDGER_MAX_FILE_BYTES,
+      }).read(cardId)
+    : undefined;
+  if (roleCard && !roleCard.ok) throw new Error(roleCard.error);
+  const roleSnapshot =
+    roleCard?.ok && roleCard.card.roles
+      ? preflightRoles(roleCard.card.roles, cardRoleContext(runtime))
+      : undefined;
+  if (roleSnapshot && !coding) throw new Error("卡片角色指定需要 --coding");
   const workspaceId = await teamWorkspaceId(context, runtime);
   if (coding && !prompt) throw new Error("usage: team ask --coding <prompt>");
   validatePrompt(prompt);
@@ -1902,6 +2068,7 @@ async function startTeamTask(
       workers.push(...runtime.pool.roster(workspaceId));
     }
   }
+  if (roleSnapshot) workers.push(...roleTargets(roleSnapshot, workspaceId));
   assertCodingRoster(coding, workers.length);
   assertAgentAvailable(lead, runtime);
 
@@ -1922,6 +2089,40 @@ async function startTeamTask(
       workers,
       replan: true,
       ...(coding ? { coding: true } : {}),
+      ...(roleSnapshot
+        ? {
+            roleSnapshot,
+            validateRoleActor: async (actor: AgentRecord) => {
+              const live = (
+                await runtime.herdr.listAgentsWithWorkspaceNames()
+              ).find((a) => a.pane_id === actor.pane_id);
+              if (!live) throw new Error("卡片角色送出前 pane 已不存在");
+              assertReadyIdentity(actor, live, actor.agent!, workspaceId);
+              if (actor.model && live.model && actor.model !== live.model)
+                throw new Error("卡片角色送出前 model 已改變");
+            },
+            recordRoleStrict: (identity: RoleIdentity) => {
+              try {
+                const recorded = new CardStore(
+                  join(stateDirectory(), "cards"),
+                  { maxFileBytes: LEDGER_MAX_FILE_BYTES },
+                ).recordEvent(cardId!, roleEvent(identity, nowSeconds()));
+                if (!recorded.ok)
+                  throw new Error(
+                    `卡片角色紀錄失敗，未派工：${recorded.error}`,
+                  );
+              } catch (error) {
+                if (identity.profileId)
+                  runtime.pool?.releaseProfile(
+                    workspaceId,
+                    identity.profileId,
+                    taskId,
+                  );
+                throw error;
+              }
+            },
+          }
+        : {}),
       onRoleAssigned: (identity) =>
         recordRoleSafely(() => {
           const owner =
@@ -1949,7 +2150,22 @@ async function startTeamTask(
             ),
           );
         }),
-      acquireWorker: async (target) => {
+      acquireWorker: async (target, assignment) => {
+        if (roleSnapshot && target.roleTarget) {
+          const role = assignment?.coding?.role;
+          if (!role || role !== target.roleTarget)
+            throw new Error("卡片角色與 acquire context 不符");
+          const profile = roleSnapshot.candidates[role as CardRole]?.find(
+            (p) => target.pane_id === `role:${role}:${p.id}`,
+          );
+          if (!profile) throw new Error("卡片角色 profile 不在凍結候選內");
+          return startCardRoleSession(
+            runtime.herdr,
+            lead,
+            profile,
+            `hdb-role-${randomUUID().slice(0, 12)}`,
+          );
+        }
         const acquired = target.pane_id.startsWith("profile:")
           ? await runtime.pool!.acquire(
               workspaceId,
@@ -1981,11 +2197,19 @@ async function startTeamTask(
           ? runtime.pool?.profiles.find((p) => p.id === target.pane_id.slice(8))
           : undefined;
         return {
-          agent: withProfileIdentity(
-            acquired.agent,
-            profile,
-            acquired.continuity,
-          ),
+          agent: {
+            ...withProfileIdentity(
+              acquired.agent,
+              profile,
+              acquired.continuity,
+            ),
+            ...(roleSnapshot &&
+            profile?.model &&
+            acquired.continuity === "new-session" &&
+            !acquired.agent.model
+              ? { modelEvidence: "launch" }
+              : {}),
+          },
           continuity: acquired.continuity,
         };
       },
@@ -2719,7 +2943,7 @@ const AUTOPICK_INTERVAL_MS = 60 * 1000;
  */
 const autopickSelections = new Map<
   string,
-  { agent: string; leadSelection: "card" | "policy" }
+  { agent: string; leadSelection: "card" | "policy"; roles?: CardRoles }
 >();
 
 function startAutopick(runtime: Runtime): () => void {
@@ -2754,7 +2978,9 @@ function startAutopick(runtime: Runtime): () => void {
         result.outcome === "stopped" ? "autopick_stopped" : "autopick_failed",
       reason:
         result.lastStep === "loop"
-          ? `loop：${Array.from(result.reason ?? "").slice(0, 194).join("")}`
+          ? `loop：${Array.from(result.reason ?? "")
+              .slice(0, 194)
+              .join("")}`
           : `${result.lastStep}：${result.reason ?? ""}`.slice(0, 200),
       time: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
       eventId: `autopick-${result.lastStep}-${Date.now()}`,
@@ -2771,6 +2997,19 @@ function startAutopick(runtime: Runtime): () => void {
       return listed.cards.map((item) => item.card);
     },
     steps: createAutopickSteps({
+      validateJob: (job) => {
+        const current = readCard(job.card.id);
+        if (!job.card.roles && !current?.roles) return;
+        if (
+          !current ||
+          current.status !== "ready" ||
+          JSON.stringify(current.roles) !== JSON.stringify(job.card.roles) ||
+          current.lead !== job.card.lead
+        )
+          throw new Error("卡片角色宣告在 preflight 後改變，未啟動 Lead");
+        if (current.roles)
+          preflightRoles(current.roles, cardRoleContext(runtime));
+      },
       port: runtime.herdr,
       command,
       recordLeadWorkspace: (id, workspaceId, label) => {
@@ -2791,16 +3030,36 @@ function startAutopick(runtime: Runtime): () => void {
       sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
       now: () => Date.now(),
     }),
+    roleGate: (card) => {
+      if (!card.roles) return;
+      try {
+        preflightRoles(card.roles, cardRoleContext(runtime));
+      } catch (error) {
+        return error instanceof Error ? error.message : "卡片角色指定無效";
+      }
+    },
     leadGate: leadGateFor(runtime.config.agentProfiles ?? []),
     onRejected: (card, reason) => {
       console.warn(`自動撿卡 ${card.id}：${reason}`);
-      const logged = new CardStore(rootDir).recordEvent(card.id, leadRejectionEvent(reason, nowSeconds(), `lead-rejected-${randomBytes(12).toString("hex")}`));
-      if (!logged.ok) console.error(`自動撿卡拒絕紀錄失敗（${card.id}）：${logged.error}`);
+      const logged = new CardStore(rootDir).recordEvent(
+        card.id,
+        leadRejectionEvent(
+          reason,
+          nowSeconds(),
+          `lead-rejected-${randomBytes(12).toString("hex")}`,
+        ),
+      );
+      if (!logged.ok) {
+        console.error(`自動撿卡拒絕紀錄失敗（${card.id}）：${logged.error}`);
+        return false;
+      }
+      return true;
     },
     onPicked: (job) => {
       autopickSelections.set(job.card.id, {
         agent: job.lead,
         leadSelection: job.leadSelection ?? "policy",
+        ...(job.card.roles ? { roles: structuredClone(job.card.roles) } : {}),
       });
       new CardStore(rootDir, { maxFileBytes: LEDGER_MAX_FILE_BYTES }).appendLog(
         job.card.id,
@@ -2827,6 +3086,48 @@ function startAutopick(runtime: Runtime): () => void {
       });
       for (const { card } of cards.list().cards)
         await closeAutopickLead(cards, card.id, runtime.herdr);
+      const listed = cards.list();
+      const loadedPolicy = loadPolicy(join(configDirectory(), "policy.yml"));
+      for (const problem of listed.errors) {
+        try {
+          const identity = malformedCardIdentity(rootDir, problem.file);
+          if (
+            !identity ||
+            !malformedCardAutopickEligible(
+              rootDir,
+              problem.file,
+              loadedPolicy,
+              identity,
+            )
+          )
+            continue;
+          await recordMalformedRejection(
+            rootDir,
+            problem.file,
+            problem.error,
+            async (destination, message) => {
+              const target = parseNotifyTarget(destination);
+              if (!target)
+                throw new Error("invalid trusted notification route");
+              if (target.kind === "discord")
+                await runtime.discord.postToOrigin(
+                  { channelId: target.thread, threadId: target.thread },
+                  message,
+                  { threadOnly: true },
+                );
+              else {
+                await assertNotificationTargetReady(runtime.herdr, target);
+                await runtime.herdr.promptAgent(target.pane, message);
+              }
+            },
+            identity,
+          );
+        } catch (error) {
+          console.error(
+            `卡片拒絕診斷寫入失敗，下一次掃描重試：${safeError(error)}`,
+          );
+        }
+      }
       await picker.tick();
     } catch {
       console.warn("autopick Lead cleanup: card scan failed");
@@ -3396,9 +3697,7 @@ export async function relayApprovalFollowup(
   return false;
 }
 
-function agentSessionKey(
-  agent: AgentRecord,
-): string | undefined {
+function agentSessionKey(agent: AgentRecord): string | undefined {
   const s = agent.agent_session as
     { kind?: string; value?: string } | undefined;
   return s ? `${s.kind ?? ""}:${s.value ?? ""}` : undefined;
@@ -3467,10 +3766,7 @@ export async function relayRecoveredStreams(runtime: Runtime): Promise<void> {
       if (streamOwnershipLost(runtime, record)) continue;
       // 舊版紀錄沒有 sessionKey：無從比對，維持先前行為（只由 Stop 事件的 session 與時間篩選）。
       const currentKey = agentSessionKey(agent) ?? "";
-      if (
-        record.sessionKey !== undefined &&
-        currentKey !== record.sessionKey
-      ) {
+      if (record.sessionKey !== undefined && currentKey !== record.sessionKey) {
         // 停機或抓取重試期間發生、streamAgent 沒來得及同步的合法轉移：回合開始時沒有 session 而現在首次登記，
         // 或 codex／agy／pi 在這個回合開始後才建立新 session（與 streamAgent 的判斷一致）。
         const legalTransfer =
@@ -4395,21 +4691,7 @@ function startCardNotifications(
       discord.postToOrigin({ channelId: thread, threadId: thread }, text, {
         threadOnly: true,
       }),
-    pane: async (id) => {
-      const pane = (await herdr.listAgents()).find((p) => p.pane_id === id);
-      if (!pane) return undefined;
-      if (pane.agent_status === "idle" || pane.agent_status === "done") {
-        // ISSUE-116: clipped prompts can appear idle.
-        const screen = await herdr.readAgent(id, "visible", 80);
-        if (
-          /trust|permission|approval|allow once|skip until next version|Do you want|是否允許|信任|選擇.*選項/i.test(
-            screen,
-          )
-        )
-          return { ...pane, agent_status: "blocked" };
-      }
-      return pane;
-    },
+    pane: (id) => readNotificationPane(herdr, id),
     agent: (pane, text) => herdr.promptAgent(pane, text),
     log: (text) => console.log(text),
   });
