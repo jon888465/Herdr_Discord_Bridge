@@ -1,6 +1,6 @@
 # Known Issues
 
-## ISSUE-138：reviewer 回 `inconclusive` 時，每個條件的判斷說明沒有寫進卡片，原因只能去翻 Agent 的 session 記錄
+## ISSUE-139：reviewer 回 `inconclusive` 時，每個條件的判斷說明沒有寫進卡片，原因只能去翻 Agent 的 session 記錄
 
 更新日期：2026-11-10。狀態：待調查（現象與根因已確認，尚未修正）。
 
@@ -101,7 +101,7 @@
 
 更新日期：2026-11-10。狀態：**重新開啟（部分）**——#202 只處理了「Lead 不可用」與「敏感路徑」兩種原因，其他 `autopick_stopped` 原因的標題仍會被關鍵字誤標（見下方 2026-11-10 實機觀察）。先前狀態與觀察保留於下方歷史；根因現已由程式碼確認。
 
-**實機觀察（2026-11-10，本機 macOS，bridge 為 main `c020881`（#201、#202）merge 後重啟的程序；測試卡 `REQ-20261110-stop-reason-live`（`lead: codex`，在 `scripts/` 新增一行檔案，PR #203））：**卡片因 reviewer 連續 2 次 `inconclusive`（原因見 ISSUE-138）停下，卡片流程紀錄寫的實際原因是「失敗：autopick_stopped；原因：loop：同一個 head 的 review 連續 2 次 inconclusive（沒有可修的結論），退回人工處理」（01:06:24Z）；但 `notify` 對象收到的通知標題是「autopick_stopped · review 條件、版本條件未滿足」。**這與 #202 預期不符：**標題說的是「review 條件、版本條件未滿足」，實際原因是 review 沒有結論，與版本無關。同一次事件的 `loop_stopped` 通知標題是「review 條件未滿足」（沒有版本條件）。
+**實機觀察（2026-11-10，本機 macOS，bridge 為 main `c020881`（#201、#202）merge 後重啟的程序；測試卡 `REQ-20261110-stop-reason-live`（`lead: codex`，在 `scripts/` 新增一行檔案，PR #203））：**卡片因 reviewer 連續 2 次 `inconclusive`（原因見 ISSUE-139）停下，卡片流程紀錄寫的實際原因是「失敗：autopick_stopped；原因：loop：同一個 head 的 review 連續 2 次 inconclusive（沒有可修的結論），退回人工處理」（01:06:24Z）；但 `notify` 對象收到的通知標題是「autopick_stopped · review 條件、版本條件未滿足」。**這與 #202 預期不符：**標題說的是「review 條件、版本條件未滿足」，實際原因是 review 沒有結論，與版本無關。同一次事件的 `loop_stopped` 通知標題是「review 條件未滿足」（沒有版本條件）。
 
 **根因（讀碼確認，`src/card-notify.ts` 的 `notificationReason`，2026-11-10）：**#202 只在分類表之前加了兩個特例（`Lead「…」不在政策候選清單內／尚未開放`、`autopick_stopped` 且含「敏感」）。其他 `autopick_stopped` 原因會走到最後的關鍵字清單，原因文字「同一個 **head** 的 **review** 連續 2 次 inconclusive」同時命中 `/review|finding/`（review 條件）與 `/head|commit/`（版本條件）。通知刻意只放分類標籤、不放原因原文（避免帶出卡片或 finding 內容），所以標題標籤錯就等於使用者看不到正確原因。
 
