@@ -1,3 +1,11 @@
+import { hasAgentSession, sameAgentSession } from "./response-stream.js";
+import type { AgentProfile } from "./agent-pool.js";
+import {
+  assertFreshProfile,
+  assertRoleMatches,
+  roleMetadata,
+} from "./card-role-assignment.js";
+import { assertReadyIdentity } from "./card-role-session.js";
 import {
   roleIdentity,
   recordRoleSafely,
@@ -31,12 +39,14 @@ import type { AgentRecord } from "./types.js";
 
 export interface FixFlowDeps {
   onRoleAssigned?: (identity: RoleIdentity) => void;
+  recordRoleStrict?: (identity: RoleIdentity) => void | Promise<void>;
   panePort: AgentStartPort;
   startAgent(input: {
     paneId: string;
     kind: string;
     name: string;
     cwd?: string;
+    args?: string[];
   }): Promise<AgentRecord>;
   /** 送出提示並讀回覆（正式環境包 `runTeamTurn`）；逾時、身份改變等問題以丟錯誤表示。 */
   runTurn(
@@ -60,10 +70,16 @@ export interface FixFlowInput {
   round: number;
   findings: OpenFinding[];
   /** 最後一個作者的 pane：新 pane 從它分割出來，種類預設沿用它。 */
-  author: { agent?: string; paneId: string; workspaceId: string };
+  author: {
+    agent?: string;
+    paneId: string;
+    workspaceId: string;
+    session?: AgentRecord["agent_session"];
+  };
   worktreePath: string;
   /** 使用者用 `--agent` 指定的種類。 */
   requestedKind?: string;
+  launch?: AgentProfile;
 }
 
 export type FixOutcome =
@@ -119,6 +135,7 @@ export async function runCardFix(
   deps: FixFlowDeps,
   input: FixFlowInput,
 ): Promise<FixFlowResult> {
+  if (input.launch) assertFreshProfile(input.launch);
   const built = buildFixPrompt({
     card: input.card,
     findings: input.findings,
@@ -126,7 +143,7 @@ export async function runCardFix(
   });
   if (!built.ok) return { ok: false, stage: "prompt", error: built.error };
 
-  const kind = input.requestedKind ?? input.author.agent;
+  const kind = input.launch?.kind ?? input.requestedKind ?? input.author.agent;
   if (kind === undefined)
     return {
       ok: false,
@@ -170,10 +187,11 @@ export async function runCardFix(
   }
 
   // 從這裡開始，pane 已經存在：不論發生什麼（含未預期的例外）都要關閉。
-  let outcome: Outcome;
+  let outcome: Outcome | undefined;
   // 例外：啟動時 blocked（BLOCKED_AT_START）要保留 pane 給人處理信任／權限提示。
   let closed: { closed: boolean; note?: string } = { closed: false };
   let keepPane = false;
+  let thrown: unknown;
   const skipped: { value?: UpdateSkip } = {};
   try {
     outcome = await fixInPane(deps, input, {
@@ -187,6 +205,8 @@ export async function runCardFix(
       outcome.kind === "done" &&
       outcome.outcome.kind === "failed" &&
       outcome.outcome.reason === BLOCKED_AT_START;
+  } catch (error) {
+    thrown = error;
   } finally {
     if (!keepPane)
       closed = await closeReviewerPane(deps.panePort, {
@@ -194,6 +214,16 @@ export async function runCardFix(
         terminalId: pane.terminalId,
       });
   }
+  if (thrown !== undefined) {
+    if (
+      closed.note &&
+      thrown instanceof Error &&
+      !thrown.message.includes(closed.note)
+    )
+      thrown.message = `${thrown.message}（${closed.note}）`;
+    throw thrown;
+  }
+  outcome = outcome!;
   const closeNote = keepPane
     ? "作者卡在啟動提示，已保留 pane 供人處理"
     : closed.note;
@@ -243,17 +273,77 @@ async function fixInPane(
       kind: run.kind,
       name: fixerAgentName(input.card.id, input.round),
       cwd: input.worktreePath,
+      ...(input.launch
+        ? {
+            args: [
+              ...(input.launch.args ?? []),
+              ...(input.launch.model
+                ? [input.launch.modelFlag!, input.launch.model]
+                : []),
+            ],
+          }
+        : {}),
     });
   } catch (error) {
     return { kind: "start-failed", error: message(error) };
   }
-  recordRoleSafely(() =>
-    deps.onRoleAssigned?.(roleIdentity("fixer", agent, { round: input.round })),
-  );
+  if (!input.card.roles)
+    recordRoleSafely(() =>
+      deps.onRoleAssigned?.(
+        roleIdentity("fixer", agent, { round: input.round }),
+      ),
+    );
   const ready = await waitUntilReady(deps, run.pane, agent);
   if (ready.updateSkip) run.skipped.value = ready.updateSkip;
   if (!ready.ok) return failed(ready.reason);
-  agent = ready.agent;
+  if (input.card.roles) {
+    const started = agent;
+    const live = (await deps.panePort.listAgentsWithWorkspaceNames()).find(
+      (a) => a.pane_id === started.pane_id,
+    );
+    if (!live) throw new Error("卡片角色就緒後 pane 已不存在");
+    ready.agent = live;
+    if (
+      hasAgentSession(input.author.session) &&
+      sameAgentSession(input.author.session, live.agent_session)
+    )
+      throw new Error("卡片角色不可使用作者同一 session");
+    assertReadyIdentity(
+      started,
+      ready.agent,
+      run.kind,
+      input.author.workspaceId,
+    );
+    if (input.launch) assertFreshProfile(input.launch);
+    if (
+      ready.agent.model &&
+      input.launch?.model &&
+      ready.agent.model !== input.launch.model
+    )
+      throw new Error("卡片角色實際 model 與啟動指定不符");
+    const actual = {
+      ...ready.agent,
+      ...(input.launch?.model ? { model: input.launch.model } : {}),
+    };
+    const constraint = input.card.roles.fixer;
+    if (constraint) assertRoleMatches("fixer", constraint, actual);
+    if (!deps.recordRoleStrict)
+      throw new Error("卡片角色紀錄介面不存在，未派工");
+    await deps.recordRoleStrict({
+      ...roleIdentity("fixer", actual, { round: input.round }),
+      ...roleMetadata(
+        "fixer",
+        constraint,
+        actual,
+        input.requestedKind ? "CLI" : "default",
+        input.launch?.model ? "launch" : actual.model ? "observed" : "unknown",
+      ),
+    });
+  }
+  agent = {
+    ...ready.agent,
+    ...(input.launch?.model ? { model: input.launch.model } : {}),
+  };
 
   let text: string;
   try {
@@ -278,7 +368,10 @@ async function fixInPane(
   try {
     after = await deps.state(input.worktreePath);
   } catch (error) {
-    return failed(`修正之後無法讀取工作樹狀態：${message(error)}`, parsed.skipped);
+    return failed(
+      `修正之後無法讀取工作樹狀態：${message(error)}`,
+      parsed.skipped,
+    );
   }
   if (after.dirty)
     return failed(
@@ -306,7 +399,10 @@ async function fixInPane(
       after.head,
     );
   } catch (error) {
-    return failed(`無法取得這次修正改動的檔案：${message(error)}`, parsed.skipped);
+    return failed(
+      `無法取得這次修正改動的檔案：${message(error)}`,
+      parsed.skipped,
+    );
   }
   return {
     kind: "done",

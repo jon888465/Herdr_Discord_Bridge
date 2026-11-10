@@ -41,9 +41,12 @@ export function pickNext(
   cards: Card[],
   skip: ReadonlySet<string> = new Set(),
   leadGate?: LeadGate,
+  roleGate?: (card: Card) => string | undefined,
 ): AutopickJob | undefined {
   const ordered = [...cards]
-    .filter((card) => card.status === "ready" && !skip.has(card.id))
+    .filter(
+      (card) => eligibleAutopickProject(policy, card) && !skip.has(card.id),
+    )
     .sort((a, b) =>
       a.created === b.created
         ? a.id.localeCompare(b.id)
@@ -52,7 +55,11 @@ export function pickNext(
   for (const card of ordered)
     for (const project of declaredProjects(card)) {
       const enabled = autopickFor(policy, project);
-      if (enabled && !leadRejection(policy, card, leadGate))
+      if (
+        enabled &&
+        !leadRejection(policy, card, leadGate) &&
+        !roleGate?.(card)
+      )
         return {
           card,
           project,
@@ -64,6 +71,17 @@ export function pickNext(
   return undefined;
 }
 
+/** Only ready cards in an explicitly selected autopick project may be rejected. */
+export function eligibleAutopickProject(policy: Policy, card: Card) {
+  if (card.status !== "ready") return undefined;
+  return declaredProjects(card)
+    .map((project) => {
+      const enabled = autopickFor(policy, project);
+      return enabled ? { project, ...enabled } : undefined;
+    })
+    .find((enabled) => enabled !== undefined);
+}
+
 /** Lead 種類的開放條件：沒達到回傳原因，通過回傳 undefined（見 `leadGateFor`）。 */
 export type LeadGate = (kind: string) => string | undefined;
 
@@ -73,10 +91,7 @@ export function leadRejection(
   card: Card,
   leadGate?: LeadGate,
 ): string | undefined {
-  if (card.status !== "ready") return undefined;
-  const picked = declaredProjects(card)
-    .map((project) => autopickFor(policy, project))
-    .find((enabled) => enabled !== undefined);
+  const picked = eligibleAutopickProject(policy, card);
   if (!picked) return undefined;
   const selected = card.lead ?? picked.lead;
   if (!(policy.autopickLead ?? ["claude"]).includes(selected))
@@ -129,7 +144,9 @@ export function loopStopReason(text: string, maxChars = 194): string {
     value.replace(/[\u0000-\u001F\u007F\s]+/g, " ").trim();
   const chars = (value: string, keepTail: boolean) => {
     const points = Array.from(value);
-    return (keepTail ? points.slice(-maxChars) : points.slice(0, maxChars)).join("");
+    return (
+      keepTail ? points.slice(-maxChars) : points.slice(0, maxChars)
+    ).join("");
   };
   if (starts.length) {
     const start = (starts.at(-1)?.index ?? 0) + "原因：".length;
@@ -159,7 +176,9 @@ export function loopStopReason(text: string, maxChars = 194): string {
     }
     return chars(reason, false);
   }
-  const inconclusiveDetails = [...text.matchAll(/^inconclusive 的原因：(.+)$/gm)];
+  const inconclusiveDetails = [
+    ...text.matchAll(/^inconclusive 的原因：(.+)$/gm),
+  ];
   if (inconclusiveDetails.length) {
     const detail = normalize(inconclusiveDetails.at(-1)?.[1] ?? "");
     return chars(`inconclusive 的原因：${detail}`, false);
@@ -241,7 +260,10 @@ export async function runAutopick(
     }
 
     step = "loop";
-    const loop = await steps.loop(id, reviewerFor(job.lead));
+    const loop = await steps.loop(
+      id,
+      job.card.roles ? "" : reviewerFor(job.lead),
+    );
     log.push("loop");
     if (!loop.merged)
       return report("stopped", "loop", loopStopReason(loop.text));
@@ -263,7 +285,8 @@ export interface AutopickerDeps {
   /** Lead 種類的開放條件（agy、pi 要先在 config.json 宣告）；沒提供就不檢查。 */
   leadGate?: LeadGate;
   /** Lead 尚未開放時，每張卡只通知一次。 */
-  onRejected?(card: Card, reason: string): void;
+  roleGate?: (card: Card) => string | undefined;
+  onRejected?(card: Card, reason: string): unknown;
 }
 
 /**
@@ -284,15 +307,23 @@ export function createAutopicker(deps: AutopickerDeps) {
       if (loaded.status !== "loaded") return undefined;
       const cards = deps.readyCards();
       for (const card of cards) {
-        const reason = leadRejection(loaded.policy, card, deps.leadGate);
+        if (!eligibleAutopickProject(loaded.policy, card)) continue;
+        const reason =
+          leadRejection(loaded.policy, card, deps.leadGate) ??
+          deps.roleGate?.(card);
         // 以卡片加原因當 key：政策每次掃描都重讀，原因換了要重新通報。
         const key = `${card.id}\n${reason}`;
         if (reason && !rejected.has(key)) {
-          rejected.add(key);
-          deps.onRejected?.(card, reason);
+          if (deps.onRejected?.(card, reason) !== false) rejected.add(key);
         }
       }
-      const job = pickNext(loaded.policy, cards, attempted, deps.leadGate);
+      const job = pickNext(
+        loaded.policy,
+        cards,
+        attempted,
+        deps.leadGate,
+        deps.roleGate,
+      );
       if (!job) return undefined;
       attempted.add(job.card.id);
       running = (async () => {
@@ -315,6 +346,16 @@ export function createAutopicker(deps: AutopickerDeps) {
 }
 
 /** Shared visible rejection template; feeds card show and existing failed-event notifications. */
-export function leadRejectionEvent(reason: string, time: string, eventId: string): CardEvent {
-  return { event: "failed", code: "autopick_stopped", reason: reason.slice(0, 200), time, eventId };
+export function leadRejectionEvent(
+  reason: string,
+  time: string,
+  eventId: string,
+): CardEvent {
+  return {
+    event: "failed",
+    code: "autopick_stopped",
+    reason: reason.slice(0, 200),
+    time,
+    eventId,
+  };
 }

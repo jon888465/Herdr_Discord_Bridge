@@ -260,7 +260,7 @@ export class HerdrClient {
     lead: AgentRecord,
     profile: AgentProfile,
     name: string,
-    onPane: (paneId: string) => void,
+    onPane: (paneId: string, terminalId?: string) => void,
     onStarting?: () => void,
   ): Promise<AgentRecord> {
     const liveLead = (await this.listAgents()).find(
@@ -291,7 +291,10 @@ export class HerdrClient {
       pane.workspace_id !== lead.workspace_id
     )
       throw new Error("pane creation returned unexpected workspace/identity");
-    onPane(pane.pane_id);
+    onPane(
+      pane.pane_id,
+      typeof pane.terminal_id === "string" ? pane.terminal_id : undefined,
+    );
     await nameAgentPane(
       this,
       pane.pane_id,

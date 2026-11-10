@@ -1,3 +1,4 @@
+import { serializeCardRoles } from "./card-role-assignment.js";
 import { isDeepStrictEqual } from "node:util";
 import {
   formatByteLimit,
@@ -74,6 +75,12 @@ export function serializeCard(
     `created: ${formatString(card.created)}`,
     `updated: ${formatString(card.updated)}`,
   ];
+  if (card.roles !== undefined)
+    lines.push(
+      `roles: {${Object.entries(serializeCardRoles(card.roles))
+        .map(([key, value]) => `${key}: ${formatString(value)}`)
+        .join(", ")}}`,
+    );
   if (card.lead !== undefined) lines.push(`lead: ${formatString(card.lead)}`);
   if (card.notify !== undefined)
     lines.push(`notify: ${formatString(card.notify)}`);

@@ -14,6 +14,7 @@ import type { AutopickJob, AutopickSteps } from "./autopick.js";
 export const AUTOPICK_USER = "autopick";
 
 export interface AutopickWiringDeps {
+  validateJob?: (job: AutopickJob) => void;
   port: AgentStartPort;
   /** 以自動撿卡的身分執行一個 console 指令（例如 `card commit <id>`），回傳印出的文字；失敗丟錯誤。 */
   command(text: string): Promise<string>;
@@ -57,6 +58,7 @@ export function createAutopickSteps(deps: AutopickWiringDeps): AutopickSteps {
 
   return {
     async startLead(job: AutopickJob) {
+      deps.validateJob?.(job);
       if (deps.allowedWorkspaceIds.length)
         throw new Error(
           "workspace 白名單（allowedWorkspaceIds）非空時，自動撿卡新開的 workspace 不在名單內，第一版不支援",
@@ -131,9 +133,7 @@ export function createAutopickSteps(deps: AutopickWiringDeps): AutopickSteps {
             : lead,
         );
         if (!ready.ok)
-          throw new Error(
-            `Lead（${job.lead}）沒有就緒：${ready.reason}`,
-          );
+          throw new Error(`Lead（${job.lead}）沒有就緒：${ready.reason}`);
         await deps.command(`wk use ${workspaceId}`);
         await deps.command(`agent use ${paneId}`);
       } catch (error) {
@@ -175,7 +175,7 @@ export function createAutopickSteps(deps: AutopickWiringDeps): AutopickSteps {
 
     async loop(cardId, reviewer) {
       const text = await deps.command(
-        `card loop ${cardId} --agent ${reviewer} --merge`,
+        `card loop ${cardId}${reviewer ? ` --agent ${reviewer}` : ""} --merge`,
       );
       // ISSUE-101：收到的是 `card loop` 印出的全部輸出（進度行在前、最後才是「loop 結束」），
       // 所以要找「以『loop 結束：』開頭、同一行含『已 merge』」的那一行，不能假設它在整段文字開頭。

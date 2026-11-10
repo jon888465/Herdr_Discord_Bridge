@@ -1,3 +1,11 @@
+import { hasAgentSession, sameAgentSession } from "./response-stream.js";
+import type { AgentProfile } from "./agent-pool.js";
+import {
+  assertFreshProfile,
+  assertRoleMatches,
+  roleMetadata,
+} from "./card-role-assignment.js";
+import { assertReadyIdentity } from "./card-role-session.js";
 import {
   roleIdentity,
   recordRoleSafely,
@@ -40,6 +48,7 @@ import type { AgentRecord } from "./types.js";
 
 export interface ReviewFlowDeps {
   onRoleAssigned?: (identity: RoleIdentity) => void;
+  recordRoleStrict?: (identity: RoleIdentity) => void | Promise<void>;
   /** pane.layout／split／get／close 與 Agent 清單。 */
   panePort: AgentStartPort;
   startAgent(input: {
@@ -47,6 +56,7 @@ export interface ReviewFlowDeps {
     kind: string;
     name: string;
     cwd?: string;
+    args?: string[];
   }): Promise<AgentRecord>;
   /** 送出提示並讀回覆（正式環境包 `runTeamTurn`）；逾時、身份改變等問題以丟錯誤表示。 */
   runTurn(
@@ -72,11 +82,17 @@ export interface ReviewFlowInput {
   pr: { number: number; headSha: string };
   material: { files: string[]; diff: string };
   /** 作者的 pane；新 pane 從它分割出來。 */
-  author: { agent?: string; paneId: string; workspaceId: string };
+  author: {
+    agent?: string;
+    paneId: string;
+    workspaceId: string;
+    session?: AgentRecord["agent_session"];
+  };
   /** 卡片的 worktree；reviewer 在這裡啟動。 */
   worktreePath: string;
   /** 使用者用 `--agent` 指定的種類。 */
   requestedKind?: string;
+  launch?: AgentProfile;
 }
 
 export type ReviewFlowResult =
@@ -124,6 +140,7 @@ export async function runCardReview(
   deps: ReviewFlowDeps,
   input: ReviewFlowInput,
 ): Promise<ReviewFlowResult> {
+  if (input.launch) assertFreshProfile(input.launch);
   const built = buildReviewPrompt({
     card: input.card,
     round: input.round,
@@ -136,7 +153,7 @@ export async function runCardReview(
 
   const chosen = chooseReviewerKind({
     authorKind: input.author.agent,
-    requested: input.requestedKind,
+    requested: input.launch?.kind ?? input.requestedKind,
   });
   if (!chosen.ok) return { ok: false, stage: "kind", error: chosen.error };
 
@@ -191,9 +208,10 @@ export async function runCardReview(
 
   // 從這裡開始，pane 已經存在：不論發生什麼（含未預期的例外）都要關閉。
   // 例外：啟動時 blocked（BLOCKED_AT_START）要保留 pane 給人處理信任／權限提示。
-  let outcome: Outcome;
+  let outcome: Outcome | undefined;
   let closed: { closed: boolean; note?: string } = { closed: false };
   let keepPane = false;
+  let thrown: unknown;
   try {
     outcome = await reviewInPane(deps, input, {
       pane,
@@ -205,6 +223,8 @@ export async function runCardReview(
       skipped,
     });
     keepPane = outcome.kind === "inconclusive" && outcome.keepPane === true;
+  } catch (error) {
+    thrown = error;
   } finally {
     if (!keepPane)
       closed = await closeReviewerPane(deps.panePort, {
@@ -212,7 +232,19 @@ export async function runCardReview(
         terminalId: pane.terminalId,
       });
   }
-  const closeNote = keepPane ? "reviewer 卡在啟動提示，已保留 pane 供人處理" : closed.note;
+  if (thrown !== undefined) {
+    if (
+      closed.note &&
+      thrown instanceof Error &&
+      !thrown.message.includes(closed.note)
+    )
+      thrown.message = `${thrown.message}（${closed.note}）`;
+    throw thrown;
+  }
+  outcome = outcome!;
+  const closeNote = keepPane
+    ? "reviewer 卡在啟動提示，已保留 pane 供人處理"
+    : closed.note;
   if (outcome.kind === "failed")
     return {
       ok: false,
@@ -230,7 +262,9 @@ export async function runCardReview(
     batch: outcome.parsed.batch,
     criteria: outcome.parsed.criteria,
     ...finish,
-    ...(outcome.parsed.downgraded ? { downgraded: outcome.parsed.downgraded } : {}),
+    ...(outcome.parsed.downgraded
+      ? { downgraded: outcome.parsed.downgraded }
+      : {}),
     omitted: outcome.parsed.omitted,
     closed: closed.closed,
     ...(closeNote ? { closeNote } : {}),
@@ -267,15 +301,26 @@ async function reviewInPane(
       kind: run.kind,
       name: reviewerAgentName(input.card.id, input.round),
       cwd: input.worktreePath,
+      ...(input.launch
+        ? {
+            args: [
+              ...(input.launch.args ?? []),
+              ...(input.launch.model
+                ? [input.launch.modelFlag!, input.launch.model]
+                : []),
+            ],
+          }
+        : {}),
     });
   } catch (error) {
     return { kind: "failed", error: message(error) };
   }
-  recordRoleSafely(() =>
-    deps.onRoleAssigned?.(
-      roleIdentity("reviewer", agent, { round: input.round }),
-    ),
-  );
+  if (!input.card.roles)
+    recordRoleSafely(() =>
+      deps.onRoleAssigned?.(
+        roleIdentity("reviewer", agent, { round: input.round }),
+      ),
+    );
   const ready = await waitUntilReady(deps, run.pane, agent);
   if (ready.updateSkip) run.skipped.value = ready.updateSkip;
   if (!ready.ok)
@@ -284,7 +329,54 @@ async function reviewInPane(
       reason: ready.reason,
       ...(ready.reason === BLOCKED_AT_START ? { keepPane: true as const } : {}),
     };
-  agent = ready.agent;
+  if (input.card.roles) {
+    const started = agent;
+    const live = (await deps.panePort.listAgentsWithWorkspaceNames()).find(
+      (a) => a.pane_id === started.pane_id,
+    );
+    if (!live) throw new Error("卡片角色就緒後 pane 已不存在");
+    ready.agent = live;
+    if (
+      hasAgentSession(input.author.session) &&
+      sameAgentSession(input.author.session, live.agent_session)
+    )
+      throw new Error("卡片角色不可使用作者同一 session");
+    assertReadyIdentity(
+      started,
+      ready.agent,
+      run.kind,
+      input.author.workspaceId,
+    );
+    if (input.launch) assertFreshProfile(input.launch);
+    if (
+      ready.agent.model &&
+      input.launch?.model &&
+      ready.agent.model !== input.launch.model
+    )
+      throw new Error("卡片角色實際 model 與啟動指定不符");
+    const actual = {
+      ...ready.agent,
+      ...(input.launch?.model ? { model: input.launch.model } : {}),
+    };
+    const constraint = input.card.roles.reviewer;
+    if (constraint) assertRoleMatches("reviewer", constraint, actual);
+    if (!deps.recordRoleStrict)
+      throw new Error("卡片角色紀錄介面不存在，未派工");
+    await deps.recordRoleStrict({
+      ...roleIdentity("reviewer", actual, { round: input.round }),
+      ...roleMetadata(
+        "reviewer",
+        constraint,
+        actual,
+        input.requestedKind ? "CLI" : "default",
+        input.launch?.model ? "launch" : actual.model ? "observed" : "unknown",
+      ),
+    });
+  }
+  agent = {
+    ...ready.agent,
+    ...(input.launch?.model ? { model: input.launch.model } : {}),
+  };
 
   let outcome: Outcome;
   try {

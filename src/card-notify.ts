@@ -3,9 +3,8 @@
 // 通知失敗一律不影響 autopick、card loop、card merge。
 
 import { createHash } from "node:crypto";
-import { parseNotifyTarget, type Card } from "./card.js";
+import { isCardId, parseNotifyTarget, type Card } from "./card.js";
 import type { LogEntry } from "./card-ledger.js";
-import { redactSecrets } from "./redact.js";
 import type { CardStore } from "./card-store.js";
 import type { AgentRecord } from "./types.js";
 
@@ -26,6 +25,53 @@ export interface NotifyDeps {
   log(text: string): void;
 }
 
+/** Shared by normal ledger notifications and malformed-card diagnostics. */
+export interface NotificationPanePort {
+  listAgents(): Promise<AgentRecord[]>;
+  readAgent(id: string, source: "visible", lines: number): Promise<string>;
+}
+export async function readNotificationPane(
+  port: NotificationPanePort,
+  id: string,
+): Promise<AgentRecord | undefined> {
+  const pane = (await port.listAgents()).find((p) => p.pane_id === id);
+  if (!pane || !["idle", "done"].includes(pane.agent_status)) return pane;
+  const screen = await port.readAgent(id, "visible", 80);
+  if (
+    /trust|permission|approval|allow once|skip until next version|Do you want|是否允許|信任|選擇.*選項/i.test(
+      screen,
+    )
+  )
+    return { ...pane, agent_status: "blocked" };
+  // Reading the screen is asynchronous: never return an identity that changed meanwhile.
+  const current = (await port.listAgents()).find((p) => p.pane_id === id);
+  if (
+    !current ||
+    current.terminal_id !== pane.terminal_id ||
+    current.agent !== pane.agent
+  )
+    return undefined;
+  return current;
+}
+export async function assertNotificationTargetReady(
+  port: NotificationPanePort,
+  target: { pane: string; terminal: string; agent: string },
+): Promise<void> {
+  for (let check = 0; check < 2; check++) {
+    const pane = await readNotificationPane(port, target.pane);
+    if (
+      !pane ||
+      pane.pane_id !== target.pane ||
+      pane.terminal_id !== target.terminal ||
+      pane.agent !== target.agent ||
+      !["idle", "done"].includes(pane.agent_status)
+    )
+      throw new Error(
+        "notification target unavailable, replaced or blocked; retry later",
+      );
+  }
+}
+
 const EVENTS = new Set([
   "autopick_picked",
   "pr_opened",
@@ -41,8 +87,56 @@ const EVENTS = new Set([
 const MAX_WRITE_FAILURES = 3;
 const MAX_DISCORD_ATTEMPTS = 3;
 
+const SAFE_ROLE_REJECTION_REASONS: readonly RegExp[] = [
+  /^必須是非空 inline map$/,
+  /^未知角色$/,
+  /^必須是 machine:agent:model 字串$/,
+  /^不可全部省略$/,
+  /^不合法 machine$/,
+  /^不允許 agent$/,
+  /^不合法 model（英數起頭、最多80字）$/,
+  /^不合法角色欄位$/,
+  /^agent (?:claude|codex|agy|pi|候選) 未開放（需要已配置可用 profile；pi Worker 尚未開放）$/,
+  /^profile [A-Za-z0-9_.-]{1,64} 的 model／modelFlag 不合法$/,
+  /^CLI agent (?:claude|codex|agy|pi) 與卡片 (?:claude|codex|agy|pi) 衝突$/,
+  /^沒有符合 agent (?:claude|codex|agy|pi|預設)／model 的可用 profile$/,
+];
+
+/** 角色拒絕原因只回傳固定分類標籤或受驗證結構，絕不直接切片事件／卡片原文。 */
+export function classifyRoleRejection(text: string): string {
+  const marker = "卡片角色指定無效：";
+  const index = text.indexOf(marker);
+  if (index < 0) return "卡片角色指定無效";
+  const tail = text.slice(index + marker.length).split("；")[0] ?? "";
+  const match =
+    /^(roles|implement|diagnose|review|verify|reviewer|fixer)：(.+)$/.exec(
+      tail,
+    );
+  if (!match) return "卡片角色指定無效";
+  const [, role, detail] = match;
+  if (SAFE_ROLE_REJECTION_REASONS.some((pattern) => pattern.test(detail!)))
+    return `卡片角色指定無效：${role}：${detail}`;
+  if (detail!.startsWith("不存在 machine "))
+    return `卡片角色指定無效：${role}：不存在 machine`;
+  if (detail!.startsWith("卡片流程尚未支援 machine "))
+    return `卡片角色指定無效：${role}：尚未支援遠端 machine`;
+  if (detail!.startsWith("派工不符：machine "))
+    return `卡片角色指定無效：${role}：派工不符：machine`;
+  if (detail!.startsWith("派工不符：agent "))
+    return `卡片角色指定無效：${role}：派工不符：agent`;
+  if (detail!.startsWith("派工不符：model "))
+    return `卡片角色指定無效：${role}：派工不符：model`;
+  if (detail!.startsWith("不允許 agent"))
+    return `卡片角色指定無效：${role}：不允許 agent`;
+  if (detail!.startsWith("不合法 model"))
+    return `卡片角色指定無效：${role}：不合法 model`;
+  return `卡片角色指定無效：${role}`;
+}
+
 /** 通知只放分類過的一句原因，不放流程紀錄原文（可能含卡片內容或 finding 全文）。 */
 export function notificationReason(event: LogEntry): string {
+  if (event.event === "failed" && event.text.includes("卡片角色指定無效："))
+    return classifyRoleRejection(event.text);
   if (event.event === "review_verdict")
     return (
       /changes_requested|inconclusive|pass/.exec(event.text)?.[0] ??
@@ -95,9 +189,7 @@ function message(
   event: LogEntry,
   prUrl: string | undefined,
 ): string {
-  const title = redactSecrets(card.title)
-    .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
-    .slice(0, 120);
+  const id = isCardId(card.id) ? card.id : "unknown-card";
   const link =
     prUrl &&
     /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/[0-9]+$/.test(
@@ -109,7 +201,7 @@ function message(
     event.event === "failed" && event.text.includes("autopick_stopped")
       ? "autopick_stopped"
       : event.event;
-  return `[bridge 通知] ${card.id} · 標題=${JSON.stringify(title)} · ${name} · ${notificationReason(event)}${link ? `\n${link}` : ""}`;
+  return `[bridge 通知] ${id} · ${name} · ${notificationReason(event)}${link ? `\n${link}` : ""}`;
 }
 
 export function createCardNotifier(deps: NotifyDeps) {

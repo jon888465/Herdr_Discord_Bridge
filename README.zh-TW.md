@@ -367,3 +367,26 @@ Agent 可在最終回覆中單獨一行寫 `[[discord-attach: /絕對路徑]]`�
 
 
 Autopick Lead 收尾（2026-11-09，ISSUE-129，已驗收）：新建的 Lead workspace id／label 會持久化到卡片。`card cleanup`／merge cleanup 在卡片為 done／cancelled 或 worktree cleanup 成功後，依卡片記錄的 workspace id 查詢現況，僅在記錄與現況 label 完全相同且符合該卡 `autopick-<lead>-<卡片 id>`（沿用 60 字元上限）時關閉 Lead；其餘來源 workspace 仍保留。done／cancelled 終態卡每分鐘掃描，即使政策沒有 `autopick:` 區塊也會執行；本程序 autopick 執行中則延後掃描。in_progress 一律不關；stopped／failed 且卡片未結束、不曾成功 cleanup 時保留現場。reached 仍呼叫 `lead.close()`；若 cleanup 已先關閉，查詢確認該 id 已不存在則視為完成。找不到、標籤不符、查詢或關閉失敗只記 log、不影響 cleanup 結果。Worker／reviewer 與個人 workspace 不在此收尾範圍。重啟後可讀卡片繼續清理；沒有 metadata 的舊卡不回填。已於 2026-11-09 重啟 bridge 並實機驗收（取消、重啟續清、人工改名保留、其他 workspace 保留；未驗證項見 ISSUE-129）；Discord 端到端未驗。
+
+### 卡片角色指定（原始碼已實作，待實機驗收）
+
+<!-- prettier-ignore -->
+```yaml
+roles: {implement: "local:claude:sonnet", reviewer: "local:agy", fixer: "local:claude"}
+```
+
+支援 implement、diagnose、review、verify、reviewer、fixer 六角色。每個引號字串是
+`machine:agent:model`；省略維度沿用原選擇／預設（`":claude"`、`"::sonnet"`、`"local"`）。
+沒有 `roles` 的卡片維持舊行為；有指定的 card assign 必須帶 --coding。
+model 必須在同種類已開放配置 profile 允許清單，沿用該 profile 的 modelFlag／args，
+不是供應商模型目錄。新啟動禁止 resume／session 綁定／覆寫 model 參數。
+CLI 的 --agent 與 loop 的 --fix-agent 不得和卡片 agent 衝突；指定的 assignment
+與每次 review／fix 都用新 session。
+
+本卡 machine 交付是「宣告＋驗證＋**local 強制執行**」。不存在的 machine 拒絕；
+已配置 remote 也在撿卡前以實際未支援原因拒絕。跨機器卡片執行、pi Worker 尚未支援。
+無效宣告保留可查拒絕診斷；壞卡使用獨立持久化 `.role-rejections`，只向嚴格驗證的路由
+送出可重試通知，card show 可查原因／送達狀態。role_assigned 用有上界的 v2 格式記錄
+machine、agent、已知 model 與各維度來源。完整契約、重試語意與 merge／重啟後仍須完成的
+三張實機驗收卡見 docs/card-role-assignment.md、docs/known-issues.md 的 ISSUE-138；
+單元測試不能取代實機驗收。

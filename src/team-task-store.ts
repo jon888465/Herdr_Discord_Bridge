@@ -1,3 +1,7 @@
+import {
+  validateRoleSnapshot,
+  type RoleSnapshot,
+} from "./card-role-assignment.js";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -69,6 +73,7 @@ export interface TeamQuestion {
   state: "pending" | "sending" | "answered" | "stale" | "unknown" | "cancelled";
 }
 export interface DurableTeamTask {
+  roleSnapshot?: RoleSnapshot;
   planRejections?: Array<{
     round: number;
     rejectionCount: number;
@@ -171,6 +176,9 @@ export class TeamTaskStore {
     const now = new Date().toISOString();
     const task: DurableTeamTask = {
       taskId: input.taskId,
+      ...(input.roleSnapshot
+        ? { roleSnapshot: structuredClone(input.roleSnapshot) }
+        : {}),
       ...(input.origin ? { origin: structuredClone(input.origin) } : {}),
       workspaceId: input.lead.workspace_id,
       lead: structuredClone(input.lead),
@@ -357,6 +365,10 @@ function validateTask(t: DurableTeamTask): void {
     !Array.isArray(t.turns)
   )
     throw new Error("invalid durable task");
+  if (t.roleSnapshot) {
+    if (!t.codingMode) throw new Error("role constraints require coding mode");
+    validateRoleSnapshot(t.roleSnapshot);
+  }
   validateAgent(t.lead);
   for (const a of [t.lead, ...t.roster]) {
     validateAgent(a);
@@ -454,6 +466,7 @@ function validateUpdate(old: DurableTeamTask, next: DurableTeamTask): void {
     "originalPrompt",
     "roster",
     "createdAt",
+    "roleSnapshot",
   ] as const)
     if (JSON.stringify(old[key]) !== JSON.stringify(next[key]))
       throw new Error(`immutable task field: ${key}`);

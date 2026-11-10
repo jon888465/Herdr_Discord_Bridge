@@ -1,3 +1,11 @@
+import {
+  preflightRoles,
+  resolveFlowRole,
+  validateRoleSnapshot,
+  type RoleContext,
+  type RoleSnapshot,
+} from "./card-role-assignment.js";
+import { chooseReviewerKind } from "./review-pane.js";
 // `card review` 的前提檢查與組裝（追蹤清單 F5 階段 3d）：把卡片、worktree 索引、PR 索引、任務紀錄、政策、
 // GitHub 與 Herdr 接成一次 `runCardReview`。所有外部東西都由呼叫端注入，所以前提檢查可以單獨測試。
 // 前提不符合就丟出說明原因的錯誤（卡片不動、不開任何 pane）。
@@ -14,6 +22,9 @@ import { levelFor, type LoadedPolicy } from "./policy.js";
 import type { AgentRecord } from "./types.js";
 
 export interface ReviewWiringDeps {
+  roleContext?: RoleContext;
+  /** 任務建立時凍結的角色快照（優先於磁碟卡片，防止任務中改寫卡片竄改約束）。 */
+  taskRoleSnapshot?(taskId: string): RoleSnapshot | undefined;
   worktrees: { active(cardId: string): CardWorktree | undefined };
   prs: { forCard(cardId: string): CardPullRequest[] };
   assignments: { forCard(cardId: string): Array<{ taskId: string }> };
@@ -33,6 +44,25 @@ export async function reviewCardPullRequest(
   card: Card,
   options: { agent?: string; round: number },
 ): Promise<ReviewRun> {
+  const assignedTaskId = deps.assignments.forCard(card.id).at(-1)?.taskId;
+  const snapshot = deps.taskRoleSnapshot
+    ? assignedTaskId
+      ? deps.taskRoleSnapshot(assignedTaskId)
+      : undefined
+    : card.roles
+      ? preflightRoles(
+          card.roles,
+          deps.roleContext ?? { machineIds: [], profiles: [] },
+        )
+      : undefined;
+  if (deps.taskRoleSnapshot && snapshot) validateRoleSnapshot(snapshot);
+  const effectiveCard: Card = snapshot
+    ? { ...card, roles: structuredClone(snapshot.roles) }
+    : (() => {
+        const copy = { ...card };
+        delete copy.roles;
+        return copy;
+      })();
   const entry = deps.worktrees.active(card.id);
   if (!entry)
     throw new Error(
@@ -80,7 +110,7 @@ export async function reviewCardPullRequest(
   const [owner, repo] = pr.repo.split("/");
   const material = await deps.fetchMaterial({ owner, repo }, pr.number);
   const result = await runCardReview(deps.flow, {
-    card,
+    card: effectiveCard,
     round: options.round,
     scope: "whole",
     pr: { number: pr.number, headSha: material.headSha },
@@ -89,8 +119,25 @@ export async function reviewCardPullRequest(
       agent: live.agent,
       paneId: live.pane_id,
       workspaceId: live.workspace_id,
+      session: live.agent_session,
     },
     worktreePath: entry.path,
+    ...(snapshot?.roles.reviewer
+      ? {
+          launch: resolveFlowRole(
+            snapshot,
+            "reviewer",
+            chooseReviewerKind({ authorKind: live.agent }).ok
+              ? (
+                  chooseReviewerKind({ authorKind: live.agent }) as {
+                    kind: string;
+                  }
+                ).kind
+              : undefined,
+            options.agent,
+          ),
+        }
+      : {}),
     ...(options.agent !== undefined ? { requestedKind: options.agent } : {}),
   });
   return {

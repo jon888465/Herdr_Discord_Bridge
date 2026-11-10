@@ -51,6 +51,83 @@
 **修正範圍（尚未開始）：**`inconclusive` 時把每個 `unknown`／`not_met` 條件的 `note` 寫進「Review 發現」，並限制長度、遮蔽機密；補測試；`SPEC.md` 的 review 紀錄契約同步。
 
 **未驗證項目／下一步：**讀 `src/card-review*.ts` 確認 note 被丟掉的位置；重做一張驗收條件只含 diff 可驗證內容的敏感路徑測試卡，才能驗到 ISSUE-133／135 的敏感路徑情境。
+## ISSUE-138：卡片缺少六角色 machine／agent／model 指定與 bridge 強制守門
+
+更新日期：2026-11-10。狀態：已修正、待驗收（原始碼與自動化檢查完成；尚未實機驗收）。卡片：REQ-20261110-card-role-assignment。
+
+**症狀／預期：**舊卡只有 lead 指定；Worker 由 Lead 自選、reviewer／fixer 由臨時 CLI 指定，不能可控驗證角色矩陣。預期六角色可宣告 machine／agent／model，無宣告完全相容，無效指定在撿卡前拒絕且原因正確，Lead 不符派工被擋，流程記實際身分與來源。
+
+**已確認根因（2026-11-10 讀碼）：**Card／serializer 只有 lead；autopick 只驗 Lead；計畫驗證沒有角色約束、acquire 沒 assignment context；model 只有格式／flag 驗證而非同 kind 配置允許清單；CardStore 的正常帳本必須 parse 成功，壞卡被掃描排除；原角色紀錄無六角色／來源 metadata 且只有 best-effort。
+
+**修正範圍：**新增 card-role-assignment／card-role-session／card-role-rejections。roles inline map、同 kind 已開放 profile 及 modelFlag／args；preflight 與 manual assign；凍結候選、Lead prompt、整份計畫與實際 Worker 守門、每 assignment fresh session；review／fix／loop 卡片指定與 CLI 衝突；嚴格送出前角色紀錄與失敗清理；≤300字 v2 來源模板且舊模板／hash不變；壞卡獨立持久診斷、card show 查詢、通知重試。詳見 card-role-assignment.md。
+
+**範圍決定與限制：**Lead 明確決定本卡 machine 交付宣告＋驗證＋local 強制執行。已配置 remote 撿卡前明確拒絕「卡片流程尚未支援 machine X」，跨機器未實作／未驗收；pi Worker 不開放。配置允許 model 不保證供應商可用，保留 CLI 實際錯誤。無可信 notify 不猜路由；通知送達但 sent 寫入失敗可能重複。卡片宣告不等於每個角色已實機通過。
+
+**重現／測試環境：**2026-11-10，本機 macOS、此卡 worktree、fake Herdr ports／暫存卡片與 journal，未呼叫真 Agent、未讀 GitHub。原始 HEAD c0208815175e059b6aec824d1d2a7215993c01a4。初次 typecheck 因尚未安裝依賴找不到 tsc，npm ci --ignore-scripts 後解除；開發階段另修 optional 介面型別錯誤。新增測試曾抓到 role target 的三段 id 被誤判成 remote machine，已加明確 local；測試 fixture 的 session kind 與 Lead plan wire 格式已依既有協定修正，沒有修改任何既有測試。這些早期失敗不作最終通過證據。
+
+**驗證（2026-11-10，階段結果）：**既有未改測試 npm test：1635項／1634 pass／0 fail／1既有 skipped。新增核心與 flow 測試40項／40 pass／0 fail。送出前非同步身分守門接線時，既有 source-wiring 測試曾因 hookFinal 不再是 context 第一欄而失敗；保留原 hookFinal 欄位位置、把新守門放其後後解除，未修改既有測試。
+
+**w1 階段驗證（2026-11-10，本機）：**`npm run typecheck` exit 0；`npm run lint` exit 0（198個 TypeScript 檔）；`npm test` exit 0（含 build），1682項／1681 pass／0 fail／1既有 skipped，約63.5秒。比原套件新增47項，原有 test 檔案一行未改（`git diff --quiet -- test/` exit 0；兩個新測試檔為未追蹤新增）。`git diff --check` exit 0。fresh session 使用建立時 terminal 核對清理；strict 紀錄失敗僅釋放該 owned profile lease，保留既有 binding，不釋放其他 Worker。
+
+### r1 審查修正（2026-11-10，w2；狀態維持已修正、待驗收）
+
+r1 在 w1 通過自動化檢查後發現六項缺口，前一輪測試未涵蓋，保留上方歷史；這不是實機驗收通過後復發。本輪修正範圍：
+
+- r1-omitted-model：profile 未配置 model、actor 回報 CLI 預設 model 時誤拒並關 pane。只在 profile.model 存在時比對，省略時保留觀察值與 observed 證據。
+- r1-blocked-cleanup：fresh Worker finally 無條件關 pane，會丟失 blocked／待回答／逾時／送達不明的現場。新增 cleanup disposition，只有派工前失敗與確認完成可關閉，其他保留 session，既有停止／清理流程負責後續。以 durable question 實際 reply 及原 turn 續接測試確認。
+- r1-retry-identity：身分檢查只在重試迴圈外，agent_not_ready 等待期間換 terminal／session／model 仍可能收到第二次 prompt。新增每次實際嘗試前 hook；beforeDispatch 單次事件不變，Team／review／fix 均接線。
+- r1-ineligible-rejection：roleGate 對 draft／done／未 opt-in 卡也記事件通知。共用 ready＋autopickFor eligible 判定，非 eligible 零拒絕事件、零通知。
+- r1-malformed-notify-gate：壞卡通知缺完整選單檢查與讀畫面後身分／狀態複核。與正常 notifier 共用 gate，完整選單與兩次送前檢查；readAgent 期間替換 terminal／kind 或變忙碌／blocked 不送，保留 pending 重試。
+- r1-invalid-doc-example：主要 roles 範例被格式化為 parser 不支援的多行 map。改單行 inline map；契約與兩語 README 加 prettier-ignore，新增三份文件範例解析測試。
+
+**本輪重現與測試（2026-11-10）：**新增 test/card-role-r1.test.ts，既有測試（含 w1 新增檔）一行不改。先跑 `npm run build && node --test dist/test/card-role-r1.test.js`：6項／2 pass／4 fail，確認省略 model、非 eligible、重試與契約範例四項症狀。修正後第一輪22項／22 pass／0 fail；新增執行中 timeout／uncertain 與各維度重試替換檢查後，targeted 27項／27 pass／0 fail。所有測試均 fake port／暫存 journal，不呼叫真 Agent、不部署。
+
+**w2 最終驗證（2026-11-10，本機）：**`npm run typecheck` exit 0；`npm run lint` exit 0（199個 TypeScript 檔）；`npm test` exit 0（含 build），1709項／1708 pass／0 fail／1既有 skipped，約64.9秒。新增27項 r1 回歸測試；w2 開始時所有既有 test 檔案（含 w1 的兩份新增測試）SHA-256 核對未變。`git diff --check` exit 0；文件範例解析已包含於新測試。未使用 GitHub、未 commit／push／merge、未部署／重啟。狀態仍為已修正、待驗收；三張 merge／重啟後實機卡仍待 Lead 執行。
+
+### PR #205 獨立 review 修正（r2，2026-11-10；狀態維持已修正、待驗收）
+
+獨立 review 對 PR #205（`ba41360`）提出六項 findings（F1–F6），本輪全部修正並補齊回歸測試：
+
+- **F1 [medium]（`src/card-role-assignment.ts` `resolveFlowRole` fallback）：**原本 `(!cli && !c?.agent && c?.model ? pool[0] : undefined)` 僅在宣告 `model` 時 fallback 至 `pool[0]`，導致只宣告 `machine`（如 `reviewer: "local"`）且預設種類不在已開放候選池時，preflight 通過但到 review／fix 階段才拋錯。改為 `!cli && !c?.agent ? pool[0] : undefined`，與 preflight 候選收斂一致（無任何已開放候選時仍在撿卡前由 `preflightRoles` 拒絕）。
+- **F2 [medium]（`src/card-review-wiring.ts`、`src/card-fix-wiring.ts`、`src/card-command.ts`、`src/main.ts` 凍結快照權威性）：**原本 review／fix 每輪重讀磁碟卡片的 `card.roles`，且 `validateJob`／`startTask` 在原本無 `roles` 時未防範後續被插入 `roles`，使執行中的 Lead／Worker 改寫磁碟卡片即可竄改 `reviewer`／`fixer` 約束。改為由 `ReviewWiringDeps`／`FixWiringDeps` 的 `taskRoleSnapshot` 讀取任務建立時凍結的 `roleSnapshot`（並以 `validateRoleSnapshot` 驗證）作為唯一權威來源，`card-command.ts` 無條件注入 `recordRoleStrict`，`main.ts` 的 `validateJob`、`autopickSelections` 與 `startTask` 亦比對 preflight 時的 `roles`（含原本 `undefined` 的情況），解除與設計文件「後續不接受 Lead 修改約束」的矛盾。
+- **F3 [medium]（`src/card.ts`、`src/card-notify.ts`、`src/card-role-rejections.ts`、`src/main.ts` 通知分類標籤與壞卡 autopick opt-in 檢查）：**`src/card.ts` 移除 `unsupported frontmatter line` 與 `unknown status` 對卡片原始行／值的回顯；`src/card-notify.ts` 新增 `classifyRoleRejection`、不再對含「卡片角色指定無效：」的事件直接 `.slice` 切片原文；`src/card-role-rejections.ts` 新增 `classifyMalformedReason` 與 `malformedCardAutopickEligible`，並在 `src/main.ts` 壞卡拒絕掃描前檢查卡片是否為 `status: ready` 且所屬 `projects`／`project` 已在 `policy.yml` 選用 autopick，未選用專案不記診斷也不發通知。
+- **F4 [low]（`src/autopick.ts`、`src/card-role-assignment.ts` 來源紀錄準確性）：**`src/autopick.ts` 在 `job.card.roles` 存在時不再將 `reviewerFor(job.lead)` 作為 `--agent` 傳給 `card loop`，使卡片有 `roles` 但未宣告 `reviewer` 時來源正確記為 `default` 而非 `CLI`；`src/card-role-assignment.ts` 的 `roleMetadata` 在 `source === "lead"` 且選中帶 `model` 的候選（卡片未約束 `model`）時，`selectionSources.model` 記為 `"lead"` 而非 `"default"`。
+- **F5 [low]（`src/card-events.ts`、`src/team-orchestration.ts` 提前驗證 `assignment.id`）：**匯出 `ROLE` 正則並在 `validateAssignmentPlan` 提前驗證 `assignment.id` 與 `workerRole(assignment.id)` 符合 `ROLE`（`/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$/`），使不合法的 `assignment.id` 在規劃階段即觸發 `plan_rejected` 重規劃，而非等到 Worker 執行時 `recordRoleStrict` 才失敗。
+- **F6 [low]（`src/card-fix-wiring.ts`、`src/card-review-flow.ts`、`src/card-fix-flow.ts`、`test/card-role-r2.test.ts` 接線清理與測試）：**移除 `src/card-fix-wiring.ts` 未使用的 `chooseReviewerKind` import；修正 `runCardReview`／`runCardFix` 在 `reviewInPane`／`fixInPane` 的 `roles` 分支拋錯時保留 `finally` 中 `closeReviewerPane` 的 `closed.note` 附加於錯誤訊息；新增 `test/card-role-r2.test.ts` 直接測試 `card-command.ts`、`reviewCardPullRequest`、`fixCardWorktree` 與 `runAutopick`。
+
+**r2 驗證（2026-11-10，本機）：**新增 `test/card-role-r2.test.ts` 共 6 項測試，既有測試檔案一行未改（`git diff -- test/card-role-assignment.test.ts test/card-role-flow.test.ts test/card-role-r1.test.ts` 為空）。`npm run check`（`npm run typecheck && npm test`）exit 0，1715項／1714 pass／0 fail／1既有 skipped；`npm run lint` exit 0（200個 TypeScript 檔）；`git diff --check` exit 0。狀態維持「已修正、待驗收」。
+
+### PR #205 第二輪獨立複審修正（r3，2026-11-10；狀態維持已修正、待驗收）
+
+獨立複審對 `8c80c17` 提出六項 findings（N1、F3-補、N2、F6-補、N3、N4），本輪全部修正並補齊回歸測試：
+
+- **N1 [medium]（`src/team-orchestration.ts` `validateAssignmentPlan` `ROLE.test` 限定於有 `roleSnapshot` 時）：**`8c80c17` 將 `ROLE.test(assignment.id)` 放在 `if (roleSnapshot)` 之外，導致無 `roles` 的卡片與一般 `team ask` 無法使用中文或含空白的 assignment id。現移入 `if (roleSnapshot)` 分支內，僅在卡片有角色約束時檢查 `ROLE` 格式，無 `roles` 時完全維持舊行為。
+- **F3-補 [必修]（`src/card-notify.ts` 移除 `不合法 model <值>` 白名單）：**移除 `SAFE_ROLE_REJECTION_REASONS` 中允許 `不合法 model <值>` 原樣通過的正則，使所有 `不合法 model ...` 拒絕原因比照 `machine` 統一收斂為固定標籤 `卡片角色指定無效：<role>：不合法 model`，不將卡片上的 model 字串送入 Discord 或 Agent 通知 prompt。
+- **N2 [low，必修]（`src/card.ts` 還原 `unknown status` 與 `unsupported frontmatter line` 完整診斷訊息）：**將 `src/card.ts:387` 與 `:415` 還原為 `unknown status "${status}"` 與 `unsupported frontmatter line: ${line}`，保留 `card show` 與 `herdr-card-check` 的具體診斷能力；通知層仍由 `classifyMalformedReason` 轉為固定標籤，不影響 prompt injection 防護。
+- **F6-補 [low]（`src/main.ts` `cardRoleContext(runtime)` 填入 `enabledProfileIds`）：**選擇在 `cardRoleContext(runtime)` 依 `CARD_ROLES.some((role) => roleProfileEnabled(role, p))` 填入 `enabledProfileIds` 並匯出 `cardRoleContext` 補單元測試，使執行時 `RoleContext.enabledProfileIds` 實際生效並與既有測試契約一致。
+- **N3 [low]（`docs/card-role-assignment.md` 與 `SPEC.md` 明載預設 reviewer 差異）：**選擇在 `docs/card-role-assignment.md` 與 `SPEC.md` 明載：有 `roles` 宣告但未指定 `reviewer` 時，`autopick` 為讓來源記為 `default` 而非 `CLI` 不傳 `--agent`，預設種類由 `chooseReviewerKind`（偏好順序 `claude`、`codex`、`agy` 中第一個與作者不同者）決定，故 `agy`／`pi` 當 Lead 時預設 reviewer 為 `claude`（無 `roles` 卡維持由 `reviewerFor` 傳 `--agent codex`）。
+- **N4 [low]（`src/card-role-rejections.ts`、`src/main.ts` 共用 `malformedCardIdentity` 讀取結果）：**`malformedCardAutopickEligible` 與 `recordMalformedRejection` 新增選填 `precomputedIdentity` 參數，`src/main.ts` 壞卡掃描先呼叫一次 `malformedCardIdentity` 並將結果傳入兩者共用，避免重複讀取同一張壞卡檔案。
+
+**r3 驗證（2026-11-10，本機）：**於 `test/card-role-r2.test.ts` 新增 2 項測試（共 8 項）並更新 F3 測試斷言以對應 N2／F3-補；`main` 分支既有 86 個測試檔一行未改。`npm run check`（`npm run typecheck && npm test`）exit 0，1717項／1716 pass／0 fail／1既有 skipped；`npm run lint` exit 0（200個 TypeScript 檔）；`git diff --check` exit 0。狀態維持「已修正、待驗收」。
+
+### PR #205 第三輪獨立複審修正（r4，2026-11-10；狀態維持已修正、待驗收）
+
+獨立 `codex` 複審對 `ba41360..c4b0ecc` 提出三項 findings（R1–R3），本輪全部修正並補齊回歸測試：
+
+- **R1 [medium，必修，F3 殘留]（`src/card-notify.ts` 最終通知移除 `card.title` 原文）：**原本 `message()` 將 `card.title` 經 `redactSecrets` 後拼成 `標題=${JSON.stringify(title)}` 放進最終通知，使標題內含 `IGNORE PREVIOUS INSTRUCTIONS` 等文字仍會原樣進入 Discord 或目標 Agent 的通知 prompt。現從 `message()` 移除 `card.title`（並移除未再使用的 `redactSecrets` import），最終通知只保留受驗證的卡片 id（`isCardId(card.id)`）、固定事件／分類原因標籤（`notificationReason(event)`）與必要受驗證 PR URL。
+- **R2 [low，新引入]（`src/card-role-rejections.ts` `inlineProjects` quoted token 結尾錨點與單次解析）：**原本 `inlineProjects` 的 quoted token 正則 `/^"(?:([^"\\]*))"|^([^"'\\#]+)$/` 第一分支缺少結尾錨點 `$` 且重複執行兩次，導致 `projects: ["local:opted"garbage]` 會被抽出 `local:opted` 而取得壞卡 autopick opt-in（正常 `parseCard` 視為 `unbalanced inline array` 拒絕）。現改為以 `/^(?:"([^"\\]*)"|([^"'\\#]+))$/` 完整錨定整個 token、每個元素只執行一次解析，任一元素不合法即讓 `inlineProjects()` 回傳 `undefined` 並拒絕 opt-in。
+- **R3 [low，文件矛盾]（`docs/card-role-assignment.md` 與 `SPEC.md` 同步壞卡掃描範圍與未宣告 `reviewer` 例外）：**修正 `docs/card-role-assignment.md:55` 與 `SPEC.md:821`：明載 autopick 壞卡掃描在無法確認 `status: ready`＋已選用 autopick 專案（含超限、symlink、不可讀、header 無法讀出有效 `ready`／`projects` 或未 opt-in）時直接跳過，不建立 `.role-rejections` 角色拒絕帳本也不通知，與既有 `CardStore` 解析診斷（`card list`／`card show`／`herdr-card-check`）區分；並於 `docs/card-role-assignment.md:17`「未宣告的角色保留原選擇」補上 `:37` 有 `roles` 但未宣告 `reviewer` 時預設改由 `chooseReviewerKind` 決定的例外說明。
+
+**r4 驗證（2026-11-10，本機）：**於 `test/card-role-r2.test.ts` 新增 2 項測試（R1 最終通知層防標題與事件原文洩漏測試、R2 非法引號後綴不得取得壞卡 opt-in 測試，該檔共 10 項）；卡片開工前 `main` 分支既有 86 個測試檔一行未改。`npm run check`（`npm run typecheck && npm test`）exit 0，1719項／1718 pass／0 fail／1既有 skipped；`npm run lint` exit 0（200個 TypeScript 檔）；`git diff --check` exit 0。狀態維持「已修正、待驗收」。
+
+**部署／未驗項目：**本輪未 commit／push／merge／重啟／部署，執行中的 bridge 尚未載入新版，歷史事件／失敗不補送。build／unit test 不代表 Discord／Herdr／CLI 實機驗收。
+
+**下一步（三張真卡仍待 Lead 在 merge 並重啟新版後執行）：**
+1. 無害一行檔案卡，至少兩角色不同 agent、至少一角色指定 model；保存 role_assigned，另取 pane／啟動紀錄證明實際 model。
+2. 不允許 agent／不合法 model 卡，證明撿卡前拒絕、零工作啟動，通知標題與原因正確。
+3. Lead 故意派出違反指定的計畫，證明 plan_rejected 且零違規 Worker prompt。
+
+每張都補卡 id、日期、環境、role_assigned 原文與結果到本 issue 及 agent-role-matrix；未完成維持已修正、待驗收，失敗則重新開啟，不得標已驗收。
 
 ## ISSUE-137：Lead／Worker 首次 prompt 在 Herdr 登記完成前回 agent_not_ready
 

@@ -1,3 +1,4 @@
+import { parseCardRoles, type CardRoles } from "./card-role-assignment.js";
 import path from "node:path";
 import type { AutopickLead } from "./policy.js";
 
@@ -26,6 +27,7 @@ export interface Card {
   source?: string;
   notify?: string;
   lead?: AutopickLead;
+  roles?: CardRoles;
   autopick_workspace_id?: string;
   autopick_workspace_label?: string;
   project?: string;
@@ -56,6 +58,7 @@ const KNOWN_KEYS = new Set<string>([
   "source",
   "notify",
   "lead",
+  "roles",
   "autopick_workspace_id",
   "autopick_workspace_label",
   "project",
@@ -474,6 +477,13 @@ export function buildCard(
       ...checkRequired(fields, filename),
       body: document.body,
     };
+    if (fields.has("roles")) {
+      try {
+        card.roles = parseCardRoles(fields.get("roles"));
+      } catch (error) {
+        reject(error instanceof Error ? error.message : "invalid roles");
+      }
+    }
     if (fields.has("lead")) {
       const value = asString("lead", fields.get("lead"));
       if (!["claude", "codex", "agy", "pi"].includes(value))

@@ -19,7 +19,9 @@ export interface TeamTurnContext {
   phase?: "planning" | "assignment" | "synthesis";
   assignmentId?: string;
   signal?: AbortSignal;
-  beforeDispatch?: () => void;
+  beforeDispatch?: () => void | Promise<void>;
+  /** Revalidate before every actual RPC attempt, including agent_not_ready retries. */
+  beforePromptAttempt?: () => void | Promise<void>;
   beforeComplete?: () => Promise<void>;
   /**
    * 該 Agent 在 `since`（毫秒時間戳）之後由 CLI hook 回報的完整最終訊息；沒有（或 hook 未啟用）
@@ -138,7 +140,8 @@ export async function runTeamTurn(
   };
   let transcript = await CodexTranscript.connect(agent, prompt);
   check();
-  context?.beforeDispatch?.();
+  const dispatchCheck = context?.beforeDispatch?.();
+  if (dispatchCheck) await dispatchCheck;
   check();
   // 優先使用 Herdr 的 atomic agent.prompt(wait=...)，確保發送與首次 settled
   // lifecycle 綁在同一個 request；不支援時才 fallback 到 promptAgent + waitAgent。
@@ -163,6 +166,10 @@ export async function runTeamTurn(
   for (;;) {
     check();
     if (lastNotReady && clock.now() >= retryDeadline) throw exhausted();
+    if (clock.now() >= deadline) throw expiredBeforeDispatch();
+    const attemptCheck = context?.beforePromptAttempt?.();
+    if (attemptCheck) await attemptCheck;
+    check();
     if (clock.now() >= deadline) throw expiredBeforeDispatch();
     try {
       promptSettled = herdr.promptAgentAndWait
