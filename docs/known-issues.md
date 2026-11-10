@@ -1,5 +1,26 @@
 # Known Issues
 
+## ISSUE-138：reviewer 回 `inconclusive` 時，每個條件的判斷說明沒有寫進卡片，原因只能去翻 Agent 的 session 記錄
+
+更新日期：2026-11-10。狀態：待調查（現象與根因已確認，尚未修正）。
+
+**使用者可見症狀：**`REQ-20261110-stop-reason-live`（PR #203）的 `card review` 第 1、2 輪都是 `inconclusive`，卡片的「Review 發現」只有「第 1 輪 · 整體 · head 64bb769fb7a8 · inconclusive」一行標題、沒有內容；通知只有 `review_verdict · inconclusive`。使用者與後續 Agent 看不出為什麼沒有結論。`inconclusive` 也算一次 verdict（每張卡共 3 次），所以看不到原因就無法判斷要不要再花一次。#202 第 1 輪的 `inconclusive`（2026-11-09）也是同樣情形，當時紀錄成「原因沒查到」，實際上是原因被丟掉。
+
+**預期行為：**`inconclusive` 要把每個 `unknown` 條件的 `note` 寫進「Review 發現」（或流程紀錄），至少一句「哪個條件為什麼無法判斷」。
+
+**重現／環境：**2026-11-10，本機 macOS，bridge 為 main `c020881`（#201、#202）merge 後重啟的程序；測試卡 `REQ-20261110-stop-reason-live`（`lead: codex`，在 `scripts/` 新增一行檔案，PR #203）。reviewer 為 claude（第 1 輪 01:05:00Z 到 01:05:28Z，第 2 輪 01:05:37Z 到 01:06:24Z）。
+
+**已確認根因：**
+1. 兩次 `inconclusive` 都是 reviewer 的正常判斷，不是 JSON 格式問題（ISSUE-134 沒有復發）：從 claude session 記錄（`~/.claude/projects/-Users-jon--herdr-worktrees-Herdr-Discord-Bridge-card-req-20261110-stop-reason-live/cf895d9c-….jsonl`）讀到回覆是合法的單一 JSON，條件 1 `met`（只新增 `scripts/card-run-stop-reason-live.txt`，內容恰為 `ok\n`），條件 2、3 `unknown`，`findings` 為空陣列，註明「屬 PR 開出後 bridge 的即時行為，無法從 diff 判斷」。
+2. **測試卡設計錯誤（Agent 的疏失）：**驗收條件 2、3 是 bridge 開 PR 之後的通知行為，review 只看 diff，本來就無法驗證。驗收條件要寫成 diff 可驗證的內容，不可寫成要靠實機觀察才知道的結果；實機觀察應放在卡片描述或另外的驗收段，不放在 `## 驗收條件`。
+3. **記錄缺口（程式，尚未讀碼確認細節）：**`findings` 為空時，各條件的 `note` 沒有被寫進「Review 發現」；reviewer pane 在回合結束後關閉，原因只留在 Agent 自己的 session 記錄。
+
+**連帶影響：**同一個 head 連續 2 次 `inconclusive` 時，autopick loop 就停下（`autopick_stopped`），退回人工處理；這次 PR #203 因此停在 review 第 2 輪，review 次數還剩 1 次。
+
+**修正範圍（尚未開始）：**`inconclusive` 時把每個 `unknown`／`not_met` 條件的 `note` 寫進「Review 發現」，並限制長度、遮蔽機密；補測試；`SPEC.md` 的 review 紀錄契約同步。
+
+**未驗證項目／下一步：**讀 `src/card-review*.ts` 確認 note 被丟掉的位置；重做一張驗收條件只含 diff 可驗證內容的敏感路徑測試卡，才能驗到 ISSUE-133／135 的敏感路徑情境。
+
 ## ISSUE-137：Lead／Worker 首次 prompt 在 Herdr 登記完成前回 agent_not_ready
 
 更新日期：2026-11-09。狀態：已驗收（2026-11-09，範圍：pi 當 Lead 一次實機成功，見「實機驗收」段；請求 A 已指認為卡片通知；其他 Agent 種類、非 Lead 角色的重試未被觸發也未驗）。
@@ -78,7 +99,15 @@
 
 ## ISSUE-135：卡片事件通知的標題把「Lead 不在候選清單」說成「專案政策未滿足」
 
-更新日期：2026-11-09。狀態：已修正、待驗收。先前狀態與觀察保留於下方歷史；根因現已由程式碼確認。
+更新日期：2026-11-10。狀態：**重新開啟（部分）**——#202 只處理了「Lead 不可用」與「敏感路徑」兩種原因，其他 `autopick_stopped` 原因的標題仍會被關鍵字誤標（見下方 2026-11-10 實機觀察）。先前狀態與觀察保留於下方歷史；根因現已由程式碼確認。
+
+**實機觀察（2026-11-10，本機 macOS，bridge 為 main `c020881`（#201、#202）merge 後重啟的程序；測試卡 `REQ-20261110-stop-reason-live`（`lead: codex`，在 `scripts/` 新增一行檔案，PR #203））：**卡片因 reviewer 連續 2 次 `inconclusive`（原因見 ISSUE-138）停下，卡片流程紀錄寫的實際原因是「失敗：autopick_stopped；原因：loop：同一個 head 的 review 連續 2 次 inconclusive（沒有可修的結論），退回人工處理」（01:06:24Z）；但 `notify` 對象收到的通知標題是「autopick_stopped · review 條件、版本條件未滿足」。**這與 #202 預期不符：**標題說的是「review 條件、版本條件未滿足」，實際原因是 review 沒有結論，與版本無關。同一次事件的 `loop_stopped` 通知標題是「review 條件未滿足」（沒有版本條件）。
+
+**根因（讀碼確認，`src/card-notify.ts` 的 `notificationReason`，2026-11-10）：**#202 只在分類表之前加了兩個特例（`Lead「…」不在政策候選清單內／尚未開放`、`autopick_stopped` 且含「敏感」）。其他 `autopick_stopped` 原因會走到最後的關鍵字清單，原因文字「同一個 **head** 的 **review** 連續 2 次 inconclusive」同時命中 `/review|finding/`（review 條件）與 `/head|commit/`（版本條件）。通知刻意只放分類標籤、不放原因原文（避免帶出卡片或 finding 內容），所以標題標籤錯就等於使用者看不到正確原因。
+
+**修正方向（尚未實作）：**不要再讓 `autopick_stopped` 的標題靠通用關鍵字猜；對 bridge 自己產生、文字固定的停止原因（review 連續 inconclusive、review 次數用完、loop 其他固定停止句）各給明確標籤，其餘未知原因回「流程未完成，原因已記錄於卡片」，不猜。`loop_stopped` 事件同理要檢查。要補測試：上面這句實際原因文字必須分類成「review 沒有結論」之類的標籤，且不含「版本條件」。
+
+**未驗證：**敏感路徑停止情境（#202 實際想修的）這次沒有走到，因為 review 先停在 inconclusive；要用驗收條件只含「diff 可驗證」內容的新測試卡才能驗到。
 
 **使用者可見症狀：**測試卡 `REQ-20261109-lead-live-reject`（`lead: pi`，不在 `autopick_lead: claude, codex` 內）被拒絕時，卡片的事件原因正確寫「Lead『pi』不在政策候選清單內，不撿這張卡」，但 `notify` 對象收到的通知標題是「autopick_stopped · 專案政策未滿足」。這不是專案等級或專案選用的問題，標題會誤導使用者去查專案政策。
 
@@ -118,7 +147,9 @@
 
 ## ISSUE-133：`autopick_stopped` 的原因只留 loop 輸出的前 200 字，真正的停止原因被截掉，通知因此誤導
 
-更新日期：2026-11-09。狀態：已修正、待驗收。先前重現與根因證據保留於下方歷史。
+更新日期：2026-11-10。狀態：已修正、待驗收（部分實機證據，見下）。先前重現與根因證據保留於下方歷史。
+
+**實機部分驗證（2026-11-10，本機 macOS，bridge 為 main `c020881`（#201、#202）merge 後重啟的程序；測試卡 `REQ-20261110-stop-reason-live`（`lead: codex`，在 `scripts/` 新增一行檔案，PR #203））：**卡片事件 `failed`／`autopick_stopped` 的原因文字是實際的停止原因（「loop：同一個 head 的 review 連續 2 次 inconclusive（沒有可修的結論），退回人工處理」，01:06:24Z），不是整段 loop 輸出或被截斷的前段；這部分符合 #202 的預期。**仍沒有驗到的：**敏感路徑造成的停止（原本觸發本 issue 的情境）；通知標題的誤標另見 ISSUE-135（重新開啟）。
 
 **使用者可見症狀：**卡片 `REQ-20261109-multi-lead-card-lead`（PR #189）已在 06:41:19Z 通過第 2 輪 review，真正擋住自動 merge 的只有敏感路徑 `src/policy.ts`（設計上要人工 merge）。但 06:41:54Z 寫進卡片的 `failed`／`autopick_stopped` 事件，原因是「loop：review 完成：… PR #189（head e1a3174b2a24）· 第 1 輪 … 判定：changes_requested …」，是**第 1 輪**的結果；bridge 據此通知「review 條件、版本條件未滿足」，與實際狀況（`pass`、head 一致，只剩敏感路徑）不符。
 
