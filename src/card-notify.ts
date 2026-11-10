@@ -3,9 +3,8 @@
 // 通知失敗一律不影響 autopick、card loop、card merge。
 
 import { createHash } from "node:crypto";
-import { parseNotifyTarget, type Card } from "./card.js";
+import { isCardId, parseNotifyTarget, type Card } from "./card.js";
 import type { LogEntry } from "./card-ledger.js";
-import { redactSecrets } from "./redact.js";
 import type { CardStore } from "./card-store.js";
 import type { AgentRecord } from "./types.js";
 
@@ -190,9 +189,7 @@ function message(
   event: LogEntry,
   prUrl: string | undefined,
 ): string {
-  const title = redactSecrets(card.title)
-    .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
-    .slice(0, 120);
+  const id = isCardId(card.id) ? card.id : "unknown-card";
   const link =
     prUrl &&
     /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/[0-9]+$/.test(
@@ -204,7 +201,7 @@ function message(
     event.event === "failed" && event.text.includes("autopick_stopped")
       ? "autopick_stopped"
       : event.event;
-  return `[bridge 通知] ${card.id} · 標題=${JSON.stringify(title)} · ${name} · ${notificationReason(event)}${link ? `\n${link}` : ""}`;
+  return `[bridge 通知] ${id} · ${name} · ${notificationReason(event)}${link ? `\n${link}` : ""}`;
 }
 
 export function createCardNotifier(deps: NotifyDeps) {

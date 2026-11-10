@@ -818,7 +818,7 @@ PR #189（`88e1ce6`）已於 2026-11-09 merge，並重啟 bridge 載入（`card 
 
 card review／fix／loop 的 CLI agent 與卡片指定衝突時開 pane 前拒絕；autopick 在卡片有 `roles` 宣告時不再傳 `--agent` 給 `card loop`，使未宣告 `reviewer` 時的來源記為 `default` 而非 `CLI`，且預設 reviewer 改由 `chooseReviewerKind`（偏好順序 `claude`、`codex`、`agy` 中第一個與作者不同者）決定——因此 `agy`／`pi` 當 Lead 時，有 `roles` 但未宣告 `reviewer` 的預設 reviewer 為 `claude`（無 `roles` 卡維持由 `reviewerFor` 傳 `--agent codex`）。每輪新 pane、禁止 resume，已知作者同 session 拒絕。無 roles 保留舊 best-effort；有 roles 的 Worker／reviewer／fixer 在送 prompt 前 strict 寫 role_assigned，失敗不送並清理可核對 owned terminal 的 pane。v2 保留舊摘要前綴，以 cr、s、ss、me 編碼 codingRole、source、三維 selectionSources、modelEvidence；assignmentId 由 role alias 還原，不重複印；不印 profileId。完整合法最長值仍≤300字，不提高限制、不截斷 model；hash 納入新 metadata，舊事件不改。事件表示身分已準備，不代表已送 prompt／成功完成。
 
-壞卡不經正常卡片帳本：獨立 `.role-rejections/<id>.json` 持久診斷、card show 可查。只接受可信 filename／唯一嚴格 id、ready、notify 路由；不重寫壞卡，symlink／超限／不可讀不推測路由。寫入失敗掃描重試、通知 pending 續試（含重啟），sent 去重；送達不確定或 sent 寫失敗可重複，無可信路由保存 no_trusted_route。通知保留實際錯誤分類與原因。
+壞卡不經正常卡片帳本：獨立 `.role-rejections/<id>.json` 持久診斷、card show 可查。autopick 掃描只對可確認可信 filename／唯一嚴格 id、`ready` 與已選用 autopick 專案（`projects`／`project`）的壞卡建立 `.role-rejections` 帳本並通知；無法確認 `ready`＋`opt-in`（如超限、symlink、不可讀、header 無法讀出有效 `ready`／`projects` 或未選用專案）時掃描直接跳過、不建立角色拒絕帳本也不通知，由既有 `CardStore` 解析診斷（`card list`／`card show`／`herdr-card-check`）回報（已確認 `ready`＋`opt-in` 後缺可信路由，或直接呼叫 `recordMalformedRejection` 時，保存 `no_trusted_route`、不推測路由）。不重寫壞卡。寫入失敗掃描重試、通知 pending 續試（含重啟），sent 去重；送達不確定或 sent 寫失敗可重複。最終通知移除卡片標題原文，只保留受驗證的卡片 id、固定事件／分類標籤與必要受驗證 PR URL。
 
 實機驗收仍須 merge、重啟後三張測試卡與 pane model 證據，見 ISSUE-138；未完成不得標已驗收。
 

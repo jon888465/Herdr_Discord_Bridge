@@ -131,19 +131,19 @@ export function malformedCardIdentity(
       );
       return (m?.[1] ?? m?.[2])?.trim();
     };
-    const inlineProjects = (): string[] => {
+    const inlineProjects = (): string[] | undefined => {
       const matches = header.filter((l) => /^\s*projects\s*:/.test(l));
-      if (matches.length !== 1) return [];
+      if (matches.length === 0) return [];
+      if (matches.length !== 1) return undefined;
       const m = /^projects: +\[([^\]]*)\]\s*(?:#.*)?$/.exec(matches[0]!);
-      if (!m) return [];
+      if (!m) return undefined;
       const body = m[1]!.trim();
       if (!body) return [];
       const out: string[] = [];
       for (const part of body.split(",")) {
-        const item =
-          /^"(?:([^"\\]*))"|^([^"'\\#]+)$/.exec(part.trim())?.[1]?.trim() ??
-          /^"(?:([^"\\]*))"|^([^"'\\#]+)$/.exec(part.trim())?.[2]?.trim();
-        if (!item || !PROJECT_NAME.test(item)) return [];
+        const token = /^(?:"([^"\\]*)"|([^"'\\#]+))$/.exec(part.trim());
+        const item = (token?.[1] ?? token?.[2])?.trim();
+        if (!item || !PROJECT_NAME.test(item)) return undefined;
         out.push(item);
       }
       return out;
@@ -151,14 +151,16 @@ export function malformedCardIdentity(
     const validId = scalar("id") === id;
     const status = validId ? scalar("status") : undefined;
     const singleProject = validId ? scalar("project") : undefined;
-    const projects = validId
-      ? [
-          ...inlineProjects(),
-          ...(singleProject && PROJECT_NAME.test(singleProject)
-            ? [singleProject]
-            : []),
-        ]
-      : [];
+    const parsedProjects = validId ? inlineProjects() : undefined;
+    const projects =
+      validId && parsedProjects !== undefined
+        ? [
+            ...parsedProjects,
+            ...(singleProject && PROJECT_NAME.test(singleProject)
+              ? [singleProject]
+              : []),
+          ]
+        : [];
     const notify = scalar("notify");
     return {
       id,

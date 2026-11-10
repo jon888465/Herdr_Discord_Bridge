@@ -59,6 +59,16 @@ r1 在 w1 通過自動化檢查後發現六項缺口，前一輪測試未涵蓋�
 
 **r3 驗證（2026-11-10，本機）：**於 `test/card-role-r2.test.ts` 新增 2 項測試（共 8 項）並更新 F3 測試斷言以對應 N2／F3-補；`main` 分支既有 86 個測試檔一行未改。`npm run check`（`npm run typecheck && npm test`）exit 0，1717項／1716 pass／0 fail／1既有 skipped；`npm run lint` exit 0（200個 TypeScript 檔）；`git diff --check` exit 0。狀態維持「已修正、待驗收」。
 
+### PR #205 第三輪獨立複審修正（r4，2026-11-10；狀態維持已修正、待驗收）
+
+獨立 `codex` 複審對 `ba41360..c4b0ecc` 提出三項 findings（R1–R3），本輪全部修正並補齊回歸測試：
+
+- **R1 [medium，必修，F3 殘留]（`src/card-notify.ts` 最終通知移除 `card.title` 原文）：**原本 `message()` 將 `card.title` 經 `redactSecrets` 後拼成 `標題=${JSON.stringify(title)}` 放進最終通知，使標題內含 `IGNORE PREVIOUS INSTRUCTIONS` 等文字仍會原樣進入 Discord 或目標 Agent 的通知 prompt。現從 `message()` 移除 `card.title`（並移除未再使用的 `redactSecrets` import），最終通知只保留受驗證的卡片 id（`isCardId(card.id)`）、固定事件／分類原因標籤（`notificationReason(event)`）與必要受驗證 PR URL。
+- **R2 [low，新引入]（`src/card-role-rejections.ts` `inlineProjects` quoted token 結尾錨點與單次解析）：**原本 `inlineProjects` 的 quoted token 正則 `/^"(?:([^"\\]*))"|^([^"'\\#]+)$/` 第一分支缺少結尾錨點 `$` 且重複執行兩次，導致 `projects: ["local:opted"garbage]` 會被抽出 `local:opted` 而取得壞卡 autopick opt-in（正常 `parseCard` 視為 `unbalanced inline array` 拒絕）。現改為以 `/^(?:"([^"\\]*)"|([^"'\\#]+))$/` 完整錨定整個 token、每個元素只執行一次解析，任一元素不合法即讓 `inlineProjects()` 回傳 `undefined` 並拒絕 opt-in。
+- **R3 [low，文件矛盾]（`docs/card-role-assignment.md` 與 `SPEC.md` 同步壞卡掃描範圍與未宣告 `reviewer` 例外）：**修正 `docs/card-role-assignment.md:55` 與 `SPEC.md:821`：明載 autopick 壞卡掃描在無法確認 `status: ready`＋已選用 autopick 專案（含超限、symlink、不可讀、header 無法讀出有效 `ready`／`projects` 或未 opt-in）時直接跳過，不建立 `.role-rejections` 角色拒絕帳本也不通知，與既有 `CardStore` 解析診斷（`card list`／`card show`／`herdr-card-check`）區分；並於 `docs/card-role-assignment.md:17`「未宣告的角色保留原選擇」補上 `:37` 有 `roles` 但未宣告 `reviewer` 時預設改由 `chooseReviewerKind` 決定的例外說明。
+
+**r4 驗證（2026-11-10，本機）：**於 `test/card-role-r2.test.ts` 新增 2 項測試（R1 最終通知層防標題與事件原文洩漏測試、R2 非法引號後綴不得取得壞卡 opt-in 測試，該檔共 10 項）；卡片開工前 `main` 分支既有 86 個測試檔一行未改。`npm run check`（`npm run typecheck && npm test`）exit 0，1719項／1718 pass／0 fail／1既有 skipped；`npm run lint` exit 0（200個 TypeScript 檔）；`git diff --check` exit 0。狀態維持「已修正、待驗收」。
+
 **部署／未驗項目：**本輪未 commit／push／merge／重啟／部署，執行中的 bridge 尚未載入新版，歷史事件／失敗不補送。build／unit test 不代表 Discord／Herdr／CLI 實機驗收。
 
 **下一步（三張真卡仍待 Lead 在 merge 並重啟新版後執行）：**
