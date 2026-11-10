@@ -384,7 +384,7 @@ function checkRequired(
   if (!CARD_TYPES.includes(type))
     reject('"type" must be requirement or ticket');
   const status = asString("status", fields.get("status"));
-  if (!CARD_STATUSES.includes(status)) reject("unknown status");
+  if (!CARD_STATUSES.includes(status)) reject(`unknown status "${status}"`);
   const title = asString("title", fields.get("title"));
   const titleLength = Array.from(title).length;
   if (titleLength < 1 || titleLength > MAX_TITLE_LENGTH)
@@ -412,7 +412,7 @@ function parseFields(lines: string[]): Map<string, Value> {
   for (const line of lines) {
     if (line.trim() === "" || line.startsWith("#")) continue;
     const match = KEY_LINE.exec(line);
-    if (!match) reject("unsupported frontmatter line");
+    if (!match) reject(`unsupported frontmatter line: ${line}`);
     const key = match[1];
     if (fields.has(key)) reject(`duplicate key "${key}"`);
     if (!KNOWN_KEYS.has(key)) reject(`unknown key "${key}"`);

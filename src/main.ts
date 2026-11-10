@@ -1,13 +1,17 @@
 import { parseNotifyTarget } from "./card.js";
 import {
   malformedCardAutopickEligible,
+  malformedCardIdentity,
   recordMalformedRejection,
 } from "./card-role-rejections.js";
 import {
+  CARD_ROLES,
   preflightRoles,
+  roleProfileEnabled,
   roleTargets,
   type CardRole,
   type CardRoles,
+  type RoleContext,
 } from "./card-role-assignment.js";
 import {
   assertReadyIdentity,
@@ -1985,10 +1989,20 @@ async function teamRemove(
  * 解析 Lead 與 Workers、登記並啟動一個持久化的 Team 任務（`team ask` 與 `card assign` 共用）。
  * 任務一經登記就會執行；回傳的 `running` 在任務結束時 resolve。
  */
-function cardRoleContext(runtime: Runtime) {
+export function cardRoleContext(runtime: {
+  config: {
+    machines: readonly { id: string }[];
+    agentProfiles?: Runtime["config"]["agentProfiles"];
+  };
+  pool?: { profiles: Runtime["config"]["agentProfiles"] };
+}): RoleContext {
+  const profiles = runtime.pool?.profiles ?? runtime.config.agentProfiles ?? [];
   return {
     machineIds: runtime.config.machines.map((m) => m.id),
-    profiles: runtime.pool?.profiles ?? runtime.config.agentProfiles ?? [],
+    profiles,
+    enabledProfileIds: profiles
+      .filter((p) => CARD_ROLES.some((role) => roleProfileEnabled(role, p)))
+      .map((p) => p.id),
   };
 }
 
@@ -3076,8 +3090,15 @@ function startAutopick(runtime: Runtime): () => void {
       const loadedPolicy = loadPolicy(join(configDirectory(), "policy.yml"));
       for (const problem of listed.errors) {
         try {
+          const identity = malformedCardIdentity(rootDir, problem.file);
           if (
-            !malformedCardAutopickEligible(rootDir, problem.file, loadedPolicy)
+            !identity ||
+            !malformedCardAutopickEligible(
+              rootDir,
+              problem.file,
+              loadedPolicy,
+              identity,
+            )
           )
             continue;
           await recordMalformedRejection(
@@ -3099,6 +3120,7 @@ function startAutopick(runtime: Runtime): () => void {
                 await runtime.herdr.promptAgent(target.pane, message);
               }
             },
+            identity,
           );
         } catch (error) {
           console.error(

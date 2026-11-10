@@ -816,7 +816,7 @@ PR #189（`88e1ce6`）已於 2026-11-09 merge，並重啟 bridge 載入（`card 
 
 完整語法、預設、快照與拒絕契約見 docs/card-role-assignment.md。autopick／manual assign 開 workspace／worktree 前驗證所有角色，task 開始凍結約束與候選；review／fix／loop 每輪重新驗證。Lead prompt 帶指定；整份計畫先以 coding.role 核對，不符即 plan_rejected、零 acquire。每個指定 assignment 新 session、不重用不同 model 的 binding，readiness 後及送 prompt 前核對實際身分；未知 model 的既有 session 不能滿足指定。保留 Team codex／agy 既有延後 session 驗證。
 
-card review／fix／loop 的 CLI agent 與卡片指定衝突時開 pane 前拒絕；每輪新 pane、禁止 resume，已知作者同 session 拒絕。無 roles 保留舊 best-effort；有 roles 的 Worker／reviewer／fixer 在送 prompt 前 strict 寫 role_assigned，失敗不送並清理可核對 owned terminal 的 pane。v2 保留舊摘要前綴，以 cr、s、ss、me 編碼 codingRole、source、三維 selectionSources、modelEvidence；assignmentId 由 role alias 還原，不重複印；不印 profileId。完整合法最長值仍≤300字，不提高限制、不截斷 model；hash 納入新 metadata，舊事件不改。事件表示身分已準備，不代表已送 prompt／成功完成。
+card review／fix／loop 的 CLI agent 與卡片指定衝突時開 pane 前拒絕；autopick 在卡片有 `roles` 宣告時不再傳 `--agent` 給 `card loop`，使未宣告 `reviewer` 時的來源記為 `default` 而非 `CLI`，且預設 reviewer 改由 `chooseReviewerKind`（偏好順序 `claude`、`codex`、`agy` 中第一個與作者不同者）決定——因此 `agy`／`pi` 當 Lead 時，有 `roles` 但未宣告 `reviewer` 的預設 reviewer 為 `claude`（無 `roles` 卡維持由 `reviewerFor` 傳 `--agent codex`）。每輪新 pane、禁止 resume，已知作者同 session 拒絕。無 roles 保留舊 best-effort；有 roles 的 Worker／reviewer／fixer 在送 prompt 前 strict 寫 role_assigned，失敗不送並清理可核對 owned terminal 的 pane。v2 保留舊摘要前綴，以 cr、s、ss、me 編碼 codingRole、source、三維 selectionSources、modelEvidence；assignmentId 由 role alias 還原，不重複印；不印 profileId。完整合法最長值仍≤300字，不提高限制、不截斷 model；hash 納入新 metadata，舊事件不改。事件表示身分已準備，不代表已送 prompt／成功完成。
 
 壞卡不經正常卡片帳本：獨立 `.role-rejections/<id>.json` 持久診斷、card show 可查。只接受可信 filename／唯一嚴格 id、ready、notify 路由；不重寫壞卡，symlink／超限／不可讀不推測路由。寫入失敗掃描重試、通知 pending 續試（含重啟），sent 去重；送達不確定或 sent 寫失敗可重複，無可信路由保存 no_trusted_route。通知保留實際錯誤分類與原因。
 

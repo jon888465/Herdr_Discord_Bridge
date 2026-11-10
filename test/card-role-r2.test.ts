@@ -23,8 +23,10 @@ import {
 import {
   classifyMalformedReason,
   malformedCardAutopickEligible,
+  malformedCardIdentity,
   recordMalformedRejection,
 } from "../src/card-role-rejections.js";
+import { cardRoleContext } from "../src/main.js";
 import {
   runTeamTask,
   validateAssignmentPlan,
@@ -292,11 +294,22 @@ test("F3: parseCard, notificationReason and recordMalformedRejection strip untru
   );
   assert.equal(parsed.ok, false);
   if (!parsed.ok) {
-    assert.equal(parsed.error, "unsupported frontmatter line");
-    assert.ok(!parsed.error.includes(rawLine));
+    assert.equal(parsed.error, `unsupported frontmatter line: ${rawLine}`);
+    assert.equal(
+      classifyMalformedReason(parsed.error),
+      "unsupported frontmatter line",
+    );
+  }
+  const badStatus = parseCard(
+    `---\nid: ${baseCard.id}\ntype: requirement\nstatus: bogus_status\ntitle: t\nversion: 1\ncreated: 2026-11-10\nupdated: 2026-11-10\n---\n`,
+  );
+  assert.equal(badStatus.ok, false);
+  if (!badStatus.ok) {
+    assert.equal(badStatus.error, 'unknown status "bogus_status"');
+    assert.equal(classifyMalformedReason(badStatus.error), "unknown status");
   }
 
-  // notificationReason classifies role rejections without slicing raw prompt injection text
+  // notificationReason classifies role rejections without slicing raw prompt injection text or model value
   const injectedEventReason = notificationReason({
     event: "failed",
     text: `失敗：autopick_stopped；原因：卡片角色指定無效：reviewer：${rawLine}`,
@@ -305,6 +318,21 @@ test("F3: parseCard, notificationReason and recordMalformedRejection strip untru
   });
   assert.equal(injectedEventReason, "卡片角色指定無效：reviewer");
   assert.ok(!injectedEventReason.includes(rawLine));
+
+  for (const modelVal of [
+    "gpt-99（須在同 kind 已開放 profile 的配置允許清單）",
+    "malicious_model_payload_12345",
+  ]) {
+    const modelReason = notificationReason({
+      event: "failed",
+      text: `失敗：autopick_stopped；原因：卡片角色指定無效：reviewer：不合法 model ${modelVal}`,
+      time: "2026-11-10T00:00:00Z",
+      eventId: "e2",
+    });
+    assert.equal(modelReason, "卡片角色指定無效：reviewer：不合法 model");
+    assert.ok(!modelReason.includes("malicious"));
+    assert.ok(!modelReason.includes("gpt-99"));
+  }
 
   assert.equal(
     classifyRoleRejection(`卡片角色指定無效：${rawLine}：未知角色`),
@@ -922,5 +950,213 @@ test("F6: reviewInPane and fixInPane preserve closeNote when roles branch throws
     );
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("N1: validateAssignmentPlan and runTeamTask allow Chinese and whitespace assignment IDs when roleSnapshot is absent", async () => {
+  const lead = actor({ pane_id: "w1:p1", terminal_id: "lead", agent: "codex" });
+  const worker = actor({
+    pane_id: "w1:p2",
+    terminal_id: "worker",
+    agent: "codex",
+  });
+
+  // 1. Non-coding plan with Chinese & whitespace assignment IDs passes validateAssignmentPlan
+  assert.doesNotThrow(() =>
+    validateAssignmentPlan(
+      {
+        assignments: [
+          {
+            id: "步驟 一：收集資料",
+            workerPaneId: worker.pane_id,
+            instruction: "收集資料",
+          },
+          {
+            id: "step 2 - 整理報告",
+            workerPaneId: worker.pane_id,
+            instruction: "整理報告",
+            dependsOn: ["步驟 一：收集資料"],
+          },
+        ],
+      },
+      lead,
+      [worker],
+    ),
+  );
+
+  // 2. Coding plan without roleSnapshot (legacy card without roles) allows URL-safe IDs like "-starts-with-dash" and long "assignment-...lead" that ROLE.test would reject
+  assert.doesNotThrow(() =>
+    validateAssignmentPlan(
+      {
+        assignments: [
+          {
+            id: "-starts-with-dash",
+            workerPaneId: worker.pane_id,
+            instruction: "實作",
+            coding: {
+              role: "implement",
+              access: "write",
+              writeScope: ["src/"],
+              artifactRefs: [],
+              findingRefs: [],
+            },
+          },
+        ],
+      },
+      lead,
+      [worker],
+      { prior: [], findingIds: [], artifactIds: [] },
+      undefined,
+    ),
+  );
+
+  // 3. Full runTeamTask (non-coding) executes Chinese/whitespace assignment IDs to completion
+  const framed = (prompt: string, body: string): string =>
+    `${/Opening marker \(first line\): (BRIDGE_BEGIN_[a-f0-9]+)/.exec(prompt)?.[1]}\n${body}\n${/Closing marker \(last line\): (BRIDGE_END_[a-f0-9]+)/.exec(prompt)?.[1]}`;
+  const prompts = new Map<string, string>();
+  let planSent = false;
+  const port: OrchestrationPort = {
+    promptAgent: async (target, text) => {
+      prompts.set(target, text);
+    },
+    waitAgent: async (target) => (target === lead.pane_id ? lead : worker),
+    readAgent: async (target) => {
+      const prompt = prompts.get(target);
+      if (!prompt) return "history";
+      if (
+        target === lead.pane_id &&
+        prompt.includes("Do not modify files while planning")
+      ) {
+        if (!planSent) {
+          planSent = true;
+          return framed(
+            prompt,
+            JSON.stringify({
+              assignments: [
+                {
+                  id: "分析 任務",
+                  workerPaneId: worker.pane_id,
+                  instruction: "檢查狀態",
+                },
+              ],
+            }),
+          );
+        }
+        return framed(prompt, JSON.stringify({ assignments: [] }));
+      }
+      return framed(prompt, "任務完成");
+    },
+  };
+  const result = await runTeamTask(
+    {
+      taskId: "legacy-team-ask",
+      prompt: "請檢查專案",
+      lead,
+      workers: [worker],
+      timeoutMs: 2000,
+    },
+    port,
+    () => {},
+  );
+  assert.equal(result.state, "completed");
+  assert.equal(result.reports.length, 1);
+  assert.equal(result.reports[0]!.assignmentId, "分析 任務");
+  assert.equal(result.reports[0]!.state, "done");
+});
+
+test("F6-補 & N4: cardRoleContext populates enabledProfileIds at runtime and malformed rejection reuses precomputed identity", async () => {
+  const profiles = validateProfiles([
+    { id: "claude", kind: "claude", model: "sonnet" },
+    { id: "codex", kind: "codex", model: "gpt-5" },
+    {
+      id: "agy-enabled",
+      kind: "agy",
+      model: "gemini-pro",
+      modelFlag: "--model",
+      capabilities: ["review"],
+    },
+    {
+      id: "agy-disabled",
+      kind: "agy",
+      model: "gemini-flash",
+      modelFlag: "--model",
+      capabilities: ["analysis"],
+    },
+    {
+      id: "pi-disabled",
+      kind: "pi",
+      capabilities: [],
+    },
+  ]);
+  const ctx = cardRoleContext({
+    config: {
+      machines: [{ id: "remote-1" }],
+      agentProfiles: profiles,
+    },
+  });
+  assert.deepEqual(ctx.machineIds, ["remote-1"]);
+  assert.deepEqual(ctx.enabledProfileIds, ["claude", "codex", "agy-enabled"]);
+
+  // Enabled agy profile passes preflight via cardRoleContext
+  const snap = preflightRoles(
+    { reviewer: { agent: "agy", model: "gemini-pro" } },
+    ctx,
+  );
+  assert.equal(snap.candidates.reviewer?.length, 1);
+  assert.equal(snap.candidates.reviewer?.[0]?.id, "agy-enabled");
+
+  // Disabled agy profile is rejected via cardRoleContext's enabledProfileIds
+  assert.throws(
+    () =>
+      preflightRoles(
+        { reviewer: { agent: "agy", model: "gemini-flash" } },
+        ctx,
+      ),
+    /不合法 model gemini-flash/,
+  );
+
+  // N4: precomputedIdentity is shared by malformedCardAutopickEligible and recordMalformedRejection without re-reading the card file
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "r2-shared-id-"));
+  try {
+    const policyParsed = parsePolicy(
+      "version: 1\nprojects:\n  local:opted: L1\nautopick:\n  local:opted: /repo\n",
+    );
+    assert.ok(policyParsed.ok);
+    const loaded = {
+      status: "loaded" as const,
+      file: "/policy.yml",
+      policy: policyParsed.policy,
+    };
+    const file = "REQ-20261110-shared.md";
+    const fullPath = path.join(root, file);
+    fs.writeFileSync(
+      fullPath,
+      "---\nid: REQ-20261110-shared\nstatus: ready\nprojects: [local:opted]\nnotify: discord:777\nbad line\n---\n",
+    );
+
+    const identity = malformedCardIdentity(root, file);
+    assert.ok(identity);
+    // Delete the card file after reading identity once to prove neither function re-reads the card file from disk
+    fs.unlinkSync(fullPath);
+
+    assert.equal(
+      malformedCardAutopickEligible(root, file, loaded, identity),
+      true,
+    );
+    const sent: string[] = [];
+    await recordMalformedRejection(
+      root,
+      file,
+      "unsupported frontmatter line: bad line",
+      async (dest, msg) => {
+        sent.push(`${dest}:${msg}`);
+      },
+      identity,
+    );
+    assert.equal(sent.length, 1);
+    assert.match(sent[0]!, /^discord:777:.*unsupported frontmatter line/);
+    assert.ok(!sent[0]!.includes("bad line"));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });

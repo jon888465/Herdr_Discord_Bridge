@@ -74,21 +74,20 @@ function save(cards: string, value: CardRejection): void {
     if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
   }
 }
+export interface MalformedCardIdentity {
+  id: string;
+  fingerprint: string;
+  notify?: string;
+  status?: string;
+  projects?: string[];
+}
 /** Only a bounded regular file with exactly one unambiguous id/status/notify
  * can supply a route. Symlinks, duplicate identity keys, quoted escapes and
  * mismatched filename/id never supply notification destinations. */
 export function malformedCardIdentity(
   cards: string,
   file: string,
-):
-  | {
-      id: string;
-      fingerprint: string;
-      notify?: string;
-      status?: string;
-      projects?: string[];
-    }
-  | undefined {
+): MalformedCardIdentity | undefined {
   const id = path.basename(file, ".md");
   if (!isCardId(id) || path.basename(file) !== `${id}.md`) return;
   const checked = ensureCardsDirectory(cards, { create: false });
@@ -188,9 +187,10 @@ export function malformedCardAutopickEligible(
   cards: string,
   file: string,
   loaded: LoadedPolicy,
+  precomputedIdentity?: MalformedCardIdentity,
 ): boolean {
   if (loaded.status !== "loaded") return false;
-  const identity = malformedCardIdentity(cards, file);
+  const identity = precomputedIdentity ?? malformedCardIdentity(cards, file);
   if (!identity || identity.status !== "ready" || !identity.projects?.length)
     return false;
   return identity.projects.some((project) =>
@@ -225,8 +225,9 @@ export async function recordMalformedRejection(
   file: string,
   reason: string,
   deliver: (destination: string, message: string) => Promise<void>,
+  precomputedIdentity?: MalformedCardIdentity,
 ): Promise<void> {
-  const identity = malformedCardIdentity(cards, file);
+  const identity = precomputedIdentity ?? malformedCardIdentity(cards, file);
   if (!identity) return;
   const safeReason = classifyMalformedReason(reason)
     .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")

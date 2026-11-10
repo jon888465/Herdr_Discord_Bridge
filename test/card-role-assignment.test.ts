@@ -379,7 +379,7 @@ test("rejection notification retains actual role/model cause", () => {
       time: "2026-11-10T00:00:00Z",
       eventId: "x",
     }),
-    "卡片角色指定無效：reviewer：不合法 model x",
+    "卡片角色指定無效：reviewer：不合法 model",
   );
 });
 

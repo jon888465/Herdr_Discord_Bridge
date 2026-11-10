@@ -46,6 +46,19 @@ r1 在 w1 通過自動化檢查後發現六項缺口，前一輪測試未涵蓋�
 
 **r2 驗證（2026-11-10，本機）：**新增 `test/card-role-r2.test.ts` 共 6 項測試，既有測試檔案一行未改（`git diff -- test/card-role-assignment.test.ts test/card-role-flow.test.ts test/card-role-r1.test.ts` 為空）。`npm run check`（`npm run typecheck && npm test`）exit 0，1715項／1714 pass／0 fail／1既有 skipped；`npm run lint` exit 0（200個 TypeScript 檔）；`git diff --check` exit 0。狀態維持「已修正、待驗收」。
 
+### PR #205 第二輪獨立複審修正（r3，2026-11-10；狀態維持已修正、待驗收）
+
+獨立複審對 `8c80c17` 提出六項 findings（N1、F3-補、N2、F6-補、N3、N4），本輪全部修正並補齊回歸測試：
+
+- **N1 [medium]（`src/team-orchestration.ts` `validateAssignmentPlan` `ROLE.test` 限定於有 `roleSnapshot` 時）：**`8c80c17` 將 `ROLE.test(assignment.id)` 放在 `if (roleSnapshot)` 之外，導致無 `roles` 的卡片與一般 `team ask` 無法使用中文或含空白的 assignment id。現移入 `if (roleSnapshot)` 分支內，僅在卡片有角色約束時檢查 `ROLE` 格式，無 `roles` 時完全維持舊行為。
+- **F3-補 [必修]（`src/card-notify.ts` 移除 `不合法 model <值>` 白名單）：**移除 `SAFE_ROLE_REJECTION_REASONS` 中允許 `不合法 model <值>` 原樣通過的正則，使所有 `不合法 model ...` 拒絕原因比照 `machine` 統一收斂為固定標籤 `卡片角色指定無效：<role>：不合法 model`，不將卡片上的 model 字串送入 Discord 或 Agent 通知 prompt。
+- **N2 [low，必修]（`src/card.ts` 還原 `unknown status` 與 `unsupported frontmatter line` 完整診斷訊息）：**將 `src/card.ts:387` 與 `:415` 還原為 `unknown status "${status}"` 與 `unsupported frontmatter line: ${line}`，保留 `card show` 與 `herdr-card-check` 的具體診斷能力；通知層仍由 `classifyMalformedReason` 轉為固定標籤，不影響 prompt injection 防護。
+- **F6-補 [low]（`src/main.ts` `cardRoleContext(runtime)` 填入 `enabledProfileIds`）：**選擇在 `cardRoleContext(runtime)` 依 `CARD_ROLES.some((role) => roleProfileEnabled(role, p))` 填入 `enabledProfileIds` 並匯出 `cardRoleContext` 補單元測試，使執行時 `RoleContext.enabledProfileIds` 實際生效並與既有測試契約一致。
+- **N3 [low]（`docs/card-role-assignment.md` 與 `SPEC.md` 明載預設 reviewer 差異）：**選擇在 `docs/card-role-assignment.md` 與 `SPEC.md` 明載：有 `roles` 宣告但未指定 `reviewer` 時，`autopick` 為讓來源記為 `default` 而非 `CLI` 不傳 `--agent`，預設種類由 `chooseReviewerKind`（偏好順序 `claude`、`codex`、`agy` 中第一個與作者不同者）決定，故 `agy`／`pi` 當 Lead 時預設 reviewer 為 `claude`（無 `roles` 卡維持由 `reviewerFor` 傳 `--agent codex`）。
+- **N4 [low]（`src/card-role-rejections.ts`、`src/main.ts` 共用 `malformedCardIdentity` 讀取結果）：**`malformedCardAutopickEligible` 與 `recordMalformedRejection` 新增選填 `precomputedIdentity` 參數，`src/main.ts` 壞卡掃描先呼叫一次 `malformedCardIdentity` 並將結果傳入兩者共用，避免重複讀取同一張壞卡檔案。
+
+**r3 驗證（2026-11-10，本機）：**於 `test/card-role-r2.test.ts` 新增 2 項測試（共 8 項）並更新 F3 測試斷言以對應 N2／F3-補；`main` 分支既有 86 個測試檔一行未改。`npm run check`（`npm run typecheck && npm test`）exit 0，1717項／1716 pass／0 fail／1既有 skipped；`npm run lint` exit 0（200個 TypeScript 檔）；`git diff --check` exit 0。狀態維持「已修正、待驗收」。
+
 **部署／未驗項目：**本輪未 commit／push／merge／重啟／部署，執行中的 bridge 尚未載入新版，歷史事件／失敗不補送。build／unit test 不代表 Discord／Herdr／CLI 實機驗收。
 
 **下一步（三張真卡仍待 Lead 在 merge 並重啟新版後執行）：**

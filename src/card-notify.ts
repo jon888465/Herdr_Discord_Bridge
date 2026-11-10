@@ -98,7 +98,6 @@ const SAFE_ROLE_REJECTION_REASONS: readonly RegExp[] = [
   /^不合法 model（英數起頭、最多80字）$/,
   /^不合法角色欄位$/,
   /^agent (?:claude|codex|agy|pi|候選) 未開放（需要已配置可用 profile；pi Worker 尚未開放）$/,
-  /^不合法 model [A-Za-z0-9][A-Za-z0-9_./:+-]{0,79}(?:（須在同 kind 已開放 profile 的配置允許清單）)?$/,
   /^profile [A-Za-z0-9_.-]{1,64} 的 model／modelFlag 不合法$/,
   /^CLI agent (?:claude|codex|agy|pi) 與卡片 (?:claude|codex|agy|pi) 衝突$/,
   /^沒有符合 agent (?:claude|codex|agy|pi|預設)／model 的可用 profile$/,
