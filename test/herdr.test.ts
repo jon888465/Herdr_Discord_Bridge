@@ -202,7 +202,7 @@ test("approval falls back when Herdr 0.9 rejects agent.send as an unknown varian
   fs.rmSync(directory, { recursive: true, force: true });
 });
 
-test("each agent.prompt request leaves one trace line with target, size, time and caller, and never the prompt text", async (t) => {
+test("each agent.prompt request leaves one trace line with target, size and time, and never via or the prompt text", async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "herdr-trace-"));
   const socketPath = path.join(directory, "herdr.sock");
   const server = net.createServer((socket) => {
@@ -230,18 +230,14 @@ test("each agent.prompt request leaves one trace line with target, size, time an
   assert.equal(lines.length, 2);
   assert.match(
     lines[0],
-    /^agent\.prompt prompt target=w5V:p1 chars=18 ts=\d+ via=/,
+    /^agent\.prompt prompt target=w5V:p1 chars=18 ts=\d+$/,
   );
   assert.match(
     lines[1],
-    /^agent\.prompt prompt\+wait target=w5V:p1 chars=18 ts=\d+ via=/,
-  );
-  assert.match(
-    lines[0],
-    /planningTurn/,
-    "the caller function name is recorded",
+    /^agent\.prompt prompt\+wait target=w5V:p1 chars=18 ts=\d+$/,
   );
   for (const line of lines) {
+    assert.ok(!line.includes("via="), "caller must not be logged");
     assert.ok(
       !line.includes("secret prompt body"),
       "prompt text must not be logged",
