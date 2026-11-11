@@ -87,25 +87,13 @@ import { prepareCardWorktree, type PrepareDeps } from "../src/card-worktree-flow
 import { doneAsReady, waitUntilReady } from "../src/agent-ready.js";
 import type { AgentRecord } from "../src/types.js";
 
-// ISSUE-142：codex Lead 的新 worktree Agent 停在更新提示。與 main 相同的組合（prepareCardWorktree＋
-// waitUntilReady(doneAsReady(port))＋真的 matchUpdatePrompt）：先跳過、再判斷就緒、才啟動 task。
-test("ISSUE-142: a codex update prompt on the worktree Lead is skipped before assign starts the task", async (t) => {
+test("ISSUE-142: update prompt skipped before assign starts the task", async (t) => {
   t.mock.method(console, "log", () => {});
   const id = "REQ-20261111-update-lead";
   const order: string[] = [];
   const agent = (agent_status: string) => ({ pane_id: "w9:p1", terminal_id: "t9", workspace_id: "w9", agent: "codex", agent_status, foreground_cwd: "/r" }) as AgentRecord;
-  const update = [
-    "  Update available · 0.166.0 → 0.167.0",
-    "  Release notes: https://github.com/openai/codex/releases/latest",
-    "",
-    "› 1. Update now (runs `brew upgrade --cask codex`)",
-    "  2. Skip",
-    "  3. Skip until next version",
-    "",
-    "  enter continue · esc skip",
-  ].join("\n");
+  const update = "Update available · 0.166.0 → 0.167.0\n› 1. Update now\n  2. Skip\n  3. Skip until next version";
   const screens = [update, "› Ready"];
-  // PR #211 之後送鍵前會重驗 pane 此刻真的是 blocked：第一次列出回 blocked，之後回 idle。
   const statuses = ["blocked", "idle"];
   const panePort = doneAsReady({
     request: async (method, params) => (order.push(`${method}${params?.keys ?? ""}`), method === "agent.read" ? { read: { text: screens.shift() } } : {}),
@@ -115,20 +103,12 @@ test("ISSUE-142: a codex update prompt on the worktree Lead is skipped before as
   new CardStore(rootDir).create({ id, type: "requirement", status: "ready", title: "t", version: 1, created: "2026-11-11", updated: "2026-11-11", body: "# t\n\n## 描述\nx\n\n## 驗收條件\n- ok\n" });
   const prepare: PrepareDeps = {
     port: { request: async <T>(m: string) => (m === "ping" ? { version: "0.9.1" } : { worktree: { path: "/wt", branch: "b" }, workspace: { workspace_id: "w9" }, root_pane: { pane_id: "w9:p1" } }) as T },
-    lead: agent("idle"),
-    sourceWorkspaceId: "w3",
-    repoRoot: async () => "/r",
-    headSha: async () => undefined,
-    startAgent: async () => agent("blocked"),
+    lead: agent("idle"), sourceWorkspaceId: "w3", repoRoot: async () => "/r", headSha: async () => undefined, startAgent: async () => agent("blocked"),
     awaitReady: async (a) => {
       const ready = await waitUntilReady({ panePort, readyPollMs: 1 }, { paneId: a.pane_id, terminalId: a.terminal_id }, a);
-      order.push(`ready:${ready.ok}`);
-      return ready.ok ? ready.agent : undefined;
+      return order.push(`ready:${ready.ok}`), ready.ok ? ready.agent : undefined;
     },
-    worktrees: { active: () => undefined, record: () => {} },
-    authorize: () => {},
-    switchRoute: () => {},
-    now: () => "2026-11-11T00:00:00Z",
+    worktrees: { active: () => undefined, record: () => {} }, authorize: () => {}, switchRoute: () => {}, now: () => "2026-11-11T00:00:00Z",
   };
   const deps = {
     rootDir, today: () => "2026-11-11", source: "console", attachments: [], now: () => "2026-11-11T00:00:00Z",

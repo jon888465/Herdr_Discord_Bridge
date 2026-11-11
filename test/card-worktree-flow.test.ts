@@ -438,21 +438,10 @@ test("an Agent that starts blocked on a skippable prompt is awaited the same way
 
 import { doneAsReady, waitUntilReady } from "../src/agent-ready.js";
 
-// ISSUE-142：與 main 相同的 awaitReady（waitUntilReady(doneAsReady(port))、真的 matchUpdatePrompt）先跳過，才算 agentReady。
-test("a codex update prompt on the new Agent is skipped before agentReady is computed", async (t) => {
+test("update prompt skipped before agentReady", async (t) => {
   t.mock.method(console, "log", () => {});
-  const update = [
-    "  Update available · 0.166.0 → 0.167.0",
-    "  Release notes: https://github.com/openai/codex/releases/latest",
-    "",
-    "› 1. Update now (runs `brew upgrade --cask codex`)",
-    "  2. Skip",
-    "  3. Skip until next version",
-    "",
-    "  enter continue · esc skip",
-  ].join("\n");
+  const update = "Update available · 0.166.0 → 0.167.0\n› 1. Update now\n  2. Skip\n  3. Skip until next version";
   const screens = [update, "› Ready"];
-  // PR #211 之後送鍵前會重驗 pane 此刻真的是 blocked：第一次列出回 blocked，之後回 idle。
   const statuses = ["blocked", "idle"];
   const { deps, log } = setup({
     lead: { ...lead, agent: "codex" },

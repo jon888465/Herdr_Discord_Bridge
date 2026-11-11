@@ -2,7 +2,7 @@
 
 ## ISSUE-143：remote machine（agy-pod）的 agent 不能擔任卡片角色；先開放 remote card reviewer
 
-**2026-11-11 reviewer 預先信任（已修正、待驗收，**沒有任何實機驗收**）：**review 第 1 輪（3023316）：F1 本機信任未驗目錄身分 → `verifyCardWorktree` 驗 `.git`、gitdir、回指、HEAD 分支，不符拒絕且不寫設定；F2 只移除本次新增的；F3 逾時 124／137 與寫入階段失敗皆視為 uncertain，清理嘗試移除、失敗記 pending；F4 uncertain 不啟動 reviewer（仍在跑的寫入可能在清理讀設定後才完成），一律記 `cleanup_pending：trust`；F5 補 C1。測試在 `test/agy-worktree-trust.test.ts`、`test/remote-agy-trust.test.ts`，皆單元測試；為 F1 改了 `fixture()`（加 `linkWorktree`，既有斷言未改）。限制：agy 執行中同時改寫設定檔的競態只能縮小視窗；本機 worktree 名稱只要求 `card-req-` 開頭；pod 的 `sha256sum`／`base64 -d`／`mktemp`／`cp -p` 未驗證。
+**2026-11-11 reviewer 預先信任（已修正、待驗收，**沒有任何實機驗收**）：**第 1 輪：F1 `verifyCardWorktree` 驗 `.git`、gitdir、回指、HEAD 分支，不符拒絕且不寫設定；F2 只移除本次新增的；F3 逾時 124／137 與寫入失敗皆 uncertain，清理嘗試移除、失敗記 pending；F4 uncertain 不啟動 reviewer（仍在跑的寫入可能在清理讀設定後才完成），一律記 `cleanup_pending：trust`；F5 補 C1。第 2 輪：F6 保留 pane 時保留信任（pane 還在等人處理）並記 `cleanup_pending：trust`；F7 腳本內 `mkdir` 鎖（`<root>/.hdb-agy-settings-backups/lock`）涵蓋雜湊重驗到 `mv`，逾時 exit 19，超過 1 分鐘的殘留鎖回收、未過期的不碰，兩個回收者同時動手仍可能互刪；F8 沒有取消訊號（取消即 runTurn 或 exec 丟錯），補兩個測試。測試在 `test/agy-worktree-trust.test.ts`、`test/remote-agy-trust.test.ts`（含真 sh 並行與鎖），皆單元測試；為 F1 改了 `fixture()`（加 `linkWorktree`，既有斷言未改）。限制：agy 執行中同時改寫設定檔的競態只能縮小視窗；本機 worktree 名稱只要求 `card-req-` 開頭；pod 的 `sha256sum`／`base64 -d`／`mktemp`／`cp -p`／`find -mmin` 未驗證。
 
 更新日期：2026-11-11。狀態：已修正、待驗收（兩個 PR 都已 merge：A 基礎層 #207 `addee48`、B 角色接線 #206 `9ff908e`；自動化檢查與 codex 獨立複審通過；**主要成功路徑已實機驗過一次**，見下方 2026-11-11 實機段；失敗路徑與其他情境尚未驗）。卡片 REQ-20261111-remote-agy-role；實機驗收卡 REQ-20261111-remote-reviewer-live（PR #210）。
 
@@ -93,7 +93,7 @@ REQ-20261111-remote-agy-role 在 02:07:43Z picked 後，02:07:55Z 記 failed「t
 
 ## ISSUE-142：autopick 開 Lead 時 codex 剛好跳出更新提示，`card assign --worktree` 沒有啟動任務，autopick 卻報成「找不到這張卡的 task」
 
-更新日期：2026-11-11。狀態：已修正、待驗收（**未做實機驗收**）：autopick 遇「任務沒有啟動」就停在 `assign`；#211（原 ISSUE-141）修更新提示本身，兩者分工。先前：待調查（根因為推論，**未看到 assign 回覆**）。
+更新日期：2026-11-11。狀態：已修正、待驗收（**未做實機驗收**）：autopick 遇「任務沒有啟動」停在 `assign`；#211（原 ISSUE-141）修更新提示本身，兩者分工。先前：待調查（根因為推論）。
 
 **使用者可見症狀：**`REQ-20261111-remote-agy-role`（`lead: codex`）在 bridge 重啟後 2026-11-11 02:07:43Z 被撿起，02:07:55Z 卡片流程紀錄只有 `worktree_created`，隨即 `failed`／`autopick_stopped`，原因「task：task 沒有完成：找不到這張卡的 task」；沒有 `role_assigned`（lead）、`assigned`、`started`。Lead（codex）的 workspace `w69` 留著，卡片仍是 `ready`。使用者看到的原因沒有說真正發生什麼（Lead 還沒就緒）。
 

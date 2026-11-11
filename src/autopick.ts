@@ -236,10 +236,9 @@ export async function runAutopick(
 
   let step: AutopickStep = "assign";
   try {
-    // ISSUE-142：assign 回「任務沒有啟動」（Lead 未就緒）就停在這一步；回覆含本機路徑，只回報固定摘要。
+    // ISSUE-142：回覆含本機路徑，只回報固定摘要。
     const assigned = await run("assign", `card assign ${id} --worktree --coding`);
-    if (/任務沒有啟動/.test(assigned))
-      return report("stopped", "assign", NOT_STARTED);
+    if (/任務沒有啟動/.test(assigned)) return report("stopped", "assign", NOT_STARTED);
 
     step = "task";
     const task = await steps.waitTask(id);

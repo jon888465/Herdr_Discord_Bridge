@@ -55,7 +55,7 @@ function arraySpan(source: string): [number, number] {
   throw new Error("trustedWorkspaces array not found");
 }
 
-/** 純函式：加入或移除 target，其餘位元組原樣保留（add 後 remove 逐位元組還原，remote 共用）；沒有變更回傳 null。 */
+/** 純函式：加入或移除 target，其餘位元組不動；沒變更回傳 null。 */
 export function editTrustedWorkspaces(original: string, target: string, add: boolean): string | null {
   const parsed = JSON.parse(original);
   const entries: unknown = parsed?.trustedWorkspaces;
@@ -84,10 +84,7 @@ export function editTrustedWorkspaces(original: string, target: string, add: boo
 
 export type TrustScope = { ok: true; target: string; cardId: string } | { ok: false; reason: string };
 
-/**
- * 純函式（檔案系統經參數注入）：只接受 `card-worktrees.json` 作用中紀錄的路徑本身，且是正規的
- * `<home>/.herdr/worktrees/<repo>/card-req-…` 目錄；`..`／`.` 段、控制字元、符號連結、root、上層、家目錄與其他路徑拒絕。
- */
+/** 純函式：只接受作用中紀錄的正規 `<home>/.herdr/worktrees/<repo>/card-req-…` 目錄；`..`、控制字元、符號連結與其他路徑拒絕。 */
 export function checkLocalTrustScope(input: {
   cwd: string;
   entries: readonly CardWorktree[];
@@ -113,7 +110,7 @@ export function checkLocalTrustScope(input: {
   return { ok: true, target: cwd, cardId: entry.cardId };
 }
 
-/** 唯讀驗證 cwd 是為該紀錄建立的 git worktree：`.git` 是檔案、gitdir 在紀錄 repo 的 `.git/worktrees/`、回指 cwd/.git、HEAD 是紀錄的 branch；任何失敗都拒絕。 */
+/** 唯讀驗證 cwd 是為該紀錄建立的 worktree（.git 檔、gitdir、回指、HEAD）；失敗即拒絕。 */
 export function verifyCardWorktree(cwd: string, entry: CardWorktree): boolean {
   try {
     const dotGit = path.join(cwd, ".git");

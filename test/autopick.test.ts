@@ -606,8 +606,7 @@ test("rejection template persists a visible failed event in the card ledger", as
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-// ISSUE-142：assign 回「任務沒有啟動」就停在 assign，不再等 task 而誤報「找不到這張卡的 task」。
-test("assign reporting that no task started stops at assign without waiting for a task", async () => {
+test("assign without a started task stops at assign", async () => {
   const reply = "已建立 worktree /Users/x/card-req-x，pane w9:p1 是 blocked。\n任務沒有啟動，卡片仍是 ready。";
   const { steps, calls, closed } = fakeSteps({
     command: async (text) => (calls.push(text), reply),
@@ -618,11 +617,9 @@ test("assign reporting that no task started stops at assign without waiting for 
   assert.ok(!/\/Users|w9:p1|找不到/.test(JSON.stringify(report)));
 });
 
-test("a task that fails to start is reported at assign, never as a missing task; success keeps the flow", async () => {
+test("a task that fails to start is reported at assign", async () => {
   const failing = fakeSteps({
-    command: async () => {
-      throw new Error("worktree 已建立但任務沒有啟動：Team 忙碌");
-    },
+    command: async () => { throw new Error("worktree 已建立但任務沒有啟動：Team 忙碌"); },
     waitTask: async () => assert.fail("waitTask"),
   });
   const report = await runAutopick(job("L2"), failing.steps);

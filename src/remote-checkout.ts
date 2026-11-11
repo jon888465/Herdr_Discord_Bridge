@@ -302,10 +302,10 @@ export async function reviewOnRemote(
           console.error(`remote review ${machineId}: cleanup_pending trust ${dir}: ${(e as Partial<RemoteFailure>)?.detail ?? String(e)}`);
         },
       );
-    // 中斷的寫入可能在清理讀設定後才完成，移除成功也不算數。
+    // 中斷的寫入可能稍後才完成，移除成功也不算數。
     if (trustUncertain && !pending.includes("trust")) {
       pending.push("trust");
-      console.error(`remote review ${machineId}: cleanup_pending trust ${dir}: 信任寫入狀態不明，已嘗試移除，請人工確認 agy 設定檔`);
+      console.error(`remote review ${machineId}: cleanup_pending trust ${dir}: 信任寫入狀態不明，請人工確認`);
     }
     if (owned && uncertain) {
       pending.push("directory");
@@ -345,7 +345,7 @@ export async function reviewOnRemote(
       throw error;
     }
   };
-  // agy 啟動前寫入信任：確定沒寫入的失敗不中止；狀態不明（斷線、逾時）不啟動 reviewer，直接失敗走清理。
+  // 寫入信任：確定沒寫入不中止；狀態不明不啟動 reviewer。
   const startAgent: ReviewFlowDeps["startAgent"] = async (agent) => {
     if (agent.kind === "agy")
       try {
@@ -368,7 +368,10 @@ export async function reviewOnRemote(
   } catch (error) {
     return fail(error, /身分已改變/.test(String(error)) ? "身分不符" : "review 中斷", ws.workspaceId, flowUncertain);
   }
-  const note = result.ok && result.paneKept ? "" : await cleanup(ws.workspaceId, flowUncertain);
+  // 保留 pane 時信任也留著，記 pending 讓人事後撤銷。
+  const pendingTrust = trustAdded || trustUncertain;
+  if (result.ok && result.paneKept && pendingTrust) console.error(`remote review ${machineId}: cleanup_pending trust ${dir}: pane 保留中`);
+  const note = result.ok && result.paneKept ? (pendingTrust ? "cleanup_pending：trust" : "") : await cleanup(ws.workspaceId, flowUncertain);
   const fields = result as unknown as Record<string, unknown>;
   for (const key of ["error", "closeNote", "inconclusiveReason"]) {
     const text = fields[key];

@@ -2,7 +2,7 @@
 
 REQ-20261111-remote-agy-role，ISSUE-143。2026-11-11，**未實機驗收**。
 
-agy reviewer 預先信任 checkout，狀態不明時不啟動 reviewer：見 ISSUE-143，**未實機驗收**。
+agy reviewer 預先信任 checkout（`mkdir` 鎖、pane 保留記 pending、狀態不明不啟動）：見 ISSUE-143，**未實機驗收**。
 
 基礎層（設定、驗證、遠端 checkout、清理）在 PR #207（A），角色與接線在 PR #206（B，依賴 A；A merge 後 B 要 rebase）。沒有 `machines[].cardReview` 時一切不變。
 
