@@ -95,3 +95,7 @@ Claude 後已取得 session ID，真實短 prompt 與共用 turn 接收器已驗
 coding reviewer、handoff／failover 保留已知 session gate。本機／Team 回覆
 仍須本次 marker 與 settled，Discord fallback 仍是有界摘錄。blocked 問答、
 完整 Team 任務與 Discord delivery 未驗收，沒有重啟 bridge，見 [ISSUE-026](known-issues.md)。
+
+## 啟動更新提示（2026-11-11，ISSUE-141）
+
+Persistent profile pool 與 fresh coding Worker 共用安全 ready wait；僅對完整符合 SPEC 的 Codex 更新選單選 `2. Skip`。其他 blocked UI 不自動回答，啟動失敗保留 pane，pool 不寫成功 binding。Skip 不代表 assignment／task 完成；尚未實機驗收，bridge 未重啟。

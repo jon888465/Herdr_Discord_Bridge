@@ -84,9 +84,15 @@ export async function startCardRoleSession(
     if (!created || created !== started.pane_id)
       throw new Error("卡片角色啟動 pane 不符");
     const ready = await waitUntilReady(
-      { panePort: doneAsReady(port) },
+      {
+        panePort: doneAsReady(port),
+        role: "Worker",
+        expectedKind: profile.kind,
+      },
       owned,
-      started,
+      started.agent_status === "done"
+        ? { ...started, agent_status: "idle" }
+        : started,
     );
     if (!ready.ok) {
       keepPane = true; // No verified stop: preserve blocked/initializing/unobservable sessions.

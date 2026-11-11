@@ -433,10 +433,10 @@ test("Lead uses only the known Codex update skip and waits after it", async () =
   h.deps.port.request = async (method, params, options) => {
     if (method === "agent.read")
       return {
-        text: skipped ? "ready" : "Update available\nSkip until next version",
+        text: skipped ? "ready" : "Update available · 0.163.0 → 0.167.1\n1. Update now\n2. Skip\n3. Skip until next version",
       };
     if (method === "pane.send_keys") {
-      assert.deepEqual(params, { pane_id: "w9:p1", keys: ["3"] });
+      assert.deepEqual(params, { pane_id: "w9:p1", keys: ["2"] });
       assert.equal(options?.retries, 0);
       assert.equal(skipped, false);
       skipped = true;

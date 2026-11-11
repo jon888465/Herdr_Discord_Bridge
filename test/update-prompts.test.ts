@@ -15,7 +15,7 @@ const REAL_CODEX_UPDATE = [
 ].join("\n");
 
 test("the real observed codex update menu matches and is not vetoed", () => {
-  assert.equal(matchUpdatePrompt("codex", REAL_CODEX_UPDATE)?.skipKey, "3");
+  assert.equal(matchUpdatePrompt("codex", REAL_CODEX_UPDATE)?.skipKey, "2");
 });
 
 test("a codex approval prompt mixed with the update menu is never matched", () => {
@@ -36,8 +36,13 @@ test("observed update list contains only the confirmed codex menu and no sensiti
   assert.deepEqual(UPDATE_PROMPTS, [
     {
       kind: "codex",
-      match: ["Update available", "Skip until next version"],
-      skipKey: "3",
+      match: [
+        "Update available",
+        "1. Update now",
+        "2. Skip",
+        "3. Skip until next version",
+      ],
+      skipKey: "2",
     },
   ]);
   for (const entry of UPDATE_PROMPTS) {
