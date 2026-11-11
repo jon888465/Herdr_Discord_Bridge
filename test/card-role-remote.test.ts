@@ -8,7 +8,7 @@ import { buildLogEntry, roleEvent } from "../src/card-events.js";
 import { notificationReason } from "../src/card-notify.js";
 import { reviewCardPullRequest } from "../src/card-review-wiring.js";
 import type { ReviewFlowDeps } from "../src/card-review-flow.js";
-import { RemoteFailure, cardHash, remoteReviewDeps, reviewOnRemote, type RemoteExec, type RemoteReviewDeps } from "../src/remote-checkout.js";
+import { REMOVE_SCRIPT, RemoteFailure, cardHash, remoteReviewDeps, reviewOnRemote, type RemoteExec, type RemoteReviewDeps } from "../src/remote-checkout.js";
 import { planningInstruction } from "../src/team-orchestration.js";
 import { cardRoleContext, liveAgentList, remoteReviewInjection } from "../src/main.js";
 import { HerdrHub } from "../src/machines.js";
@@ -82,8 +82,11 @@ function harness(o: { origin?: string; head?: string; throwOn?: string; listing?
   const exec: RemoteExec = async (argv) => {
     const j = argv.join(" ");
     // timeout 檢查、目錄／marker 檢查與 marker 寫入是前置作業，不進流程 log。
-    if (!["timeout", "test", "cat", "sh", "realpath"].includes(argv[0]!)) log.push(`exec:${["clone", "rm", "fetch"].find((a) => argv.includes(a)) ?? "git"}`);
+    const removal = argv[0] === "sh" && argv[2] === REMOVE_SCRIPT;
+    if (removal && cloned) log.push("exec:rm");
+    if (!removal && !["timeout", "test", "cat", "sh", "realpath"].includes(argv[0]!)) log.push(`exec:${["clone", "fetch"].find((a) => argv.includes(a)) ?? "git"}`);
     if (argv.includes("clone")) cloned = true;
+    if (removal) return { code: 0, stdout: "" };
     if (o.throwOn && j.includes(o.throwOn)) throw new RemoteFailure("逾時", "pod secret", true);
     if (argv[0] === "realpath") return { code: 0, stdout: `${argv[2]}\n` };
     if (argv[0] === "test" && argv[1] === "-L") return { code: 1, stdout: "" };

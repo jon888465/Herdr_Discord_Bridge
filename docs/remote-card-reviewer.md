@@ -29,9 +29,9 @@ Lead prompt 列 remote reviewer 候選（machine／kind／profile／model），�
 - 第一個遠端指令是 `timeout -k 1 5 true`；缺 GNU `timeout`（exit 127 或 busybox exit 1）丟「遠端缺少 timeout」，不誤報成 clone 失敗。
 - 路徑須是 canonical：先遠端 `realpath` root 與 dir（單行絕對路徑），root 或祖先、dir、`dir/.git` 是符號連結或 realpath 異常都拒絕；marker 檢查、沿用與 `rm -rf` 只用驗過的路徑。
 - 目錄不存在才 https clone 並寫 `<dir>/.git/hdb-card-review`（`hdb-card-review-checkout:v1:<卡片雜湊>`，不弄髒工作樹）。**沿用與清理一律要求 marker 相符**；無 marker（即使 origin 相同）、marker 不符、origin 不同、不是 repo 都拒絕、不碰。沿用還要工作樹乾淨（`git status --porcelain --untracked-files=all` 為空），否則拒絕、不 reset／clean、目錄留著記 `cleanup_pending：directory`。之後 fetch `refs/pull/<N>/head`、detached checkout，HEAD 須等於 PR head。
-- workspace 用 `requestOn` 開在該機器；label 每次執行唯一（`review-<雜湊>-<8 hex>`）。create 逾時依 label 有界重查 3 次（間隔 2 秒），找到就關，最後仍找不到才當作沒建立並記 console。
-- 結束關 pane、workspace，刪 marker 相符的目錄；`BLOCKED_AT_START` 保留；斷線、本機逾時或指紋階段 uncertain 失敗不刪，記 `cleanup_pending`，目前不重試。
-- 結果文字只放行白名單內的固定標籤，其餘是「遠端 review 失敗：未分類」；紀錄與通知只帶固定分類。`cleanup_pending` 的 workspace id／label、完整目錄路徑與 stderr 只進 console。
+- workspace 用 `requestOn` 開在該機器；label 每次執行唯一（`review-<雜湊>-<8 hex>`）。create 逾時依 label 有界重查 3 次（間隔 2 秒），找到就關；耗盡仍找不到時狀態不明（create 可能在最後一次查詢之後才完成），記 `cleanup_pending：workspace` 要人工確認，console 帶 machine 與 label。
+- 結束關 pane、workspace，刪目錄：「重取 realpath、確認 root 仍 canonical 且 dir 不是符號連結、marker 相符、再 `rm -rf -- <root 底下的直接子目錄名>`」合併成同一個遠端 `sh -c` 固定腳本，值只經位置參數傳入（不拼進腳本），先 `cd -P` 到 canonical root 再刪相對名稱；檢查失敗就不刪並回固定結果。**已知限制：**視窗只縮到單一指令內，無法完全消除（沒有 openat 語意的 shell 做不到），另一個程序在這個極短視窗內置換 root 或祖先仍有理論風險。`BLOCKED_AT_START` 保留；斷線、本機逾時或指紋階段 uncertain 失敗不刪，記 `cleanup_pending`，目前不重試。
+- 結果文字只放行白名單（`RESULT_WHITELIST`）：先比完整字串（`BLOCKED_AT_START` 含「：」，要保留「卡在信任提示、需人工處理」的原因），再比「：」前的固定標籤，其餘是「遠端 review 失敗：未分類」；紀錄與通知只帶固定分類。`cleanup_pending` 的 workspace id／label、完整目錄路徑與 stderr 只進 console。
 
 ## 未驗證與後續
 
