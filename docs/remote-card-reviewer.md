@@ -2,7 +2,11 @@
 
 REQ-20261111-remote-agy-role，ISSUE-143。2026-11-11，**未實機驗收**。
 
-本文件是 **PR A（基礎層，#207）**：設定、驗證、遠端 checkout 與清理；沒有 `machines[].cardReview` 時不會被呼叫，行為與 main 相同。角色接線在相依的 PR #206（PR B）；B 合併前 reviewer 不能指定 remote。
+基礎層（設定、驗證、遠端 checkout、清理）在 PR #207（A），角色與接線在 PR #206（B，依賴 A；A merge 後 B 要 rebase）。沒有 `machines[].cardReview` 時一切不變。
+
+## 範圍與限制
+
+只有 card reviewer（PR 後的 review／loop，唯讀）可在 remote：卡片 `roles: {implement: "local:claude:opus", reviewer: "agy-pod:agy"}`。implement／fixer 拒絕「remote 寫入尚未支援」，其他角色拒絕「remote 目前只支援 reviewer」。**沒有 `roles` 的卡不支援由 Lead 自己選 remote reviewer**，只有卡片宣告 `reviewer: <machine>:<agent>` 才會派到 pod；「Lead 自行選擇 remote 角色」屬後續卡片 REQ-20261111-remote-in-task-roles。卡片內容與 PR diff 會送到該機器，只對信任的機器開 `cardReview`。
 
 ## 設定
 
@@ -14,6 +18,10 @@ REQ-20261111-remote-agy-role，ISSUE-143。2026-11-11，**未實機驗收**。
 ```
 
 `root` 是 bridge 專用的遠端絕對路徑（≥2 段，不含 `.`／`..` 段、空白、控制或 shell 字元，段不以 `-` 開頭）；`kinds` 是允許種類（`claude`、`codex`、`agy`、`pi`，不重複）；其他欄位拒絕。`HerdrHub` 新增 `machineConfig`、`requestOn`（只送指定機器、不經快取）、`freshAgentsOn`（當下 Agent 清單）。
+
+## 名單與守門
+
+Lead prompt 列 remote reviewer 候選（machine／kind／profile／model），由 bridge 在 PR 後派工，不是 Team Worker target。machine 須有 `cardReview` 且 agent 在 `kinds`，否則撿卡前拒絕「machine 未開放卡片 review」；快照凍結 `remoteMachines`，review 時再驗目前配置的 machine 與 kinds（舊快照允許、現已不開放就拒絕「machine 目前未開放這個 agent 種類」）；readiness 與送 prompt 前讀當下遠端清單（`freshAgentsOn`）驗身分；main 只在 `HerdrHub` 才注入遠端介面。
 
 ## 拉取、marker、身分、清理
 
@@ -27,4 +35,4 @@ REQ-20261111-remote-agy-role，ISSUE-143。2026-11-11，**未實機驗收**。
 
 ## 未驗證與後續
 
-實機未跑：pod 的 git／`timeout`／`realpath`／repo 權限、`refs/pull` fetch、marker 寫入。測試是 `test/remote-checkout.test.ts`（fake exec）。後續：`git bundle` 上傳、remote 寫入角色、cleanup_pending 重試。
+實機未跑：pod 的 git／`timeout`／`realpath`／repo 權限、`refs/pull` fetch、marker 寫入、agy 信任提示（第一次很可能停在這裡並保留 workspace，需人工關閉）。測試：`test/remote-checkout.test.ts`（A）、`test/card-role-remote.test.ts`（B）。驗收：兩個 PR merge、加 `cardReview`、重啟後跑一張無害卡。後續：`git bundle` 上傳、remote 寫入角色、cleanup_pending 重試。

@@ -11,13 +11,15 @@ export function assertReadyIdentity(
   ready: AgentRecord,
   kind: string,
   workspace: string,
+  /** 只有卡片 remote reviewer 會傳遠端 machine；其餘一律 local。 */
+  machine = "local",
 ): void {
   if (
     ready.pane_id !== started.pane_id ||
     ready.terminal_id !== started.terminal_id ||
     ready.workspace_id !== workspace ||
     ready.agent !== kind ||
-    machineOfActor(ready) !== "local" ||
+    machineOfActor(ready) !== machine ||
     (hasAgentSession(started.agent_session) &&
       !sameAgentSession(started.agent_session, ready.agent_session))
   )

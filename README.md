@@ -266,6 +266,11 @@ Inbound attachment folders (`<cwd>/.herdr-discord-bridge/attachments/message-*`)
 
 After `herdr machine add`, list the machine under `machines` in the plugin config (see [config.example.jsonc](config.example.jsonc)): `id`, `ssh` (a Host from `~/.ssh/config`) and `socket`, the absolute path of the remote Herdr API socket. The bridge forwards that socket with `ssh -L`; remote IDs carry an `<id>:` prefix (for example `agy-pod:w2:p1`) and unprefixed IDs are always local. Supported: text conversation and Discord → remote-agent attachments (uploaded over ssh into the remote cwd). Not supported: agent → Discord file return and `herdr-discord-send` for remote agents. Text conversation is accepted; remote attachments await acceptance (ISSUE-041).
 
+
+### Remote card reviewer (optional)
+
+Add `"cardReview": { "root": "/root/hdb-card-review", "kinds": ["agy"] }` to a machine to let a card declare `roles: {reviewer: "agy-pod:agy"}`: after the PR is pushed the bridge clones the GitHub `origin` over anonymous https into `<root>/` on that machine, checks out the PR head, verifies HEAD equals the PR head sha and runs the reviewer there (no credentials forwarded, no fallback to local). `root` is a bridge-only absolute path; `kinds` lists allowed agent kinds. Only `reviewer` can be remote; the card text and PR diff are sent to that machine. Without `cardReview` nothing changes, and cards without `roles` cannot get a remote reviewer picked by the Lead (follow-up card REQ-20261111-remote-in-task-roles). Not accepted on real machines yet (ISSUE-143, [docs/remote-card-reviewer.md](docs/remote-card-reviewer.md)).
+
 ## Agent profiles and quiet console
 
 Define `agentProfiles` in the plugin config (see [config.example.jsonc](config.example.jsonc)). Profiles configure CLI kind, optional model/arguments and capabilities; no model name is assumed valid for your account.
@@ -402,9 +407,10 @@ CLI `--agent` / loop `--fix-agent` cannot conflict with a card agent assignment.
 Each constrained assignment and each review/fix round starts a fresh session.
 
 Machine delivery in this change is declaration, validation and enforced **local**
-execution. Unknown machines are rejected; configured remote machines are also
-rejected before picking with the actual unsupported-machine reason. Cross-machine
-card execution and pi Workers remain unsupported. Invalid declarations retain
+execution. Unknown machines are rejected; configured remote machines are rejected
+before picking unless it is a `reviewer` on a machine that opted in with
+`machines[].cardReview` (ISSUE-143, see above). Other cross-machine
+card execution remains unsupported. Invalid declarations retain
 queryable rejection diagnostics; malformed cards use a separate persistent
 `.role-rejections` store, with retrying notifications through strictly validated
 routes. `card show` exposes the reason/delivery status. `role_assigned` records
