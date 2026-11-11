@@ -12,13 +12,25 @@
 
 **獨立審查修正（Fable 複審 8 項，1–4 在 A，5–8 在 B）：**見 docs/remote-card-reviewer.md。(1) marker（clone 後寫 `.git/hdb-card-review`，沿用與清理都要求 marker 相符；沒有 marker 的同 origin 目錄拒絕不碰）、(2) 遠端缺 GNU `timeout` 先檢查並丟固定標籤、(3) `cleanup_pending` 在 console 留下 workspace id／label 與完整目錄路徑（紀錄與通知維持固定標籤）。(4) workspace label 改為每次執行唯一（舊版每張卡唯一，`workspace.create` 失敗時會連前一次保留的 workspace 一起關掉）。前一輪審查已修：遠端以 `timeout -k 10` 包 git、斷線／本機逾時不清目錄改記 cleanup_pending、ssh 關 ForwardAgent／X11／ClearAllForwardings、紀錄與通知用固定分類、拒絕 `.` 路徑段。
 
+**B 內容（PR #206，依賴 A）：**角色與接線：card-role-assignment、card-events、card-notify、card-role-session、card-review-flow、card-review-wiring、main、team-orchestration 與 `test/card-role-remote.test.ts`。(5) README 與 README.zh-TW 補 `machines[].cardReview`；(6) #205 實機觀察放回 ISSUE-138 段與 agent-role-matrix.md；(7) main 的兩個分支抽成 `remoteReviewInjection`／`liveAgentList` 並補測試；(8) 基礎層檔案與 A 完全一致，B 分支含 A 的 commit。
+
+**B 測試與大小（2026-11-11，B 分支含 A）：**`npm run check` exit 0：1744 項／1743 pass／0 fail／1 既有 skipped；`git diff --check` 通過。原 #206 的 diff 為 71,377 字元，超過 card review 的 60,000 上限（使用者決定拆分）；A `git diff main...HEAD | wc -c` = 47,702；B 在假設 A 已 merge 時 `git diff remote-checkout-base...HEAD | wc -c` = 57,166。B 直接對 main 的 diff 仍超過上限，要等 A merge 並 rebase 才會縮小。agy 信任提示很可能擋第一次實機並保留 workspace，需人工關閉。
+
 **A 測試（2026-11-11，本機，fake exec／fake ssh）：**`npm run check` exit 0：1731 項／1730 pass／0 fail／1 既有 skipped；`npm run lint` 通過；`git diff --check` 通過；既有測試檔未修改。新測試涵蓋 marker 缺少／不符／清理拒絕、遠端缺 timeout（exit 127 與 1，含經 ssh 包裝）、cleanup_pending 的 console 識別與紀錄不含、label 每次執行唯一。這只是單元測試，不是 Herdr／pod 實機驗收。
 
 **未驗證：**實機（pod 的 git 與 repo 權限、GNU `timeout`、`refs/pull` fetch、marker 寫入）；cleanup_pending 不重試；clone 被中斷留下的半成品目錄因沒有 marker 不會被清理（只記 pending，需人工）；需使用者加 `cardReview` 並重啟。PR A 單獨 merge 不會啟用任何 remote 功能。
 
+## ISSUE-144：autopick 在 task 開始前記「找不到這張卡的 task」的 autopick_stopped
+
+更新日期：2026-11-11。狀態：待調查（一次觀察，根因未確認）。
+
+REQ-20261111-remote-agy-role 在 02:07:43Z picked 後，02:07:55Z 記 failed「task 沒有完成：找不到這張卡的 task」並排入通知，但 task 02:09:51Z 才開始且之後正常。預期 task 建立前不記失敗。可能與等待 task 的時序或 ISSUE-133／135 同類，未證實。下一步：對照 autopick 等待 task 的路徑與時間戳。
+
 ## ISSUE-138：卡片缺少六角色 machine／agent／model 指定與 bridge 強制守門
 
 更新日期：2026-11-10。狀態：已修正、待驗收（原始碼與自動化檢查完成；尚未實機驗收）。卡片：REQ-20261110-card-role-assignment。
+
+**2026-11-11 實機觀察（部分，非三卡驗收）：**REQ-20261111-remote-agy-role 首次實機用 roles（只宣告 local）；diagnose、implement 的 `role_assigned` 皆 `claude（opus）；machine=local；…；s=C,ss=CCC,me=L`，implement pane `w69:p3` 為 `claude·worker·opus`、同 worktree 有 `claude --model opus` 程序（pid↔pane 只由時間與 cwd 推定）。原文見 agent-role-matrix.md；另見 ISSUE-144。remote 拒絕文字已由 ISSUE-143 改變。
 
 **症狀／預期：**舊卡只有 lead 指定；Worker 由 Lead 自選、reviewer／fixer 由臨時 CLI 指定，不能可控驗證角色矩陣。預期六角色可宣告 machine／agent／model，無宣告完全相容，無效指定在撿卡前拒絕且原因正確，Lead 不符派工被擋，流程記實際身分與來源。
 

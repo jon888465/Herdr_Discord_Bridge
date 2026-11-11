@@ -118,6 +118,12 @@ export function classifyRoleRejection(text: string): string {
     return `卡片角色指定無效：${role}：${detail}`;
   if (detail!.startsWith("不存在 machine "))
     return `卡片角色指定無效：${role}：不存在 machine`;
+  for (const label of [
+    "remote 寫入尚未支援",
+    "remote 目前只支援 reviewer",
+    "machine 未開放卡片 review",
+  ])
+    if (detail!.startsWith(label)) return `卡片角色指定無效：${role}：${label}`;
   if (detail!.startsWith("卡片流程尚未支援 machine "))
     return `卡片角色指定無效：${role}：尚未支援遠端 machine`;
   if (detail!.startsWith("派工不符：machine "))

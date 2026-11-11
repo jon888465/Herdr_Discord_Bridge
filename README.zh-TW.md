@@ -236,6 +236,11 @@ npm run build
 
 用 `herdr machine add` 加入遠端機器後，在 plugin `config.json` 加入 `machines`（見 [設定範例](config.example.jsonc)）：`id`、`ssh`（`~/.ssh/config` 的 Host）與遠端 Herdr API socket 的絕對路徑 `socket`。bridge 會以 `ssh -L` 轉發該 socket，遠端 Agent 的 ID 帶 `<id>:` 前綴（如 `agy-pod:w2:p1`），沒帶前綴的一律是本機。支援文字對話與 Discord → 遠端 Agent 的附件（經 ssh 上傳到遠端 cwd）；不支援 Agent → Discord 的檔案回送與 `herdr-discord-send`。文字對話已驗收，遠端附件待驗收（ISSUE-041）。
 
+
+### 遠端卡片 reviewer（選填）
+
+機器項目加 `"cardReview": { "root": "/root/hdb-card-review", "kinds": ["agy"] }` 後，卡片可寫 `roles: {reviewer: "agy-pod:agy"}`：PR push 之後，bridge 用匿名 https 把 GitHub `origin` clone 到該機器的 `<root>/`，checkout PR head 並驗證 HEAD 等於 PR head sha，再在該機器執行 reviewer（不轉送憑證、不 fallback 本機）。`root` 是 bridge 專用的絕對路徑，`kinds` 是允許的 Agent 種類。只有 reviewer 可以是 remote，卡片內容與 PR diff 會送到該機器。沒設定 `cardReview` 時一切不變。尚未實機驗收（ISSUE-143，見 [docs/remote-card-reviewer.md](docs/remote-card-reviewer.md)）。
+
 ## 可用 Agent 池與動態分工
 
 在 plugin `config.json` 加入 `agentProfiles`（見 [設定範例](config.example.jsonc)），定義 CLI kind、可選的 model／args 及 capabilities。模型名稱需符合你的 CLI 與帳號。
@@ -384,7 +389,7 @@ CLI 的 --agent 與 loop 的 --fix-agent 不得和卡片 agent 衝突；指定�
 與每次 review／fix 都用新 session。
 
 本卡 machine 交付是「宣告＋驗證＋**local 強制執行**」。不存在的 machine 拒絕；
-已配置 remote 也在撿卡前以實際未支援原因拒絕。跨機器卡片執行、pi Worker 尚未支援。
+已配置 remote 在撿卡前拒絕，只有 `machines[].cardReview` 開放的機器上的 `reviewer` 例外（ISSUE-143，見上）。其他跨機器卡片執行、pi Worker 尚未支援。
 無效宣告保留可查拒絕診斷；壞卡使用獨立持久化 `.role-rejections`，只向嚴格驗證的路由
 送出可重試通知，card show 可查原因／送達狀態。role_assigned 用有上界的 v2 格式記錄
 machine、agent、已知 model 與各維度來源。完整契約、重試語意與 merge／重啟後仍須完成的

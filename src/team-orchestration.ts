@@ -122,6 +122,8 @@ export type OrchestrationEvent = {
 
 export interface TeamTaskInput {
   roleSnapshot?: RoleSnapshot;
+  /** 開放的遠端 card reviewer（PR 後由 bridge 派工，不是 Worker target）。 */
+  remoteReviewers?: object[];
   recordRoleStrict?: (identity: RoleIdentity) => void | Promise<void>;
   validateRoleActor?: (actor: AgentRecord) => Promise<void>;
   onRoleAssigned?: (identity: RoleIdentity) => void;
@@ -940,7 +942,7 @@ function assertAcyclic(plan: AssignmentPlan): void {
   for (const assignment of plan.assignments) visit(assignment.id);
 }
 
-function planningInstruction(input: TeamTaskInput): string {
+export function planningInstruction(input: TeamTaskInput): string {
   const workers = input.workers
     .map(
       (worker) =>
@@ -958,6 +960,8 @@ function planningInstruction(input: TeamTaskInput): string {
           `Role candidates (machine=local, model from frozen profile): ${JSON.stringify(Object.fromEntries(Object.entries(input.roleSnapshot.candidates).map(([role, profiles]) => [role, profiles?.map((p) => ({ id: p.id, kind: p.kind, model: p.model }))])))}`,
         ]
       : []),
+    ...(input.roleSnapshot?.remoteMachines ? [`Card reviewer runs on machine ${input.roleSnapshot.roles.reviewer?.machine} after the PR.`] : []),
+    ...(input.remoteReviewers?.length ? [`Remote card reviewer candidates (bridge-dispatched after the PR, not Worker targets): ${JSON.stringify(input.remoteReviewers)}`] : []),
     "Do not modify files while planning. Return ONLY JSON as the result body, inside the response transport markers.",
     "The JSON object must have an assignments array. Each assignment has id (unique string), workerPaneId (listed Worker target), instruction (concrete subtask), and dependsOn (array of assignment IDs).",
     "Worker targets may be existing panes or profile:<id> entries. Profiles start lazily only when selected. Assign only listed targets; do not invent IDs or assign yourself. Decide roles dynamically; there is no fixed coding/review pipeline.",

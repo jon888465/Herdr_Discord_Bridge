@@ -20,9 +20,11 @@ import { runCardReview, type ReviewFlowDeps } from "./card-review-flow.js";
 import type { CardWorktree } from "./card-worktrees.js";
 import { levelFor, type LoadedPolicy } from "./policy.js";
 import type { AgentRecord } from "./types.js";
+import { reviewOnRemote, type RemoteReviewDeps } from "./remote-checkout.js";
 
 export interface ReviewWiringDeps {
   roleContext?: RoleContext;
+  remote?: RemoteReviewDeps;
   /** 任務建立時凍結的角色快照（優先於磁碟卡片，防止任務中改寫卡片竄改約束）。 */
   taskRoleSnapshot?(taskId: string): RoleSnapshot | undefined;
   worktrees: { active(cardId: string): CardWorktree | undefined };
@@ -108,8 +110,13 @@ export async function reviewCardPullRequest(
     );
 
   const [owner, repo] = pr.repo.split("/");
+  // 卡片 reviewer 在 remote：執行中的 config 也必須仍開放這台機器（REQ-20261111-remote-agy-role）。
+  const remote = snapshot?.roles.reviewer?.machine?.replace(/^local$/, "");
+  if (remote && !deps.roleContext?.remoteMachines?.some((m) => m.id === remote))
+    throw new Error("遠端 review 失敗：machine 未開放卡片 review");
+  if (remote && !deps.remote) throw new Error("remote reviewer 介面不存在，不開始 review");
   const material = await deps.fetchMaterial({ owner, repo }, pr.number);
-  const result = await runCardReview(deps.flow, {
+  const flowInput: Parameters<typeof runCardReview>[1] = {
     card: effectiveCard,
     round: options.round,
     scope: "whole",
@@ -139,7 +146,10 @@ export async function reviewCardPullRequest(
         }
       : {}),
     ...(options.agent !== undefined ? { requestedKind: options.agent } : {}),
-  });
+  };
+  const result = remote
+    ? await reviewOnRemote(deps.remote!, deps.flow, remote, { ...flowInput, prRepo: pr.repo, localWorktree: entry.path })
+    : await runCardReview(deps.flow, flowInput);
   return {
     pr: { number: pr.number, url: pr.url, headSha: material.headSha },
     result,

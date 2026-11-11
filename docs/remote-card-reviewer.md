@@ -2,7 +2,13 @@
 
 REQ-20261111-remote-agy-role，ISSUE-143。2026-11-11 原始碼與自動化測試完成，**未實機驗收**。
 
-這份文件只描述 **PR A（基礎層）**：設定、驗證、遠端 checkout 與清理。沒有 `machines[].cardReview` 設定時，這一層不會被任何程式呼叫，行為與 main 完全相同。角色接線（preflight、Lead 名單、review 流程、身分重驗）在相依的 PR #206（PR B），B 合併前 reviewer 仍不能指定 remote，本文件的 checkout 流程也還不會被執行。
+基礎層（設定、驗證、遠端 checkout、marker、清理）在 PR #207（PR A），角色與接線在 PR #206（PR B，依賴 A；A merge 後 B 要 rebase）。沒有 `machines[].cardReview` 設定時一切不變。
+
+## 範圍
+
+只有 card reviewer（PR 後的 review／loop，唯讀）可在 remote 執行；implement／fixer 拒絕「remote 寫入尚未支援」，diagnose／review／verify 拒絕「remote 目前只支援 reviewer」。卡片：`roles: {implement: "local:claude:opus", reviewer: "agy-pod:agy"}`。
+
+**資料流：**卡片標題、描述、驗收條件與 PR diff 會隨 review prompt 送到 pod 上的 agy；只對使用者信任的 machine 開 `cardReview`。
 
 ## 設定
 
@@ -14,6 +20,10 @@ REQ-20261111-remote-agy-role，ISSUE-143。2026-11-11 原始碼與自動化測�
 ```
 
 `root` 是 bridge 專用的遠端絕對路徑（≥2 段，不含 `.`／`..` 路徑段、空白、控制或 shell 字元，路徑段不以 `-` 開頭）；`kinds` 是允許種類（`claude`、`codex`、`agy`、`pi`，不可重複）。其他欄位一律拒絕。`HerdrHub` 新增 `machineConfig`、`requestOn`（只送指定機器，不經快取，ID 參數必須帶該機器前綴）與 `freshAgentsOn`（當下 Agent 清單）。
+
+## 名單與守門（PR B）
+
+Lead prompt 列 remote reviewer 候選（machine／kind／profile／model），由 bridge 在 PR 後派工，不是 Team Worker target。machine 須有 `cardReview` 且 agent 在 `kinds`，否則撿卡前拒絕「machine 未開放卡片 review」。快照凍結 `remoteMachines` 並重驗；readiness 與送 prompt 前讀當下遠端清單（`freshAgentsOn`）驗身分；main 只在 `HerdrHub` 才注入遠端介面（`remoteReviewInjection`）。
 
 ## 拉取、marker、身分、清理
 
@@ -27,4 +37,4 @@ REQ-20261111-remote-agy-role，ISSUE-143。2026-11-11 原始碼與自動化測�
 
 ## 未驗證與後續
 
-實機未跑：pod 的 git／`timeout`／repo 權限、`refs/pull` fetch、marker 寫入。單元測試用 fake exec，涵蓋在 `test/remote-checkout.test.ts`。後續：本機 `git bundle` 上傳取代 GitHub 拉取、remote 寫入角色、cleanup_pending 重試。
+實機未跑：pod 的 git／`timeout`／repo 權限、`refs/pull` fetch、marker 寫入、agy 信任提示（ISSUE-113／116，第一次很可能停在這裡並保留 pane，保留的 workspace 之後要人工關閉）。單元測試用 fake exec／fake port：`test/remote-checkout.test.ts`（A）、`test/card-role-remote.test.ts`（B，含 main 的接線 helper）。驗收：merge A、B，加 `cardReview`、重啟後跑一張無害卡，確認 `role_assigned` 的 reviewer 為 agy-pod／agy、遠端 HEAD 相符、結果寫回、已清理。後續：本機 `git bundle` 上傳取代 GitHub 拉取、remote 寫入角色、cleanup_pending 重試。

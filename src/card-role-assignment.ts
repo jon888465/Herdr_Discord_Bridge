@@ -19,14 +19,19 @@ export interface RoleConstraint {
   model?: string;
 }
 export type CardRoles = Partial<Record<CardRole, RoleConstraint>>;
+/** `machines[].cardReview` 開放的遠端 id 與 kinds。 */
+export type RemoteReviewMachine = { id: string; kinds: readonly string[] };
 export interface RoleSnapshot {
   roles: CardRoles;
   candidates: Partial<Record<CardRole, AgentProfile[]>>;
+  /** reviewer 指到遠端時凍結的開放條件；舊快照沒有＝只有 local。 */
+  remoteMachines?: RemoteReviewMachine[];
 }
 export interface RoleContext {
   machineIds: readonly string[];
   profiles: readonly AgentProfile[];
   enabledProfileIds?: readonly string[];
+  remoteMachines?: readonly RemoteReviewMachine[];
 }
 export const CARD_MODEL = /^[A-Za-z0-9][A-Za-z0-9_./:+-]{0,79}$/;
 const KINDS = ["claude", "codex", "agy", "pi"];
@@ -131,6 +136,7 @@ export function preflightRoles(
   }
   roles = parseCardRoles(serializeCardRoles(roles));
   const candidates: RoleSnapshot["candidates"] = {};
+  const remoteMachines: RemoteReviewMachine[] = [];
   for (const role of CARD_ROLES) {
     const c = roles[role];
     if (!c) continue;
@@ -140,11 +146,11 @@ export function preflightRoles(
       !context.machineIds.includes(c.machine)
     )
       roleError(role, `不存在 machine ${c.machine}`);
-    if (c.machine && c.machine !== "local")
-      roleError(role, `卡片流程尚未支援 machine ${c.machine}`);
+    const remote = c.machine?.replace(/^local$/, "") && remoteReviewMachine(role, c, context);
     const kindProfiles = context.profiles.filter(
       (p) =>
         (!c.agent || p.kind === c.agent) &&
+        (!remote || remote.kinds.includes(p.kind)) &&
         (!context.enabledProfileIds ||
           context.enabledProfileIds.includes(p.id)),
     );
@@ -166,8 +172,25 @@ export function preflightRoles(
         roleError(role, `profile ${p.id} 的 model／modelFlag 不合法`);
     }
     candidates[role] = structuredClone(matches);
+    if (remote) remoteMachines.push({ id: remote.id, kinds: [...remote.kinds] });
   }
-  return { roles: structuredClone(roles), candidates };
+  return { roles: structuredClone(roles), candidates, ...(remoteMachines.length ? { remoteMachines } : {}) };
+}
+function remoteReviewMachine(role: CardRole, c: RoleConstraint, context: RoleContext): RemoteReviewMachine {
+  const unsupported = `卡片流程尚未支援 machine ${c.machine}`;
+  if (role === "implement" || role === "fixer") roleError(role, `remote 寫入尚未支援：${unsupported} 的寫入角色`);
+  if (role !== "reviewer") roleError(role, `remote 目前只支援 reviewer：${unsupported} 的 ${role}`);
+  const remote = context.remoteMachines?.find((m) => m.id === c.machine);
+  if (!remote || (c.agent && !remote.kinds.includes(c.agent))) roleError(role, `machine 未開放卡片 review（${c.machine}）`);
+  return remote;
+}
+/** Lead 候選：每個開放遠端上的可用 reviewer profile，標明 machine。 */
+export function remoteReviewerCandidates(context: RoleContext) {
+  return (context.remoteMachines ?? []).flatMap((m) =>
+    context.profiles
+      .filter((p) => m.kinds.includes(p.kind) && roleProfileEnabled("reviewer", p) && (context.enabledProfileIds?.includes(p.id) ?? true))
+      .map((p) => ({ machine: m.id, kind: p.kind, profileId: p.id, ...(p.model ? { model: p.model } : {}) })),
+  );
 }
 export function machineOfActor(actor: AgentRecord): string {
   return typeof actor.machine === "string"
@@ -260,6 +283,11 @@ export function resolveFlowRole(
 
 /** Durable snapshots are immutable data, not authority to invent profiles/args. */
 export function validateRoleSnapshot(snapshot: RoleSnapshot): void {
+  const remote = snapshot.remoteMachines;
+  const machineOk = (m: RemoteReviewMachine) =>
+    Object.keys(m ?? 0).join() === "id,kinds" && /^(?!local$)[A-Za-z][\w-]{1,31}$/.test(m.id) && m.kinds?.length && m.kinds.every((k) => KINDS.includes(k));
+  if (remote && !(Array.isArray(remote) && remote.length && remote.length <= 8 && remote.every(machineOk)))
+    throw new Error("invalid role remote machines");
   const names = Object.keys(snapshot.roles);
   if (Object.keys(snapshot.candidates).some((k) => !names.includes(k)))
     throw new Error("invalid role candidates");
@@ -279,5 +307,8 @@ export function validateRoleSnapshot(snapshot: RoleSnapshot): void {
       flattened.push(validated);
     }
   }
-  preflightRoles(snapshot.roles, { machineIds: [], profiles: flattened });
+  // 凍結的遠端開放條件一起重驗；多出或少了都拒絕。
+  const machines = remote ?? [];
+  const checked = preflightRoles(snapshot.roles, { machineIds: machines.map((m) => m.id), profiles: flattened, remoteMachines: machines });
+  if (JSON.stringify(checked.remoteMachines ?? []) !== JSON.stringify(machines)) throw new Error("invalid role remote machines");
 }

@@ -346,6 +346,7 @@ async function reviewInPane(
       ready.agent,
       run.kind,
       input.author.workspaceId,
+      input.card.roles.reviewer?.machine ?? "local",
     );
     if (input.launch) assertFreshProfile(input.launch);
     if (
