@@ -1,5 +1,27 @@
 # Known Issues
 
+## ISSUE-142：autopick 開 Lead 時 codex 剛好跳出更新提示，`card assign --worktree` 沒有啟動任務，autopick 卻報成「找不到這張卡的 task」
+
+更新日期：2026-11-11。狀態：待調查（現象已重現一次；根因是讀碼與時間序推論，**尚未直接看到 `card assign` 的回覆**）。
+
+**使用者可見症狀：**`REQ-20261111-remote-agy-role`（`lead: codex`）在 bridge 重啟後 2026-11-11 02:07:43Z 被撿起，02:07:55Z 卡片流程紀錄只有 `worktree_created`，隨即 `failed`／`autopick_stopped`，原因「task：task 沒有完成：找不到這張卡的 task」；沒有 `role_assigned`（lead）、`assigned`、`started`。Lead（codex）的 workspace `w69` 留著，卡片仍是 `ready`。使用者看到的原因沒有說真正發生什麼（Lead 還沒就緒）。
+
+**預期行為：**Lead 就緒前不要派工，或等到就緒再 assign；若 assign 沒有啟動任務，停止原因要說「Lead 在 assign 時不是 idle（例如 codex 更新提示）」，不是「找不到 task」。
+
+**重現／環境：**2026-11-11，本機 macOS，bridge 為 main `796e0cb`（#205）重啟後的程序；bridge console 在失敗前一刻印出「已自動跳過 codex 的更新提示（pane w69:p1、按鍵 3）」。手動補跑 `card assign REQ-20261111-remote-agy-role --coding`（不帶 `--worktree`，Lead pane 這時已 idle）成功，task `task-5c36f579-…` 開始。
+
+**推論的根因（讀碼，2026-11-11）：**
+1. `src/card-command.ts` 的 `assignCard` 在 `--worktree` 路徑下，若新 workspace 的 Agent 當下不是 idle／done（`prepared.agentReady` 為 false），回覆「任務沒有啟動，卡片仍是 ready」並直接返回，不丟錯誤。
+2. `src/autopick.ts` 的 `run()` 只執行 `steps.command(text)` 並記步驟，**完全不看回覆內容**，所以往下走到 `waitTask`。
+3. `src/autopick-wiring.ts` 的 `waitTask` 用 `taskIdForCard` 找不到任務，回「找不到這張卡的 task」，這是最後被當成停止原因的字串。
+4. codex 啟動時的更新提示讓 pane 當下不是 idle；bridge 自動按鍵 3 跳過，但是在 assign 判斷 `agentReady` 之後。
+
+**未確認：**實際的 `card assign` 回覆文字沒有被記錄，所以無法直接證明走的是「agentReady 為 false」這一支（另一支是 `startTask` 丟錯誤，訊息同樣以「任務沒有啟動」開頭）。同一個 codex 更新提示是否在其他次啟動也會讓 Lead 不 idle，也未驗證。
+
+**修正方向（尚未實作）：**autopick 要檢查 `card assign` 的回覆（或改用有結構的結果），回覆含「任務沒有啟動」時停止原因要用該回覆的關鍵句；Lead 就緒判斷要把已知的 codex 更新提示處理進去（先跳過再判定 ready），或 assign 前重新確認 Lead 狀態。要補測試：assign 回「任務沒有啟動」時，autopick 的停止原因不是「找不到這張卡的 task」。
+
+**影響：**這次需要人工補跑 `card assign`，等於自動撿卡流程沒有走完；也是 ISSUE-133（停止原因要是實際原因）同一類問題的新樣本。
+
 ## ISSUE-140：卡片通知把卡片標題原文放進每一則通知，標題內容會原樣送進 Discord 或 Agent pane 的 prompt
 
 更新日期：2026-11-10。狀態：待調查（現象已重現，**既有行為、尚未修正**）。
