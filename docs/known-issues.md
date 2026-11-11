@@ -10,7 +10,7 @@
 
 **修正範圍：**新增 card-role-assignment／card-role-session／card-role-rejections。roles inline map、同 kind 已開放 profile 及 modelFlag／args；preflight 與 manual assign；凍結候選、Lead prompt、整份計畫與實際 Worker 守門、每 assignment fresh session；review／fix／loop 卡片指定與 CLI 衝突；嚴格送出前角色紀錄與失敗清理；≤300字 v2 來源模板且舊模板／hash不變；壞卡獨立持久診斷、card show 查詢、通知重試。詳見 card-role-assignment.md。
 
-**範圍決定與限制：**Lead 明確決定本卡 machine 交付宣告＋驗證＋local 強制執行。已配置 remote 撿卡前明確拒絕「卡片流程尚未支援 machine X」，跨機器未實作／未驗收；pi Worker 不開放。配置允許 model 不保證供應商可用，保留 CLI 實際錯誤。無可信 notify 不猜路由；通知送達但 sent 寫入失敗可能重複。卡片宣告不等於每個角色已實機通過。
+**範圍決定與限制：**Lead 明確決定本卡 machine 交付宣告＋驗證＋local 強制執行。已配置 remote 撿卡前明確拒絕「卡片流程尚未支援 machine X」，跨機器未實作／未驗收；pi Worker 先前被程式錯誤排除；2026-11-11 已移除此角色種類限制，現由 profile 的 implementation／review capability 決定可用性。配置允許 model 不保證供應商可用，保留 CLI 實際錯誤。無可信 notify 不猜路由；通知送達但 sent 寫入失敗可能重複。卡片宣告不等於每個角色已實機通過。
 
 **重現／測試環境：**2026-11-10，本機 macOS、此卡 worktree、fake Herdr ports／暫存卡片與 journal，未呼叫真 Agent、未讀 GitHub。原始 HEAD c0208815175e059b6aec824d1d2a7215993c01a4。初次 typecheck 因尚未安裝依賴找不到 tsc，npm ci --ignore-scripts 後解除；開發階段另修 optional 介面型別錯誤。新增測試曾抓到 role target 的三段 id 被誤判成 remote machine，已加明確 local；測試 fixture 的 session kind 與 Lead plan wire 格式已依既有協定修正，沒有修改任何既有測試。這些早期失敗不作最終通過證據。
 

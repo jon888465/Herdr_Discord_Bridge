@@ -812,7 +812,7 @@ PR #189（`88e1ce6`）已於 2026-11-09 merge，並重啟 bridge 載入（`card 
 
 `roles: {implement: "local:claude:sonnet", reviewer: "local:agy"}` 為一層 inline map；只接受 implement、diagnose、review、verify、reviewer、fixer。每個值是 machine:agent:model，只拆前兩個冒號；省略段落不約束該維度，model 可含冒號。空／重複／未知角色、非字串拒絕；未宣告 roles 時既有行為完全不變。有 roles 的 card assign 必須 --coding；每個已派出的角色都受約束，不能用非 coding assignment／Lead synthesis 繞過。
 
-本卡 machine 範圍由 Lead 決定為「宣告＋驗證＋local 強制執行」。未知 machine 報不存在；已配置 remote 報「卡片流程尚未支援 machine X」，在撿卡前拒絕，不 fallback 到 local；不代表跨機器實際執行已完成。agent／model 必須有同 kind 已開放配置 profile；model 是管理者允許清單，不保證供應商可用。沿用選中 profile 的 modelFlag／args，不猜參數；新流程禁止 resume／session 綁定及 model 覆寫。agy 需 implementation／review opt-in，pi Worker 尚未開放；無宣告卡的 roster 不變。
+本卡 machine 範圍由 Lead 決定為「宣告＋驗證＋local 強制執行」。未知 machine 報不存在；已配置 remote 報「卡片流程尚未支援 machine X」，在撿卡前拒絕，不 fallback 到 local；不代表跨機器實際執行已完成。agent／model 必須有同 kind 已開放配置 profile；model 是管理者允許清單，不保證供應商可用。沿用選中 profile 的 modelFlag／args，不猜參數；新流程禁止 resume／session 綁定及 model 覆寫。agy、pi 均需 implementation／review opt-in；符合條件的 profile 可供六種卡片角色使用，無宣告卡的 roster 不變。
 
 完整語法、預設、快照與拒絕契約見 docs/card-role-assignment.md。autopick／manual assign 開 workspace／worktree 前驗證所有角色，task 開始凍結約束與候選；review／fix／loop 每輪重新驗證。Lead prompt 帶指定；整份計畫先以 coding.role 核對，不符即 plan_rejected、零 acquire。每個指定 assignment 新 session、不重用不同 model 的 binding，readiness 後及送 prompt 前核對實際身分；未知 model 的既有 session 不能滿足指定。保留 Team codex／agy 既有延後 session 驗證。
 
