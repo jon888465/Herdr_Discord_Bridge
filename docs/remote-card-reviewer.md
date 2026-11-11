@@ -35,7 +35,7 @@ Lead prompt 列 remote reviewer 候選（machine／kind／profile／model），�
 
 ## agy 預先信任（REQ-20261111-agent-first-run-prompts，未做實機驗收）
 
-reviewer 是 agy 時，啟動前由 `src/remote-agy-trust.ts` 把 checkout 加進 pod 的 `$HOME/.gemini/antigravity-cli/settings.json`。pod 沒有 node：讀檔附遠端 sha256，本機核對後用 `editTrustedWorkspaces` 編輯；寫入是固定 `sh -c` 腳本，值只經位置參數，腳本再驗 root canonical、dir 非符號連結且 realpath 相符、marker 相符、設定檔非符號連結且雜湊未變，才備份到 `<root>/.hdb-agy-settings-backups`（600，留 5 份）並 `mktemp`＋`mv`；被改動就重讀（最多 4 次）。寫入失敗不中止（維持保留 pane）。成功、失敗、例外、逾時、uncertain 都在刪目錄前移除；paneKept 保留；移除失敗記 `cleanup_pending：trust`，路徑只進 console。pod 的 `sha256sum`、`base64 -d`、`mktemp`、`cp -p` 未驗證（本機以真的 `sh` 測過）。
+reviewer 是 agy 時，啟動前由 `src/remote-agy-trust.ts` 把 checkout 加進 pod 的 `$HOME/.gemini/antigravity-cli/settings.json`：讀檔附遠端 sha256，本機以 `editTrustedWorkspaces` 編輯，固定 `sh -c` 腳本（值只經位置參數）驗 root／dir／marker／設定檔非符號連結且雜湊未變才備份（`<root>/.hdb-agy-settings-backups`，600，留 5 份）並 `mktemp`＋`mv`；被改動就重讀（最多 4 次）。確定沒寫入的失敗不中止；**狀態不明**（斷線、遠端 timeout 124／137，mv 可能已完成）不啟動 reviewer、直接失敗走清理：仍嘗試移除，但仍在跑的寫入可能在清理讀設定後才完成，所以一律記 `cleanup_pending：trust` 並保留目錄。只移除「本次新增」的項目（`editRemoteAgyTrust` 回傳 false＝原本就在）；成功、失敗、例外、逾時都在刪目錄前移除，paneKept 保留。pod 的 `sha256sum`、`base64 -d`、`mktemp`、`cp -p` 未驗證（本機以真的 `sh` 測過）。
 
 ## 未驗證與後續
 

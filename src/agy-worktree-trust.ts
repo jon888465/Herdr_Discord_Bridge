@@ -94,10 +94,12 @@ export function checkLocalTrustScope(input: {
   home: string;
   realpath: (p: string) => string;
   isDirectory: (p: string) => boolean;
+  /** `verifyCardWorktree`；不給就不驗（純函式測試用）。 */
+  verifyIdentity?: (cwd: string, entry: CardWorktree) => boolean;
 }): TrustScope {
   const { cwd } = input;
   const no = (reason: string): TrustScope => ({ ok: false, reason });
-  if (/[\u0000-\u001F\u007F]/.test(cwd)) return no("control");
+  if (/[\u0000-\u001F\u007F-\u009F]/.test(cwd)) return no("control");
   if (!path.isAbsolute(cwd) || cwd.split("/").some((p) => p === ".." || p === ".")) return no("dotdot");
   const entry = input.entries.find((e) => !e.removedAt && e.path === cwd);
   if (!entry) return no("not_indexed");
@@ -107,7 +109,21 @@ export function checkLocalTrustScope(input: {
   if (input.realpath(cwd) !== cwd) return no("symlink");
   if (input.realpath(root) !== root) return no("root_not_canonical");
   if (!input.isDirectory(cwd)) return no("not_directory");
+  if (input.verifyIdentity && !input.verifyIdentity(cwd, entry)) return no("not_card_worktree");
   return { ok: true, target: cwd, cardId: entry.cardId };
+}
+
+/** 唯讀驗證 cwd 是為該紀錄建立的 git worktree：`.git` 是檔案、gitdir 在紀錄 repo 的 `.git/worktrees/`、回指 cwd/.git、HEAD 是紀錄的 branch；任何失敗都拒絕。 */
+export function verifyCardWorktree(cwd: string, entry: CardWorktree): boolean {
+  try {
+    const dotGit = path.join(cwd, ".git");
+    if (!fs.lstatSync(dotGit).isFile()) return false;
+    const gitdir = fs.realpathSync(fs.readFileSync(dotGit, "utf8").replace(/^gitdir: /, "").trim());
+    const read = (name: string) => fs.readFileSync(path.join(gitdir, name), "utf8").trim();
+    return path.dirname(gitdir) === path.join(fs.realpathSync(entry.repoPath), ".git/worktrees") && read("gitdir") === dotGit && read("HEAD") === `ref: refs/heads/${entry.branch}`;
+  } catch {
+    return false;
+  }
 }
 
 export class AgyWorktreeTrust {
@@ -313,6 +329,7 @@ export class AgyWorktreeTrust {
         home: this.home,
         realpath: (p) => fs.realpathSync(p),
         isDirectory: (p) => fs.statSync(p).isDirectory(),
+        verifyIdentity: verifyCardWorktree,
       });
       // 已登記的是 symlink（即使目標是另一個卡片目錄）：沿用原本的錯誤回報；其他範圍外的路徑靜默略過。
       if (!scope.ok && scope.reason === "symlink")

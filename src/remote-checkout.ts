@@ -268,8 +268,9 @@ export async function reviewOnRemote(
   // 每次執行唯一，才不會關到前一次保留給人處理信任提示的 workspace。
   const label = `review-${hash}-${randomBytes(4).toString("hex")}`;
   let owned = false;
-  // agy 的預先信任可能已寫入（含狀態不明）：清理時要在刪目錄前移除；確定沒寫入就不碰。
-  let trusted = false;
+  // 只移除本次新增或寫入狀態不明的信任；原本就在清單內的不碰。
+  let trustAdded = false;
+  let trustUncertain = false;
   // cleanup_pending 的定位資訊（workspace id／label、完整目錄）只進 console，紀錄與通知維持固定標籤。
   // create 逾時時遠端可能稍後才建好：有界重查，耗盡仍找不到就記 pending。
   const closeByLabel = async (): Promise<void> => {
@@ -293,14 +294,19 @@ export async function reviewOnRemote(
       pending.push("workspace");
       console.error(`remote review ${machineId}: cleanup_pending workspace ${workspace} label ${label}: ${String(e)}`);
     });
-    if (trusted)
+    if (trustAdded || trustUncertain)
       await editRemoteAgyTrust(exec, { root, dir, cardHash: hash }, false).then(
-        () => void (trusted = false),
+        () => void (trustAdded = false),
         (e) => {
           pending.push("trust");
           console.error(`remote review ${machineId}: cleanup_pending trust ${dir}: ${(e as Partial<RemoteFailure>)?.detail ?? String(e)}`);
         },
       );
+    // 中斷的寫入可能在清理讀設定後才完成，移除成功也不算數。
+    if (trustUncertain && !pending.includes("trust")) {
+      pending.push("trust");
+      console.error(`remote review ${machineId}: cleanup_pending trust ${dir}: 信任寫入狀態不明，已嘗試移除，請人工確認 agy 設定檔`);
+    }
     if (owned && uncertain) {
       pending.push("directory");
       console.error(`remote review ${machineId}: cleanup_pending directory ${dir}: 未刪除（遠端狀態不明或工作樹不乾淨）`);
@@ -339,15 +345,18 @@ export async function reviewOnRemote(
       throw error;
     }
   };
-  // 只在 reviewer 是 agy 時、啟動前寫入信任；失敗不中止，維持原狀（卡在信任提示時保留 pane 給人處理）。
+  // agy 啟動前寫入信任：確定沒寫入的失敗不中止；狀態不明（斷線、逾時）不啟動 reviewer，直接失敗走清理。
   const startAgent: ReviewFlowDeps["startAgent"] = async (agent) => {
     if (agent.kind === "agy")
       try {
-        trusted = true;
-        await editRemoteAgyTrust(exec, { root, dir, cardHash: hash }, true);
+        if (await editRemoteAgyTrust(exec, { root, dir, cardHash: hash }, true)) trustAdded = true;
       } catch (error) {
-        if (error instanceof RemoteFailure && !error.uncertain) trusted = false;
-        console.error(`remote review ${machineId}: agy trust not added ${dir}: ${(error as Partial<RemoteFailure>)?.detail ?? String(error)}`);
+        const detail = (error as Partial<RemoteFailure>)?.detail ?? String(error);
+        if (error instanceof RemoteFailure && error.uncertain) {
+          trustUncertain = flowUncertain = true;
+          throw error;
+        }
+        console.error(`remote review ${machineId}: agy trust not added ${dir}: ${detail}`);
       }
     return remote.startAgent(agent);
   };

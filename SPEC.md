@@ -818,7 +818,7 @@ PR #189（`88e1ce6`）已於 2026-11-09 merge，並重啟 bridge 載入（`card 
 
 `machines[].cardReview {root, kinds}` 選填，未設定時行為完全不變（基礎層 PR #207，角色接線 PR #206，B 依賴 A）。只有 reviewer 可指定開放的 remote（implement／fixer 拒絕「remote 寫入尚未支援」，其他「remote 目前只支援 reviewer」），快照凍結 remoteMachines，啟動前重驗目前配置的 machine 與 kinds；沒有 roles 的卡不支援 Lead 自選 remote reviewer（後續卡片 REQ-20261111-remote-in-task-roles）。目錄 `<root>/<owner>__<repo>__<卡片雜湊>`；路徑須是遠端 canonical（符號連結拒絕）；clone 後寫 `.git/hdb-card-review` marker，沿用與清理要求 marker 相符、沿用還要工作樹乾淨；第一個遠端指令檢查 GNU `timeout`；create 逾時有界重查；HEAD 須等於 PR head；斷線不 fallback 本機；結果文字只放行固定標籤。見 docs/remote-card-reviewer.md。
 
-**首次啟動提示（REQ-20261111-agent-first-run-prompts，2026-11-11，未做實機驗收）：**reviewer 是 agy 時，啟動前把 checkout 目錄寫進 pod 的 `$HOME/.gemini/antigravity-cli/settings.json` `trustedWorkspaces`，刪目錄前移除（paneKept 保留；移除失敗記 `cleanup_pending：trust`；寫入失敗不中止）。本機卡片 worktree 信任改由純函式 `checkLocalTrustScope` 判定，另拒絕 `..`／`.` 段、控制字元與已移除紀錄；目錄名仍只要求 `card-req-` 開頭（未綁 cardId）。更新提示清單不新增：claude／pi 只見通知、agy 沒有可靠可操作的選單樣本；測試要求每筆表項都有實機畫面樣本。
+**首次啟動提示（REQ-20261111-agent-first-run-prompts，2026-11-11，未做實機驗收）：**reviewer 是 agy 時，啟動前把 checkout 目錄寫進 pod 的 `$HOME/.gemini/antigravity-cli/settings.json` `trustedWorkspaces`，刪目錄前只移除本次新增的項目（paneKept 保留；移除失敗記 `cleanup_pending：trust`；寫入狀態不明〔斷線、timeout 124／137〕不啟動 reviewer、清理後一律記 pending）。本機卡片 worktree 信任改由純函式 `checkLocalTrustScope` 判定，另拒絕 `..`／`.` 段、C0／DEL／C1 控制字元與已移除紀錄，並以 `verifyCardWorktree` 讀檔驗證為該卡建立的 git worktree。更新提示清單不新增（沒有實機畫面樣本）。
 
 ### 卡片角色 machine／agent／model（2026-11-10，ISSUE-138，已修正、待驗收）
 

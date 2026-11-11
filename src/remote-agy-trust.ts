@@ -61,7 +61,10 @@ export async function editRemoteAgyTrust(exec: RemoteExec, input: { root: string
     if (next === null) return false;
     const b64 = Buffer.from(next, "utf8").toString("base64");
     if (b64.length > MAX_B64) throw new RemoteFailure("agy 設定檔過大");
-    const { code } = await exec(["sh", "-c", TRUST_WRITE_SCRIPT, "sh", root, dir, name, marker, add ? "add" : "remove", hash, b64], SHORT_MS);
+    // 寫入階段任何 exec 失敗（含 timeout 124／137）都可能已寫入：一律狀態不明。
+    const { code } = await exec(["sh", "-c", TRUST_WRITE_SCRIPT, "sh", root, dir, name, marker, add ? "add" : "remove", hash, b64], SHORT_MS).catch((error: unknown) => {
+      throw error instanceof RemoteFailure ? new RemoteFailure(error.label, error.detail, true) : new RemoteFailure("寫入 agy 設定檔失敗", String(error), true);
+    });
     if (code === 0) return true;
     if (code !== 15) throw new RemoteFailure(REFUSED[code] ?? "寫入 agy 設定檔失敗", `exit ${code}`);
   }

@@ -5,6 +5,14 @@ import os from "node:os";
 import path from "node:path";
 import { AgyWorktreeTrust } from "../src/agy-worktree-trust.js";
 
+/** 模擬 `git worktree add` 留下的檔案：cwd/.git 檔、主 repo 的 .git/worktrees/<名稱>（gitdir 回指與 HEAD）。 */
+function linkWorktree(repo: string, cwd: string, branch: string) {
+  const gitdir = path.join(repo, ".git/worktrees", path.basename(cwd));
+  fs.mkdirSync(gitdir, { recursive: true });
+  for (const [file, text] of [[path.join(gitdir, "gitdir"), `${cwd}/.git`], [path.join(gitdir, "HEAD"), `ref: refs/heads/${branch}`], [path.join(cwd, ".git"), `gitdir: ${gitdir}`]]) fs.writeFileSync(file!, `${text}\n`);
+  return gitdir;
+}
+
 function fixture() {
   const root = fs.realpathSync(
     fs.mkdtempSync(path.join(os.tmpdir(), "agy-trust-")),
@@ -12,6 +20,7 @@ function fixture() {
   const home = path.join(root, "home");
   const cwd = path.join(home, ".herdr/worktrees/repo/card-req-test");
   fs.mkdirSync(cwd, { recursive: true });
+  linkWorktree(root, cwd, "card/test");
   const settings = path.join(root, "settings.json");
   assert.ok(!settings.startsWith(os.homedir() + path.sep));
   const state = path.join(root, "state");
@@ -619,7 +628,7 @@ test("checkLocalTrustScope accepts only the indexed canonical card directory and
     });
   assert.deepEqual(check(good), { ok: true, target: good, cardId: "REQ-20261111-a" });
   for (const [cwd, reason, o] of [
-    [`${good}\nx`, "control"], [`${good}\u007f`, "control"],
+    [`${good}\nx`, "control"], [`${good}\u007f`, "control"], [`${good}\u0080`, "control"], [`${good}\u0085`, "control"], [`${good}\u009f`, "control"],
     ["/h/.herdr/worktrees/repo/card-req-b/../card-req-a", "dotdot"], ["/h/.herdr/worktrees/repo/./card-req-a", "dotdot"], ["rel/card-req-a", "dotdot"],
     [good, "not_indexed", { removedAt: "x" }],
     ["/", "outside_root"], ["/h", "outside_root"], ["/h/.herdr/worktrees", "outside_root"], ["/h/.herdr/worktrees/repo", "outside_root"],
@@ -664,4 +673,28 @@ test("worktree removal failure keeps the trust entry and its ownership for a lat
   assert.equal((await cleanupCardWorktree(deps as never, "REQ-20261107-test")).removed, false);
   assert.deepEqual(f.read().trustedWorkspaces, ["/user/original", f.cwd]);
   assert.equal(JSON.parse(fs.readFileSync(path.join(f.state, "agy-worktree-trust.json"), "utf8")).length, 1);
+});
+
+test("F1: a replaced plain directory, a .git directory, a misdirected gitdir or a wrong branch are refused and settings stay untouched", () => {
+  const wt = (f: ReturnType<typeof fixture>, file: string) => path.join(f.root, ".git/worktrees/card-req-test", file);
+  const cases: Array<[string, (f: ReturnType<typeof fixture>) => void]> = [
+    ["plain directory", (f) => fs.rmSync(path.join(f.cwd, ".git"))],
+    [".git is a directory", (f) => { fs.rmSync(path.join(f.cwd, ".git")); fs.mkdirSync(path.join(f.cwd, ".git")); }],
+    [".git is a symlink", (f) => { fs.rmSync(path.join(f.cwd, ".git")); fs.symlinkSync(wt(f, ""), path.join(f.cwd, ".git")); }],
+    ["gitdir missing", (f) => fs.writeFileSync(path.join(f.cwd, ".git"), `gitdir: ${f.root}/.git/worktrees/missing\n`)],
+    ["gitdir in another repo", (f) => {
+      fs.mkdirSync(path.join(f.root, "other"));
+      fs.writeFileSync(path.join(f.cwd, ".git"), `gitdir: ${linkWorktree(path.join(f.root, "other"), f.cwd, "card/test")}\n`);
+    }],
+    ["back pointer elsewhere", (f) => fs.writeFileSync(wt(f, "gitdir"), `${f.root}/elsewhere/.git\n`)],
+    ["branch mismatch", (f) => fs.writeFileSync(wt(f, "HEAD"), "ref: refs/heads/card/other\n")],
+    ["detached HEAD", (f) => fs.writeFileSync(wt(f, "HEAD"), `${"a".repeat(40)}\n`)],
+  ];
+  for (const [name, tamper] of cases) {
+    const f = fixture();
+    tamper(f);
+    f.trust.beforeLaunch("agy", "w1:p1", f.cwd);
+    assert.deepEqual(f.read(), f.original, name);
+    assert.ok(!fs.existsSync(path.join(f.state, "agy-worktree-trust.json")), name);
+  }
 });

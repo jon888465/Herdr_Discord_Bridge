@@ -23,11 +23,17 @@ const READ = ["sh", "-c", TRUST_READ_SCRIPT, "sh"];
 const IN = { root: ROOT, dir: DIR, cardHash: HASH };
 
 /** pod 上的設定檔放在記憶體；寫入腳本照 argv 解碼。 */
-function pod(o: { writeCode?: (mode: string) => number; read?: () => { code: number; stdout: string } } = {}) {
-  const state = { settings: SETTINGS, calls: [] as string[][] };
+type Fault = { error: RemoteFailure; landed: boolean };
+function pod(o: { writeCode?: (mode: string) => number; read?: () => { code: number; stdout: string }; settings?: string; fault?: (mode: string) => Fault | undefined } = {}) {
+  const state = { settings: o.settings ?? SETTINGS, calls: [] as string[][] };
   const exec: RemoteExec = async (argv) => {
     state.calls.push(argv);
     if (argv[2] === TRUST_READ_SCRIPT) return o.read?.() ?? { code: 0, stdout: `${sha(state.settings)}\n${state.settings}` };
+    const fault = o.fault?.(argv[8]!);
+    if (fault) {
+      if (fault.landed) state.settings = Buffer.from(argv[10]!, "base64").toString("utf8");
+      throw fault.error;
+    }
     const code = o.writeCode?.(argv[8]!) ?? 0;
     if (!code) state.settings = Buffer.from(argv[10]!, "base64").toString("utf8");
     return { code, stdout: "" };
@@ -133,15 +139,18 @@ const profiles = validateProfiles([
 ]);
 const agent = (patch: Partial<AgentRecord> = {}): AgentRecord => ({ pane_id: "pod:w3:p2", terminal_id: "pod:t", workspace_id: "pod:w3", tab_id: "", agent: "agy", agent_status: "idle", machine: "pod", ...patch });
 
-function harness(o: { listing?: AgentRecord[][]; turn?: () => Promise<{ state: "done"; text: string }>; writeCode?: (mode: string) => number; statusThrows?: number; kind?: "agy" | "claude" } = {}) {
+function harness(o: { listing?: AgentRecord[][]; turn?: () => Promise<{ state: "done"; text: string }>; writeCode?: (mode: string) => number; statusThrows?: number; kind?: "agy" | "claude"; settings?: string; fault?: (mode: string) => Fault | undefined } = {}) {
   const log: string[] = [];
-  const p = pod({ writeCode: o.writeCode });
+  const p = pod({ writeCode: o.writeCode, settings: o.settings, fault: o.fault });
   let statusCalls = 0;
   let cloned = false;
   const exec: RemoteExec = async (argv, ms) => {
     const [cmd, flag, script] = argv;
     if (script === TRUST_READ_SCRIPT || script === TRUST_WRITE_SCRIPT) {
-      const r = await p.exec(argv, ms);
+      const r = await p.exec(argv, ms).catch((e: unknown) => {
+        if (script === TRUST_WRITE_SCRIPT) log.push(`trust:${argv[8]}:throw`);
+        throw e;
+      });
       if (script === TRUST_WRITE_SCRIPT) log.push(`trust:${argv[8]}${r.code ? ":fail" : ""}`);
       return r;
     }
@@ -237,4 +246,36 @@ test("a reviewer that is not agy never touches the agy settings", async (t) => {
   const h = harness({ kind: "claude" });
   match((await quietly(t, h.run)).out, /"verdict":"pass"/);
   eq([h.p.state.calls, h.log.filter((l) => l !== "close")], [[], ["start:claude", "rm"]]);
+});
+
+const fault = (code: number, uncertain = false, landed = true) => (mode: string) => (mode === "add" ? { error: new RemoteFailure("逾時", `exit ${code}`, uncertain), landed } : undefined);
+const trusted = (h: ReturnType<typeof harness>) => h.log.filter((l) => l.startsWith("trust"));
+
+test("F2: a trust entry that already existed is never removed, on success, failure and timeout", async (t) => {
+  const settings = SETTINGS.replace('"/root/workspace"', `"/root/workspace", "${DIR}"`);
+  for (const turn of [undefined, async () => ({ state: "done" as const, text: "not json" }), async () => { throw new Error("turn timed out"); }]) {
+    const h = harness({ turn, settings });
+    ok(!/cleanup_pending：trust/.test((await quietly(t, h.run)).out));
+    eq([trusted(h), h.p.state.settings, h.log.includes("rm")], [[], settings, true]);
+  }
+});
+
+test("F3: remote timeout 124/137 on the trust write is uncertain: cleanup tries to remove, a failed removal is cleanup_pending：trust", async (t) => {
+  for (const code of [124, 137]) {
+    const mv = harness({ fault: fault(code) });
+    match((await quietly(t, mv.run)).out, /cleanup_pending：trust/, `${code}`);
+    eq([trusted(mv), mv.p.state.settings, mv.log.includes("start:agy")], [["trust:add:throw", "trust:remove"], SETTINGS, false], `${code}`);
+    const stuck = harness({ fault: fault(code), writeCode: (mode) => (mode === "remove" ? 17 : 0) });
+    const failed = await quietly(t, stuck.run);
+    ok(/cleanup_pending：trust/.test(failed.out) && failed.lines.includes(`cleanup_pending trust ${DIR}`), `${code}`);
+  }
+});
+
+test("F4: an uncertain trust write (disconnect) never starts the reviewer and is never treated as cleanly cleaned", async (t) => {
+  const h = harness({ fault: fault(255, true, false) });
+  const { out, lines } = await quietly(t, h.run);
+  match(out, /"ok":false.*cleanup_pending：trust、directory/);
+  ok(lines.includes(`cleanup_pending trust ${DIR}: 信任寫入狀態不明，已嘗試移除，請人工確認 agy 設定檔`));
+  ok(h.p.state.calls.filter((c) => c[2] === TRUST_READ_SCRIPT).length >= 2, "cleanup reread the settings to attempt removal");
+  ok(!h.log.includes("start:agy") && !h.log.includes("rm"), "no reviewer; directory kept while the write may still run");
 });
