@@ -111,23 +111,23 @@
 
 **再次發生（2026-11-11，第三次）：**卡片 `REQ-20261111-herdr-core-support`（pi 開的卡，claude Lead，diagnose 階段）。task 有兩個 Assignment：`d1-bridge-deps`（helper 的 codex Worker，`w6F:p3`）與依賴它的 `d1-critique`（reviewer）。`d1-bridge-deps` 等滿 30 分鐘上限（task 狀態 `blocked`，原因「Assignment d1-bridge-deps 等待逾時（已等待 30 分鐘，上限 30 分鐘）」），`d1-critique` 因依賴未完成失敗，task 於 2026-11-11T10:16:01Z 標成 `task_failed`。卡片 worktree 乾淨（沒有未 commit 的檔案、沒有 commit、沒有 PR）。這次與前兩次**不同**：沒有證據顯示 Worker 在逾時後才完成；Worker 為何超過 30 分鐘未回報**未確認**（可能是工作量、也可能卡住；沒有讀 Worker 的完整輸出）。Lead 的結案報告建議重跑時換 pane 或改派、要求分段回報。task 的 `coding.status` 為 `unknown`（「Unsettled dispatch; inspect before cancelling. No automatic replay.」）。卡片狀態仍是 `in_progress`，bridge 不會自動重跑（與 ISSUE-146 同一類：task 沒有完成，卡片不會自己收尾）。Lead 順帶的觀察（與本問題無關，重跑時參考）：`scripts/run.sh` 的 `$# -gt 1` 會擋掉後端旗標；Core 模式沒有對應 plugin 的 relink 邏輯。**目前沒有修正，也沒有重跑。**是否把上限做成可設定、或加「逾時後回報」路徑，仍待決定。
 
-## ISSUE-148：bridge 重啟後，已處理並合併的卡片事件被重複通知到 `notify` 的 Agent pane，形成連續重送
+## ISSUE-148：卡片通知在收件 Agent 忙碌時排隊，事件過了數小時才一則一則送達，收件 Agent 被已處理完的舊事件佔住
 
-更新日期：2026-11-11。狀態：待調查（現象已觀察，根因未確認；沒有修正）。
+更新日期：2026-11-11。狀態：待調查（現象與機制已確認；沒有修正，尚未決定要不要改設計）。
 
-**使用者可見症狀：**2026-11-11 約 12:30Z 起，卡片 `REQ-20261111-agent-first-run-prompts`（`notify: agent:w5D:p1:…:claude`，PR #212 已於 09:40:28Z 合併）的舊事件一則一則送進 `w5D:p1`：`review_verdict`（changes_requested）、`ci_result`（success）、最後還有 `merged`。bridge console 顯示該 pane 每次回合結束（`hook Stop`）後約 5 到 10 秒就有下一則 `agent.prompt`（`chars=129`／`144`），超過 10 則，內容都是已處理完的舊事件。
+**使用者可見症狀：**卡片 `REQ-20261111-agent-first-run-prompts`（`notify: agent:w5D:p1:…:claude`，PR #212 已於 09:40:28Z 合併）與 `REQ-20261111-pretrust-live`（PR #214 已合併）的事件，在合併後數小時才一則一則送進 `w5D:p1`：`review_verdict`、`ci_result`、`autopick_picked`、`merged` 等。bridge console 顯示該 pane 每次回合結束（`hook Stop`）後約 5 到 10 秒就有下一則 `agent.prompt`（`chars=129`／`144`）。例：`pretrust-live` 12:56:49Z 排隊的 `autopick_picked`，到 15:25:08Z 才「通知已送出」。
 
-**預期行為：**已送過、已合併的卡片事件不再重送；事件以 `ev:` id 去重，重啟後也一樣。
+**預期行為：**通知不要在事件已經過時、PR 已合併之後才一則一則送達；至少要能合併或略過已過期的事件。
 
-**重現／環境：**2026-11-11，本機 macOS，bridge 為 main `b44ab90`（#211、#212 已載入），重啟（`run.sh -r`）後約 3 小時；卡片檔只有 9 筆相關事件，重送數量超過卡片實際事件數，所以不是單純依序補送。
+**已確認的機制（2026-11-11，讀卡片流程紀錄；`src/card-notify.ts` 的送出邏輯只確認到註解「送出前讀兩次，確認 pane 仍在、身分一致、Agent 閒置；工作中或等待提示就排隊，不打斷」與 `排隊` 紀錄，沒有逐行驗證）：**每個事件的通知先記一筆「Agent 忙碌，通知排隊」，等收件 Agent 閒置時才送，再記「Agent 通知已送出」；每個事件只送一次。計數（2026-11-11 當下）：`REQ-20261111-agent-first-run-prompts` 排隊 12、已送出 12；`REQ-20261111-pretrust-live` 排隊 7、已送出 6（其餘仍在排隊）。收件 Agent（本 session 的 claude）幾乎一直在工作，只有回完一輪才閒置，所以每回完一則，下一則才送進來，看起來像沒完沒了的連續重送。
 
-**已確認：**每則通知都對應卡片檔已有的事件（沒有新的 `review_verdict`／`ci_result`）；重送由收件 Agent 的回合結束觸發。**根因未確認：**可能是通知「待送」狀態沒標成已送、可能是 pane 閒置時才送出的積壓、也可能是事件 id 去重沒有跨重啟；都只是推測，沒有讀程式碼或通知狀態驗證。
+**更正：**本條最初（2026-11-11 PR #213）寫成「重啟後已處理的事件被重複通知」並推測根因為去重失效；這是錯的，**沒有重複送**，是排隊延遲。bridge 重啟（15:26Z）後排隊中的事件仍被送出，沒有因重啟遺失或重送。
 
-**影響：**干擾，不造成實際動作；但每則通知讓收到的 Agent 多跑一回合，浪費額度，也可能誤導 Agent 以為有新事件。
+**影響：**每則過期通知讓收件 Agent 多跑一回合（花額度），也可能誤導 Agent 以為有新事件；不造成實際動作。
 
-**處理：**Agent 沒有逐則回覆，避免繼續觸發迴圈。沒有修正。
+**處理：**Agent 逐則簡短回覆「舊事件、不需處理」（每回一則，下一則才會送進來）；沒有修正。使用者側可行的緩解：卡片的 `notify` 不指向長時間工作中的互動 Agent pane。
 
-**未驗證／下一步：**讀通知送出路徑（`card-events`／notify）與去重狀態的存放位置，確認重啟後是否清空；是否需要重啟才能重現；迴圈是否會自己停止（觀察時尚未停）。
+**未驗證／下一步：**排隊中的通知有沒有上限、過期或合併機制（目前看起來沒有）；是否要在 PR 已合併或卡片已 `done` 後丟掉尚未送出的舊通知，或把同一張卡排隊的多則通知合併成一則；是否要做成需求卡。
 
 ## ISSUE-144：autopick 在 task 開始前記「找不到這張卡的 task」的 autopick_stopped
 
