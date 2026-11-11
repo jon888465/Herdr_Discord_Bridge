@@ -7,6 +7,7 @@ import { runCardReview, type ReviewFlowDeps, type ReviewFlowInput, type ReviewFl
 import { BLOCKED_AT_START } from "./agent-ready.js";
 import { defaultExec } from "./github.js";
 import { shellQuote, unsafeRemoteValue, type HerdrHub, type MachineConfig } from "./machines.js";
+import { editRemoteAgyTrust } from "./remote-agy-trust.js";
 
 export type RemoteExec = (
   argv: string[],
@@ -27,7 +28,7 @@ export class RemoteFailure extends Error {
 const LONG_MS = 5 * 60 * 1000;
 const SHORT_MS = 30_000;
 export const LOCAL_GRACE_MS = 20_000;
-const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+export const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 const SHA = /^[0-9a-f]{40}$/;
 const GIT = ["git", "-c", "protocol.allow=never", "-c", "protocol.https.allow=always", "-c", "core.hooksPath=/dev/null"];
 /** 即使 ~/.ssh/config 開了也不轉送。 */
@@ -90,7 +91,7 @@ export function remoteCheckoutDir(root: string, owner: string, repo: string, car
 
 /** clone 後寫在 `.git` 裡（不弄髒工作樹）；沒有它的目錄一律不是 bridge 的。 */
 const MARKER_FILE = "hdb-card-review";
-const markerContent = (hash: string) => `hdb-card-review-checkout:v1:${hash}`;
+export const markerContent = (hash: string) => `hdb-card-review-checkout:v1:${hash}`;
 
 async function assertMarker(exec: RemoteExec, dir: string, hash: string): Promise<void> {
   assertRemoteValue("cardHash", hash);
@@ -267,6 +268,8 @@ export async function reviewOnRemote(
   // 每次執行唯一，才不會關到前一次保留給人處理信任提示的 workspace。
   const label = `review-${hash}-${randomBytes(4).toString("hex")}`;
   let owned = false;
+  // agy 的預先信任可能已寫入（含狀態不明）：清理時要在刪目錄前移除；確定沒寫入就不碰。
+  let trusted = false;
   // cleanup_pending 的定位資訊（workspace id／label、完整目錄）只進 console，紀錄與通知維持固定標籤。
   // create 逾時時遠端可能稍後才建好：有界重查，耗盡仍找不到就記 pending。
   const closeByLabel = async (): Promise<void> => {
@@ -290,6 +293,14 @@ export async function reviewOnRemote(
       pending.push("workspace");
       console.error(`remote review ${machineId}: cleanup_pending workspace ${workspace} label ${label}: ${String(e)}`);
     });
+    if (trusted)
+      await editRemoteAgyTrust(exec, { root, dir, cardHash: hash }, false).then(
+        () => void (trusted = false),
+        (e) => {
+          pending.push("trust");
+          console.error(`remote review ${machineId}: cleanup_pending trust ${dir}: ${(e as Partial<RemoteFailure>)?.detail ?? String(e)}`);
+        },
+      );
     if (owned && uncertain) {
       pending.push("directory");
       console.error(`remote review ${machineId}: cleanup_pending directory ${dir}: 未刪除（遠端狀態不明或工作樹不乾淨）`);
@@ -328,9 +339,21 @@ export async function reviewOnRemote(
       throw error;
     }
   };
+  // 只在 reviewer 是 agy 時、啟動前寫入信任；失敗不中止，維持原狀（卡在信任提示時保留 pane 給人處理）。
+  const startAgent: ReviewFlowDeps["startAgent"] = async (agent) => {
+    if (agent.kind === "agy")
+      try {
+        trusted = true;
+        await editRemoteAgyTrust(exec, { root, dir, cardHash: hash }, true);
+      } catch (error) {
+        if (error instanceof RemoteFailure && !error.uncertain) trusted = false;
+        console.error(`remote review ${machineId}: agy trust not added ${dir}: ${(error as Partial<RemoteFailure>)?.detail ?? String(error)}`);
+      }
+    return remote.startAgent(agent);
+  };
   try {
     result = await runCardReview(
-      { ...flow, panePort: remote.panePort(machineId), startAgent: remote.startAgent, fingerprint },
+      { ...flow, panePort: remote.panePort(machineId), startAgent, fingerprint },
       { ...input, author: { ...input.author, paneId: ws.paneId, workspaceId: ws.workspaceId }, worktreePath: dir },
     );
   } catch (error) {

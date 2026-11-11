@@ -435,3 +435,25 @@ test("an Agent that starts blocked on a skippable prompt is awaited the same way
   assert.deepEqual(seen, ["blocked"]);
   assert.equal(result.agentReady, true);
 });
+
+import { doneAsReady, waitUntilReady } from "../src/agent-ready.js";
+
+// ISSUE-142：與 main 相同的 awaitReady（waitUntilReady(doneAsReady(port))、真的 matchUpdatePrompt）先跳過，才算 agentReady。
+test("a codex update prompt on the new Agent is skipped before agentReady is computed", async (t) => {
+  t.mock.method(console, "log", () => {});
+  const screens = ["Update available\n  3. Skip until next version", "› Ready"];
+  const { deps, log } = setup({
+    lead: { ...lead, agent: "codex" },
+    startAgent: async () => ({ ...started, agent: "codex", agent_status: "blocked" }),
+  });
+  const panePort = doneAsReady({
+    request: async (m, p) => (log.push(`${m}${p?.keys ?? ""}`), m === "agent.read" ? { read: { text: screens.shift() } } : {}),
+    listAgentsWithWorkspaceNames: async () => [{ ...started, agent: "codex", agent_status: "idle" }],
+  });
+  deps.awaitReady = async (a) => {
+    const ready = await waitUntilReady({ panePort, readyPollMs: 1 }, { paneId: a.pane_id, terminalId: a.terminal_id }, a);
+    return ready.ok ? ready.agent : undefined;
+  };
+  assert.equal((await prepareCardWorktree(deps, CARD)).agentReady, true);
+  assert.deepEqual(log.slice(-4), ["agent.read", "pane.send_keys3", "agent.read", "switch:w9:w9:p1"]);
+});

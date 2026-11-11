@@ -186,6 +186,9 @@ export function loopStopReason(text: string, maxChars = 194): string {
   return chars(normalize(text), true);
 }
 
+export const NOT_STARTED =
+  "Lead 尚未就緒，任務沒有啟動，卡片仍是 ready（請到新 workspace 的 pane 處理後重試）";
+
 /** reviewer 偏好：codex Lead 用 claude，其餘用 codex；真正的作者／reviewer session 獨立性仍由 gate 核對。 */
 function reviewerFor(lead: AutopickLead): string {
   return lead === "codex" ? "claude" : "codex";
@@ -225,14 +228,18 @@ export async function runAutopick(
   }
   log.push("lead");
 
-  const run = async (step: AutopickStep, text: string): Promise<void> => {
-    await steps.command(text);
+  const run = async (step: AutopickStep, text: string): Promise<string> => {
+    const reply = await steps.command(text);
     log.push(step);
+    return reply;
   };
 
   let step: AutopickStep = "assign";
   try {
-    await run("assign", `card assign ${id} --worktree --coding`);
+    // ISSUE-142：assign 回「任務沒有啟動」（Lead 未就緒）就停在這一步；回覆含本機路徑，只回報固定摘要。
+    const assigned = await run("assign", `card assign ${id} --worktree --coding`);
+    if (/任務沒有啟動/.test(assigned))
+      return report("stopped", "assign", NOT_STARTED);
 
     step = "task";
     const task = await steps.waitTask(id);

@@ -2,6 +2,8 @@
 
 ## ISSUE-143：remote machine（agy-pod）的 agent 不能擔任卡片角色；先開放 remote card reviewer
 
+**後續（2026-11-11，REQ-20261111-agent-first-run-prompts，已修正、待驗收，未做實機驗收）：**reviewer 是 agy 時啟動前預先信任 checkout、清理時移除，失敗記 `cleanup_pending：trust`；見 docs/remote-card-reviewer.md。單元測試含真的 `sh` 跑寫入腳本；pod 上 `sha256sum`／`base64 -d`／`mktemp`／`cp -p` 未驗證。
+
 更新日期：2026-11-11。狀態：已修正、待驗收（兩個 PR 都已 merge：A 基礎層 #207 `addee48`、B 角色接線 #206 `9ff908e`；自動化檢查與 codex 獨立複審通過；**主要成功路徑已實機驗過一次**，見下方 2026-11-11 實機段；失敗路徑與其他情境尚未驗）。卡片 REQ-20261111-remote-agy-role；實機驗收卡 REQ-20261111-remote-reviewer-live（PR #210）。
 
 **實機驗收（2026-11-11，本機 macOS，bridge 為 main `9ff908e`（#206、#207）重啟後的程序；`config.json` 的 agy-pod 已加 `cardReview {root: "/root/herdr-card-review", kinds: ["agy"]}`（備份 `config.json.bak-cardreview-20261111`）；pod：git 2.53.0、GNU `timeout`、`realpath`、agy 1.5.2，沒有 node；root 目錄由 Agent 在使用者同意後建立（權限 700、空目錄、非符號連結））：**測試卡 `REQ-20261111-remote-reviewer-live`（`lead: codex`、`roles: {reviewer: "agy-pod:agy"}`，bridge 序列化成 `"agy-pod:agy:"`），新增一行檔案的 PR #210。
@@ -91,7 +93,9 @@ REQ-20261111-remote-agy-role 在 02:07:43Z picked 後，02:07:55Z 記 failed「t
 
 ## ISSUE-142：autopick 開 Lead 時 codex 剛好跳出更新提示，`card assign --worktree` 沒有啟動任務，autopick 卻報成「找不到這張卡的 task」
 
-更新日期：2026-11-11。狀態：待調查（現象已重現一次；根因是讀碼與時間序推論，**尚未直接看到 `card assign` 的回覆**）。
+更新日期：2026-11-11。狀態：已修正、待驗收（REQ-20261111-agent-first-run-prompts；**未做實機驗收**）。先前：待調查（現象已重現一次；根因是讀碼與時間序推論，**尚未直接看到 `card assign` 的回覆**）。
+
+**2026-11-11 更正與修正：**讀碼確認 `prepareCardWorktree` 在算 `agentReady` **之前**就經 `awaitReady` 跳過更新提示；下方「跳過發生在判斷之後」是**未證實的推論**，當時讓 assign 回「任務沒有啟動」的分支仍未確認。已確認：`src/autopick.ts` 忽略 assign 回覆才誤報「找不到這張卡的 task」；現在回覆含「任務沒有啟動」就停在 `assign`、只回固定摘要，不再等 task／commit／PR／loop。測試：worktree-flow 與 card-command-main 以真的 `matchUpdatePrompt` 證明送 `3` → 就緒 → `startTask`；autopick 三案。未驗證：實機 codex Lead 的 autopick。
 
 **使用者可見症狀：**`REQ-20261111-remote-agy-role`（`lead: codex`）在 bridge 重啟後 2026-11-11 02:07:43Z 被撿起，02:07:55Z 卡片流程紀錄只有 `worktree_created`，隨即 `failed`／`autopick_stopped`，原因「task：task 沒有完成：找不到這張卡的 task」；沒有 `role_assigned`（lead）、`assigned`、`started`。Lead（codex）的 workspace `w69` 留著，卡片仍是 `ready`。使用者看到的原因沒有說真正發生什麼（Lead 還沒就緒）。
 
@@ -4383,6 +4387,8 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 預期行為：bridge 不替使用者確認信任提示（與現有行為一致，不改）；但不就緒時應告知「agy pane 在等信任資料夾確認，請到 `<pane id>` 處理」，讓使用者知道要做什麼。
 
 重現／環境：2026-11-06，本機 macOS，Antigravity CLI 1.4.12；每張卡的 worktree 都是新資料夾（`~/.herdr/worktrees/<repo>/card-<id>`）。
+
+2026-11-11：remote 卡片 agy reviewer 已有對應的預先信任（ISSUE-143 後續，未做實機驗收）；本機範圍檢查改為 `checkLocalTrustScope`，另拒絕 `..` 與控制字元。
 
 已確認根因：agy 的信任清單 `~/.gemini/antigravity-cli/settings.json` 的 `trustedWorkspaces` **只比對完整路徑，不含子資料夾**：清單裡雖然已有上層 `~/.herdr/worktrees/Herdr_Discord_Bridge`，仍然會詢問；過去 7 張卡的 worktree 也都是各自一條。因此每張卡的 worktree 對 agy 都要信任一次。Claude 不受影響，是因為它信任了上層的 `git_wk`。
 

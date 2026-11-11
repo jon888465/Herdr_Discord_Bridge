@@ -1,5 +1,5 @@
 import test from "node:test";
-import assert from "node:assert/strict";
+import assert, { deepEqual as eq } from "node:assert/strict";
 import { UPDATE_PROMPTS, matchUpdatePrompt } from "../src/update-prompts.js";
 
 // 2026-11-07 在實機 codex 0.166.0 看到的更新選單（原樣）。
@@ -45,5 +45,18 @@ test("observed update list contains only the confirmed codex menu and no sensiti
       JSON.stringify(entry),
       /trust|permission|approv|allow|login|log\s*in|sign\s*in/i,
     );
+  }
+});
+
+// 每筆表項都要有實機畫面樣本，新增表項沒樣本就失敗；claude、agy、pi 沒有可靠可操作的更新選單樣本，不收錄。
+const OBSERVED: Record<string, string> = { codex: REAL_CODEX_UPDATE };
+
+test("every update prompt has an observed sample; it matches only its kind, never with a match text missing", () => {
+  eq(UPDATE_PROMPTS.map((e) => e.kind).sort(), Object.keys(OBSERVED).sort());
+  for (const entry of UPDATE_PROMPTS) {
+    const screen = OBSERVED[entry.kind]!;
+    assert.equal(matchUpdatePrompt(entry.kind, screen), entry);
+    for (const other of ["claude", "codex", "agy", "pi"].filter((k) => k !== entry.kind)) assert.equal(matchUpdatePrompt(other, screen), undefined);
+    for (const text of entry.match) assert.equal(matchUpdatePrompt(entry.kind, screen.split(text).join("")), undefined, text);
   }
 });

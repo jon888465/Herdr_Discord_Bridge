@@ -229,3 +229,18 @@ test("the role label replaces reviewer in the failure messages, and the default 
   const reviewer = await waitUntilReady(deps, pane, agent("codex", "working"));
   assert.match(!reviewer.ok ? reviewer.reason : "", /^reviewer 在 /);
 });
+
+test("concurrent waits on the same port and pane send the skip key at most once", async (t) => {
+  quiet(t);
+  const { deps, calls } = fixture([
+    { text: update },
+    { text: update },
+    { text: "Ready" },
+  ]);
+  const results = await Promise.all([
+    waitUntilReady(deps, pane, agent()),
+    waitUntilReady(deps, pane, agent()),
+  ]);
+  assert.equal(calls.filter((c) => c.method === "pane.send_keys").length, 1);
+  assert.equal(results.filter((r) => r.updateSkip).length, 1);
+});

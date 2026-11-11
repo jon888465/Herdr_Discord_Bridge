@@ -33,6 +33,10 @@ Lead prompt 列 remote reviewer 候選（machine／kind／profile／model），�
 - 結束關 pane、workspace，刪目錄：「重取 realpath、確認 root 仍 canonical 且 dir 不是符號連結、marker 相符、再 `rm -rf -- <root 底下的直接子目錄名>`」合併成同一個遠端 `sh -c` 固定腳本，值只經位置參數傳入（不拼進腳本），先 `cd -P` 到 canonical root 再刪相對名稱；檢查失敗就不刪並回固定結果。**已知限制：**視窗只縮到單一指令內，無法完全消除（沒有 openat 語意的 shell 做不到），另一個程序在這個極短視窗內置換 root 或祖先仍有理論風險。`BLOCKED_AT_START` 保留；斷線、本機逾時或指紋階段 uncertain 失敗不刪，記 `cleanup_pending`，目前不重試。
 - 結果文字只放行白名單（`RESULT_WHITELIST`）：先比完整字串（`BLOCKED_AT_START` 含「：」，要保留「卡在信任提示、需人工處理」的原因），再比「：」前的固定標籤，其餘是「遠端 review 失敗：未分類」；紀錄與通知只帶固定分類。`cleanup_pending` 的 workspace id／label、完整目錄路徑與 stderr 只進 console。
 
+## agy 預先信任（REQ-20261111-agent-first-run-prompts，未做實機驗收）
+
+reviewer 是 agy 時，啟動前由 `src/remote-agy-trust.ts` 把 checkout 加進 pod 的 `$HOME/.gemini/antigravity-cli/settings.json`。pod 沒有 node：讀檔附遠端 sha256，本機核對後用 `editTrustedWorkspaces` 編輯；寫入是固定 `sh -c` 腳本，值只經位置參數，腳本再驗 root canonical、dir 非符號連結且 realpath 相符、marker 相符、設定檔非符號連結且雜湊未變，才備份到 `<root>/.hdb-agy-settings-backups`（600，留 5 份）並 `mktemp`＋`mv`；被改動就重讀（最多 4 次）。寫入失敗不中止（維持保留 pane）。成功、失敗、例外、逾時、uncertain 都在刪目錄前移除；paneKept 保留；移除失敗記 `cleanup_pending：trust`，路徑只進 console。pod 的 `sha256sum`、`base64 -d`、`mktemp`、`cp -p` 未驗證（本機以真的 `sh` 測過）。
+
 ## 未驗證與後續
 
 實機未跑：pod 的 git／`timeout`／`realpath`／repo 權限、`refs/pull` fetch、marker 寫入、agy 信任提示（第一次很可能停在這裡並保留 workspace，需人工關閉）。測試：`test/remote-checkout.test.ts`（A）、`test/card-role-remote.test.ts`（B）。驗收：兩個 PR merge、加 `cardReview`、重啟後跑一張無害卡。後續：`git bundle` 上傳、remote 寫入角色、cleanup_pending 重試。

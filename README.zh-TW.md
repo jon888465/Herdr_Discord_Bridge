@@ -388,6 +388,8 @@ model 必須在同種類已開放配置 profile 允許清單，沿用該 profile
 CLI 的 --agent 與 loop 的 --fix-agent 不得和卡片 agent 衝突；指定的 assignment
 與每次 review／fix 都用新 session。
 
+例外：卡片的 remote reviewer 是 agy 時，bridge 啟動前把 checkout 寫進 pod 的 agy 信任清單、清理時移除（失敗記 `cleanup_pending：trust`）；尚未實機驗收。
+
 本卡 machine 交付是「宣告＋驗證＋**local 強制執行**」。不存在的 machine 拒絕；
 已配置 remote 在撿卡前拒絕，只有 `machines[].cardReview` 開放的機器上的 `reviewer` 例外（ISSUE-143，見上）。其他跨機器卡片執行尚未支援。
 無效宣告保留可查拒絕診斷；壞卡使用獨立持久化 `.role-rejections`，只向嚴格驗證的路由
