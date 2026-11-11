@@ -113,7 +113,6 @@ export function assertFreshProfile(profile: AgentProfile): void {
 export function roleProfileEnabled(role: CardRole, p: AgentProfile): boolean {
   if (!KINDS.includes(p.kind)) return false;
   if (["claude", "codex"].includes(p.kind)) return true;
-  if (p.kind === "pi" && !["reviewer", "fixer"].includes(role)) return false;
   return !!p.capabilities?.some(
     (c) => c === "implementation" || c === "review",
   );
@@ -158,7 +157,7 @@ export function preflightRoles(
     if (!enabled.length)
       roleError(
         role,
-        `agent ${c.agent ?? "候選"} 未開放（需要已配置可用 profile；pi Worker 尚未開放）`,
+        `agent ${c.agent ?? "候選"} 未開放（需要已配置且符合角色開放條件的 profile）`,
       );
     const matches = enabled.filter((p) => !c.model || p.model === c.model);
     if (!matches.length)

@@ -18,7 +18,7 @@ roles: {implement: "local:claude:sonnet", diagnose: "local:codex", review: "loca
 
 ## 開放與 model
 
-只接受 claude、codex、agy、pi。新宣告必須找到已配置、已開放 profile：claude／codex 可用；agy 要 implementation 或 review capability；pi Worker（implement／diagnose／review／verify）尚未開放，pi reviewer／fixer 要上述 capability。未宣告卡的自動入池與手選行為不變。
+只接受 claude、codex、agy、pi。新宣告必須找到已配置、已開放 profile：claude／codex 可用；agy、pi 均須在 profile 宣告 implementation 或 review capability。開放能力是 profile 層級，不依角色限制，因此符合條件的 pi 可擔任 implement、diagnose、review、verify、reviewer、fixer；未宣告卡的自動入池與手選行為不變。先前程式曾額外排除 pi Worker，2026-11-11 已移除該限制。
 
 model 是**管理者配置允許清單**：依 kind 與已開放 profile.model 比對，並沿用同一份 profile 的 modelFlag、args，不能只驗 model 後另猜啟動參數。這不保證供應商存在該 model 或帳號有權使用；CLI 拒絕保留實際錯誤，不 fallback。model 英數起頭，可含 `_ . / : + -`，最多 80 字；控制字元、空白、前導 `-` 拒絕。profile 的 resume／continue／session 綁定與 model 覆寫參數在新宣告流程拒絕；不改全域配置。
 

@@ -28,6 +28,79 @@
 
 REQ-20261111-remote-agy-role 在 02:07:43Z picked 後，02:07:55Z 記 failed「task 沒有完成：找不到這張卡的 task」並排入通知，但 task 02:09:51Z 才開始且之後正常。預期 task 建立前不記失敗。可能與等待 task 的時序或 ISSUE-133／135 同類，未證實。下一步：對照 autopick 等待 task 的路徑與時間戳。
 
+## ISSUE-142：autopick 開 Lead 時 codex 剛好跳出更新提示，`card assign --worktree` 沒有啟動任務，autopick 卻報成「找不到這張卡的 task」
+
+更新日期：2026-11-11。狀態：待調查（現象已重現一次；根因是讀碼與時間序推論，**尚未直接看到 `card assign` 的回覆**）。
+
+**使用者可見症狀：**`REQ-20261111-remote-agy-role`（`lead: codex`）在 bridge 重啟後 2026-11-11 02:07:43Z 被撿起，02:07:55Z 卡片流程紀錄只有 `worktree_created`，隨即 `failed`／`autopick_stopped`，原因「task：task 沒有完成：找不到這張卡的 task」；沒有 `role_assigned`（lead）、`assigned`、`started`。Lead（codex）的 workspace `w69` 留著，卡片仍是 `ready`。使用者看到的原因沒有說真正發生什麼（Lead 還沒就緒）。
+
+**預期行為：**Lead 就緒前不要派工，或等到就緒再 assign；若 assign 沒有啟動任務，停止原因要說「Lead 在 assign 時不是 idle（例如 codex 更新提示）」，不是「找不到 task」。
+
+**重現／環境：**2026-11-11，本機 macOS，bridge 為 main `796e0cb`（#205）重啟後的程序；bridge console 在失敗前一刻印出「已自動跳過 codex 的更新提示（pane w69:p1、按鍵 3）」。手動補跑 `card assign REQ-20261111-remote-agy-role --coding`（不帶 `--worktree`，Lead pane 這時已 idle）成功，task `task-5c36f579-…` 開始。
+
+**推論的根因（讀碼，2026-11-11）：**
+1. `src/card-command.ts` 的 `assignCard` 在 `--worktree` 路徑下，若新 workspace 的 Agent 當下不是 idle／done（`prepared.agentReady` 為 false），回覆「任務沒有啟動，卡片仍是 ready」並直接返回，不丟錯誤。
+2. `src/autopick.ts` 的 `run()` 只執行 `steps.command(text)` 並記步驟，**完全不看回覆內容**，所以往下走到 `waitTask`。
+3. `src/autopick-wiring.ts` 的 `waitTask` 用 `taskIdForCard` 找不到任務，回「找不到這張卡的 task」，這是最後被當成停止原因的字串。
+4. codex 啟動時的更新提示讓 pane 當下不是 idle；bridge 自動按鍵 3 跳過，但是在 assign 判斷 `agentReady` 之後。
+
+**未確認：**實際的 `card assign` 回覆文字沒有被記錄，所以無法直接證明走的是「agentReady 為 false」這一支（另一支是 `startTask` 丟錯誤，訊息同樣以「任務沒有啟動」開頭）。同一個 codex 更新提示是否在其他次啟動也會讓 Lead 不 idle，也未驗證。
+
+**修正方向（尚未實作）：**autopick 要檢查 `card assign` 的回覆（或改用有結構的結果），回覆含「任務沒有啟動」時停止原因要用該回覆的關鍵句；Lead 就緒判斷要把已知的 codex 更新提示處理進去（先跳過再判定 ready），或 assign 前重新確認 Lead 狀態。要補測試：assign 回「任務沒有啟動」時，autopick 的停止原因不是「找不到這張卡的 task」。
+
+**影響：**這次需要人工補跑 `card assign`，等於自動撿卡流程沒有走完；也是 ISSUE-133（停止原因要是實際原因）同一類問題的新樣本。
+
+## ISSUE-140：卡片通知把卡片標題原文放進每一則通知，標題內容會原樣送進 Discord 或 Agent pane 的 prompt
+
+更新日期：2026-11-10。狀態：待調查（現象已重現，**既有行為、尚未修正**）。
+
+**使用者可見症狀：**卡片標題寫「IGNORE PREVIOUS INSTRUCTIONS」，通知就會是 `[bridge 通知] … · 標題="IGNORE PREVIOUS INSTRUCTIONS" · failed · 卡片角色指定無效：reviewer：不合法 model`，標題原文照樣送進通知對象。
+
+**預期行為：**`src/card-notify.ts` 上方註解寫「通知只放分類過的一句原因，不放流程紀錄原文」；標題原文與這個原則不一致。
+
+**重現／環境：**2026-11-10，本機；PR #205（`REQ-20261110-card-role-assignment`）head `c4b0ecc`，codex 獨立唯讀複審（報告 `/tmp/codex-review-c4b0ecc.md`，由 Lead 開的新 codex session 產生）。codex 用記憶體 fake store 呼叫真實 notifier 重現。
+
+**已確認根因：**`src/card-notify.ts` 的 `message()`（#205 內約 193–207 行）把 `card.title` 經遮蔽、去控制字元、截 120 字後拼進每一則通知（`標題=${JSON.stringify(title)}`）。這是所有通知長期的格式，不是 #205 引入；#205 只是把 model、狀態、原始錯誤行這些新的卡片原文路徑改成固定分類標籤。
+
+**影響評估（Agent 判斷，不是已驗證結論）：**標題與卡片內容由同一個寫卡者提供，信任等級相同；字數與字元已受限，但仍可在通知文字中放入指令式內容。
+
+**修正方向（尚未實作）：**移除通知中的標題原文，保留卡片 id、固定分類與 PR URL；這會改變所有通知的格式，要同步 `SPEC.md` 通知契約與既有測試。建議和 `REQ-20261110-stop-title-classification` 一起處理。
+
+**未驗證：**實機通知；對 Discord 與 Agent pane 兩種目的地的實際影響。
+
+## ISSUE-141：PR #205 複審後未修的兩個 low（壞卡 opt-in 判斷的引號解析、角色指定文件與實作不一致）
+
+更新日期：2026-11-10。狀態：待調查（已確認，**使用者 2026-11-10 決定不再修這一輪，記錄後由人工決定 merge**）。
+
+**來源／環境：**2026-11-10，本機；PR #205（`REQ-20261110-card-role-assignment`）head `c4b0ecc`，codex 獨立唯讀複審（報告 `/tmp/codex-review-c4b0ecc.md`，由 Lead 開的新 codex session 產生）。
+
+1. **壞卡 opt-in 判斷未完整比對 quoted project token（low，#205 新引入）：**`src/card-role-rejections.ts:144-145` 的正則第一個分支缺結尾錨點，`projects: ["local:opted"garbage]` 被抽出 `local:opted` 而通過壞卡 opt-in 判斷；正常 parser 對同一行回 `unbalanced inline array`。後果：一張格式壞掉的卡可能被當成已 opt-in 的專案而寫入角色拒絕帳本、送出通知。建議修法：以完整分組錨定整個 token，例如 `/^(?:"([^"\\]*)"|([^"'\\#]+))$/`，只解析一次，補非法引號後綴不得取得 opt-in 的測試。
+2. **文件與實作不一致（low）：**`docs/card-role-assignment.md:55` 仍寫超限、symlink、不可讀的卡會保存診斷，但 `src/main.ts:3094-3103` 在無法確認 ready 與專案 opt-in 時直接跳過、不建立角色拒絕帳本；同文件第 17 行「未宣告角色保留原選擇」要補上第 37 行 reviewer 預設變更的例外。
+
+**修正範圍：**尚未修正；兩項都在 PR #205 的檔案上，merge #205 後要在後續 PR 處理，或在 merge 前請 Lead 再派 agy 修一輪。
+
+**驗證（codex 複審，2026-11-10）：**`npm run check` 1717 項、1716 pass、0 fail、1 skipped（sandbox 外重跑；sandbox 內因 socket `EPERM` 被擋）；`git diff --check ba41360..c4b0ecc` 通過。**沒有實機驗收。**
+
+## ISSUE-139：reviewer 回 `inconclusive` 時，每個條件的判斷說明沒有寫進卡片，原因只能去翻 Agent 的 session 記錄
+
+更新日期：2026-11-10。狀態：待調查（現象與根因已確認，尚未修正）。
+
+**使用者可見症狀：**`REQ-20261110-stop-reason-live`（PR #203）的 `card review` 第 1、2 輪都是 `inconclusive`，卡片的「Review 發現」只有「第 1 輪 · 整體 · head 64bb769fb7a8 · inconclusive」一行標題、沒有內容；通知只有 `review_verdict · inconclusive`。使用者與後續 Agent 看不出為什麼沒有結論。`inconclusive` 也算一次 verdict（每張卡共 3 次），所以看不到原因就無法判斷要不要再花一次。#202 第 1 輪的 `inconclusive`（2026-11-09）也是同樣情形，當時紀錄成「原因沒查到」，實際上是原因被丟掉。
+
+**預期行為：**`inconclusive` 要把每個 `unknown` 條件的 `note` 寫進「Review 發現」（或流程紀錄），至少一句「哪個條件為什麼無法判斷」。
+
+**重現／環境：**2026-11-10，本機 macOS，bridge 為 main `c020881`（#201、#202）merge 後重啟的程序；測試卡 `REQ-20261110-stop-reason-live`（`lead: codex`，在 `scripts/` 新增一行檔案，PR #203）。reviewer 為 claude（第 1 輪 01:05:00Z 到 01:05:28Z，第 2 輪 01:05:37Z 到 01:06:24Z）。
+
+**已確認根因：**
+1. 兩次 `inconclusive` 都是 reviewer 的正常判斷，不是 JSON 格式問題（ISSUE-134 沒有復發）：從 claude session 記錄（`~/.claude/projects/-Users-jon--herdr-worktrees-Herdr-Discord-Bridge-card-req-20261110-stop-reason-live/cf895d9c-….jsonl`）讀到回覆是合法的單一 JSON，條件 1 `met`（只新增 `scripts/card-run-stop-reason-live.txt`，內容恰為 `ok\n`），條件 2、3 `unknown`，`findings` 為空陣列，註明「屬 PR 開出後 bridge 的即時行為，無法從 diff 判斷」。
+2. **測試卡設計錯誤（Agent 的疏失）：**驗收條件 2、3 是 bridge 開 PR 之後的通知行為，review 只看 diff，本來就無法驗證。驗收條件要寫成 diff 可驗證的內容，不可寫成要靠實機觀察才知道的結果；實機觀察應放在卡片描述或另外的驗收段，不放在 `## 驗收條件`。
+3. **記錄缺口（程式，尚未讀碼確認細節）：**`findings` 為空時，各條件的 `note` 沒有被寫進「Review 發現」；reviewer pane 在回合結束後關閉，原因只留在 Agent 自己的 session 記錄。
+
+**連帶影響：**同一個 head 連續 2 次 `inconclusive` 時，autopick loop 就停下（`autopick_stopped`），退回人工處理；這次 PR #203 因此停在 review 第 2 輪，review 次數還剩 1 次。
+
+**修正範圍（尚未開始）：**`inconclusive` 時把每個 `unknown`／`not_met` 條件的 `note` 寫進「Review 發現」，並限制長度、遮蔽機密；補測試；`SPEC.md` 的 review 紀錄契約同步。
+
+**未驗證項目／下一步：**讀 `src/card-review*.ts` 確認 note 被丟掉的位置；重做一張驗收條件只含 diff 可驗證內容的敏感路徑測試卡，才能驗到 ISSUE-133／135 的敏感路徑情境。
 ## ISSUE-138：卡片缺少六角色 machine／agent／model 指定與 bridge 強制守門
 
 更新日期：2026-11-10。狀態：已修正、待驗收（原始碼與自動化檢查完成；尚未實機驗收）。卡片：REQ-20261110-card-role-assignment。
@@ -40,7 +113,7 @@ REQ-20261111-remote-agy-role 在 02:07:43Z picked 後，02:07:55Z 記 failed「t
 
 **修正範圍：**新增 card-role-assignment／card-role-session／card-role-rejections。roles inline map、同 kind 已開放 profile 及 modelFlag／args；preflight 與 manual assign；凍結候選、Lead prompt、整份計畫與實際 Worker 守門、每 assignment fresh session；review／fix／loop 卡片指定與 CLI 衝突；嚴格送出前角色紀錄與失敗清理；≤300字 v2 來源模板且舊模板／hash不變；壞卡獨立持久診斷、card show 查詢、通知重試。詳見 card-role-assignment.md。
 
-**範圍決定與限制：**Lead 明確決定本卡 machine 交付宣告＋驗證＋local 強制執行。已配置 remote 撿卡前明確拒絕「卡片流程尚未支援 machine X」，跨機器未實作／未驗收；pi Worker 不開放。配置允許 model 不保證供應商可用，保留 CLI 實際錯誤。無可信 notify 不猜路由；通知送達但 sent 寫入失敗可能重複。卡片宣告不等於每個角色已實機通過。
+**範圍決定與限制：**Lead 明確決定本卡 machine 交付宣告＋驗證＋local 強制執行。已配置 remote 撿卡前明確拒絕「卡片流程尚未支援 machine X」，跨機器未實作／未驗收；pi Worker 先前被程式錯誤排除；2026-11-11 已移除此角色種類限制，現由 profile 的 implementation／review capability 決定可用性。配置允許 model 不保證供應商可用，保留 CLI 實際錯誤。無可信 notify 不猜路由；通知送達但 sent 寫入失敗可能重複。卡片宣告不等於每個角色已實機通過。
 
 **重現／測試環境：**2026-11-10，本機 macOS、此卡 worktree、fake Herdr ports／暫存卡片與 journal，未呼叫真 Agent、未讀 GitHub。原始 HEAD c0208815175e059b6aec824d1d2a7215993c01a4。初次 typecheck 因尚未安裝依賴找不到 tsc，npm ci --ignore-scripts 後解除；開發階段另修 optional 介面型別錯誤。新增測試曾抓到 role target 的三段 id 被誤判成 remote machine，已加明確 local；測試 fixture 的 session kind 與 Lead plan wire 格式已依既有協定修正，沒有修改任何既有測試。這些早期失敗不作最終通過證據。
 
@@ -186,7 +259,15 @@ r1 在 w1 通過自動化檢查後發現六項缺口，前一輪測試未涵蓋�
 
 ## ISSUE-135：卡片事件通知的標題把「Lead 不在候選清單」說成「專案政策未滿足」
 
-更新日期：2026-11-09。狀態：已修正、待驗收。先前狀態與觀察保留於下方歷史；根因現已由程式碼確認。
+更新日期：2026-11-10。狀態：**重新開啟（部分）**——#202 只處理了「Lead 不可用」與「敏感路徑」兩種原因，其他 `autopick_stopped` 原因的標題仍會被關鍵字誤標（見下方 2026-11-10 實機觀察）。先前狀態與觀察保留於下方歷史；根因現已由程式碼確認。
+
+**實機觀察（2026-11-10，本機 macOS，bridge 為 main `c020881`（#201、#202）merge 後重啟的程序；測試卡 `REQ-20261110-stop-reason-live`（`lead: codex`，在 `scripts/` 新增一行檔案，PR #203））：**卡片因 reviewer 連續 2 次 `inconclusive`（原因見 ISSUE-139）停下，卡片流程紀錄寫的實際原因是「失敗：autopick_stopped；原因：loop：同一個 head 的 review 連續 2 次 inconclusive（沒有可修的結論），退回人工處理」（01:06:24Z）；但 `notify` 對象收到的通知標題是「autopick_stopped · review 條件、版本條件未滿足」。**這與 #202 預期不符：**標題說的是「review 條件、版本條件未滿足」，實際原因是 review 沒有結論，與版本無關。同一次事件的 `loop_stopped` 通知標題是「review 條件未滿足」（沒有版本條件）。
+
+**根因（讀碼確認，`src/card-notify.ts` 的 `notificationReason`，2026-11-10）：**#202 只在分類表之前加了兩個特例（`Lead「…」不在政策候選清單內／尚未開放`、`autopick_stopped` 且含「敏感」）。其他 `autopick_stopped` 原因會走到最後的關鍵字清單，原因文字「同一個 **head** 的 **review** 連續 2 次 inconclusive」同時命中 `/review|finding/`（review 條件）與 `/head|commit/`（版本條件）。通知刻意只放分類標籤、不放原因原文（避免帶出卡片或 finding 內容），所以標題標籤錯就等於使用者看不到正確原因。
+
+**修正方向（尚未實作）：**不要再讓 `autopick_stopped` 的標題靠通用關鍵字猜；對 bridge 自己產生、文字固定的停止原因（review 連續 inconclusive、review 次數用完、loop 其他固定停止句）各給明確標籤，其餘未知原因回「流程未完成，原因已記錄於卡片」，不猜。`loop_stopped` 事件同理要檢查。要補測試：上面這句實際原因文字必須分類成「review 沒有結論」之類的標籤，且不含「版本條件」。
+
+**未驗證：**敏感路徑停止情境（#202 實際想修的）這次沒有走到，因為 review 先停在 inconclusive；要用驗收條件只含「diff 可驗證」內容的新測試卡才能驗到。
 
 **使用者可見症狀：**測試卡 `REQ-20261109-lead-live-reject`（`lead: pi`，不在 `autopick_lead: claude, codex` 內）被拒絕時，卡片的事件原因正確寫「Lead『pi』不在政策候選清單內，不撿這張卡」，但 `notify` 對象收到的通知標題是「autopick_stopped · 專案政策未滿足」。這不是專案等級或專案選用的問題，標題會誤導使用者去查專案政策。
 
@@ -226,7 +307,9 @@ r1 在 w1 通過自動化檢查後發現六項缺口，前一輪測試未涵蓋�
 
 ## ISSUE-133：`autopick_stopped` 的原因只留 loop 輸出的前 200 字，真正的停止原因被截掉，通知因此誤導
 
-更新日期：2026-11-09。狀態：已修正、待驗收。先前重現與根因證據保留於下方歷史。
+更新日期：2026-11-10。狀態：已修正、待驗收（部分實機證據，見下）。先前重現與根因證據保留於下方歷史。
+
+**實機部分驗證（2026-11-10，本機 macOS，bridge 為 main `c020881`（#201、#202）merge 後重啟的程序；測試卡 `REQ-20261110-stop-reason-live`（`lead: codex`，在 `scripts/` 新增一行檔案，PR #203））：**卡片事件 `failed`／`autopick_stopped` 的原因文字是實際的停止原因（「loop：同一個 head 的 review 連續 2 次 inconclusive（沒有可修的結論），退回人工處理」，01:06:24Z），不是整段 loop 輸出或被截斷的前段；這部分符合 #202 的預期。**仍沒有驗到的：**敏感路徑造成的停止（原本觸發本 issue 的情境）；通知標題的誤標另見 ISSUE-135（重新開啟）。
 
 **使用者可見症狀：**卡片 `REQ-20261109-multi-lead-card-lead`（PR #189）已在 06:41:19Z 通過第 2 輪 review，真正擋住自動 merge 的只有敏感路徑 `src/policy.ts`（設計上要人工 merge）。但 06:41:54Z 寫進卡片的 `failed`／`autopick_stopped` 事件，原因是「loop：review 完成：… PR #189（head e1a3174b2a24）· 第 1 輪 … 判定：changes_requested …」，是**第 1 輪**的結果；bridge 據此通知「review 條件、版本條件未滿足」，與實際狀況（`pass`、head 一致，只剩敏感路徑）不符。
 
