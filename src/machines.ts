@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { HerdrClient, HerdrError } from "./herdr.js";
 import { hookSocketPath } from "./hook-events.js";
+import type { AgentRecord } from "./types.js";
 
 /** 遠端 Herdr 機器：經 SSH 把遠端 herdr.sock 轉成本機短路徑 socket（ISSUE-041）。 */
 export interface MachineConfig {
@@ -19,6 +20,29 @@ export interface MachineConfig {
    * 遠端 Agent 的 Stop hook 才能把事件送回本機（ISSUE-045）。未設定則遠端只用 parser。
    */
   hookSocket?: string;
+  /** 選填：開放卡片 reviewer；root 是遠端 checkout 根目錄，kinds 是允許種類。 */
+  cardReview?: { root: string; kinds: string[] };
+}
+
+/** 遠端 shell／git 參數：不可含 `..`、`.` 路徑段、控制字元、空白、shell 字元，路徑段不以 `-` 開頭。 */
+export function unsafeRemoteValue(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value || value.length > 200) return "長度";
+  if (value.split("/").some((part) => part.startsWith("-") || part === ".")) return ". 或 - 路徑段";
+  if (/[\u0000-\u0020\u007F\s'"\\`$;&|<>*?]/.test(value) || value.includes("..")) return "控制、空白、shell 字元或 ..";
+  return undefined;
+}
+
+function validateCardReview(id: string, value: unknown): MachineConfig["cardReview"] {
+  if (value === undefined) return undefined;
+  const { root, kinds, ...rest } = (value ?? {}) as Record<string, unknown>;
+  const list = Array.isArray(kinds) ? (kinds as string[]) : [];
+  if (
+    !value || Array.isArray(value) || Object.keys(rest).length || typeof root !== "string" || !root.startsWith("/") ||
+    unsafeRemoteValue(root) || root.split("/").filter(Boolean).length < 2 || !list.length || new Set(list).size !== list.length ||
+    list.some((kind) => !["claude", "codex", "agy", "pi"].includes(kind))
+  )
+    throw new Error(`machines[${id}].cardReview needs an absolute root (2+ segments) and kinds from claude, codex, agy, pi`);
+  return { root: root.replace(/\/+$/, ""), kinds: [...list] };
 }
 
 const MACHINE_ID = /^[A-Za-z][A-Za-z0-9_-]{1,31}$/;
@@ -31,7 +55,7 @@ export function validateMachines(value: unknown): MachineConfig[] {
   const machines: MachineConfig[] = [];
   for (const item of value) {
     if (!item || typeof item !== "object") continue;
-    const { id, ssh, socket, hookSocket } = item as Record<string, unknown>;
+    const { id, ssh, socket, hookSocket, cardReview } = item as Record<string, unknown>;
     if (
       typeof id !== "string" ||
       typeof ssh !== "string" ||
@@ -56,12 +80,14 @@ export function validateMachines(value: unknown): MachineConfig[] {
       throw new Error(
         `machines[${id}].hookSocket must be an absolute path without spaces`,
       );
+    const review = validateCardReview(id, cardReview);
     seen.add(id);
     machines.push({
       id,
       ssh,
       socket,
       ...(typeof hookSocket === "string" ? { hookSocket } : {}),
+      ...(review ? { cardReview: review } : {}),
     });
   }
   return machines;
@@ -460,6 +486,26 @@ export class HerdrHub extends HerdrClient {
 
   machineIds(): string[] {
     return [...this.remotes.keys()];
+  }
+
+  machineConfig(machineId: string): MachineConfig | undefined {
+    return this.remotes.get(machineId)?.config;
+  }
+
+  /** 只送到指定機器：不經聚合與快取，失敗就丟錯；ID 參數必須帶該機器前綴。 */
+  requestOn<T = unknown>(machineId: string, method: string, params: Params = {}, options: { timeoutMs?: number; retries?: number } = {}): Promise<T> {
+    const remote = this.remotes.get(machineId);
+    if (!remote) return Promise.reject(new Error(`unknown machine ${machineId}`));
+    if (Object.entries(params).some(([k, v]) => ID_KEYS.has(k) && typeof v === "string" && !v.startsWith(`${machineId}:`)))
+      return Promise.reject(new Error(`request on ${machineId} has a non-${machineId} ID`));
+    return this.remoteRequest<T>(remote, method, params, options);
+  }
+
+  /** 指定機器當下的 Agent 清單（不用快取）。 */
+  async freshAgentsOn(machineId: string): Promise<AgentRecord[]> {
+    const result = await this.requestOn<{ agents?: unknown }>(machineId, "agent.list", {}, { timeoutMs: 5000, retries: 0 });
+    if (!Array.isArray(result?.agents)) throw new Error(`agent.list on ${machineId} returned no agents array`);
+    return result.agents as AgentRecord[];
   }
 
   override request<T = unknown>(
