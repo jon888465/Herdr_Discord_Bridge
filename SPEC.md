@@ -814,6 +814,10 @@ Autopick 建立 Lead workspace 後、啟動 Agent 前，把 id 與實際 label �
 PR #189（`88e1ce6`）已於 2026-11-09 merge，並重啟 bridge 載入（`card policy` 顯示政策載入正常）；Discord／Herdr／CLI 實機驗收仍待辦，尤其 agy／pi 的 coding 證據要求不變。
 
 
+### 遠端卡片 reviewer（2026-11-11，ISSUE-143，未實機驗收）
+
+`machines[].cardReview {root, kinds}` 選填，未設定時行為完全不變（基礎層 PR #207，角色接線 PR #206，B 依賴 A）。只有 reviewer 可指定開放的 remote（implement／fixer 拒絕「remote 寫入尚未支援」，其他「remote 目前只支援 reviewer」），快照凍結 remoteMachines，啟動前重驗目前配置的 machine 與 kinds；沒有 roles 的卡不支援 Lead 自選 remote reviewer（後續卡片 REQ-20261111-remote-in-task-roles）。目錄 `<root>/<owner>__<repo>__<卡片雜湊>`；路徑須是遠端 canonical（符號連結拒絕）；clone 後寫 `.git/hdb-card-review` marker，沿用與清理要求 marker 相符、沿用還要工作樹乾淨；第一個遠端指令檢查 GNU `timeout`；create 逾時有界重查；HEAD 須等於 PR head；斷線不 fallback 本機；結果文字只放行固定標籤。見 docs/remote-card-reviewer.md。
+
 ### 卡片角色 machine／agent／model（2026-11-10，ISSUE-138，已修正、待驗收）
 
 `roles: {implement: "local:claude:sonnet", reviewer: "local:agy"}` 為一層 inline map；只接受 implement、diagnose、review、verify、reviewer、fixer。每個值是 machine:agent:model，只拆前兩個冒號；省略段落不約束該維度，model 可含冒號。空／重複／未知角色、非字串拒絕；未宣告 roles 時既有行為完全不變。有 roles 的 card assign 必須 --coding；每個已派出的角色都受約束，不能用非 coding assignment／Lead synthesis 繞過。

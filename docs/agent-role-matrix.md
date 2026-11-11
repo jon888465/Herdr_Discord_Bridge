@@ -53,7 +53,8 @@
 - Lead：四種都被政策接受；agy、pi 要先在 `config.json` 宣告 `implementation`（目前兩者都已宣告，pi 是 2026-11-09 為測試加的）。
 
 **B. 設計缺口（2026-11-10 更新）：**
-- REQ-20261110-card-role-assignment 已有原始碼實作（ISSUE-138，待驗收）：roles inline map 指定六角色 machine／agent／model、計畫與實際派工守門，reviewer／fixer 同樣套用；語法與限制見 card-role-assignment.md。無宣告保留原行為。machine 本卡只強制 local，已配置 remote 撿前明確拒絕；跨機器未支援。本次未部署／重啟／跑實機卡，不新增任何矩陣成功格。pi 已於 2026-11-11 由使用者回報 coding Worker 驗證，但缺少可核對流程證據，待補記。
+- REQ-20261110-card-role-assignment 已有原始碼實作（ISSUE-138，待驗收）：roles inline map 指定六角色 machine／agent／model、計畫與實際派工守門，reviewer／fixer 同樣套用；語法與限制見 card-role-assignment.md。無宣告保留原行為。machine 本卡只強制 local，已配置 remote 撿前明確拒絕；跨機器未支援，pi Worker 未開放。本次未部署／重啟／跑實機卡，不新增任何矩陣成功格。
+- 2026-11-11（ISSUE-143）：card reviewer 可指定 `cardReview` 開放的 remote（見 remote-card-reviewer.md），其他角色 remote 仍拒絕；**未做實機驗收**，不新增成功格。
 - 以下為此功能之前的缺口背景；不再表示原始碼完全沒有指定機制：
 - implement／diagnose／verify／review（task 內）**由 Lead 在計畫裡決定**，卡片與使用者沒有「指定某角色必須由某 Agent 扮演」的機制。要驗證「claude 當 implement」只能靠 Lead 剛好選到，沒有可控的方法。
 - reviewer 與作者要是不同 session 的規則，意味著每個 Agent 當 reviewer 都需要一個不同 session 的作者。
@@ -70,8 +71,8 @@
 |---|---|---|
 | R0 | 本文與矩陣 | 本 PR |
 | R1 | **不需要新程式就能驗證的格子**：`card review --agent agy`（agy 當 reviewer）；`card loop --fix-agent codex`／`agy`（codex、agy 當 fixer）；~~pi 當 Lead 重測~~（**已於 2026-11-09 完成一次**，見註 4）；`card review --agent pi`（pi 當 reviewer） | 部分完成 |
-| R2 | **pi 納入 Worker 名單**：使用者 2026-11-11 確認 pi coding Worker 已驗證並決定納入；`coding-roster.ts` 已納入 pi、允許單一 profile，保留 fresh-session 獨立 review | 原始碼與自動化測試完成（ISSUE-140）；實機驗收待完成 |
-| R3 | **可指定角色的機制**：roles 六角色指定，見 ISSUE-138 與 card-role-assignment.md；local 執行，remote 尚不支援 | 原始碼已實作、待三卡實機驗收（2026-11-10） |
+| R2 | **pi 納入 Worker 名單**：改 `coding-roster.ts` 的 pi 排除規則（需要使用者決定，因為目前是刻意寫死）；先驗 pi 當 implement／diagnose／verify | 未開始，需要決策 |
+| R3 | **可指定角色的機制**：roles 六角色指定，見 ISSUE-138 與 card-role-assignment.md；local 執行；remote 只開放 card reviewer（ISSUE-143） | 原始碼已實作、待三卡實機驗收（2026-11-10）；remote reviewer 原始碼完成、未做實機驗收（2026-11-11） |
 | R4 | **整張矩陣補齊**：依 R1 到 R3，每個還沒有證據的格子各跑一張無害卡，更新本文的矩陣與日期 | 未開始 |
 
 **R1 的具體方式（不需要新程式）：**
@@ -101,3 +102,13 @@
 3. Lead 故意不符卡片指定：plan_rejected 且零違規 Worker prompt。
 
 另核對 reviewer／fixer 的 fresh session。不把本機單元測試當成 remote／完整角色矩陣的實機證據。
+
+## ISSUE-138 實機觀察（2026-11-11）
+
+REQ-20261111-remote-agy-role（task-5c36f579-aa08-4318-bce2-c71191500f25，本機 macOS）只宣告 local 角色：
+
+- `diagnose-remote-role：claude（opus）；machine=local；task=task-5c36f579-aa08-4318-bce2-c71191500f25；v=2,cr=d,s=C,ss=CCC,me=L`（02:10:09Z）
+- `implement-remote-reviewer：claude（opus）；machine=local；task=task-5c36f579-aa08-4318-bce2-c71191500f25；v=2,cr=i,s=C,ss=CCC,me=L`（02:15:30Z）
+- `herdr pane get w69:p3`：claude、label `claude·worker·opus`、cwd 為本卡 worktree；同 cwd 有 `claude --model opus`（pid 34147，10:15:25 +08:00）。Herdr 未回報 pid，pid↔pane **未直接證實**。
+
+只是第 1 項卡的部分觀察（同 agent 兩角色），不計入次數；remote reviewer 未實機執行。

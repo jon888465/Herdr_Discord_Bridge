@@ -1,68 +1,178 @@
 # Known Issues
 
-## ISSUE-139：執行 run.sh 後 Herdr Desktop 看不到 bridge
+## ISSUE-143：remote machine（agy-pod）的 agent 不能擔任卡片角色；先開放 remote card reviewer
 
-更新日期：2026-11-10。狀態：待調查（runtime 差異已確認，Desktop 相容層尚未實作）。
+更新日期：2026-11-11。狀態：已修正、待驗收（兩個 PR 都已 merge：A 基礎層 #207 `addee48`、B 角色接線 #206 `9ff908e`；自動化檢查與 codex 獨立複審通過；**主要成功路徑已實機驗過一次**，見下方 2026-11-11 實機段；失敗路徑與其他情境尚未驗）。卡片 REQ-20261111-remote-agy-role；實機驗收卡 REQ-20261111-remote-reviewer-live（PR #210）。
 
-追蹤卡：`REQ-20261110-desktop-core-support`，2026-11-10 已建於本機執行中 bridge 的營運目錄 `/home/jones/.local/state/herdr/plugins/herdr-discord-bridge/cards/`，狀態 draft，notify 指向建立卡片的 Agent pane。使用者明確要求本卡不得 merge，最多交付 PR；因此未設 ready，避免 L2 自動流程越過限制。`scripts/herdr-card-check` 當日結果 OK。尚未開始實作或驗收。
+**實機驗收（2026-11-11，本機 macOS，bridge 為 main `9ff908e`（#206、#207）重啟後的程序；`config.json` 的 agy-pod 已加 `cardReview {root: "/root/herdr-card-review", kinds: ["agy"]}`（備份 `config.json.bak-cardreview-20261111`）；pod：git 2.53.0、GNU `timeout`、`realpath`、agy 1.5.2，沒有 node；root 目錄由 Agent 在使用者同意後建立（權限 700、空目錄、非符號連結））：**測試卡 `REQ-20261111-remote-reviewer-live`（`lead: codex`、`roles: {reviewer: "agy-pod:agy"}`，bridge 序列化成 `"agy-pod:agy:"`），新增一行檔案的 PR #210。
+1. **撿卡前驗證通過：**06:59:28Z 撿起，沒有出現「卡片流程尚未支援 machine agy-pod」拒絕。
+2. **task 內的本機 agy Worker 卡住（與本功能無關，見 ISSUE-147）：**Agent 取消該 task（07:15:54Z）、接手 commit（`93ffcd6`）、開 PR #210、`card attach-pr`。
+3. **第 1 輪 review（07:16:46Z）`inconclusive`：**原因「reviewer 卡在啟動提示（blocked）」，pane 被保留。pod 上獨立佐證：`/root/herdr-card-review/jon888465__Herdr_Discord_Bridge__163ee5854b` 已 clone，`git rev-parse HEAD` = `93ffcd6a3435…` = PR 的 head sha，`.git/hdb-card-review` marker 存在（內容 `hdb-card-review-checkout:v1:163ee5854b`）；pod 的 Herdr 顯示 `w3:p2 agy·reviewer` 是 `blocked`，畫面原文：「Do you trust the contents of this project? Antigravity CLI requires permission to read, edit, and execute files here. > Yes, I trust this folder／No, exit」，工作目錄就是該 checkout。**這與預期一致（第一次信任提示）。**
+4. **信任：**Agent 依使用者的決定（第一次信任要信任），確認畫面路徑等於 bridge 管理且 marker 相符的目錄後，對這一個目錄按了確認；agy 的信任記在 pod 的 `/root/.gemini/antigravity-cli/settings.json` 的 `trustedWorkspaces`（原本 `['/root/workspace', '/root']`，新增 checkout 目錄）。**觀察：**`/root` 本來就在信任清單，checkout 目錄（它的子目錄）仍跳出提示，信任不會繼承上層。
+5. **第 2 輪 review（07:18:38Z `role_assigned`：`reviewer（第 2 輪）：agy；machine=agy-pod；v=2,cr=-,s=C,ss=CCD,me=U`；07:19:03Z）`pass`：**兩條驗收條件都 ✓；沿用上一輪的 checkout（沿用前工作樹乾淨：`git status --porcelain` 0 行，HEAD 仍是 `93ffcd6`）。bridge 回報「reviewer 的 pane 已關閉」。
+6. **清理：**第 2 輪結束後 `/root/herdr-card-review` 為空、pod 上只剩使用者原本的 `w2:p1`。**但 agy 的 `trustedWorkspaces` 裡那筆已刪除目錄的信任項目沒有被移除**（每個 reviewer 卡片都會累積一筆）。
+7. **review 次數：**第 1 輪 `inconclusive` 也算一次 verdict，這張卡用掉 2 次（上限 3）。
 
-使用者可見症狀：執行 `scripts/run.sh` 後，Herdr Desktop 未顯示 bridge。預期：能在 Desktop 使用 Discord bridge；目前實作僅針對舊 Herdr socket／plugin API，不保證 Desktop 相容。
+**這個實機驗收證明的：**remote reviewer 的主要成功路徑（撿卡前驗證、pod 上 git clone、head sha 與 marker、agy 在 pod 執行 review、結果採用、沿用 checkout、清理目錄與 pane）一次成功；固定標籤與 pane 保留在信任提示時如設計。**沒有證明的：**agy-pod 不可達時不 fallback 到 local；clone／fetch／timeout／realpath 失敗路徑；`cleanup_pending`；marker 不符或工作樹不乾淨被拒；逾時；Lead 在 task 進行中自行選擇 remote（本來就不支援）；只有一張極簡卡、一次；pod 沒有 node，所以 verify 角色不能放在 pod。**新發現：**信任項目沒有清理（`REQ-20261111-agent-first-run-prompts` 的範圍已涵蓋）。
 
-重現／環境：2026-11-10，目前 Ubuntu 同時有 `herdr server`、`herdr`、`herdr-app`、`herdr-core connect`、`herdr-core serve` 程序。`herdr status server` 回報 0.8.0、protocol 19、socket `/home/jones/.config/herdr/herdr.sock`；`herdr workspace list` 有 `bridge`（`w4`），`herdr pane list` 有 `Discord bridge`（`w4:p35`，tab `w4:t1`）。使用者貼回相同 server status 與 workspace list。`herdr-app --version` 為 0.1.14，`herdr-core --version` 為 hc 0.1.19；Desktop core socket 為 `/run/user/1000/herdr-core/default.sock`。
+**症狀／預期：**`reviewer: "agy-pod:agy"` 撿卡前被拒「卡片流程尚未支援 machine」。預期開放的 remote reviewer 派到 pod；remote implement／fixer 拒絕「remote 寫入尚未支援」；無 remote 配置時不變。
 
-已確認根因／範圍：run.sh 使用舊 `herdr` plugin／workspace／pane 命令，Desktop 程序則使用獨立的 herdr-core runtime。`herdr-core --help` 顯示 terminal 地址（如 t7）、run／ls／send／connect／schema 介面，與 bridge 所依賴的舊 workspace／pane／agent API 不同；不能僅把 socket 路徑改成 core socket 就宣稱相容。`--no-focus` 不是 runtime 不同的修正方式。尚未調查完整 core schema 或實作移植。
+**根因（讀碼確認）：**preflight、快照、roster、身分檢查、v2 紀錄只接受 local；review 只用本機 worktree；HerdrHub 不能指定 machine、斷線回快取；config 無開放條件。
 
-修正範圍：本輪只同步已知限制至 SPEC 與本紀錄，未改程式、重啟或部署。現有 pane 登記不代表 bot 健康，也不代表 Desktop 可見。
+**拆分：**原 #206 diff 71,377 字元，超過 card review 的 60,000 上限（使用者決定拆分）。A 是行為中立的基礎層（`cardReview` 設定、`HerdrHub` 的 `requestOn` 等、`src/remote-checkout.ts`），無設定時不改行為；B 是角色與接線。
 
-驗證（2026-11-10）：`herdr status server`、`herdr workspace list`、`herdr pane list`、程序清單、`herdr-core --help`、兩個 Desktop 元件的 `--version` 均成功。純文件變更，未跑 build／程式測試；`git diff --check` 通過。
+**審查修正（A）：**第一輪：`timeout -k 10`、斷線不清目錄、ssh 關轉送、固定分類、拒絕 `.` 段。Fable：(1) marker、(2) 缺 GNU `timeout` 先檢查、(3) cleanup_pending 在 console 留識別、(4) label 每次執行唯一。codex：A1 root／dir 以遠端 `realpath` 驗 canonical，符號連結（root、祖先、dir、`.git`）與 realpath 異常拒絕；A2 指紋階段 uncertain 失敗不刪目錄；A3 結果文字改白名單，其餘「遠端 review 失敗：未分類」；A4 create 逾時 label 有界重查 3 次（間隔 2 秒）；A5 沿用需工作樹乾淨，否則拒絕並記 pending，不 reset／clean；補回相對 c2f6617 消失的斷言。
 
-未驗證／下一步：調查 core schema、狀態與完成訊號及 Desktop 終端機呈現方式，設計獨立 adapter／啟動流程並完成 Discord／Desktop 端到端驗收。當前版本不可宣稱已支援 Desktop。
+**第四輪（codex 驗證複審 `225df0b`，A 部分，2026-11-11）：**A1 驗證與 `rm -rf` 分屬不同遠端指令，中間置換符號連結會刪到 root 外：改成單一 `sh -c` 固定腳本，值走位置參數；剩餘視窗縮到單一指令內，無法完全消除，列為已知限制。A3 `BLOCKED_AT_START` 含「常見原因：」被誤映射成「未分類」：先比完整字串再比切割後標籤。A4 重查耗盡仍找不到不能當未建立：改記 `cleanup_pending：workspace`。測試：`test/remote-checkout.test.ts`（含真實 `sh` 對真實符號連結）。
 
-**2026-11-11 autopick 嘗試：**卡片 `REQ-20261111-herdr-core-support` 轉為 ready 後由 bridge 撿起，但在 assign 前置檢查失敗，卡片流程紀錄為 `autopick_failed`：「無法使用 worktree：Herdr 0.8.0 is older than 0.9.1, which worktree support was tested on」。因此沒有建立 worktree、沒有派送 Agent 任務；卡片 frontmatter 仍為 ready，但本 bridge 程序已記錄此卡嘗試過、不會自行重試。這是舊 Herdr server 版本不符合現有 worktree 最低版本檢查，尚非 Core adapter 的實作／驗收結果；需要先在 Core 相容性工作中決定如何為 Core 提供隔離 worktree 能力及安全的啟動路徑。當日未改程式或重啟，無額外測試。
+**B 內容與 codex 複審（PR #206，依賴 A）：**角色與接線（`src/card-*`、main、team-orchestration、`test/card-role-remote.test.ts`）。Fable (5) README 兩份補 `cardReview`、(6) #205 觀察放回 ISSUE-138 與 agent-role-matrix.md、(7) main 兩個分支抽成 `remoteReviewInjection`／`liveAgentList` 並補測試、(8) 基礎層與 A 一致（B 以 merge 吃 A，不改寫歷史）。codex：B1 review 時重驗目前配置的 kinds，舊快照允許 agy 但現配置不含就拒絕（固定標籤、不 fallback）；B2 維持現狀：沒有 roles 的卡不支援 Lead 自選 remote reviewer，只有卡片宣告 `reviewer: <machine>:<agent>` 才派到 pod，寫成限制（docs、README），Lead 自選 remote 角色屬後續卡片 REQ-20261111-remote-in-task-roles；補回 blocked／cleanup 的整份結果敏感字串斷言。codex 驗證複審：B pass；A 的第四輪三項見上。
 
-**2026-11-11 bridge 重啟後再次嘗試：**確認 Herdr client/server 為 0.9.5；卡片仍是 `ready`，bridge 再次 `autopick_picked` 並建立了卡片 worktree（`/home/jones/.herdr/worktrees/Herdr_Discord_Bridge/card-req-20261111-herdr-core-support`，workspace `w7`）。隨後流程以 `autopick_stopped` 結束：「task 沒有完成：找不到這張卡的 task」；尚未確認為何 `taskIdForCard` 未找到 task，不能視為已派工或開始實作。Lead pane `w7:p1` 當時狀態為 blocked。之後檢查到該 pane 顯示 Codex 0.163.0 更新至 0.167.0 的提示；依使用者指示選擇 `Skip` 後 Lead 回到 idle，但原 autopick 流程已結束。這確認了 blocked UI 是更新提示，但尚未證實它與 task 關聯缺失的因果關係。追蹤卡 `REQ-20261111-codex-update-check-skip` 已建立為 ready，notify 已填並通過 `scripts/herdr-card-check`；修正此流程後再重試 Core 支援卡。當時 Core 支援卡仍為 ready，失敗後 worktree 現場保留；之後依使用者要求改為 `draft`，暫停 Core 卡的 autopick。兩張卡均未有程式實作或驗收；未改程式、未重啟，無額外測試。
+**B 測試與大小（2026-11-11，B 分支含 A）：**`npm run check` exit 0：1752 項／1751 pass／0 fail／1 既有 skipped；`git diff --check` 通過。大小以字元數計（card review 上限是字元數）：A `git diff main...HEAD` = 57,950 字元；B 在假設 A 已 merge 時 `git diff remote-checkout-base...HEAD` = 49,886 字元；B 直接對 main 仍超過 60,000，A merge 並 rebase 後才縮小。agy 信任提示很可能擋第一次實機並保留 workspace，需人工關閉。
 
-**2026-11-11 更新提示修復卡的 autopick 結果：**`REQ-20261111-codex-update-check-skip` 被撿起，Lead pane `wA:p1` 已結束；assign 在 task 啟動前失敗，流程紀錄 `autopick_failed`：「`--coding` 任務需要至少一個 Worker」。worktree 留在 `/home/jones/.herdr/worktrees/Herdr_Discord_Bridge/card-req-20261111-codex-update-check-skip`（workspace `wB`），沒有 task／程式修正；卡片仍為 ready，本程序不會重試。這張修復卡未配置或建立 Worker；失敗符合現有 coding 派工守門，不能宣稱更新提示已修正。之後 bridge 又因 Core 支援卡已有作用中 worktree 而停止重試（workspace `w9`）。當時需先提供合法 Worker 並由人決定如何處理保留 worktree／重派；未調整私人設定、未關閉 workspace、未重啟，未跑程式測試。2026-11-11 使用者授權清理閒置資源後，Core 卡仍為 draft；乾淨的 w8 card worktree 已用 `card cleanup` 移除、分支保留，w6／w7 的 autopick workspace 已關閉，w9 在後續清單中已不存在。這不代表 Core 實作或 Desktop 驗收完成。
+**A 測試（2026-11-11，本機，fake exec／fake ssh）：**`npm run check` exit 0：1739 項／1738 pass／0 fail／1 既有 skipped；`npm run lint`、`git diff --check` 通過；既有測試檔未修改。單元測試不是 Herdr／pod 實機驗收。
 
-## ISSUE-140：`--coding` 自動 Worker 池排除 pi，且單一 profile 被錯誤拒絕
+**未驗證：**實機（pod 的 git 與 repo 權限、GNU `timeout`、`realpath`、`refs/pull` fetch、marker 寫入）；cleanup_pending 不重試；clone 中斷留下的半成品沒有 marker，不會被清理（記 pending，需人工）；需使用者加 `cardReview` 並重啟。A 單獨 merge 不會啟用任何 remote 功能。
 
-更新日期：2026-11-11。狀態：已修正、待驗收（來源與相關自動化檢查完成；實機確認 Pi 已進入 roster，但尚未實際派送 Pi assignment，完整驗收受 ISSUE-141 阻擋）。
+## ISSUE-147：task 內本機 agy Worker 沒有收到第一個 prompt，Herdr 回 ok 但 pane 是空的，task 一直等到逾時
 
-**症狀／預期：**2026-11-11 autopick `REQ-20261111-codex-update-check-skip` 在 `card assign --worktree --coding` 啟動前因沒有 Worker 失敗。使用者指出 pi coding Worker 已驗證，要求 pi 納入自動候選；只有一個合格 profile 也應能工作。預期：自動候選包含 claude／codex／pi 與符合 capabilities 的 agy；一個 profile 即可入池；單一 profile 時仍為每個 coding assignment 啟動獨立 fresh session，保留 author／reviewer 不同 session 的驗收，不降低 review gate。
+更新日期：2026-11-11。狀態：待調查（現象已觀察一次；根因未確認）。
 
-**重現／環境（2026-11-11，本機）：** Herdr 0.9.5；autopick 建立 update-check 卡 worktree（workspace `wB`），`card assign --worktree --coding` 回報需要至少一個 Worker。使用者 config 的 `agentProfiles` 有一個 codex profile 與一個 pi profile；Lead 為 codex。沒有修改私人設定。
+**使用者可見症狀：**`REQ-20261111-remote-reviewer-live` 的 task 內 review（`team-review-card-file`，本機 agy Worker，pane `w6B:p4`）：07:03:37Z `role_assigned`、07:03:38.080Z `turn_dispatched`，bridge console 印出 `agent.prompt prompt+wait target=w6B:p4 chars=7266 ts=1794380618480`，**沒有任何錯誤**。之後 agy 的 pane 一直是剛啟動的歡迎畫面、輸入框是空的，Herdr 的 `agent explain` 說 `state: idle`，沒有 `hook Stop`；task 的最後一個事件就是那次 `turn_dispatched`，到 07:14:48Z 仍沒有變化（約 11 分鐘）。bridge 會等到單一回合上限（30 分鐘）才會判逾時。
 
-**已確認根因：**`src/coding-roster.ts` 的自動候選只含 claude／codex，agy 需 capabilities opt-in，pi 被排除；`autoEnableCodingProfiles` 要求至少兩個候選。故只有一個符合條件的 codex profile 時不會勾選任何 profile，`assertCodingRoster` 隨即拒絕。單純把門檻降為一個而重用同一個 persistent session，會使同 session review 被 fail closed；必須在單一 profile roster 時為每個 coding assignment 建立 fresh session。
+**預期行為：**prompt 送達 agy，或送不進去時明確失敗、有限度重試（ISSUE-137 的做法）；不應該靜默等 30 分鐘。
 
-**修正範圍（2026-11-11）：**`coding-roster.ts` 納入 pi、允許一個候選並補 fresh-session 判斷；`main.ts` 對單一 profile coding roster 使用 `startCardRoleSession`，每項 assignment 新開並依既有安全規則清理 pane；更新 roster 測試與相關文件。config／policy 不變。
+**重現／環境：**2026-11-11，本機 macOS，bridge 為 main `9ff908e`；agy 1.5.4（本機，Gemini 3.8 Flash）；該 agy 是這張卡第一次需要的 Worker，bridge 在 07:03:33Z 才對這個 worktree 預先信任（`agy_worktree_trust`）並在 07:03:37Z 啟動；之前其他 Worker（codex）都正常。
 
-**驗證（2026-11-11）：**初次 targeted `coding-roster` 測試 12/13 通過、1 項因舊「agy 單獨不入池」預期失敗，該測試已依新決策更新。`npm run build`、`npm run lint`（200 TypeScript files）、`npm run typecheck` 通過；`node --test dist/test/coding-roster.test.js dist/test/team-task-engine.test.js` 54/54 pass；另 `node --test --test-name-pattern='one configured pi profile' dist/test/team-task-engine.test.js` 1/1 pass。全套 `npm test` 在 240 秒命令逾時前跑到 test 1162，沒有最後總結，不能算全套通過。`git diff --check` 通過。
+**根因：**未確認。與 ISSUE-137（Lead／Worker 第一個 prompt 在 Herdr 登記前被拒收，pi 上發生過）同一類，但這次 Herdr 沒有回 `agent_not_ready`，也沒有錯誤，所以 #198 的有上限重試沒有被觸發。可能是 agy 剛啟動時吞掉輸入、或預先信任剛寫入設定後的啟動時序；沒有驗證。
 
-**實機測試（2026-11-11）：**依使用者要求執行 `scripts/run.sh` 重啟已連結本地 plugin（Herdr 0.9.5；使用已 build 的 `dist`，未改 config／policy）。清理先前乾淨的 wB card worktree（只移除 worktree、保留分支）後，ready 卡由 autopick 建立 task `task-2b7e7e84-9a5d-407d-9b2c-3f3a63eb795a`，task roster 明確含 `profile:codex` 與 `profile:pi`，Lead／task／卡片關聯也已建立。Lead 與 Codex diagnose Worker 都遇到版本 0.163.0 → 0.167.1 更新提示；依既有使用者指示僅選 `Skip`，未更新 Codex。Worker assignment 在互動前已以 `agent_blocked` 失敗，task 最終 `blocked`、卡片流程 `autopick_stopped`；沒有 Pi assignment、通過 review／verification 或程式修改。測試當下 wD worktree 與失敗 task 保留、工作樹乾淨；之後依使用者清理要求，`card cleanup` 已移除 wD worktree 並保留分支，workspace／Agents 已關閉；durable failed task 仍保留，不補派。此測試只證明目前 build 的自動 roster 含 Pi 及 task 可以建立，未證明 Pi 實際工作或單一 profile author→reviewer live 流程。
+**處理：**Agent 以 `wk use w6B` 切到卡片 workspace，用 `team cancel` 取消該 task（07:15:54Z），接手 commit、開 PR #210；task 內的 review 與 verify 沒有走完。
 
-**未驗證／下一步：**單一 profile 的完整 fake-runtime coding 任務與 Herdr／CLI 實機 author→獨立 reviewer 流程仍待驗證。使用者回報 pi 已驗證，但其環境、卡片與流程紀錄未提供。完整 live 驗收受 ISSUE-141 的 Codex 更新提示阻擋；本輪 bridge 已依使用者授權重啟且仍在執行，failed task 不會自動補送。
+**未驗證／下一步：**重跑能否重現；agy 啟動後多久才能收 prompt；bridge 對 `prompt+wait` 沒有任何「pane 內容沒有變化」的偵測。
 
-## ISSUE-141：Codex 更新提示阻塞 autopick Lead 與 coding profile Worker
+## ISSUE-146：task 沒有完成、PR 由人工接手 merge 後，卡片永遠停在 in_progress，autopick Lead 的 workspace 不會被收尾
 
-更新日期：2026-11-11。狀態：修正中。追蹤卡：`REQ-20261111-codex-update-check-skip`（task `task-2b7e7e84-9a5d-407d-9b2c-3f3a63eb795a` 受阻）。
+更新日期：2026-11-11。狀態：待調查（現象已重現一次、根因為觀察與推論；沒有修正）。
 
-**症狀／預期：**Codex 0.163.0 啟動時出現 `Update available · 0.163.0 → 0.167.1`，選項為 Update now、Skip、Skip until next version。Lead 和 profile Worker 都可能 blocked，導致 coding assignment 失敗。預期只在精確辨識此 Codex 更新提示時選 `Skip`；絕不更新 Codex，也不自動回答一般 approval、question 或其他 blocked UI；Lead 與 Worker 均需能就緒，task／卡片關聯保持有效。
+**使用者可見症狀：**`REQ-20261111-remote-agy-role` 的 task 因 ISSUE-145 標成 `blocked`，我接手 worktree、開 PR、用 `card attach-pr` 登記；PR #206 於 2026-11-11 06:45:07Z merge，bridge 在 06:45:44Z 記錄 `merged`、06:45:47Z 記錄 `cleanup_done`（worktree 與卡片 workspace 已移除）。**但卡片檔 `status` 一直是 `in_progress`**（至少到 07:0x，重啟 bridge 之後仍是），autopick 為 codex Lead 開的 workspace `autopick-codex-REQ-20261111-remote-agy-role` 也一直開著。我手動把卡片改成 `done` 後，約一分鐘內 bridge 的收尾掃描就關掉了那個 workspace。
 
-**重現／環境（2026-11-11）：**Herdr 0.9.5，重啟本地 bridge 後 autopick 指派 `REQ-20261111-codex-update-check-skip`。Lead `wD:p1` 遇到更新提示，手動選 Skip 後 task 建立；roster 有 codex 與 pi。後續 Codex profile Worker `wD:p2` 又遇到相同提示，task engine 記錄 `agent.prompt: agent_blocked` 並將 assignment 標為 failed。Worker 提示在 assignment 已失敗後才手動選 Skip，task 最終仍 `blocked`／`autopick_stopped`，沒有自動重試。Codex 未更新。
+**預期行為：**卡片關聯的 PR 已 merge 且 bridge 已記錄 `merged` 與 `cleanup_done` 時，卡片應該進入終態（`done`），Lead workspace 隨後被收尾；不應該依賴 task 是否「完成」。
 
-**先前診斷（保留歷史）：**當時只確認 profile Worker 也遇到更新提示，尚未確認完整因果。2026-11-11 讀碼與隔離入口測試確認：舊 matcher 只比對兩段文字並送 `3`，不符合本次只選 Skip 的要求；persistent profile pool 有獨立等待、未接更新提示處理；fresh session 原已用共用 waiter。原實機 agent_blocked 是否同時涉及 ready 與首次 prompt 間的競態，仍未證實；本修正不在一般 turn／question queue 自動送答。
+**重現／環境：**2026-11-11，本機 macOS，bridge 為 main `796e0cb`（後續重啟為 `9ff908e`）。條件：task 沒有完成（`blocked`／failed）→ 人工接手 → `card attach-pr` → PR merge。
 
-**修正範圍／驗證：**本輪未修改更新提示處理程式。`scripts/run.sh` 已依使用者要求重啟本地 plugin，bridge connected 且 Herdr server 仍為 0.9.5。實機 task 未完成診斷、review 或 verification；沒有 source diff、commit、PR 或 merge。後續依使用者要求以 `card cleanup` 移除乾淨的 wD card worktree（分支保留），並關閉 wC／wD workspace；blocked durable task 及卡片 `in_progress` 狀態保留。下一步先調查 Lead 及 profile Worker 的啟動／更新提示辨識與安全選擇，再以可重複測試及實機卡片流程驗證。
+**推論的根因：**卡片只有在 task 事件為完成時才被同步成 `done`（`Card sync updated`）；`merged` 事件只記流程紀錄並清理 worktree，不改卡片狀態。task 失敗後人工接手的卡片因此不會進入終態。之前同類的卡（`REQ-20261109-codex-lead-agy`、`REQ-20261109-pi-lead-live` 等 5 張）也停在 `in_progress`，已記為殘留孤兒卡，可能是同一原因。
 
-**2026-11-11 本輪實作進度（尚未完成驗證）：**保留既有 ISSUE-140 dirty diff。已修改完整更新選單比對，只送 `2`（Skip）、不附 Enter、不重試，送鍵前核對 blocked 與 pane／terminal／workspace／CLI／已知 session；persistent pool 接入共用 ready wait，fresh Worker 增加預期種類檢查。修正前新增入口測試 18 項為 9 pass／9 fail；中途相關測試 118 項為 116 pass／2 fail（fixture 因送鍵前新增身分複核而需調整），新增 card/task 整合測試曾有 `syncCards.assignments` 型別錯誤，正在修正與重跑，不能視為驗證完成。初始 shell sandbox 因 `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted` 無法啟動，改以獲准的執行方式進行專案讀寫與隔離測試。未修改私人設定／policy，未操作或重派既有 durable task，未清理或重啟 bridge，未 commit／push／PR／merge／部署。執行中 bridge 尚未載入本輪修改，舊失敗不補送。下一步：完成整合測試、全套檢查與 SPEC 同步，再交獨立 session review；實機驗收仍待另行授權安排。
+**未確認：**`merged` 事件是否在「只有 PR 登記、沒有 task 完成」時就不改卡片狀態是設計還是遺漏；卡片同步的實際程式位置。
 
-**後續驗證（2026-11-11）：**全套 `npm run check` 的 typecheck／build 成功，預設並行測試曾發現 Agent 身分錯誤訊息、review／fix 舊更新選單 fixture 不符合新契約，以及 durable question 計時失敗；前述訊息與 fixture 已修正。該輪高負載下停於約 test 1199，已停止本輪測試 runner，沒有最終總結，不能算全套通過；新版另以限制並行重跑。使用者後續授權 commit／PR；runtime 重啟／部署仍未授權，獨立 review 尚未進行。
+**修正方向（尚未實作）：**`merged` 與 `cleanup_done` 都已記錄、且卡片有關聯 PR 時，把卡片設成 `done`；要補測試涵蓋 task 未完成的路徑。
 
-**入口最終驗證（2026-11-11）：**`npm run build`、`npm run typecheck`、`npm run lint`（201 TypeScript files）、`git diff --check` 通過；`node --test dist/test/codex-update-startup.test.js` 為 **34/34 pass、0 fail、0 cancelled**，包含真實 card command／durable coding task／temporary Git repository 的整合測試，未連線真實 Herdr／Discord。相關 11 檔限制並行測試為 294 項、271 pass、0 fail、23 cancelled（durable engine 的 whole-team cancellation Promise 未結束導致後續取消），不能算全部通過；另行重跑 engine 與全套。狀態維持修正中，直到剩餘自動檢查確認；實機仍待驗收。
+**暫時做法：**人工確認 PR 確實已 merge 後，手動把卡片 `status` 改成 `done`（2026-11-11 對 `REQ-20261111-remote-agy-role` 這樣做了）。
 
+## ISSUE-145：單一指派的 30 分鐘等待上限，讓已完成的 Worker 成果被 bridge 判逾時丟掉
+
+更新日期：2026-11-11。狀態：待調查（現象已重現一次、根因為讀碼與時間序推論；沒有修正）。
+
+**使用者可見症狀：**`REQ-20261111-remote-agy-role` 的 implement Worker（claude opus，`implement-remote-reviewer`）從 02:15:30Z 開始實作，**02:45:32Z bridge 判定等待逾時**（task 事件 `Assignment implement-remote-reviewer 等待逾時（已等待 30 分 2 秒，上限 30 分鐘）`，task 標成 `blocked`，Lead 的彙整、task 內 review、verify 都沒有進行）；但 Worker 的 pane 顯示它在 **02:46（31 分 14 秒）完成並送出完整回報**（`BRIDGE_BEGIN`／`BRIDGE_END` 區塊，含 `codingResult` 與 18 個檔案清單）。bridge 已不收這份回報，成果只留在卡片 worktree（未 commit 的 18 個檔案），由人工接手驗證與提交。
+
+**預期行為：**Worker 在上限之後才完成、但回報有效時，不要整個 task 丟掉；至少要能「採用逾時後才到的回報」或明確讓人選擇重新等待，並在通知說清楚是等待逾時、成果可能在 worktree（現有訊息已有這句，但沒有後續動作）。
+
+**重現／環境：**2026-11-11，本機 macOS，bridge 為 main `796e0cb`；卡片大小是 31 檔以上的實作（約 +380／-17 行加 4 個新檔），opus 實作約 31 分鐘。
+
+**根因（推論）：**單一指派的等待上限是固定值（30 分鐘），Worker 的回合稍微超過就被判逾時，且逾時後沒有「事後採用回報」的路徑；與 ISSUE-124（回合逾時的分類）同一類，但這次是成果已完成、只是晚了約 1 分鐘。
+
+**影響：**task 內的 review、verify 與 Lead 彙整都被跳過；這張卡之後只能走人工接手與 PR 審查。相關：`REQ-20261111-quota-handoff` 的背景（task 內缺乏 Worker 狀況不明時的復原機制）。
+
+**未驗證／下一步：**逾時上限是否可設定（`timeoutMs` 的來源）；逾時後回報到達的處理要不要做成需求卡。
+
+## ISSUE-144：autopick 在 task 開始前記「找不到這張卡的 task」的 autopick_stopped
+
+更新日期：2026-11-11。狀態：待調查（一次觀察，根因未確認；**與 ISSUE-142 是同一次事件的兩份記錄**，ISSUE-142 有對 `card assign` 回覆與 codex 更新提示的讀碼推論，處理時合併看）。
+
+REQ-20261111-remote-agy-role 在 02:07:43Z picked 後，02:07:55Z 記 failed「task 沒有完成：找不到這張卡的 task」並排入通知，但 task 02:09:51Z 才開始且之後正常。預期 task 建立前不記失敗。可能與等待 task 的時序或 ISSUE-133／135 同類，未證實。下一步：對照 autopick 等待 task 的路徑與時間戳。
+
+## ISSUE-142：autopick 開 Lead 時 codex 剛好跳出更新提示，`card assign --worktree` 沒有啟動任務，autopick 卻報成「找不到這張卡的 task」
+
+更新日期：2026-11-11。狀態：待調查（現象已重現一次；根因是讀碼與時間序推論，**尚未直接看到 `card assign` 的回覆**）。
+
+**使用者可見症狀：**`REQ-20261111-remote-agy-role`（`lead: codex`）在 bridge 重啟後 2026-11-11 02:07:43Z 被撿起，02:07:55Z 卡片流程紀錄只有 `worktree_created`，隨即 `failed`／`autopick_stopped`，原因「task：task 沒有完成：找不到這張卡的 task」；沒有 `role_assigned`（lead）、`assigned`、`started`。Lead（codex）的 workspace `w69` 留著，卡片仍是 `ready`。使用者看到的原因沒有說真正發生什麼（Lead 還沒就緒）。
+
+**預期行為：**Lead 就緒前不要派工，或等到就緒再 assign；若 assign 沒有啟動任務，停止原因要說「Lead 在 assign 時不是 idle（例如 codex 更新提示）」，不是「找不到 task」。
+
+**重現／環境：**2026-11-11，本機 macOS，bridge 為 main `796e0cb`（#205）重啟後的程序；bridge console 在失敗前一刻印出「已自動跳過 codex 的更新提示（pane w69:p1、按鍵 3）」。手動補跑 `card assign REQ-20261111-remote-agy-role --coding`（不帶 `--worktree`，Lead pane 這時已 idle）成功，task `task-5c36f579-…` 開始。
+
+**推論的根因（讀碼，2026-11-11）：**
+1. `src/card-command.ts` 的 `assignCard` 在 `--worktree` 路徑下，若新 workspace 的 Agent 當下不是 idle／done（`prepared.agentReady` 為 false），回覆「任務沒有啟動，卡片仍是 ready」並直接返回，不丟錯誤。
+2. `src/autopick.ts` 的 `run()` 只執行 `steps.command(text)` 並記步驟，**完全不看回覆內容**，所以往下走到 `waitTask`。
+3. `src/autopick-wiring.ts` 的 `waitTask` 用 `taskIdForCard` 找不到任務，回「找不到這張卡的 task」，這是最後被當成停止原因的字串。
+4. codex 啟動時的更新提示讓 pane 當下不是 idle；bridge 自動按鍵 3 跳過，但是在 assign 判斷 `agentReady` 之後。
+
+**未確認：**實際的 `card assign` 回覆文字沒有被記錄，所以無法直接證明走的是「agentReady 為 false」這一支（另一支是 `startTask` 丟錯誤，訊息同樣以「任務沒有啟動」開頭）。同一個 codex 更新提示是否在其他次啟動也會讓 Lead 不 idle，也未驗證。
+
+**修正方向（尚未實作）：**autopick 要檢查 `card assign` 的回覆（或改用有結構的結果），回覆含「任務沒有啟動」時停止原因要用該回覆的關鍵句；Lead 就緒判斷要把已知的 codex 更新提示處理進去（先跳過再判定 ready），或 assign 前重新確認 Lead 狀態。要補測試：assign 回「任務沒有啟動」時，autopick 的停止原因不是「找不到這張卡的 task」。
+
+**影響：**這次需要人工補跑 `card assign`，等於自動撿卡流程沒有走完；也是 ISSUE-133（停止原因要是實際原因）同一類問題的新樣本。
+
+## ISSUE-140：卡片通知把卡片標題原文放進每一則通知，標題內容會原樣送進 Discord 或 Agent pane 的 prompt
+
+更新日期：2026-11-10。狀態：待調查（現象已重現，**既有行為、尚未修正**）。
+
+**使用者可見症狀：**卡片標題寫「IGNORE PREVIOUS INSTRUCTIONS」，通知就會是 `[bridge 通知] … · 標題="IGNORE PREVIOUS INSTRUCTIONS" · failed · 卡片角色指定無效：reviewer：不合法 model`，標題原文照樣送進通知對象。
+
+**預期行為：**`src/card-notify.ts` 上方註解寫「通知只放分類過的一句原因，不放流程紀錄原文」；標題原文與這個原則不一致。
+
+**重現／環境：**2026-11-10，本機；PR #205（`REQ-20261110-card-role-assignment`）head `c4b0ecc`，codex 獨立唯讀複審（報告 `/tmp/codex-review-c4b0ecc.md`，由 Lead 開的新 codex session 產生）。codex 用記憶體 fake store 呼叫真實 notifier 重現。
+
+**已確認根因：**`src/card-notify.ts` 的 `message()`（#205 內約 193–207 行）把 `card.title` 經遮蔽、去控制字元、截 120 字後拼進每一則通知（`標題=${JSON.stringify(title)}`）。這是所有通知長期的格式，不是 #205 引入；#205 只是把 model、狀態、原始錯誤行這些新的卡片原文路徑改成固定分類標籤。
+
+**影響評估（Agent 判斷，不是已驗證結論）：**標題與卡片內容由同一個寫卡者提供，信任等級相同；字數與字元已受限，但仍可在通知文字中放入指令式內容。
+
+**修正方向（尚未實作）：**移除通知中的標題原文，保留卡片 id、固定分類與 PR URL；這會改變所有通知的格式，要同步 `SPEC.md` 通知契約與既有測試。建議和 `REQ-20261110-stop-title-classification` 一起處理。
+
+**未驗證：**實機通知；對 Discord 與 Agent pane 兩種目的地的實際影響。
+
+## ISSUE-141：PR #205 複審後未修的兩個 low（壞卡 opt-in 判斷的引號解析、角色指定文件與實作不一致）
+
+更新日期：2026-11-10。狀態：待調查（已確認，**使用者 2026-11-10 決定不再修這一輪，記錄後由人工決定 merge**）。
+
+**來源／環境：**2026-11-10，本機；PR #205（`REQ-20261110-card-role-assignment`）head `c4b0ecc`，codex 獨立唯讀複審（報告 `/tmp/codex-review-c4b0ecc.md`，由 Lead 開的新 codex session 產生）。
+
+1. **壞卡 opt-in 判斷未完整比對 quoted project token（low，#205 新引入）：**`src/card-role-rejections.ts:144-145` 的正則第一個分支缺結尾錨點，`projects: ["local:opted"garbage]` 被抽出 `local:opted` 而通過壞卡 opt-in 判斷；正常 parser 對同一行回 `unbalanced inline array`。後果：一張格式壞掉的卡可能被當成已 opt-in 的專案而寫入角色拒絕帳本、送出通知。建議修法：以完整分組錨定整個 token，例如 `/^(?:"([^"\\]*)"|([^"'\\#]+))$/`，只解析一次，補非法引號後綴不得取得 opt-in 的測試。
+2. **文件與實作不一致（low）：**`docs/card-role-assignment.md:55` 仍寫超限、symlink、不可讀的卡會保存診斷，但 `src/main.ts:3094-3103` 在無法確認 ready 與專案 opt-in 時直接跳過、不建立角色拒絕帳本；同文件第 17 行「未宣告角色保留原選擇」要補上第 37 行 reviewer 預設變更的例外。
+
+**修正範圍：**尚未修正；兩項都在 PR #205 的檔案上，merge #205 後要在後續 PR 處理，或在 merge 前請 Lead 再派 agy 修一輪。
+
+**驗證（codex 複審，2026-11-10）：**`npm run check` 1717 項、1716 pass、0 fail、1 skipped（sandbox 外重跑；sandbox 內因 socket `EPERM` 被擋）；`git diff --check ba41360..c4b0ecc` 通過。**沒有實機驗收。**
+
+## ISSUE-139：reviewer 回 `inconclusive` 時，每個條件的判斷說明沒有寫進卡片，原因只能去翻 Agent 的 session 記錄
+
+更新日期：2026-11-10。狀態：待調查（現象與根因已確認，尚未修正）。
+
+**使用者可見症狀：**`REQ-20261110-stop-reason-live`（PR #203）的 `card review` 第 1、2 輪都是 `inconclusive`，卡片的「Review 發現」只有「第 1 輪 · 整體 · head 64bb769fb7a8 · inconclusive」一行標題、沒有內容；通知只有 `review_verdict · inconclusive`。使用者與後續 Agent 看不出為什麼沒有結論。`inconclusive` 也算一次 verdict（每張卡共 3 次），所以看不到原因就無法判斷要不要再花一次。#202 第 1 輪的 `inconclusive`（2026-11-09）也是同樣情形，當時紀錄成「原因沒查到」，實際上是原因被丟掉。
+
+**預期行為：**`inconclusive` 要把每個 `unknown` 條件的 `note` 寫進「Review 發現」（或流程紀錄），至少一句「哪個條件為什麼無法判斷」。
+
+**重現／環境：**2026-11-10，本機 macOS，bridge 為 main `c020881`（#201、#202）merge 後重啟的程序；測試卡 `REQ-20261110-stop-reason-live`（`lead: codex`，在 `scripts/` 新增一行檔案，PR #203）。reviewer 為 claude（第 1 輪 01:05:00Z 到 01:05:28Z，第 2 輪 01:05:37Z 到 01:06:24Z）。
+
+**已確認根因：**
+1. 兩次 `inconclusive` 都是 reviewer 的正常判斷，不是 JSON 格式問題（ISSUE-134 沒有復發）：從 claude session 記錄（`~/.claude/projects/-Users-jon--herdr-worktrees-Herdr-Discord-Bridge-card-req-20261110-stop-reason-live/cf895d9c-….jsonl`）讀到回覆是合法的單一 JSON，條件 1 `met`（只新增 `scripts/card-run-stop-reason-live.txt`，內容恰為 `ok\n`），條件 2、3 `unknown`，`findings` 為空陣列，註明「屬 PR 開出後 bridge 的即時行為，無法從 diff 判斷」。
+2. **測試卡設計錯誤（Agent 的疏失）：**驗收條件 2、3 是 bridge 開 PR 之後的通知行為，review 只看 diff，本來就無法驗證。驗收條件要寫成 diff 可驗證的內容，不可寫成要靠實機觀察才知道的結果；實機觀察應放在卡片描述或另外的驗收段，不放在 `## 驗收條件`。
+3. **記錄缺口（程式，尚未讀碼確認細節）：**`findings` 為空時，各條件的 `note` 沒有被寫進「Review 發現」；reviewer pane 在回合結束後關閉，原因只留在 Agent 自己的 session 記錄。
+
+**連帶影響：**同一個 head 連續 2 次 `inconclusive` 時，autopick loop 就停下（`autopick_stopped`），退回人工處理；這次 PR #203 因此停在 review 第 2 輪，review 次數還剩 1 次。
+
+**修正範圍（尚未開始）：**`inconclusive` 時把每個 `unknown`／`not_met` 條件的 `note` 寫進「Review 發現」，並限制長度、遮蔽機密；補測試；`SPEC.md` 的 review 紀錄契約同步。
+
+**未驗證項目／下一步：**讀 `src/card-review*.ts` 確認 note 被丟掉的位置；重做一張驗收條件只含 diff 可驗證內容的敏感路徑測試卡，才能驗到 ISSUE-133／135 的敏感路徑情境。
 ## ISSUE-138：卡片缺少六角色 machine／agent／model 指定與 bridge 強制守門
 
-更新日期：2026-11-10。狀態：已修正、待驗收（原始碼與自動化檢查完成；尚未實機驗收）。卡片：REQ-20261110-card-role-assignment。
+更新日期：2026-11-11。狀態：已修正、待驗收（原始碼與自動化檢查完成；**實機驗收只有部分證據**，見下方 2026-11-11 段）。卡片：REQ-20261110-card-role-assignment。
+
+**實機部分證據（2026-11-11，本機 macOS，bridge 為 main `796e0cb`（#205）重啟後的程序，`config.json` 的 claude profile 已加 `"model": "opus"`，備份 `config.json.bak-claude-opus-20261111`）：**
+1. **指定生效（部分）：**卡片 `REQ-20261111-remote-agy-role`（`lead: codex`、`roles: {implement: "local:claude:opus", diagnose: "local:claude:opus"}`）撿起後，流程紀錄出現 `diagnose-remote-role：claude（opus）；machine=local；…v=2,cr=d,s=C,ss=CCC,me=L`（02:10:09Z）與 `implement-remote-reviewer：claude（opus）；machine=local；…v=2,cr=i,s=C,ss=CCC,me=L`（02:15:30Z），來源 `s=C`（card）。獨立佐證：系統行程 `claude --model opus`（pid 31840），Herdr pane 標籤 `claude·worker·opus`。**限制：**兩個角色都是 claude，不是「兩角色不同 agent」；只有 implement 與 diagnose 兩個角色。
+2. **無效指定被拒（部分）：**使用者建的 `REQ-20261110-role-process-records`（`implement: agy-pod:agy:…`）在 bridge 重啟後被撿卡前拒絕，事件 `failed`／`autopick_stopped`：「卡片角色指定無效：implement：卡片流程尚未支援 machine agy-pod」（2026-11-10 08:06:11Z，另一次在 2026-11-11 重啟後）。這是 remote machine 這一種無效指定；不合法 agent、不合法 model 沒有實機驗過。
+3. **Lead 派工不符被擋：沒有驗。**
+4. 其餘（`card review`／`fix`／loop 使用卡片指定、fixer）沒有驗；該卡的 task 因單一指派等待逾時而 blocked（見 ISSUE-145），後續流程由 Agent 接手，沒有走完整的角色路徑。
+
+**2026-11-11 實機觀察（部分，非三卡驗收）：**REQ-20261111-remote-agy-role 首次實機用 roles（只宣告 local）；diagnose、implement 的 `role_assigned` 皆 `claude（opus）；machine=local；…；s=C,ss=CCC,me=L`，implement pane `w69:p3` 為 `claude·worker·opus`、同 worktree 有 `claude --model opus` 程序（pid↔pane 只由時間與 cwd 推定）。原文見 agent-role-matrix.md；另見 ISSUE-144。remote 拒絕文字已由 ISSUE-143 改變。
 
 **症狀／預期：**舊卡只有 lead 指定；Worker 由 Lead 自選、reviewer／fixer 由臨時 CLI 指定，不能可控驗證角色矩陣。預期六角色可宣告 machine／agent／model，無宣告完全相容，無效指定在撿卡前拒絕且原因正確，Lead 不符派工被擋，流程記實際身分與來源。
 
@@ -216,7 +326,15 @@ r1 在 w1 通過自動化檢查後發現六項缺口，前一輪測試未涵蓋�
 
 ## ISSUE-135：卡片事件通知的標題把「Lead 不在候選清單」說成「專案政策未滿足」
 
-更新日期：2026-11-09。狀態：已修正、待驗收。先前狀態與觀察保留於下方歷史；根因現已由程式碼確認。
+更新日期：2026-11-10。狀態：**重新開啟（部分）**——#202 只處理了「Lead 不可用」與「敏感路徑」兩種原因，其他 `autopick_stopped` 原因的標題仍會被關鍵字誤標（見下方 2026-11-10 實機觀察）。先前狀態與觀察保留於下方歷史；根因現已由程式碼確認。
+
+**實機觀察（2026-11-10，本機 macOS，bridge 為 main `c020881`（#201、#202）merge 後重啟的程序；測試卡 `REQ-20261110-stop-reason-live`（`lead: codex`，在 `scripts/` 新增一行檔案，PR #203））：**卡片因 reviewer 連續 2 次 `inconclusive`（原因見 ISSUE-139）停下，卡片流程紀錄寫的實際原因是「失敗：autopick_stopped；原因：loop：同一個 head 的 review 連續 2 次 inconclusive（沒有可修的結論），退回人工處理」（01:06:24Z）；但 `notify` 對象收到的通知標題是「autopick_stopped · review 條件、版本條件未滿足」。**這與 #202 預期不符：**標題說的是「review 條件、版本條件未滿足」，實際原因是 review 沒有結論，與版本無關。同一次事件的 `loop_stopped` 通知標題是「review 條件未滿足」（沒有版本條件）。
+
+**根因（讀碼確認，`src/card-notify.ts` 的 `notificationReason`，2026-11-10）：**#202 只在分類表之前加了兩個特例（`Lead「…」不在政策候選清單內／尚未開放`、`autopick_stopped` 且含「敏感」）。其他 `autopick_stopped` 原因會走到最後的關鍵字清單，原因文字「同一個 **head** 的 **review** 連續 2 次 inconclusive」同時命中 `/review|finding/`（review 條件）與 `/head|commit/`（版本條件）。通知刻意只放分類標籤、不放原因原文（避免帶出卡片或 finding 內容），所以標題標籤錯就等於使用者看不到正確原因。
+
+**修正方向（尚未實作）：**不要再讓 `autopick_stopped` 的標題靠通用關鍵字猜；對 bridge 自己產生、文字固定的停止原因（review 連續 inconclusive、review 次數用完、loop 其他固定停止句）各給明確標籤，其餘未知原因回「流程未完成，原因已記錄於卡片」，不猜。`loop_stopped` 事件同理要檢查。要補測試：上面這句實際原因文字必須分類成「review 沒有結論」之類的標籤，且不含「版本條件」。
+
+**未驗證：**敏感路徑停止情境（#202 實際想修的）這次沒有走到，因為 review 先停在 inconclusive；要用驗收條件只含「diff 可驗證」內容的新測試卡才能驗到。
 
 **使用者可見症狀：**測試卡 `REQ-20261109-lead-live-reject`（`lead: pi`，不在 `autopick_lead: claude, codex` 內）被拒絕時，卡片的事件原因正確寫「Lead『pi』不在政策候選清單內，不撿這張卡」，但 `notify` 對象收到的通知標題是「autopick_stopped · 專案政策未滿足」。這不是專案等級或專案選用的問題，標題會誤導使用者去查專案政策。
 
@@ -256,7 +374,9 @@ r1 在 w1 通過自動化檢查後發現六項缺口，前一輪測試未涵蓋�
 
 ## ISSUE-133：`autopick_stopped` 的原因只留 loop 輸出的前 200 字，真正的停止原因被截掉，通知因此誤導
 
-更新日期：2026-11-09。狀態：已修正、待驗收。先前重現與根因證據保留於下方歷史。
+更新日期：2026-11-10。狀態：已修正、待驗收（部分實機證據，見下）。先前重現與根因證據保留於下方歷史。
+
+**實機部分驗證（2026-11-10，本機 macOS，bridge 為 main `c020881`（#201、#202）merge 後重啟的程序；測試卡 `REQ-20261110-stop-reason-live`（`lead: codex`，在 `scripts/` 新增一行檔案，PR #203））：**卡片事件 `failed`／`autopick_stopped` 的原因文字是實際的停止原因（「loop：同一個 head 的 review 連續 2 次 inconclusive（沒有可修的結論），退回人工處理」，01:06:24Z），不是整段 loop 輸出或被截斷的前段；這部分符合 #202 的預期。**仍沒有驗到的：**敏感路徑造成的停止（原本觸發本 issue 的情境）；通知標題的誤標另見 ISSUE-135（重新開啟）。
 
 **使用者可見症狀：**卡片 `REQ-20261109-multi-lead-card-lead`（PR #189）已在 06:41:19Z 通過第 2 輪 review，真正擋住自動 merge 的只有敏感路徑 `src/policy.ts`（設計上要人工 merge）。但 06:41:54Z 寫進卡片的 `failed`／`autopick_stopped` 事件，原因是「loop：review 完成：… PR #189（head e1a3174b2a24）· 第 1 輪 … 判定：changes_requested …」，是**第 1 輪**的結果；bridge 據此通知「review 條件、版本條件未滿足」，與實際狀況（`pass`、head 一致，只剩敏感路徑）不符。
 

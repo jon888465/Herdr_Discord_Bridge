@@ -9,6 +9,8 @@ import {
   preflightRoles,
   roleProfileEnabled,
   roleTargets,
+  remoteReviewerCandidates,
+  machineOfActor,
   type CardRole,
   type CardRoles,
   type RoleContext,
@@ -96,6 +98,7 @@ import { openCardPullRequest } from "./card-pr-flow.js";
 import { attachCardPullRequest } from "./card-attach-pr.js";
 import { fetchReviewMaterial } from "./card-review-fetch.js";
 import { reviewCardPullRequest } from "./card-review-wiring.js";
+import { remoteReviewDeps, type RemoteReviewDeps } from "./remote-checkout.js";
 import { fixCardWorktree } from "./card-fix-wiring.js";
 import {
   changedFilesBetween,
@@ -929,6 +932,7 @@ export async function handleCommand(
               fetchMaterial: (repo, number) =>
                 fetchReviewMaterial(defaultExec, repo, number),
               roleContext: cardRoleContext(runtime),
+              ...remoteReviewInjection(runtime.herdr),
               flow: {
                 recordRoleStrict: options.recordRoleStrict,
                 onRoleAssigned: options.onRoleAssigned,
@@ -950,7 +954,7 @@ export async function handleCommand(
                         ? {
                             beforePromptAttempt: async () => {
                               const live = (
-                                await runtime.herdr.listAgentsWithWorkspaceNames()
+                                await liveAgentList(runtime.herdr, agent)
                               ).find((a) => a.pane_id === agent.pane_id);
                               if (!live)
                                 throw new Error("卡片角色送出前 pane 已不存在");
@@ -959,6 +963,7 @@ export async function handleCommand(
                                 live,
                                 agent.agent!,
                                 agent.workspace_id,
+                                machineOfActor(agent),
                               );
                               if (
                                 agent.model &&
@@ -1986,13 +1991,23 @@ async function teamRemove(
   );
 }
 
+export function remoteReviewInjection(herdr: HerdrClient): { remote?: RemoteReviewDeps } {
+  return herdr instanceof HerdrHub ? { remote: remoteReviewDeps(herdr) } : {};
+}
+
+/** 遠端 reviewer 讀當下清單，不用斷線快取；本機走原本的路徑。 */
+export function liveAgentList(herdr: HerdrClient, agent: AgentRecord): Promise<AgentRecord[]> {
+  const machine = machineOfActor(agent);
+  return herdr instanceof HerdrHub && machine !== "local" ? herdr.freshAgentsOn(machine) : herdr.listAgentsWithWorkspaceNames();
+}
+
 /**
  * 解析 Lead 與 Workers、登記並啟動一個持久化的 Team 任務（`team ask` 與 `card assign` 共用）。
  * 任務一經登記就會執行；回傳的 `running` 在任務結束時 resolve。
  */
 export function cardRoleContext(runtime: {
   config: {
-    machines: readonly { id: string }[];
+    machines: readonly { id: string; cardReview?: { kinds: readonly string[] } }[];
     agentProfiles?: Runtime["config"]["agentProfiles"];
   };
   pool?: { profiles: Runtime["config"]["agentProfiles"] };
@@ -2001,6 +2016,10 @@ export function cardRoleContext(runtime: {
   return {
     machineIds: runtime.config.machines.map((m) => m.id),
     profiles,
+    // 只有設定了 cardReview 的遠端才帶；沒有時與以前完全相同。
+    ...(runtime.config.machines.some((m) => m.cardReview)
+      ? { remoteMachines: runtime.config.machines.flatMap((m) => (m.cardReview ? [{ id: m.id, kinds: [...m.cardReview.kinds] }] : [])) }
+      : {}),
     enabledProfileIds: profiles
       .filter((p) => CARD_ROLES.some((role) => roleProfileEnabled(role, p)))
       .map((p) => p.id),
@@ -2070,10 +2089,7 @@ async function startTeamTask(
     }
   }
   if (roleSnapshot) workers.push(...roleTargets(roleSnapshot, workspaceId));
-  const freshSingleProfileSessions = needsFreshCodingProfileSession(
-    coding,
-    workers,
-  );
+  const remoteReviewers = runtime.config.machines?.some((m) => m.cardReview) ? remoteReviewerCandidates(cardRoleContext(runtime)) : [];
   assertCodingRoster(coding, workers.length);
   assertAgentAvailable(lead, runtime);
 
@@ -2094,6 +2110,7 @@ async function startTeamTask(
       workers,
       replan: true,
       ...(coding ? { coding: true } : {}),
+      ...(coding && remoteReviewers.length ? { remoteReviewers } : {}),
       ...(roleSnapshot
         ? {
             roleSnapshot,

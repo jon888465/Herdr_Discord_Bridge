@@ -4,7 +4,7 @@
 
 ## 範圍與語法
 
-本卡依 Lead 決定交付 machine 宣告、驗證與 **local 強制執行**。已配置 remote 仍在撿卡前拒絕「卡片流程尚未支援 machine X」，不存在的 machine 則報不存在；不提供跨機器工作副本、版本同步或 remote 派工。這是目前卡片架構限制，不代表矩陣的遠端格已通過。
+本卡依 Lead 決定交付 machine 宣告、驗證與 **local 強制執行**，不存在的 machine 報不存在。2026-11-11 起只有 reviewer 可指定開放的 remote（ISSUE-143，[remote-card-reviewer.md](remote-card-reviewer.md)），其他角色宣告 remote 仍在撿卡前拒絕。
 
 <!-- prettier-ignore -->
 ```yaml
