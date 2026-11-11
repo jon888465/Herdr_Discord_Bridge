@@ -2,7 +2,7 @@
 
 ## ISSUE-143：remote machine（agy-pod）的 agent 不能擔任卡片角色；先開放 remote card reviewer
 
-更新日期：2026-11-11。狀態：修正中（拆成兩個相依 PR：A 基礎層＝本 PR，已完成自動化檢查；B 角色接線＝PR #206，尚待 A merge 後 rebase）。**未實機驗收**；bridge 未重啟。卡片 REQ-20261111-remote-agy-role。
+更新日期：2026-11-11。狀態：修正中（拆成兩個相依 PR：A 基礎層 PR #207、B 角色接線 PR #206，B 依賴 A，A merge 後 B 要 rebase；自動化檢查通過，兩個都 merge 後改為已修正、待驗收）。**未實機驗收**；bridge 未重啟。卡片 REQ-20261111-remote-agy-role。
 
 **症狀／預期：**`reviewer: "agy-pod:agy"` 撿卡前被拒「卡片流程尚未支援 machine」，Lead 名單無 remote agent，pod 無工作副本。預期開放的 remote reviewer 標明 machine 進名單並派到 pod；remote implement／fixer 拒絕「remote 寫入尚未支援」；無 remote 配置時不變。
 
@@ -10,9 +10,9 @@
 
 **拆分原因：**原 PR #206 的 diff 為 71,377 字元，超過 card review 的 60,000 字元上限（使用者 2026-11-11 決定拆成兩個 PR）。PR A 是行為中立的基礎層（`machines[].cardReview` 設定與驗證、`unsafeRemoteValue`、`HerdrHub.requestOn／freshAgentsOn／machineConfig`、`src/remote-checkout.ts`、`test/remote-checkout.test.ts`），可單獨 merge，沒有 `cardReview` 設定時不改任何行為；PR B（#206）是角色與接線，依賴 A。
 
-**PR A 內容與獨立審查修正：**見 docs/remote-card-reviewer.md。含 marker（clone 後寫 `.git/hdb-card-review`，沿用與清理都要求 marker 相符；沒有 marker 的同 origin 目錄拒絕不碰）、遠端缺 GNU `timeout` 先檢查並丟固定標籤、`cleanup_pending` 在 console 留下 workspace id／label 與完整目錄路徑（紀錄與通知維持固定標籤）。workspace label 改為每次執行唯一（舊版每張卡唯一，`workspace.create` 失敗時會連前一次保留的 workspace 一起關掉）。前一輪審查已修：遠端以 `timeout -k 10` 包 git、斷線／本機逾時不清目錄改記 cleanup_pending、ssh 關 ForwardAgent／X11／ClearAllForwardings、紀錄與通知用固定分類、拒絕 `.` 路徑段。
+**獨立審查修正（Fable 複審 8 項，1–4 在 A，5–8 在 B）：**見 docs/remote-card-reviewer.md。(1) marker（clone 後寫 `.git/hdb-card-review`，沿用與清理都要求 marker 相符；沒有 marker 的同 origin 目錄拒絕不碰）、(2) 遠端缺 GNU `timeout` 先檢查並丟固定標籤、(3) `cleanup_pending` 在 console 留下 workspace id／label 與完整目錄路徑（紀錄與通知維持固定標籤）。(4) workspace label 改為每次執行唯一（舊版每張卡唯一，`workspace.create` 失敗時會連前一次保留的 workspace 一起關掉）。前一輪審查已修：遠端以 `timeout -k 10` 包 git、斷線／本機逾時不清目錄改記 cleanup_pending、ssh 關 ForwardAgent／X11／ClearAllForwardings、紀錄與通知用固定分類、拒絕 `.` 路徑段。
 
-**測試（2026-11-11，本機，fake exec／fake ssh；PR A 分支 `remote-checkout-base`）：**`npm run check` exit 0：1731 項／1730 pass／0 fail／1 既有 skipped；`npm run lint` 通過；`git diff --check` 通過；既有測試檔未修改。新測試涵蓋 marker 缺少／不符／清理拒絕、遠端缺 timeout（exit 127 與 1，含經 ssh 包裝）、cleanup_pending 的 console 識別與紀錄不含、label 每次執行唯一。這只是單元測試，不是 Herdr／pod 實機驗收。
+**A 測試（2026-11-11，本機，fake exec／fake ssh）：**`npm run check` exit 0：1731 項／1730 pass／0 fail／1 既有 skipped；`npm run lint` 通過；`git diff --check` 通過；既有測試檔未修改。新測試涵蓋 marker 缺少／不符／清理拒絕、遠端缺 timeout（exit 127 與 1，含經 ssh 包裝）、cleanup_pending 的 console 識別與紀錄不含、label 每次執行唯一。這只是單元測試，不是 Herdr／pod 實機驗收。
 
 **未驗證：**實機（pod 的 git 與 repo 權限、GNU `timeout`、`refs/pull` fetch、marker 寫入）；cleanup_pending 不重試；clone 被中斷留下的半成品目錄因沒有 marker 不會被清理（只記 pending，需人工）；需使用者加 `cardReview` 並重啟。PR A 單獨 merge 不會啟用任何 remote 功能。
 
