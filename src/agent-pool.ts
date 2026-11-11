@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { setTimeout as delay } from "node:timers/promises";
+import { doneAsReady, waitUntilReady } from "./agent-ready.js";
+import type { AgentStartPort } from "./agent-start.js";
 import type { AgentRecord } from "./types.js";
 import type { HerdrClient } from "./herdr.js";
 import { hasAgentSession, sameAgentSession } from "./response-stream.js";
@@ -24,7 +25,8 @@ interface PoolState {
   teams: Record<string, string[]>;
   sessions: Record<string, Binding>;
 }
-type Port = Pick<HerdrClient, "listAgentsWithWorkspaceNames" | "startProfile">;
+type Port = Pick<HerdrClient, "listAgentsWithWorkspaceNames" | "startProfile"> &
+  Partial<Pick<AgentStartPort, "request">>;
 export interface Acquisition {
   agent: AgentRecord;
   continuity: "same-session" | "new-session" | "unknown";
@@ -353,23 +355,36 @@ export class AgentPool {
     started: AgentRecord,
     kind: string,
   ): Promise<AgentRecord> {
-    const deadline = Date.now() + this.readyTimeoutMs;
-    let current = started;
-    for (;;) {
-      if (current.agent && current.agent !== kind) return current;
-      if (
-        current.agent === kind &&
-        ["idle", "done"].includes(current.agent_status)
-      )
-        return current;
-      if (Date.now() >= deadline) return current;
-      await delay(300);
-      const found = (await this.herdr.listAgentsWithWorkspaceNames()).find(
-        (a) => a.pane_id === started.pane_id,
+    // Keep one port per pool so uncertain Skip delivery cannot be retried.
+    const ready = await waitUntilReady(
+      {
+        panePort: doneAsReady(this.readyPort),
+        role: "Worker",
+        expectedKind: kind,
+        readyTimeoutMs: this.readyTimeoutMs,
+        readyPollMs: 300,
+      },
+      { paneId: started.pane_id, terminalId: started.terminal_id },
+      started.agent_status === "done"
+        ? { ...started, agent_status: "idle" }
+        : started,
+    );
+    if (!ready.ok)
+      throw new Error(
+        `started Agent does not match requested profile/workspace or is not ready: ${ready.reason}`,
       );
-      if (found) current = found;
-    }
+    return ready.agent;
   }
+  private readonly readyPort: AgentStartPort = {
+    listAgentsWithWorkspaceNames: () =>
+      this.herdr.listAgentsWithWorkspaceNames(),
+    request: (method, params, options) => {
+      if (!this.herdr.request)
+        throw new Error("startup screen access unavailable");
+      return this.herdr.request(method, params, options);
+    },
+  };
+
   /**
    * ISSUE-107：agy 啟動時沒有 session，處理完第一個回合後才被 Herdr 登記。回合結果已經核對過 session 全程一致
    * （`runTeamTurn`），這裡再確認：呼叫者持有這個 profile 的保留、綁定仍是同一個 pane／terminal／workspace／

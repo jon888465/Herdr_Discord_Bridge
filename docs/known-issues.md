@@ -42,6 +42,24 @@
 
 **未驗證／下一步：**單一 profile 的完整 fake-runtime coding 任務與 Herdr／CLI 實機 author→獨立 reviewer 流程仍待驗證。使用者回報 pi 已驗證，但其環境、卡片與流程紀錄未提供。完整 live 驗收受 ISSUE-141 的 Codex 更新提示阻擋；本輪 bridge 已依使用者授權重啟且仍在執行，failed task 不會自動補送。
 
+## ISSUE-141：Codex 更新提示阻塞 autopick Lead 與 coding profile Worker
+
+更新日期：2026-11-11。狀態：修正中。追蹤卡：`REQ-20261111-codex-update-check-skip`（task `task-2b7e7e84-9a5d-407d-9b2c-3f3a63eb795a` 受阻）。
+
+**症狀／預期：**Codex 0.163.0 啟動時出現 `Update available · 0.163.0 → 0.167.1`，選項為 Update now、Skip、Skip until next version。Lead 和 profile Worker 都可能 blocked，導致 coding assignment 失敗。預期只在精確辨識此 Codex 更新提示時選 `Skip`；絕不更新 Codex，也不自動回答一般 approval、question 或其他 blocked UI；Lead 與 Worker 均需能就緒，task／卡片關聯保持有效。
+
+**重現／環境（2026-11-11）：**Herdr 0.9.5，重啟本地 bridge 後 autopick 指派 `REQ-20261111-codex-update-check-skip`。Lead `wD:p1` 遇到更新提示，手動選 Skip 後 task 建立；roster 有 codex 與 pi。後續 Codex profile Worker `wD:p2` 又遇到相同提示，task engine 記錄 `agent.prompt: agent_blocked` 並將 assignment 標為 failed。Worker 提示在 assignment 已失敗後才手動選 Skip，task 最終仍 `blocked`／`autopick_stopped`，沒有自動重試。Codex 未更新。
+
+**先前診斷（保留歷史）：**當時只確認 profile Worker 也遇到更新提示，尚未確認完整因果。2026-11-11 讀碼與隔離入口測試確認：舊 matcher 只比對兩段文字並送 `3`，不符合本次只選 Skip 的要求；persistent profile pool 有獨立等待、未接更新提示處理；fresh session 原已用共用 waiter。原實機 agent_blocked 是否同時涉及 ready 與首次 prompt 間的競態，仍未證實；本修正不在一般 turn／question queue 自動送答。
+
+**修正範圍／驗證：**本輪未修改更新提示處理程式。`scripts/run.sh` 已依使用者要求重啟本地 plugin，bridge connected 且 Herdr server 仍為 0.9.5。實機 task 未完成診斷、review 或 verification；沒有 source diff、commit、PR 或 merge。後續依使用者要求以 `card cleanup` 移除乾淨的 wD card worktree（分支保留），並關閉 wC／wD workspace；blocked durable task 及卡片 `in_progress` 狀態保留。下一步先調查 Lead 及 profile Worker 的啟動／更新提示辨識與安全選擇，再以可重複測試及實機卡片流程驗證。
+
+**2026-11-11 本輪實作進度（尚未完成驗證）：**保留既有 ISSUE-140 dirty diff。已修改完整更新選單比對，只送 `2`（Skip）、不附 Enter、不重試，送鍵前核對 blocked 與 pane／terminal／workspace／CLI／已知 session；persistent pool 接入共用 ready wait，fresh Worker 增加預期種類檢查。修正前新增入口測試 18 項為 9 pass／9 fail；中途相關測試 118 項為 116 pass／2 fail（fixture 因送鍵前新增身分複核而需調整），新增 card/task 整合測試曾有 `syncCards.assignments` 型別錯誤，正在修正與重跑，不能視為驗證完成。初始 shell sandbox 因 `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted` 無法啟動，改以獲准的執行方式進行專案讀寫與隔離測試。未修改私人設定／policy，未操作或重派既有 durable task，未清理或重啟 bridge，未 commit／push／PR／merge／部署。執行中 bridge 尚未載入本輪修改，舊失敗不補送。下一步：完成整合測試、全套檢查與 SPEC 同步，再交獨立 session review；實機驗收仍待另行授權安排。
+
+**後續驗證（2026-11-11）：**全套 `npm run check` 的 typecheck／build 成功，預設並行測試曾發現 Agent 身分錯誤訊息、review／fix 舊更新選單 fixture 不符合新契約，以及 durable question 計時失敗；前述訊息與 fixture 已修正。該輪高負載下停於約 test 1199，已停止本輪測試 runner，沒有最終總結，不能算全套通過；新版另以限制並行重跑。使用者後續授權 commit／PR；runtime 重啟／部署仍未授權，獨立 review 尚未進行。
+
+**入口最終驗證（2026-11-11）：**`npm run build`、`npm run typecheck`、`npm run lint`（201 TypeScript files）、`git diff --check` 通過；`node --test dist/test/codex-update-startup.test.js` 為 **34/34 pass、0 fail、0 cancelled**，包含真實 card command／durable coding task／temporary Git repository 的整合測試，未連線真實 Herdr／Discord。相關 11 檔限制並行測試為 294 項、271 pass、0 fail、23 cancelled（durable engine 的 whole-team cancellation Promise 未結束導致後續取消），不能算全部通過；另行重跑 engine 與全套。狀態維持修正中，直到剩餘自動檢查確認；實機仍待驗收。
+
 ## ISSUE-138：卡片缺少六角色 machine／agent／model 指定與 bridge 強制守門
 
 更新日期：2026-11-10。狀態：已修正、待驗收（原始碼與自動化檢查完成；尚未實機驗收）。卡片：REQ-20261110-card-role-assignment。

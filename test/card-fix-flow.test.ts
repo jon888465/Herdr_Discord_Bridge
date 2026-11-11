@@ -319,22 +319,23 @@ test("a skipped update prompt is reported in the fix result, and a pane still bl
   t.mock.method(console, "log", () => {});
   const done = setup({
     start: () => fixer({ agent: "codex", agent_status: "blocked" }),
-    listing: [[fixer({ agent: "codex", agent_status: "idle" })]],
+    listing: [[fixer({ agent: "codex", agent_status: "blocked" })], [fixer({ agent: "codex", agent_status: "idle" })]],
     screens: [CODEX_UPDATE, "ready"],
   });
   const ok = await runCardFix(done.deps, input({ requestedKind: "codex" }));
   assert.ok(ok.ok);
-  assert.deepEqual(ok.ok && ok.updateSkip, { kind: "codex", paneId: "w5:p9", key: "3" });
+  assert.deepEqual(ok.ok && ok.updateSkip, { kind: "codex", paneId: "w5:p9", key: "2" });
   assert.ok(done.log.includes("pane.close"));
 
   const stuck = setup({
     start: () => fixer({ agent: "codex", agent_status: "blocked" }),
     screens: [CODEX_UPDATE],
+    listing: [[fixer({ agent: "codex", agent_status: "blocked" })]],
   });
   const kept = await runCardFix(stuck.deps, input({ requestedKind: "codex" }));
   assert.ok(kept.ok);
   assert.equal(kept.ok && kept.paneKept, true);
-  assert.equal(kept.ok && kept.updateSkip?.key, "3");
+  assert.equal(kept.ok && kept.updateSkip?.key, "2");
   assert.equal(stuck.log.includes("pane.close"), false);
 });
 

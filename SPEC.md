@@ -163,13 +163,15 @@ name/alias、agent kind、pane ID、terminal ID 或 terminal title；若有歧�
 與設定的 workspace allowlist。Pane 不存在、agent 已退出、workspace 改變或
 mapping 過期時，一律 fail closed。
 
-### 啟動就緒與更新提示（ISSUE-118）
+### 啟動就緒與更新提示（ISSUE-118／141，2026-11-11）
 
-就緒狀態不保證 Herdr 已登記 active named agent：autopick 等待只檢查 agent_status；Team 首次 prompt 處理見 ISSUE-137。
+共用 `waitUntilReady` 用於 autopick 來源 Lead、worktree Lead、fresh role／單一 coding profile Worker；persistent profile pool 亦接入此等待。只有預期 CLI 已被辨識且 idle／done（呼叫端明確選用 doneAsReady）才就緒；pane／terminal／workspace／CLI 被替換即失敗。就緒不保證 Herdr 已登記 active named agent，首次 prompt 的有界 agent_not_ready 重試仍見 ISSUE-137。
 
-`src/agent-ready.ts` 的 `waitUntilReady` 在啟動或輪詢到 `blocked` 時，只有成功讀取 visible 畫面、CLI 種類與已知更新提示清單相符，且畫面不含信任、權限、approval 或登入字樣時，才送清單指定的跳過鍵。**只自動跳過更新提示，信任與權限提示仍由人處理**。目前清單只有 codex：同時包含 `Update available` 與 `Skip until next version`，送 `3`；claude、agy 與其他 CLI 尚無清單項目，不猜按鍵。
+僅在 blocked 且 visible 畫面完整符合觀察到的 Codex 更新選單時自動選 **`2. Skip`**。畫面須有 `Update available · <semver> → <semver>` 與依序精確選項 `1. Update now`、`2. Skip`、`3. Skip until next version`；容許空白、ANSI 樣式、`›` 選取標記、已知 release notes 網址、`enter continue · esc skip` 底列，以及既有觀察到的 brew 更新說明。任何額外文字、一般 question、approval、信任、權限、登入、缺選項、不同編號或其他 CLI 均 fail closed，不送按鍵。不得選 Update now 或 Skip until next version，也不改私人設定／policy。
 
-每個 bridge port 下的同一 pane 最多嘗試送一次（包含重入／並行等待；不確定送達也不重試），以 `pane.send_keys`、`retries: 0` 送出且不附 Enter；送出後 console log 記錄 CLI、pane 與按鍵，重讀畫面，若仍是同一提示或讀取失敗，沿用原 `BLOCKED_AT_START` 失敗，不關閉 pane。其他未知、信任、權限、登入或讀取失敗畫面不送按鍵；更新提示混有上述字樣也不送。畫面已離開更新提示則繼續既有就緒輪詢，後續再次 blocked 仍失敗並保留 pane。此變更只適用呼叫此共用函式的流程；autopick `startLead` 與 profile pool 的獨立等待流程未接線，ISSUE-117、ISSUE-116 狀態不變。原始碼與假 port 測試已完成，尚未實機驗收。
+送鍵前重查 blocked 及 pane／terminal／workspace／CLI／已知 session。使用 `pane.send_keys`、`keys: ["2"]`、`retries: 0`，不附 Enter；同底層 port／pane（含 doneAsReady、並行及重入）最多一次，不確定送達不重試。送後 visible 讀取失敗或仍有更新選單片段即失敗，否則繼續輪詢就緒。Skip 的送出與 updateSkip 紀錄不代表 readiness、assignment 或 task 成功。未知／blocked fresh Worker 保留現場，pool 保持 uncertain 且不寫成功 binding；失敗不能新增 coding pass artifact 或將卡片設 done。Lead 來源啟動失敗沿用關閉本次新 workspace，worktree Lead blocked 沿用保留 worktree、卡片 ready 且不建立 task；已建立 task 的 Worker 失敗保留 task/card 關聯及 in_progress 狀態。
+
+驗證須覆蓋 Lead、fresh／persistent Worker 的目標選單 Skip、其他 blocked UI 零按鍵、身分替換、讀取／送達失敗、一次性防重、task/card 關聯與 coding gate 不誤成功。原始碼與自動化結果見 ISSUE-141；真實 Discord／Herdr／Codex 0.163.0 尚待驗收，未重啟 bridge，不補送舊失敗。
 
 ## 5. Discord 指令與輸出
 

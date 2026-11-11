@@ -420,25 +420,26 @@ test("a failing agent listing while waiting is inconclusive with the reason, and
 test("a skipped update prompt is reported in the review result; a pane still blocked afterwards is kept and marked as kept, not as a failed close", async (t) => {
   // 自動跳過會 console.log；不要讓測試輸出混進 node:test 子行程的 stdout。
   t.mock.method(console, "log", () => {});
-  const update = "Update available · 0.166.0 → 0.167.0\n3. Skip until next version";
+  const update = "Update available · 0.166.0 → 0.167.0\n1. Update now\n2. Skip\n3. Skip until next version";
   const done = setup({
     start: () => reviewer({ agent: "codex", agent_status: "blocked" }),
-    listing: [[reviewer({ agent: "codex", agent_status: "idle" })]],
+    listing: [[reviewer({ agent: "codex", agent_status: "blocked" })], [reviewer({ agent: "codex", agent_status: "idle" })]],
     screens: [update, "ready"],
   });
   const ok = await runCardReview(done.deps, input({ requestedKind: "codex" }));
   assert.ok(ok.ok);
-  assert.deepEqual(ok.ok && ok.updateSkip, { kind: "codex", paneId: "w5:p9", key: "3" });
+  assert.deepEqual(ok.ok && ok.updateSkip, { kind: "codex", paneId: "w5:p9", key: "2" });
 
   const stuck = setup({
     start: () => reviewer({ agent: "codex", agent_status: "blocked" }),
     screens: [update],
+    listing: [[reviewer({ agent: "codex", agent_status: "blocked" })]],
   });
   const kept = await runCardReview(stuck.deps, input({ requestedKind: "codex" }));
   assert.ok(kept.ok);
   assert.equal(kept.ok && kept.paneKept, true);
   assert.match(kept.ok ? (kept.closeNote ?? "") : "", /保留/);
-  assert.equal(kept.ok && kept.updateSkip?.key, "3");
+  assert.equal(kept.ok && kept.updateSkip?.key, "2");
   assert.equal(stuck.log.includes("pane.close"), false);
 });
 

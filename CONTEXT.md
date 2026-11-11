@@ -193,3 +193,7 @@ ISSUE-127（2026-11-08，待實機驗收）：新增 role_assigned 固定模板�
 ## Card role assignments
 
 - [卡片角色指定](docs/card-role-assignment.md)：REQ-20261110-card-role-assignment，2026-11-10 原始碼實作、待驗收（ISSUE-138）。六角色 machine／agent／model 宣告、preflight、Lead 計畫／實際身分守門、fresh session、strict 角色紀錄及獨立壞卡診斷。Lead 決定本卡 machine 只交付 local 強制執行；已配置 remote 明確拒絕，跨機器尚未支援。無宣告卡維持舊行為；merge／重啟後三張實機驗收卡尚未執行。
+
+## Codex startup update menu (ISSUE-141, 2026-11-11)
+
+Lead and fresh/persistent profile Worker readiness use the strict observed update menu matcher and only send `2. Skip`, once, after identity checks. Other blocked UI fails closed. Task/card failure evidence remains durable; live acceptance is pending and the bridge has not been restarted. See SPEC.md and docs/known-issues.md.
