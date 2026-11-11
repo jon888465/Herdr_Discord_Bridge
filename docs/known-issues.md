@@ -97,6 +97,8 @@ REQ-20261111-remote-agy-role 在 02:07:43Z picked 後，02:07:55Z 記 failed「t
 
 **2026-11-11 更正與修正：**讀碼確認 `prepareCardWorktree` 在算 `agentReady` **之前**就經 `awaitReady` 跳過更新提示；下方「跳過發生在判斷之後」是**未證實的推論**，當時讓 assign 回「任務沒有啟動」的分支仍未確認。已確認：`src/autopick.ts` 忽略 assign 回覆才誤報「找不到這張卡的 task」；現在回覆含「任務沒有啟動」就停在 `assign`、只回固定摘要，不再等 task／commit／PR／loop。測試：worktree-flow 與 card-command-main 以真的 `matchUpdatePrompt` 證明送 `3` → 就緒 → `startTask`；autopick 三案。未驗證：實機 codex Lead 的 autopick。
 
+**與 PR #211 的關係（2026-11-11）：**main 上的 PR #211（使用者合併，`654cfe0`）已在 `docs/known-issues.md` 以「PR #211 原 ISSUE-141：Codex 更新提示阻塞 autopick Lead 與 coding profile Worker」記錄**同一個現象**，並修了更新提示本身：精確比對整個 Codex 更新選單、跳過鍵改成 `2`（Skip）、送鍵前重驗 pane 身分、就緒判斷要求先觀察到預期的 kind。本條（REQ-20261111-agent-first-run-prompts）的修正是**另一部分**：autopick 不再忽略 `card assign` 的回覆，回覆含「任務沒有啟動」就停在 `assign`、只回固定摘要，不再誤報「找不到這張卡的 task」。兩者合起來才是完整處理；本條新增的兩個測試（`test/card-worktree-flow.test.ts`、`test/card-command-main.test.ts`）已對齊 #211 的行為（完整選單畫面、跳過鍵 `2`、送鍵前 blocked 身分重驗）。實機上更新提示是否已不再讓 assign 回「任務沒有啟動」仍**未驗證**。
+
 **使用者可見症狀：**`REQ-20261111-remote-agy-role`（`lead: codex`）在 bridge 重啟後 2026-11-11 02:07:43Z 被撿起，02:07:55Z 卡片流程紀錄只有 `worktree_created`，隨即 `failed`／`autopick_stopped`，原因「task：task 沒有完成：找不到這張卡的 task」；沒有 `role_assigned`（lead）、`assigned`、`started`。Lead（codex）的 workspace `w69` 留著，卡片仍是 `ready`。使用者看到的原因沒有說真正發生什麼（Lead 還沒就緒）。
 
 **預期行為：**Lead 就緒前不要派工，或等到就緒再 assign；若 assign 沒有啟動任務，停止原因要說「Lead 在 assign 時不是 idle（例如 codex 更新提示）」，不是「找不到 task」。
