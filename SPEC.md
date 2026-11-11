@@ -810,7 +810,7 @@ PR #189（`88e1ce6`）已於 2026-11-09 merge，並重啟 bridge 載入（`card 
 
 ### 遠端卡片 reviewer 基礎層（2026-11-11，ISSUE-143，PR A，未實機驗收）
 
-`machines[].cardReview {root, kinds}` 選填，未設定時行為完全不變；本層不接線任何卡片角色（角色接線在 PR B）。遠端 checkout 目錄 `<root>/<owner>__<repo>__<卡片雜湊>`，clone 後在 `.git/hdb-card-review` 寫 marker，沿用既有目錄與清理一律要求 marker 存在且內容相符，沒有 marker 的目錄（即使 origin 相同）拒絕、不碰；第一個遠端指令檢查 GNU `timeout`，缺少時丟固定標籤「遠端缺少 timeout」；fetch 後 HEAD 須等於 PR head；斷線不 fallback 本機；紀錄與通知只帶固定分類，`cleanup_pending` 的 workspace id／label 與目錄路徑只進 console。見 docs/remote-card-reviewer.md。
+`machines[].cardReview {root, kinds}` 選填，未設定時行為完全不變；本層不接線任何卡片角色（角色接線在 PR B）。遠端 checkout 目錄 `<root>/<owner>__<repo>__<卡片雜湊>`，clone 後在 `.git/hdb-card-review` 寫 marker，沿用既有目錄與清理一律要求 marker 存在且內容相符，沒有 marker 的目錄（即使 origin 相同）拒絕、不碰；第一個遠端指令檢查 GNU `timeout`，缺少時丟固定標籤「遠端缺少 timeout」；workspace label 每次執行唯一；fetch 後 HEAD 須等於 PR head；斷線不 fallback 本機；紀錄與通知只帶固定分類，`cleanup_pending` 的 workspace id／label 與目錄路徑只進 console。見 docs/remote-card-reviewer.md。
 
 ### 卡片角色 machine／agent／model（2026-11-10，ISSUE-138，已修正、待驗收）
 

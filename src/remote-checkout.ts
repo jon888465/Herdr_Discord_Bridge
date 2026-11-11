@@ -1,6 +1,6 @@
 // 卡片 remote reviewer（REQ-20261111-remote-agy-role）。RemoteFailure.label 是可進紀錄的固定分類，detail 只進 console。
 
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { startAgentInPane, type AgentStartPort } from "./agent-start.js";
 import { runCardReview, type ReviewFlowDeps, type ReviewFlowInput, type ReviewFlowResult } from "./card-review-flow.js";
@@ -196,8 +196,9 @@ export async function reviewOnRemote(
     throw new Error("origin 不是與 PR 相同的 GitHub repo，不在遠端 clone");
   const exec = remote.exec(machine);
   const dir = remoteCheckoutDir(root, origin.owner, origin.repo, input.card.id);
-  const label = `review-${dir.slice(-10)}`;
   const hash = cardHash(input.card.id);
+  // 每次執行唯一：workspace.create 失敗時依 label 關閉，不能關到前一次保留給人處理信任提示的 workspace。
+  const label = `review-${hash}-${randomBytes(4).toString("hex")}`;
   let owned = false;
   // cleanup_pending 的定位資訊（workspace id／label、完整目錄）只進 console，紀錄與通知維持固定標籤。
   const cleanup = async (workspace?: string, uncertain = false): Promise<string> => {

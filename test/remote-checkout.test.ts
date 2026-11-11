@@ -181,11 +181,13 @@ test("hub requestOn stays on that machine; a down remote fails instead of return
 // reviewOnRemote 在進入 review flow 之前的失敗路徑（flow 與本機 Agent 在這裡都不會被呼叫）。
 function reviewHarness(o: { exec: rc.RemoteExec; closeFails?: boolean; createFails?: boolean }) {
   const closed: string[] = [];
+  const created: string[] = [];
   const remote: rc.RemoteReviewDeps = {
     machine: () => ({ id: "pod", ssh: "pod", socket: "/s", cardReview: { root: ROOT, kinds: ["agy"] } }),
     exec: () => o.exec,
     originUrl: async () => "git@github.com:acme/repo.git\n",
-    createWorkspace: async () => {
+    createWorkspace: async (_m, _cwd, label) => {
+      created.push(label);
       if (o.createFails) throw new Error("pod stderr SECRET");
       return { workspaceId: "pod:w3", paneId: "pod:w3:p1" };
     },
@@ -199,7 +201,7 @@ function reviewHarness(o: { exec: rc.RemoteExec; closeFails?: boolean; createFai
   };
   const run = () =>
     rc.reviewOnRemote(remote, {} as never, "pod", { card: { id: "REQ-1", title: "SECRET", roles: {} }, pr: { number: 7, headSha: HEAD }, prRepo: "acme/repo", localWorktree: "/l" } as never);
-  return { run, closed };
+  return { run, closed, created };
 }
 
 /** clone 之後目錄才存在（模擬剛建立的 checkout）。 */
@@ -231,13 +233,14 @@ test("cleanup_pending: uncertain timeout keeps the directory; console names the 
 
 test("cleanup_pending: workspace close failure logs workspace id and label to console only; marker-less directory is never deleted", async (t) => {
   const dir = rc.remoteCheckoutDir(ROOT, "acme", "repo", "REQ-1");
-  const label = `review-${dir.slice(-10)}`;
   // 沒有 marker 的目錄（例如別人的 repo 剛好同路徑）：清理拒絕，不刪，目錄 pending。
   const f = fake({ marker: null });
   const exec = existsAfterClone(f.exec, dir);
   const h = reviewHarness({ exec, createFails: true, closeFails: true });
   const { lines, error } = await captured(t, () => h.run());
   match(error, /遠端 review 失敗：workspace 失敗.*cleanup_pending：workspace、directory/);
+  const label = h.created[0]!;
+  match(label, /^review-[0-9a-f]{10}-[0-9a-f]{8}$/);
   ok(lines.includes(`cleanup_pending workspace ${label} label ${label}`));
   ok(lines.includes(`cleanup_pending directory ${dir}`));
   ok(!f.calls.some((a) => a[0] === "rm"));
@@ -247,4 +250,19 @@ test("cleanup_pending: workspace close failure logs workspace id and label to co
   const h2 = reviewHarness({ exec: existsAfterClone(ok2.exec, dir), createFails: true, closeFails: true });
   const second = await captured(t, () => h2.run());
   equal(second.error, "Error: 遠端 review 失敗：workspace 失敗（cleanup_pending：workspace）");
+});
+
+test("workspace label is unique per run, so a failed create never closes a workspace an earlier run kept for the trust prompt", async (t) => {
+  const hash = rc.cardHash("REQ-1");
+  const labels: string[] = [];
+  for (let i = 0; i < 2; i++) {
+    const h = reviewHarness({ exec: existsAfterClone(fake().exec, rc.remoteCheckoutDir(ROOT, "acme", "repo", "REQ-1")), createFails: true });
+    await captured(t, () => h.run());
+    equal(h.created.length, 1);
+    equal(h.closed.length, 1);
+    equal(h.closed[0], h.created[0]); // 失敗清理關的是這次的 label
+    match(h.created[0]!, new RegExp(`^review-${hash}-[0-9a-f]{8}$`));
+    labels.push(h.created[0]!);
+  }
+  ok(labels[0] !== labels[1]);
 });
