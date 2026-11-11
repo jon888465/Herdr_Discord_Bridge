@@ -2,7 +2,7 @@
 
 ## ISSUE-143：remote machine（agy-pod）的 agent 不能擔任卡片角色；先開放 remote card reviewer
 
-**2026-11-11 reviewer 預先信任（已修正、待驗收，**沒有任何實機驗收**）：**契約見 SPEC.md「遠端 reviewer 的 agy 預先信任」。經過：bridge card review 三輪（第 1 輪 head 3023316、第 2 輪 b580fe9、第 3 輪 9302325）**都是 changes_requested，review 次數已用完，這個 PR 需要人工決定 merge**。第 1 輪：F1 `verifyCardWorktree` 驗 `.git`、gitdir、回指、HEAD 分支，不符拒絕且不寫設定；F2 只移除本次新增的；F3 逾時 124／137 與寫入失敗皆 uncertain，清理嘗試移除、失敗記 pending；F4 uncertain 不啟動 reviewer（仍在跑的寫入可能在清理讀設定後才完成），一律記 `cleanup_pending：trust`；F5 補 C1。第 2 輪：F6 保留 pane 時保留信任（pane 還在等人處理）並記 `cleanup_pending：trust`；F7 腳本內 `mkdir` 鎖（`<root>/.hdb-agy-settings-backups/lock`）涵蓋雜湊重驗到 `mv`，逾時 exit 19，超過 1 分鐘的殘留鎖回收、未過期的不碰；F8 沒有取消訊號（取消即 runTurn 或 exec 丟錯），補兩個測試。第 3 輪：F11 SPEC 仍寫「不信任遠端 agy」而與預先信任互相矛盾 → 已改成一致（SPEC、README 兩份、docs/remote-card-reviewer.md；ISSUE-113 的「遠端 agy 不在範圍」是歷史紀錄，不改）；F12 本條缺測試證據 → 已補。**F9、F10 為已知限制，未採納**：F9 兩個等待者在毫秒級同時判定同一把鎖過期並回收時，後者可能刪掉前者剛重建的新鎖，兩個 writer 可能同時通過雜湊檢查而互相覆蓋設定；bridge 一次只做一張卡、同一台 pod 同時寫兩張卡的機會低，視窗已縮小但無法完全消除，pod 上 `find -mmin` 未驗證。F10 reviewer 卡在啟動提示而保留 pane 時，信任與目錄保留、記 `cleanup_pending：trust`、不自動移除（不重試，需人工撤銷），理由是 pane 還在等人處理、移除信任對仍在執行的 agy 的影響沒有驗證；reviewer（codex 第 2、3 輪）認為此時也應嘗試撤銷，此取捨未採納。**驗證（單元測試，不是實機驗收）：**`npm run check`（2026-11-11，本機 macOS，卡片 worktree，head 9302325，本輪重跑確認）：1814 項、1813 pass、0 fail、1 skipped；`npm run lint`（206 個 TypeScript 檔）、`git diff --check` 通過。測試在 `test/agy-worktree-trust.test.ts`、`test/remote-agy-trust.test.ts`（含真 sh 並行與鎖，本機 macOS，不是 pod）；為 F1 改了 `fixture()`（加 `linkWorktree`，既有斷言未改）。**沒有任何實機驗收：**bridge 沒重啟、沒在 pod 上跑過。其他限制：agy 執行中同時改寫設定檔的競態只能縮小視窗；本機 worktree 名稱只要求 `card-req-` 開頭；pod 的 `sha256sum`／`base64 -d`／`mktemp`／`cp -p`／`find -mmin` 未驗證。
+**2026-11-11 reviewer 預先信任（已修正、待驗收；**主要成功路徑已於 2026-11-11 實機驗過一次，失敗路徑尚未驗**）：**契約見 SPEC.md「遠端 reviewer 的 agy 預先信任」。經過：bridge card review 三輪（第 1 輪 head 3023316、第 2 輪 b580fe9、第 3 輪 9302325）**都是 changes_requested，review 次數已用完，這個 PR 需要人工決定 merge**。第 1 輪：F1 `verifyCardWorktree` 驗 `.git`、gitdir、回指、HEAD 分支，不符拒絕且不寫設定；F2 只移除本次新增的；F3 逾時 124／137 與寫入失敗皆 uncertain，清理嘗試移除、失敗記 pending；F4 uncertain 不啟動 reviewer（仍在跑的寫入可能在清理讀設定後才完成），一律記 `cleanup_pending：trust`；F5 補 C1。第 2 輪：F6 保留 pane 時保留信任（pane 還在等人處理）並記 `cleanup_pending：trust`；F7 腳本內 `mkdir` 鎖（`<root>/.hdb-agy-settings-backups/lock`）涵蓋雜湊重驗到 `mv`，逾時 exit 19，超過 1 分鐘的殘留鎖回收、未過期的不碰；F8 沒有取消訊號（取消即 runTurn 或 exec 丟錯），補兩個測試。第 3 輪：F11 SPEC 仍寫「不信任遠端 agy」而與預先信任互相矛盾 → 已改成一致（SPEC、README 兩份、docs/remote-card-reviewer.md；ISSUE-113 的「遠端 agy 不在範圍」是歷史紀錄，不改）；F12 本條缺測試證據 → 已補。**F9、F10 為已知限制，未採納**：F9 兩個等待者在毫秒級同時判定同一把鎖過期並回收時，後者可能刪掉前者剛重建的新鎖，兩個 writer 可能同時通過雜湊檢查而互相覆蓋設定；bridge 一次只做一張卡、同一台 pod 同時寫兩張卡的機會低，視窗已縮小但無法完全消除，pod 上 `find -mmin` 未驗證。F10 reviewer 卡在啟動提示而保留 pane 時，信任與目錄保留、記 `cleanup_pending：trust`、不自動移除（不重試，需人工撤銷），理由是 pane 還在等人處理、移除信任對仍在執行的 agy 的影響沒有驗證；reviewer（codex 第 2、3 輪）認為此時也應嘗試撤銷，此取捨未採納。**驗證（單元測試，不是實機驗收）：**`npm run check`（2026-11-11，本機 macOS，卡片 worktree，head 9302325，本輪重跑確認）：1814 項、1813 pass、0 fail、1 skipped；`npm run lint`（206 個 TypeScript 檔）、`git diff --check` 通過。測試在 `test/agy-worktree-trust.test.ts`、`test/remote-agy-trust.test.ts`（含真 sh 並行與鎖，本機 macOS，不是 pod）；為 F1 改了 `fixture()`（加 `linkWorktree`，既有斷言未改）。**實機驗收（2026-11-11 13:07Z，本機 macOS，bridge 為 main `b44ab90`（#211、#212）、pod 為 agy 1.5.2；pod 工具 `sha256sum`／`base64`／`mktemp`／`cp`／`find`／`timeout`／`realpath` 都存在；測試卡 `REQ-20261111-pretrust-live`、PR #214，`roles: {reviewer: "agy-pod:agy"}`）：**reviewer 13:07:16Z 啟動（`role_assigned`：reviewer（第 1 輪）：agy；machine=agy-pod；v=2,cr=-,s=C,ss=CCD,me=U）、13:07:40Z `pass`，**沒有人介入、agy 沒有停在信任提示**（#210 同情境曾停在「Do you trust…」）。輪詢 pod：checkout `…__9a229d824a` 出現後 `trustedWorkspaces` 多了這一項，約 20 秒後被移除；結束時 `trustedWorkspaces` 只剩原本三項，`/root/herdr-card-review` 沒有 checkout 目錄，pod 只剩原本的 `w2:p1`。**沒有驗證：**寫入失敗、狀態不明（斷線、124／137）、`cleanup_pending：trust`、保留 pane 時保留信任、清理失敗；舊的殘留項目 `…__163ee5854b`（#210 留下，bridge 不碰）仍在 `trustedWorkspaces`，需人工決定是否移除。新發現見 ISSUE-149、ISSUE-150。其他限制（修正當時的紀錄）：agy 執行中同時改寫設定檔的競態只能縮小視窗；本機 worktree 名稱只要求 `card-req-` 開頭；pod 的 `sha256sum`／`base64 -d`／`mktemp`／`cp -p`／`find -mmin` 未驗證。
 
 更新日期：2026-11-11。狀態：已修正、待驗收（兩個 PR 都已 merge：A 基礎層 #207 `addee48`、B 角色接線 #206 `9ff908e`；自動化檢查與 codex 獨立複審通過；**主要成功路徑已實機驗過一次**，見下方 2026-11-11 實機段；失敗路徑與其他情境尚未驗）。卡片 REQ-20261111-remote-agy-role；實機驗收卡 REQ-20261111-remote-reviewer-live（PR #210）。
 
@@ -34,6 +34,30 @@
 **A 測試（2026-11-11，本機，fake exec／fake ssh）：**`npm run check` exit 0：1739 項／1738 pass／0 fail／1 既有 skipped；`npm run lint`、`git diff --check` 通過；既有測試檔未修改。單元測試不是 Herdr／pod 實機驗收。
 
 **未驗證：**實機（pod 的 git 與 repo 權限、GNU `timeout`、`realpath`、`refs/pull` fetch、marker 寫入）；cleanup_pending 不重試；clone 中斷留下的半成品沒有 marker，不會被清理（記 pending，需人工）；需使用者加 `cardReview` 並重啟。A 單獨 merge 不會啟用任何 remote 功能。
+
+## ISSUE-150：task 內本機 agy 的 review（`review-card-acceptance`）回報「no passing review for the current version」，task 失敗
+
+更新日期：2026-11-11。狀態：待調查（現象已觀察一次；原因未查）。
+
+**使用者可見症狀：**`REQ-20261111-pretrust-live`（一行檔案卡，`lead: codex`）：implement、verify 都完成，13:01:21Z 本機 agy 的 `review-card-acceptance` 之後 task 以「no passing review for the current version」失敗，卡片 worktree 有未 commit 的檔案（內容 `ok`，正確）。Agent 接手 commit、開 PR #214、`card attach-pr`，後續 remote reviewer 正常。
+
+**預期行為：**一行檔案這種卡 task 內 review 可通過；失敗時要能看出 review 回報了什麼。
+
+**根因：**未確認（沒有讀 agy 的 review 輸出與 task artifact）。與 ISSUE-147（本機 agy Worker 第一個 prompt 沒收到）可能相關，沒有驗證。
+
+**未驗證／下一步：**讀 task 的 review artifact；判斷是 agy 的回報格式、版本指紋，還是 review 沒有真正執行。
+
+## ISSUE-149：pod 上 agy 設定備份只增不減，且卡片流程紀錄沒有 pod 端信任寫入／移除事件
+
+更新日期：2026-11-11。狀態：待調查（現象已觀察；沒有修正）。
+
+**使用者可見症狀：**(1) 每次預先信任寫入都在 `/root/herdr-card-review/.hdb-agy-settings-backups/` 留一份 `settings-<時間>-<pid>.json`，一次 reviewer（寫入、移除）就多 2 份，沒有任何清理；長期使用會一直累積。(2) 本機 worktree 的信任有 `agy_worktree_trust` 事件，pod 端的寫入與移除沒有對應的卡片流程紀錄，驗收時只能靠 ssh 讀 pod 檔案佐證。
+
+**預期行為：**備份有數量或時間上限；pod 端信任的寫入與移除在卡片紀錄留痕（固定標籤，不含路徑原文）。
+
+**根因：**設計取捨，#212 只保證「改前備份」，沒有定保留數量；紀錄缺口未查是否為遺漏。
+
+**未驗證／下一步：**決定保留數量（例如最近 N 份）；補事件。不影響 review 結果。
 
 ## ISSUE-147：task 內本機 agy Worker 沒有收到第一個 prompt，Herdr 回 ok 但 pane 是空的，task 一直等到逾時
 

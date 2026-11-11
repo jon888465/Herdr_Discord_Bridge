@@ -814,7 +814,7 @@ Autopick 建立 Lead workspace 後、啟動 Agent 前，把 id 與實際 label �
 PR #189（`88e1ce6`）已於 2026-11-09 merge，並重啟 bridge 載入（`card policy` 顯示政策載入正常）；Discord／Herdr／CLI 實機驗收仍待辦，尤其 agy／pi 的 coding 證據要求不變。
 
 
-**遠端 reviewer 的 agy 預先信任（REQ-20261111-agent-first-run-prompts，2026-11-11，**沒有任何實機驗收**，只有單元測試）：**預設 bridge 仍不替人回答信任提示；**唯一例外**是卡片的 remote reviewer 且 reviewer 是 agy 時，bridge 只把「bridge 管理、marker 相符的那一個 checkout 目錄」（`<root>/<owner>__<repo>__<hash>`）加進 pod 的 `$HOME/.gemini/antigravity-cli/settings.json` `trustedWorkspaces`，不信任 root、上層或其他路徑。時機：reviewer 啟動前寫入（固定腳本、`mkdir` 鎖、備份後 `mv`）；刪目錄前清理，只移除本次新增的項目（原本就在的不碰）。成功、失敗、例外、逾時都清理；寫入確定失敗不中止 review；**寫入狀態不明（斷線、遠端 timeout 124／137、取消）不啟動 reviewer**，清理仍嘗試移除並一律記 `cleanup_pending：trust` 且保留目錄；reviewer 卡在啟動提示而保留 pane 時**信任與目錄都保留**並記 `cleanup_pending：trust`。`cleanup_pending：trust` 不自動重試，需人工撤銷。限制與已知取捨見 ISSUE-143（F9、F10）。
+**遠端 reviewer 的 agy 預先信任（REQ-20261111-agent-first-run-prompts，2026-11-11，主要成功路徑已實機驗過一次（寫入、reviewer 不停在提示、review 後移除；見 ISSUE-143），失敗路徑只有單元測試）：**預設 bridge 仍不替人回答信任提示；**唯一例外**是卡片的 remote reviewer 且 reviewer 是 agy 時，bridge 只把「bridge 管理、marker 相符的那一個 checkout 目錄」（`<root>/<owner>__<repo>__<hash>`）加進 pod 的 `$HOME/.gemini/antigravity-cli/settings.json` `trustedWorkspaces`，不信任 root、上層或其他路徑。時機：reviewer 啟動前寫入（固定腳本、`mkdir` 鎖、備份後 `mv`）；刪目錄前清理，只移除本次新增的項目（原本就在的不碰）。成功、失敗、例外、逾時都清理；寫入確定失敗不中止 review；**寫入狀態不明（斷線、遠端 timeout 124／137、取消）不啟動 reviewer**，清理仍嘗試移除並一律記 `cleanup_pending：trust` 且保留目錄；reviewer 卡在啟動提示而保留 pane 時**信任與目錄都保留**並記 `cleanup_pending：trust`。`cleanup_pending：trust` 不自動重試，需人工撤銷。限制與已知取捨見 ISSUE-143（F9、F10）。
 
 ### 遠端卡片 reviewer（2026-11-11，ISSUE-143，未實機驗收）
 

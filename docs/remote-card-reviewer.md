@@ -2,7 +2,7 @@
 
 REQ-20261111-remote-agy-role，ISSUE-143。2026-11-11，**未實機驗收**。
 
-agy reviewer 預先信任 checkout：契約（範圍、生命週期、`cleanup_pending：trust` 不自動重試、需人工撤銷）見 SPEC.md「遠端 reviewer 的 agy 預先信任」，限制見 ISSUE-143（F9、F10），**未實機驗收**。
+agy reviewer 預先信任 checkout：契約（範圍、生命週期、`cleanup_pending：trust` 不自動重試、需人工撤銷）見 SPEC.md「遠端 reviewer 的 agy 預先信任」，限制見 ISSUE-143（F9、F10）；主要成功路徑 2026-11-11 已實機驗過一次，失敗路徑未驗。
 
 **已知限制（未採納 review 建議）：**F9 兩個等待者在毫秒級同時判定同一把鎖過期並回收時，後者可能刪掉前者剛重建的新鎖，兩個 writer 可能同時通過雜湊檢查而互相覆蓋設定；bridge 一次只做一張卡、同一台 pod 同時寫兩張卡的機會低，視窗已縮小但無法完全消除，pod 上的 `find -mmin` 未驗證。F10 reviewer 卡在啟動提示而保留 pane 時，信任與目錄保留、記 `cleanup_pending：trust`、不自動移除：pane 還在等人處理，且移除信任對仍在執行的 agy 的影響沒有驗證；reviewer（codex 第 2、3 輪）認為此時也應嘗試撤銷，這個取捨未採納，需人工撤銷。
 
