@@ -4588,3 +4588,5 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 補記前輪最終結果（2026-11-11，`fd8d0ad`，不代表本次合併版）：限制並行全套 `node --test --test-concurrency=2 dist/test/*.test.js` 為 1755/1755 pass，engine 單檔重跑為 41/41 pass，先前 cancelled 不當最新通過證據；本次合併版需重新 typecheck／build／測試與兩平台 CI。未重啟或部署 bridge，未操作指定舊 task，仍待獨立 review 與實機驗收。
 
 本次修正驗證進度（2026-11-11）：`npm run check` 中 typecheck 已通過（原 TS2304 已消失）；`npm run lint` 通過（204 TypeScript files），`git diff --check` 通過。build／全套測試及新一輪 CI 結果待補，不把前輪結果當成本次合併版通過。
+
+CI 回歸驗證（2026-11-11，修正提交 `7a3a41e`，run `42985910445`）：Ubuntu／macOS Node 22 的 typecheck、lint、npm test（含 build）均通過，原 TS2304 阻擋已解除。這是合併版的自動化證據，非實機驗收；本機全套在高負載下仍執行中，不宣稱已有本機最終結果。PR 保持 draft，待獨立 session review，未重啟／部署。
