@@ -4539,3 +4539,52 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 最終檢查（2026-11-07）：`npm run typecheck`、`npm run build`；`node --test dist/test/autopick-wiring.test.js dist/test/agent-launch.test.js dist/test/profile-start.test.js dist/test/review-pane.test.js dist/test/card-review-flow.test.js dist/test/cli-adapter.test.js dist/test/pane-split.test.js`，101/101 pass、0 fail。涵蓋 codex／claude、長 id 與 60 字元上限、前綴、種類 alias、角色及 model、改名後仍用 id 關閉、terminal 被替換時拒絕關閉、命名不支援時不改清理行為。未跑完整套件：sandbox Unix socket listen 會 EPERM（既有限制 ISSUE-115），本輪只跑相關測試檔。`git diff --check` 通過。
 
 未驗證／下一步：**尚未在實機 Herdr 側欄驗證**；本機／遠端的 pane.rename 實際顯示、CLI 啟動後 label 是否保留、人工改名後的實機清理仍需 Lead 安排驗收。舊版遠端 server 可能不支援 rename，會記警告並沿用未命名 pane。原始碼與 build 已完成，執行中的 bridge 未部署、未重啟；既有 workspace／pane 不會補改名，舊訊息不會補送。不代表 ISSUE-117 的 codex Lead 就緒問題已修正（該 issue 狀態不變）。未 commit、未 push。
+
+## PR #211：Codex Skip／coding roster 追蹤與 CI 合併回歸
+
+更新日期：2026-11-11。狀態：修正中。此 PR 原用 ISSUE-140／141 編號，main 同日另有同號問題；保留原紀錄於此，避免覆寫 main 的 issue。合併 `2e843c6` 遺失本 PR 的追蹤段落，本輪補回；以下歷史狀態與新結果按時間閱讀。
+
+### PR #211 原 ISSUE-140：`--coding` 自動 Worker 池排除 pi，且單一 profile 被錯誤拒絕
+
+更新日期：2026-11-11。狀態：已修正、待驗收（來源與相關自動化檢查完成；實機確認 Pi 已進入 roster，但尚未實際派送 Pi assignment，完整驗收受 ISSUE-141 阻擋）。
+
+**症狀／預期：**2026-11-11 autopick `REQ-20261111-codex-update-check-skip` 在 `card assign --worktree --coding` 啟動前因沒有 Worker 失敗。使用者指出 pi coding Worker 已驗證，要求 pi 納入自動候選；只有一個合格 profile 也應能工作。預期：自動候選包含 claude／codex／pi 與符合 capabilities 的 agy；一個 profile 即可入池；單一 profile 時仍為每個 coding assignment 啟動獨立 fresh session，保留 author／reviewer 不同 session 的驗收，不降低 review gate。
+
+**重現／環境（2026-11-11，本機）：** Herdr 0.9.5；autopick 建立 update-check 卡 worktree（workspace `wB`），`card assign --worktree --coding` 回報需要至少一個 Worker。使用者 config 的 `agentProfiles` 有一個 codex profile 與一個 pi profile；Lead 為 codex。沒有修改私人設定。
+
+**已確認根因：**`src/coding-roster.ts` 的自動候選只含 claude／codex，agy 需 capabilities opt-in，pi 被排除；`autoEnableCodingProfiles` 要求至少兩個候選。故只有一個符合條件的 codex profile 時不會勾選任何 profile，`assertCodingRoster` 隨即拒絕。單純把門檻降為一個而重用同一個 persistent session，會使同 session review 被 fail closed；必須在單一 profile roster 時為每個 coding assignment 建立 fresh session。
+
+**修正範圍（2026-11-11）：**`coding-roster.ts` 納入 pi、允許一個候選並補 fresh-session 判斷；`main.ts` 對單一 profile coding roster 使用 `startCardRoleSession`，每項 assignment 新開並依既有安全規則清理 pane；更新 roster 測試與相關文件。config／policy 不變。
+
+**驗證（2026-11-11）：**初次 targeted `coding-roster` 測試 12/13 通過、1 項因舊「agy 單獨不入池」預期失敗，該測試已依新決策更新。`npm run build`、`npm run lint`（200 TypeScript files）、`npm run typecheck` 通過；`node --test dist/test/coding-roster.test.js dist/test/team-task-engine.test.js` 54/54 pass；另 `node --test --test-name-pattern='one configured pi profile' dist/test/team-task-engine.test.js` 1/1 pass。全套 `npm test` 在 240 秒命令逾時前跑到 test 1162，沒有最後總結，不能算全套通過。`git diff --check` 通過。
+
+**實機測試（2026-11-11）：**依使用者要求執行 `scripts/run.sh` 重啟已連結本地 plugin（Herdr 0.9.5；使用已 build 的 `dist`，未改 config／policy）。清理先前乾淨的 wB card worktree（只移除 worktree、保留分支）後，ready 卡由 autopick 建立 task `task-2b7e7e84-9a5d-407d-9b2c-3f3a63eb795a`，task roster 明確含 `profile:codex` 與 `profile:pi`，Lead／task／卡片關聯也已建立。Lead 與 Codex diagnose Worker 都遇到版本 0.163.0 → 0.167.1 更新提示；依既有使用者指示僅選 `Skip`，未更新 Codex。Worker assignment 在互動前已以 `agent_blocked` 失敗，task 最終 `blocked`、卡片流程 `autopick_stopped`；沒有 Pi assignment、通過 review／verification 或程式修改。測試當下 wD worktree 與失敗 task 保留、工作樹乾淨；之後依使用者清理要求，`card cleanup` 已移除 wD worktree 並保留分支，workspace／Agents 已關閉；durable failed task 仍保留，不補派。此測試只證明目前 build 的自動 roster 含 Pi 及 task 可以建立，未證明 Pi 實際工作或單一 profile author→reviewer live 流程。
+
+**未驗證／下一步：**單一 profile 的完整 fake-runtime coding 任務與 Herdr／CLI 實機 author→獨立 reviewer 流程仍待驗證。使用者回報 pi 已驗證，但其環境、卡片與流程紀錄未提供。完整 live 驗收受 ISSUE-141 的 Codex 更新提示阻擋；本輪 bridge 已依使用者授權重啟且仍在執行，failed task 不會自動補送。
+
+### PR #211 原 ISSUE-141：Codex 更新提示阻塞 autopick Lead 與 coding profile Worker
+
+更新日期：2026-11-11。狀態：修正中。追蹤卡：`REQ-20261111-codex-update-check-skip`（task `task-2b7e7e84-9a5d-407d-9b2c-3f3a63eb795a` 受阻）。
+
+**症狀／預期：**Codex 0.163.0 啟動時出現 `Update available · 0.163.0 → 0.167.1`，選項為 Update now、Skip、Skip until next version。Lead 和 profile Worker 都可能 blocked，導致 coding assignment 失敗。預期只在精確辨識此 Codex 更新提示時選 `Skip`；絕不更新 Codex，也不自動回答一般 approval、question 或其他 blocked UI；Lead 與 Worker 均需能就緒，task／卡片關聯保持有效。
+
+**重現／環境（2026-11-11）：**Herdr 0.9.5，重啟本地 bridge 後 autopick 指派 `REQ-20261111-codex-update-check-skip`。Lead `wD:p1` 遇到更新提示，手動選 Skip 後 task 建立；roster 有 codex 與 pi。後續 Codex profile Worker `wD:p2` 又遇到相同提示，task engine 記錄 `agent.prompt: agent_blocked` 並將 assignment 標為 failed。Worker 提示在 assignment 已失敗後才手動選 Skip，task 最終仍 `blocked`／`autopick_stopped`，沒有自動重試。Codex 未更新。
+
+**先前診斷（保留歷史）：**當時只確認 profile Worker 也遇到更新提示，尚未確認完整因果。2026-11-11 讀碼與隔離入口測試確認：舊 matcher 只比對兩段文字並送 `3`，不符合本次只選 Skip 的要求；persistent profile pool 有獨立等待、未接更新提示處理；fresh session 原已用共用 waiter。原實機 agent_blocked 是否同時涉及 ready 與首次 prompt 間的競態，仍未證實；本修正不在一般 turn／question queue 自動送答。
+
+**修正範圍／驗證：**本輪未修改更新提示處理程式。`scripts/run.sh` 已依使用者要求重啟本地 plugin，bridge connected 且 Herdr server 仍為 0.9.5。實機 task 未完成診斷、review 或 verification；沒有 source diff、commit、PR 或 merge。後續依使用者要求以 `card cleanup` 移除乾淨的 wD card worktree（分支保留），並關閉 wC／wD workspace；blocked durable task 及卡片 `in_progress` 狀態保留。下一步先調查 Lead 及 profile Worker 的啟動／更新提示辨識與安全選擇，再以可重複測試及實機卡片流程驗證。
+
+**2026-11-11 本輪實作進度（尚未完成驗證）：**保留既有 ISSUE-140 dirty diff。已修改完整更新選單比對，只送 `2`（Skip）、不附 Enter、不重試，送鍵前核對 blocked 與 pane／terminal／workspace／CLI／已知 session；persistent pool 接入共用 ready wait，fresh Worker 增加預期種類檢查。修正前新增入口測試 18 項為 9 pass／9 fail；中途相關測試 118 項為 116 pass／2 fail（fixture 因送鍵前新增身分複核而需調整），新增 card/task 整合測試曾有 `syncCards.assignments` 型別錯誤，正在修正與重跑，不能視為驗證完成。初始 shell sandbox 因 `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted` 無法啟動，改以獲准的執行方式進行專案讀寫與隔離測試。未修改私人設定／policy，未操作或重派既有 durable task，未清理或重啟 bridge，未 commit／push／PR／merge／部署。執行中 bridge 尚未載入本輪修改，舊失敗不補送。下一步：完成整合測試、全套檢查與 SPEC 同步，再交獨立 session review；實機驗收仍待另行授權安排。
+
+**後續驗證（2026-11-11）：**全套 `npm run check` 的 typecheck／build 成功，預設並行測試曾發現 Agent 身分錯誤訊息、review／fix 舊更新選單 fixture 不符合新契約，以及 durable question 計時失敗；前述訊息與 fixture 已修正。該輪高負載下停於約 test 1199，已停止本輪測試 runner，沒有最終總結，不能算全套通過；新版另以限制並行重跑。使用者後續授權 commit／PR；runtime 重啟／部署仍未授權，獨立 review 尚未進行。
+
+**入口最終驗證（2026-11-11）：**`npm run build`、`npm run typecheck`、`npm run lint`（201 TypeScript files）、`git diff --check` 通過；`node --test dist/test/codex-update-startup.test.js` 為 **34/34 pass、0 fail、0 cancelled**，包含真實 card command／durable coding task／temporary Git repository 的整合測試，未連線真實 Herdr／Discord。相關 11 檔限制並行測試為 294 項、271 pass、0 fail、23 cancelled（durable engine 的 whole-team cancellation Promise 未結束導致後續取消），不能算全部通過；另行重跑 engine 與全套。狀態維持修正中，直到剩餘自動檢查確認；實機仍待驗收。
+
+
+### CI 合併回歸（2026-11-11）
+
+兩平台 CI run `42985157696` 均在 typecheck 失敗：`src/main.ts(2192,11): TS2304 Cannot find name freshSingleProfileSessions`。本機同步 CI head `2e843c6` 後，`npm run typecheck` 可重現相同錯誤。根因已確認：合併 main 的 remote reviewer 接線時移除了 single profile 判斷宣告，但保留其使用。修正補回原宣告，與 remoteReviewers 並存，不改 roster／review gate 或更新提示行為。
+
+補記前輪最終結果（2026-11-11，`fd8d0ad`，不代表本次合併版）：限制並行全套 `node --test --test-concurrency=2 dist/test/*.test.js` 為 1755/1755 pass，engine 單檔重跑為 41/41 pass，先前 cancelled 不當最新通過證據；本次合併版需重新 typecheck／build／測試與兩平台 CI。未重啟或部署 bridge，未操作指定舊 task，仍待獨立 review 與實機驗收。
+
+本次修正驗證進度（2026-11-11）：`npm run check` 中 typecheck 已通過（原 TS2304 已消失）；`npm run lint` 通過（204 TypeScript files），`git diff --check` 通過。build／全套測試及新一輪 CI 結果待補，不把前輪結果當成本次合併版通過。

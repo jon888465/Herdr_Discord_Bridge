@@ -2089,6 +2089,10 @@ async function startTeamTask(
     }
   }
   if (roleSnapshot) workers.push(...roleTargets(roleSnapshot, workspaceId));
+  const freshSingleProfileSessions = needsFreshCodingProfileSession(
+    coding,
+    workers,
+  );
   const remoteReviewers = runtime.config.machines?.some((m) => m.cardReview) ? remoteReviewerCandidates(cardRoleContext(runtime)) : [];
   assertCodingRoster(coding, workers.length);
   assertAgentAvailable(lead, runtime);
