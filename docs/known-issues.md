@@ -2,7 +2,18 @@
 
 ## ISSUE-143：remote machine（agy-pod）的 agent 不能擔任卡片角色；先開放 remote card reviewer
 
-更新日期：2026-11-11。狀態：修正中（拆成兩個相依 PR：A 基礎層 PR #207、B 角色接線 PR #206，B 依賴 A，A merge 後 B 要 rebase；自動化檢查通過，兩個都 merge 後改為已修正、待驗收）。**未實機驗收**；bridge 未重啟。卡片 REQ-20261111-remote-agy-role。
+更新日期：2026-11-11。狀態：已修正、待驗收（兩個 PR 都已 merge：A 基礎層 #207 `addee48`、B 角色接線 #206 `9ff908e`；自動化檢查與 codex 獨立複審通過；**主要成功路徑已實機驗過一次**，見下方 2026-11-11 實機段；失敗路徑與其他情境尚未驗）。卡片 REQ-20261111-remote-agy-role；實機驗收卡 REQ-20261111-remote-reviewer-live（PR #210）。
+
+**實機驗收（2026-11-11，本機 macOS，bridge 為 main `9ff908e`（#206、#207）重啟後的程序；`config.json` 的 agy-pod 已加 `cardReview {root: "/root/herdr-card-review", kinds: ["agy"]}`（備份 `config.json.bak-cardreview-20261111`）；pod：git 2.53.0、GNU `timeout`、`realpath`、agy 1.5.2，沒有 node；root 目錄由 Agent 在使用者同意後建立（權限 700、空目錄、非符號連結））：**測試卡 `REQ-20261111-remote-reviewer-live`（`lead: codex`、`roles: {reviewer: "agy-pod:agy"}`，bridge 序列化成 `"agy-pod:agy:"`），新增一行檔案的 PR #210。
+1. **撿卡前驗證通過：**06:59:28Z 撿起，沒有出現「卡片流程尚未支援 machine agy-pod」拒絕。
+2. **task 內的本機 agy Worker 卡住（與本功能無關，見 ISSUE-147）：**Agent 取消該 task（07:15:54Z）、接手 commit（`93ffcd6`）、開 PR #210、`card attach-pr`。
+3. **第 1 輪 review（07:16:46Z）`inconclusive`：**原因「reviewer 卡在啟動提示（blocked）」，pane 被保留。pod 上獨立佐證：`/root/herdr-card-review/jon888465__Herdr_Discord_Bridge__163ee5854b` 已 clone，`git rev-parse HEAD` = `93ffcd6a3435…` = PR 的 head sha，`.git/hdb-card-review` marker 存在（內容 `hdb-card-review-checkout:v1:163ee5854b`）；pod 的 Herdr 顯示 `w3:p2 agy·reviewer` 是 `blocked`，畫面原文：「Do you trust the contents of this project? Antigravity CLI requires permission to read, edit, and execute files here. > Yes, I trust this folder／No, exit」，工作目錄就是該 checkout。**這與預期一致（第一次信任提示）。**
+4. **信任：**Agent 依使用者的決定（第一次信任要信任），確認畫面路徑等於 bridge 管理且 marker 相符的目錄後，對這一個目錄按了確認；agy 的信任記在 pod 的 `/root/.gemini/antigravity-cli/settings.json` 的 `trustedWorkspaces`（原本 `['/root/workspace', '/root']`，新增 checkout 目錄）。**觀察：**`/root` 本來就在信任清單，checkout 目錄（它的子目錄）仍跳出提示，信任不會繼承上層。
+5. **第 2 輪 review（07:18:38Z `role_assigned`：`reviewer（第 2 輪）：agy；machine=agy-pod；v=2,cr=-,s=C,ss=CCD,me=U`；07:19:03Z）`pass`：**兩條驗收條件都 ✓；沿用上一輪的 checkout（沿用前工作樹乾淨：`git status --porcelain` 0 行，HEAD 仍是 `93ffcd6`）。bridge 回報「reviewer 的 pane 已關閉」。
+6. **清理：**第 2 輪結束後 `/root/herdr-card-review` 為空、pod 上只剩使用者原本的 `w2:p1`。**但 agy 的 `trustedWorkspaces` 裡那筆已刪除目錄的信任項目沒有被移除**（每個 reviewer 卡片都會累積一筆）。
+7. **review 次數：**第 1 輪 `inconclusive` 也算一次 verdict，這張卡用掉 2 次（上限 3）。
+
+**這個實機驗收證明的：**remote reviewer 的主要成功路徑（撿卡前驗證、pod 上 git clone、head sha 與 marker、agy 在 pod 執行 review、結果採用、沿用 checkout、清理目錄與 pane）一次成功；固定標籤與 pane 保留在信任提示時如設計。**沒有證明的：**agy-pod 不可達時不 fallback 到 local；clone／fetch／timeout／realpath 失敗路徑；`cleanup_pending`；marker 不符或工作樹不乾淨被拒；逾時；Lead 在 task 進行中自行選擇 remote（本來就不支援）；只有一張極簡卡、一次；pod 沒有 node，所以 verify 角色不能放在 pod。**新發現：**信任項目沒有清理（`REQ-20261111-agent-first-run-prompts` 的範圍已涵蓋）。
 
 **症狀／預期：**`reviewer: "agy-pod:agy"` 撿卡前被拒「卡片流程尚未支援 machine」。預期開放的 remote reviewer 派到 pod；remote implement／fixer 拒絕「remote 寫入尚未支援」；無 remote 配置時不變。
 
@@ -22,9 +33,59 @@
 
 **未驗證：**實機（pod 的 git 與 repo 權限、GNU `timeout`、`realpath`、`refs/pull` fetch、marker 寫入）；cleanup_pending 不重試；clone 中斷留下的半成品沒有 marker，不會被清理（記 pending，需人工）；需使用者加 `cardReview` 並重啟。A 單獨 merge 不會啟用任何 remote 功能。
 
+## ISSUE-147：task 內本機 agy Worker 沒有收到第一個 prompt，Herdr 回 ok 但 pane 是空的，task 一直等到逾時
+
+更新日期：2026-11-11。狀態：待調查（現象已觀察一次；根因未確認）。
+
+**使用者可見症狀：**`REQ-20261111-remote-reviewer-live` 的 task 內 review（`team-review-card-file`，本機 agy Worker，pane `w6B:p4`）：07:03:37Z `role_assigned`、07:03:38.080Z `turn_dispatched`，bridge console 印出 `agent.prompt prompt+wait target=w6B:p4 chars=7266 ts=1794380618480`，**沒有任何錯誤**。之後 agy 的 pane 一直是剛啟動的歡迎畫面、輸入框是空的，Herdr 的 `agent explain` 說 `state: idle`，沒有 `hook Stop`；task 的最後一個事件就是那次 `turn_dispatched`，到 07:14:48Z 仍沒有變化（約 11 分鐘）。bridge 會等到單一回合上限（30 分鐘）才會判逾時。
+
+**預期行為：**prompt 送達 agy，或送不進去時明確失敗、有限度重試（ISSUE-137 的做法）；不應該靜默等 30 分鐘。
+
+**重現／環境：**2026-11-11，本機 macOS，bridge 為 main `9ff908e`；agy 1.5.4（本機，Gemini 3.8 Flash）；該 agy 是這張卡第一次需要的 Worker，bridge 在 07:03:33Z 才對這個 worktree 預先信任（`agy_worktree_trust`）並在 07:03:37Z 啟動；之前其他 Worker（codex）都正常。
+
+**根因：**未確認。與 ISSUE-137（Lead／Worker 第一個 prompt 在 Herdr 登記前被拒收，pi 上發生過）同一類，但這次 Herdr 沒有回 `agent_not_ready`，也沒有錯誤，所以 #198 的有上限重試沒有被觸發。可能是 agy 剛啟動時吞掉輸入、或預先信任剛寫入設定後的啟動時序；沒有驗證。
+
+**處理：**Agent 以 `wk use w6B` 切到卡片 workspace，用 `team cancel` 取消該 task（07:15:54Z），接手 commit、開 PR #210；task 內的 review 與 verify 沒有走完。
+
+**未驗證／下一步：**重跑能否重現；agy 啟動後多久才能收 prompt；bridge 對 `prompt+wait` 沒有任何「pane 內容沒有變化」的偵測。
+
+## ISSUE-146：task 沒有完成、PR 由人工接手 merge 後，卡片永遠停在 in_progress，autopick Lead 的 workspace 不會被收尾
+
+更新日期：2026-11-11。狀態：待調查（現象已重現一次、根因為觀察與推論；沒有修正）。
+
+**使用者可見症狀：**`REQ-20261111-remote-agy-role` 的 task 因 ISSUE-145 標成 `blocked`，我接手 worktree、開 PR、用 `card attach-pr` 登記；PR #206 於 2026-11-11 06:45:07Z merge，bridge 在 06:45:44Z 記錄 `merged`、06:45:47Z 記錄 `cleanup_done`（worktree 與卡片 workspace 已移除）。**但卡片檔 `status` 一直是 `in_progress`**（至少到 07:0x，重啟 bridge 之後仍是），autopick 為 codex Lead 開的 workspace `autopick-codex-REQ-20261111-remote-agy-role` 也一直開著。我手動把卡片改成 `done` 後，約一分鐘內 bridge 的收尾掃描就關掉了那個 workspace。
+
+**預期行為：**卡片關聯的 PR 已 merge 且 bridge 已記錄 `merged` 與 `cleanup_done` 時，卡片應該進入終態（`done`），Lead workspace 隨後被收尾；不應該依賴 task 是否「完成」。
+
+**重現／環境：**2026-11-11，本機 macOS，bridge 為 main `796e0cb`（後續重啟為 `9ff908e`）。條件：task 沒有完成（`blocked`／failed）→ 人工接手 → `card attach-pr` → PR merge。
+
+**推論的根因：**卡片只有在 task 事件為完成時才被同步成 `done`（`Card sync updated`）；`merged` 事件只記流程紀錄並清理 worktree，不改卡片狀態。task 失敗後人工接手的卡片因此不會進入終態。之前同類的卡（`REQ-20261109-codex-lead-agy`、`REQ-20261109-pi-lead-live` 等 5 張）也停在 `in_progress`，已記為殘留孤兒卡，可能是同一原因。
+
+**未確認：**`merged` 事件是否在「只有 PR 登記、沒有 task 完成」時就不改卡片狀態是設計還是遺漏；卡片同步的實際程式位置。
+
+**修正方向（尚未實作）：**`merged` 與 `cleanup_done` 都已記錄、且卡片有關聯 PR 時，把卡片設成 `done`；要補測試涵蓋 task 未完成的路徑。
+
+**暫時做法：**人工確認 PR 確實已 merge 後，手動把卡片 `status` 改成 `done`（2026-11-11 對 `REQ-20261111-remote-agy-role` 這樣做了）。
+
+## ISSUE-145：單一指派的 30 分鐘等待上限，讓已完成的 Worker 成果被 bridge 判逾時丟掉
+
+更新日期：2026-11-11。狀態：待調查（現象已重現一次、根因為讀碼與時間序推論；沒有修正）。
+
+**使用者可見症狀：**`REQ-20261111-remote-agy-role` 的 implement Worker（claude opus，`implement-remote-reviewer`）從 02:15:30Z 開始實作，**02:45:32Z bridge 判定等待逾時**（task 事件 `Assignment implement-remote-reviewer 等待逾時（已等待 30 分 2 秒，上限 30 分鐘）`，task 標成 `blocked`，Lead 的彙整、task 內 review、verify 都沒有進行）；但 Worker 的 pane 顯示它在 **02:46（31 分 14 秒）完成並送出完整回報**（`BRIDGE_BEGIN`／`BRIDGE_END` 區塊，含 `codingResult` 與 18 個檔案清單）。bridge 已不收這份回報，成果只留在卡片 worktree（未 commit 的 18 個檔案），由人工接手驗證與提交。
+
+**預期行為：**Worker 在上限之後才完成、但回報有效時，不要整個 task 丟掉；至少要能「採用逾時後才到的回報」或明確讓人選擇重新等待，並在通知說清楚是等待逾時、成果可能在 worktree（現有訊息已有這句，但沒有後續動作）。
+
+**重現／環境：**2026-11-11，本機 macOS，bridge 為 main `796e0cb`；卡片大小是 31 檔以上的實作（約 +380／-17 行加 4 個新檔），opus 實作約 31 分鐘。
+
+**根因（推論）：**單一指派的等待上限是固定值（30 分鐘），Worker 的回合稍微超過就被判逾時，且逾時後沒有「事後採用回報」的路徑；與 ISSUE-124（回合逾時的分類）同一類，但這次是成果已完成、只是晚了約 1 分鐘。
+
+**影響：**task 內的 review、verify 與 Lead 彙整都被跳過；這張卡之後只能走人工接手與 PR 審查。相關：`REQ-20261111-quota-handoff` 的背景（task 內缺乏 Worker 狀況不明時的復原機制）。
+
+**未驗證／下一步：**逾時上限是否可設定（`timeoutMs` 的來源）；逾時後回報到達的處理要不要做成需求卡。
+
 ## ISSUE-144：autopick 在 task 開始前記「找不到這張卡的 task」的 autopick_stopped
 
-更新日期：2026-11-11。狀態：待調查（一次觀察，根因未確認）。
+更新日期：2026-11-11。狀態：待調查（一次觀察，根因未確認；**與 ISSUE-142 是同一次事件的兩份記錄**，ISSUE-142 有對 `card assign` 回覆與 codex 更新提示的讀碼推論，處理時合併看）。
 
 REQ-20261111-remote-agy-role 在 02:07:43Z picked 後，02:07:55Z 記 failed「task 沒有完成：找不到這張卡的 task」並排入通知，但 task 02:09:51Z 才開始且之後正常。預期 task 建立前不記失敗。可能與等待 task 的時序或 ISSUE-133／135 同類，未證實。下一步：對照 autopick 等待 task 的路徑與時間戳。
 
@@ -103,7 +164,13 @@ REQ-20261111-remote-agy-role 在 02:07:43Z picked 後，02:07:55Z 記 failed「t
 **未驗證項目／下一步：**讀 `src/card-review*.ts` 確認 note 被丟掉的位置；重做一張驗收條件只含 diff 可驗證內容的敏感路徑測試卡，才能驗到 ISSUE-133／135 的敏感路徑情境。
 ## ISSUE-138：卡片缺少六角色 machine／agent／model 指定與 bridge 強制守門
 
-更新日期：2026-11-10。狀態：已修正、待驗收（原始碼與自動化檢查完成；尚未實機驗收）。卡片：REQ-20261110-card-role-assignment。
+更新日期：2026-11-11。狀態：已修正、待驗收（原始碼與自動化檢查完成；**實機驗收只有部分證據**，見下方 2026-11-11 段）。卡片：REQ-20261110-card-role-assignment。
+
+**實機部分證據（2026-11-11，本機 macOS，bridge 為 main `796e0cb`（#205）重啟後的程序，`config.json` 的 claude profile 已加 `"model": "opus"`，備份 `config.json.bak-claude-opus-20261111`）：**
+1. **指定生效（部分）：**卡片 `REQ-20261111-remote-agy-role`（`lead: codex`、`roles: {implement: "local:claude:opus", diagnose: "local:claude:opus"}`）撿起後，流程紀錄出現 `diagnose-remote-role：claude（opus）；machine=local；…v=2,cr=d,s=C,ss=CCC,me=L`（02:10:09Z）與 `implement-remote-reviewer：claude（opus）；machine=local；…v=2,cr=i,s=C,ss=CCC,me=L`（02:15:30Z），來源 `s=C`（card）。獨立佐證：系統行程 `claude --model opus`（pid 31840），Herdr pane 標籤 `claude·worker·opus`。**限制：**兩個角色都是 claude，不是「兩角色不同 agent」；只有 implement 與 diagnose 兩個角色。
+2. **無效指定被拒（部分）：**使用者建的 `REQ-20261110-role-process-records`（`implement: agy-pod:agy:…`）在 bridge 重啟後被撿卡前拒絕，事件 `failed`／`autopick_stopped`：「卡片角色指定無效：implement：卡片流程尚未支援 machine agy-pod」（2026-11-10 08:06:11Z，另一次在 2026-11-11 重啟後）。這是 remote machine 這一種無效指定；不合法 agent、不合法 model 沒有實機驗過。
+3. **Lead 派工不符被擋：沒有驗。**
+4. 其餘（`card review`／`fix`／loop 使用卡片指定、fixer）沒有驗；該卡的 task 因單一指派等待逾時而 blocked（見 ISSUE-145），後續流程由 Agent 接手，沒有走完整的角色路徑。
 
 **2026-11-11 實機觀察（部分，非三卡驗收）：**REQ-20261111-remote-agy-role 首次實機用 roles（只宣告 local）；diagnose、implement 的 `role_assigned` 皆 `claude（opus）；machine=local；…；s=C,ss=CCC,me=L`，implement pane `w69:p3` 為 `claude·worker·opus`、同 worktree 有 `claude --model opus` 程序（pid↔pane 只由時間與 cwd 推定）。原文見 agent-role-matrix.md；另見 ISSUE-144。remote 拒絕文字已由 ISSUE-143 改變。
 
