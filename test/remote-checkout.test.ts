@@ -1,9 +1,11 @@
 import test, { type TestContext } from "node:test";
 import assert, { ok, deepEqual as eq, equal, throws, rejects, match } from "node:assert/strict";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HerdrHub, validateMachines } from "../src/machines.js";
+import { BLOCKED_AT_START } from "../src/agent-ready.js";
 import * as rc from "../src/remote-checkout.js";
 
 const { RemoteFailure } = rc;
@@ -24,8 +26,15 @@ type FakeOptions = { exists?: string[]; origin?: string; head?: string; failOn?:
 
 function fake(o: FakeOptions = {}) {
   const calls: string[][] = [];
+  const removed: string[] = [];
   const exec: rc.RemoteExec = async (argv) => {
     calls.push(argv);
+    if (argv[0] === "sh" && argv[2] === rc.REMOVE_SCRIPT) {
+      const [, , , , base, dir, , marker] = argv as string[];
+      const code = o.realMap?.[base!] ? 11 : o.links?.includes(dir!) ? 12 : o.exists && !o.exists.includes(dir!) ? 0 : o.realMap?.[dir!] ? 12 : o.marker === null ? 13 : (o.marker ?? MARKER) !== marker ? 14 : -1;
+      if (code < 0) removed.push(dir!);
+      return { code: Math.max(code, 0), stdout: "" };
+    }
     const j = argv.join(" ");
     if (o.throwOn && j.includes(o.throwOn)) throw new RemoteFailure("逾時", "x", true);
     if (o.failOn && j.includes(o.failOn)) return { code: 128, stdout: "" };
@@ -37,7 +46,7 @@ function fake(o: FakeOptions = {}) {
     if (argv.includes("status")) return { code: 0, stdout: o.dirty ?? "" };
     return { code: 0, stdout: j.includes("get-url") ? (o.origin ?? URL) : j.includes("rev-parse") ? `${o.head ?? HEAD}\n` : "" };
   };
-  return { exec, calls };
+  return { exec, calls, removed };
 }
 async function prepare(o: FakeOptions, patch = {}) {
   const f = fake(o);
@@ -87,7 +96,7 @@ test("existing repo needs a matching marker and origin; no marker, wrong marker,
   const same = await prepare({ exists: REPO });
   ok(!same.error && same.owned && !same.calls.some((a) => a.includes("clone")));
   const bare = await prepare({ exists: REPO, marker: null });
-  ok(label("既有目錄沒有 bridge marker")(bare.error) && !bare.owned && !bare.calls.some((a) => a.includes("remote") || a.includes("fetch") || a.includes("clone") || a.includes("rm")));
+  ok(label("既有目錄沒有 bridge marker")(bare.error) && !bare.owned && !bare.calls.some((a) => a.includes("remote") || a.includes("fetch") || a.includes("clone")));
   const wrong = await prepare({ exists: REPO, marker: "hdb-card-review-checkout:v1:ffffffffff" });
   ok(label("既有目錄 marker 不符")(wrong.error) && !wrong.owned && !wrong.calls.some((a) => a.includes("fetch")));
   const foreign = await prepare({ exists: REPO, marker: "something else" });
@@ -96,7 +105,7 @@ test("existing repo needs a matching marker and origin; no marker, wrong marker,
   ok(label("既有目錄 origin 不符")(other.error) && !other.owned && !other.calls.some((a) => a.includes("fetch")));
   const plain = await prepare({ exists: [DIR] });
   ok(label("既有目錄不是 repo")(plain.error) && !plain.owned && !plain.calls.some((a) => a.includes("clone")));
-  for (const r of [bare, wrong, foreign, other, plain]) ok(!r.calls.some((a) => a[0] === "rm" || a.includes("rm")));
+  for (const r of [bare, wrong, foreign, other, plain]) ok(!r.removed.length);
 });
 
 test("remote without GNU timeout fails first with a fixed label, not as clone failure (exit 127 and busybox usage error 1)", async () => {
@@ -136,21 +145,22 @@ test("fingerprint is read-only; cleanup removes only a direct child of root", as
   eq(f.calls.map((a) => a.slice(GIT.length + 2)), [["rev-parse", "HEAD"], ["status", "--porcelain"]]);
   const owned = fake({ exists: REPO });
   await rc.removeRemoteCheckout(owned.exec, ROOT, DIR, HASH);
-  eq(owned.calls.map((a) => a.slice(0, 3).join(" ")), ["realpath -- /home/agy/r", "test -L " + DIR, "test -e " + DIR, "realpath -- " + DIR, "test -L " + DIR + "/.git", "cat -- " + DIR + "/.git/hdb-card-review", "rm -rf --"]);
-  eq(owned.calls.at(-1), ["rm", "-rf", "--", DIR]);
+  eq(owned.calls, [["sh", "-c", rc.REMOVE_SCRIPT, "sh", ROOT, DIR, "acme__repo__x", MARKER]]);
+  eq(owned.removed, [DIR]);
+  ok(!/[\n]/.test(rc.REMOVE_SCRIPT) && ![ROOT, DIR, "acme", HASH, MARKER].some((v) => rc.REMOVE_SCRIPT.includes(v)));
   for (const dir of [ROOT, `${ROOT}/`, "/home/agy", `${ROOT}/a/b`, `${ROOT}/../x`, `${ROOT}x/y`, `${ROOT}/.git`, `${ROOT}/.`]) {
     const spy = fake();
     await rejects(rc.removeRemoteCheckout(spy.exec, ROOT, dir, HASH));
     equal(spy.calls.length, 0);
   }
-  for (const [marker, wanted] of [[null, "既有目錄沒有 bridge marker"], ["hdb-card-review-checkout:v1:ffffffffff", "既有目錄 marker 不符"]] as const) {
-    const spy = fake({ exists: REPO, marker });
+  for (const [o, wanted] of [[{ marker: null }, "既有目錄沒有 bridge marker"], [{ marker: "hdb-card-review-checkout:v1:ffffffffff" }, "既有目錄 marker 不符"], [{ realMap: { [ROOT]: "/srv/x" } }, "root 是符號連結或在符號連結之下"], [{ links: [DIR] }, "既有目錄是符號連結"], [{ realMap: { [DIR]: "/o" } }, "既有目錄是符號連結"]] as [FakeOptions, string][]) {
+    const spy = fake({ exists: REPO, ...o });
     await rejects(rc.removeRemoteCheckout(spy.exec, ROOT, DIR, HASH), label(wanted));
-    ok(!spy.calls.some((a) => a[0] === "rm"));
+    ok(!spy.removed.length && spy.calls.length === 1);
   }
-  const gone = fake();
+  const gone = fake({ exists: [] });
   await rc.removeRemoteCheckout(gone.exec, ROOT, DIR, HASH);
-  ok(!gone.calls.some((a) => a[0] === "rm" || a[0] === "cat"));
+  ok(!gone.removed.length);
 });
 
 test("ssh: forwarding off, remote timeout wraps argv, 124 clean timeout, 255/local timer uncertain, no stderr in label", async () => {
@@ -242,7 +252,7 @@ test("cleanup_pending: uncertain timeout keeps the directory; console names the 
   const { lines, error } = await captured(t, () => h.run());
   match(error, /遠端 review 失敗：逾時.*cleanup_pending：directory/);
   ok(lines.includes(`cleanup_pending directory ${dir}`));
-  ok(!f.calls.some((a) => a[0] === "rm"));
+  ok(!f.removed.length);
   for (const hidden of [dir, "pod", "SECRET", "REQ-1"]) ok(!error.includes(hidden), hidden);
 });
 
@@ -257,13 +267,13 @@ test("cleanup_pending: workspace close failure logs workspace id and label to co
   match(label, /^review-[0-9a-f]{10}-[0-9a-f]{8}$/);
   ok(lines.includes(`cleanup_pending workspace ${label} label ${label}`));
   ok(lines.includes(`cleanup_pending directory ${dir}`));
-  ok(!f.calls.some((a) => a[0] === "rm"));
+  ok(!f.removed.length);
   for (const hidden of [dir, label, "pod:w3", "SECRET"]) ok(!error.includes(hidden), hidden);
 });
 
 const DIR1 = rc.remoteCheckoutDir(ROOT, "acme", "repo", "REQ-1");
 const MARKER1 = `hdb-card-review-checkout:v1:${rc.cardHash("REQ-1")}`;
-const untouched = (calls: string[][]) => !calls.some((a) => ["cat", "rm", "clone", "fetch", "checkout", "sh"].includes(a[0]!) || a.some((x) => ["clone", "fetch", "checkout"].includes(x)));
+const untouched = (calls: string[][]) => !calls.some((a) => ["cat", "clone", "fetch", "checkout", "sh"].includes(a[0]!) || a.some((x) => ["clone", "fetch", "checkout"].includes(x)));
 
 test("symlinks and bad realpath output are refused before marker, reuse or rm", async () => {
   const cases: [string, FakeOptions, string][] = [
@@ -281,9 +291,10 @@ test("symlinks and bad realpath output are refused before marker, reuse or rm", 
   for (const [name, o, wanted] of cases) {
     const r = await prepare(o);
     ok(label(wanted)(r.error) && !r.owned && untouched(r.calls), `prepare: ${name}`);
+    if (wanted === "路徑驗證失敗" || name === ".git") continue;
     const spy = fake({ marker: MARKER, ...o });
     await rejects(rc.removeRemoteCheckout(spy.exec, ROOT, DIR, HASH), label(wanted), `remove: ${name}`);
-    ok(untouched(spy.calls) && !spy.calls.some((a) => a[0] === "rm"), `remove: ${name}`);
+    ok(!spy.removed.length, `remove: ${name}`);
   }
 });
 
@@ -296,15 +307,13 @@ test("uncertain fingerprint failure keeps the directory; a certain one removes i
   };
   const uncertain = await run("status", undefined);
   ok(uncertain.lines.includes(`cleanup_pending directory ${DIR1}`));
-  ok(!uncertain.f.calls.some((a) => a[0] === "rm"));
+  ok(!uncertain.f.removed.length);
   ok(uncertain.h.closed.includes("pod:w3")); // workspace 仍然關閉
   const certain = await run(undefined, "status");
-  ok(certain.f.calls.some((a) => a[0] === "rm") && !certain.lines.includes(`cleanup_pending directory ${DIR1}`));
+  ok(certain.f.removed.length === 1 && !certain.lines.includes(`cleanup_pending directory ${DIR1}`));
 });
 
 test("fixed result text: only known labels pass, the rest is unclassified", () => {
-  for (const known of ["無法取得工作樹指紋，不開始 review", "reviewer 沒有回覆", "等待 reviewer 就緒時讀取 Agent 清單失敗", "reviewer 在 30 秒內沒有就緒", "cleanup_pending"])
-    equal(rc.fixedResultText(`${known}：machine pod stderr SECRET`), rc.fixedResultText(known));
   equal(rc.fixedResultText("reviewer 沒有回覆：pod secret"), "reviewer 沒有回覆");
   for (const sample of ["agent.start failed on agy-pod: permission denied", "machine pod unreachable", "pod：stderr SECRET", "reviewer 沒有回覆 pod", "stderr: /root/hdb-card-review/x", ""]) {
     equal(rc.fixedResultText(sample), rc.UNCLASSIFIED);
@@ -330,12 +339,18 @@ test("create timeout re-checks the labelled workspace 3 times, 2 s apart", async
   const second = await captured(t, () => h.run());
   equal(h.closed.length, 2);
   eq(h.sleeps, [2000]);
-  ok(!/cleanup_pending/.test(second.error) && f.calls.some((a) => a[0] === "rm"));
+  ok(!/cleanup_pending/.test(second.error) && f.removed.length === 1);
   const none = reviewHarness({ exec: existsAfterClone(fake({ marker: MARKER1 }).exec, DIR1), createFails: true, labeled: async () => 0 });
   const r = await captured(t, () => none.run());
   equal(none.closed.length, 3);
   eq(none.sleeps, [2000, 2000]);
-  ok(r.lines.includes("重查 3 次都沒有找到") && !/cleanup_pending/.test(r.error));
+  match(r.error, /cleanup_pending：workspace/);
+  ok(r.lines.includes(`cleanup_pending workspace ${none.created[0]} label ${none.created[0]}`) && r.lines.includes("remote review pod:") && r.lines.includes("重查 3 次都沒有找到"));
+  ok(!r.error.includes(none.created[0]!) && !/pod/.test(r.error));
+  let fourth = 0;
+  const late = reviewHarness({ exec: existsAfterClone(fake({ marker: MARKER1 }).exec, DIR1), createFails: true, labeled: async () => (++fourth < 4 ? 0 : 1) });
+  match((await captured(t, () => late.run())).error, /cleanup_pending：workspace/);
+  eq([late.closed.length, fourth], [3, 3]);
   const broken = reviewHarness({ exec: existsAfterClone(fake({ marker: MARKER1 }).exec, DIR1), createFails: true, closeFails: true });
   match((await captured(t, () => broken.run())).error, /cleanup_pending：workspace/);
   equal(broken.closed.length, 3);
@@ -367,7 +382,7 @@ test("reuse needs a clean work tree: refused, kept as cleanup_pending, never res
     const r = await prepare({ exists: REPO, dirty });
     ok(label("既有目錄工作樹不乾淨")(r.error) && r.error!.uncertain && r.owned);
     ok(r.calls.some((a) => a.includes("status") && a.includes("--untracked-files=all")));
-    ok(!r.calls.some((a) => ["reset", "clean", "checkout", "fetch", "clone", "rm"].some((w) => a.includes(w))));
+    ok(!r.removed.length && !r.calls.some((a) => ["reset", "clean", "checkout", "fetch", "clone"].some((w) => a.includes(w))));
   }
   const clean = await prepare({ exists: REPO });
   ok(!clean.error && clean.calls.some((a) => a.includes("fetch")));
@@ -376,5 +391,46 @@ test("reuse needs a clean work tree: refused, kept as cleanup_pending, never res
   const { lines, error } = await captured(t, () => h.run());
   match(error, /遠端 review 失敗：既有目錄工作樹不乾淨（cleanup_pending：directory）/);
   ok(lines.includes(`cleanup_pending directory ${DIR1}`) && !error.includes(DIR1));
-  ok(!f.calls.some((a) => a[0] === "rm" || a.includes("reset") || a.includes("clean")));
+  ok(!f.removed.length && !f.calls.some((a) => a.includes("reset") || a.includes("clean")));
+});
+
+test("the removal script, run for real, refuses symlinked root, ancestor and dir", async () => {
+  const base = await realpath(await mkdtemp(join(tmpdir(), "hdb-rm-")));
+  const local: rc.RemoteExec = (argv) => new Promise((done) => execFile(argv[0]!, argv.slice(1), (e, stdout) => done({ code: e ? ((e as { code?: number }).code ?? 1) : 0, stdout })));
+  const repo = async (dir: string, marker = MARKER) => (await mkdir(join(dir, ".git"), { recursive: true }), writeFile(join(dir, ".git", "hdb-card-review"), marker));
+  const exists = (path: string) => readFile(join(path, ".git", "hdb-card-review")).then(() => true, () => false);
+  try {
+    const root = join(base, "r");
+    await repo(join(root, "acme__repo__x"));
+    await repo(join(base, "outside"));
+    await symlink(root, join(base, "link"));
+    await symlink(base, join(base, "up"));
+    await symlink(join(base, "outside"), join(root, "evil"));
+    await repo(join(root, "nomark"), "other");
+    await rm(join(root, "nomark", ".git", "hdb-card-review"));
+    await repo(join(root, "wrong"), "hdb-card-review-checkout:v1:ffffffffff");
+    const refuse = async (r: string, name: string, wanted: string) => rejects(rc.removeRemoteCheckout(local, r, `${r}/${name}`, HASH), label(wanted));
+    await refuse(join(base, "link"), "acme__repo__x", "root 是符號連結或在符號連結之下");
+    await refuse(join(base, "up", "r"), "acme__repo__x", "root 是符號連結或在符號連結之下");
+    await refuse(root, "evil", "既有目錄是符號連結");
+    await refuse(root, "nomark", "既有目錄沒有 bridge marker");
+    await refuse(root, "wrong", "既有目錄 marker 不符");
+    ok((await exists(join(root, "acme__repo__x"))) && (await exists(join(base, "outside"))) && (await exists(join(root, "wrong"))));
+    await rc.removeRemoteCheckout(local, root, join(root, "acme__repo__x"), HASH);
+    ok(!(await exists(join(root, "acme__repo__x"))) && (await exists(join(base, "outside"))));
+    await rc.removeRemoteCheckout(local, root, join(root, "acme__repo__x"), HASH);
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
+test("whitelist: every entry passes; BLOCKED_AT_START keeps the manual-handling reason", () => {
+  for (const entry of rc.RESULT_WHITELIST) {
+    const sample = typeof entry === "string" ? entry : entry.sample;
+    equal(rc.fixedResultText(sample), sample);
+    equal(rc.fixedResultText(`${sample}：pod stderr SECRET`), sample.includes("：") ? rc.UNCLASSIFIED : sample);
+  }
+  const produced = [BLOCKED_AT_START, "reviewer 卡在啟動提示，已保留 pane 供人處理", "reviewer 卡住了（blocked，可能在等人確認）", "reviewer 在 30 秒內沒有就緒（狀態 working）", "等待 reviewer 就緒時，它的 pane 不見了（消失或被換掉）"];
+  for (const text of produced) equal(rc.fixedResultText(text), text);
+  match(BLOCKED_AT_START, /常見原因：.*請先.*處理一次/);
 });

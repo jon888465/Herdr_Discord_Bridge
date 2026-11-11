@@ -10,9 +10,11 @@
 
 **拆分：**原 #206 diff 71,377 字元，超過 card review 的 60,000 上限（使用者決定拆分）。A 是行為中立的基礎層（`cardReview` 設定、`HerdrHub` 的 `requestOn` 等、`src/remote-checkout.ts`），無設定時不改行為；B 是角色與接線。
 
-**審查修正（A）：**第一輪：`timeout -k 10`、斷線不清目錄、ssh 關轉送、固定分類、拒絕 `.` 段。Fable：(1) marker、(2) 缺 GNU `timeout` 先檢查、(3) cleanup_pending 在 console 留識別、(4) label 每次執行唯一。codex：A1 root／dir 以遠端 `realpath` 驗 canonical，符號連結（root、祖先、dir、`.git`）與 realpath 異常拒絕；A2 指紋階段 uncertain 失敗不刪目錄；A3 結果文字改白名單，其餘「遠端 review 失敗：未分類」；A4 create 逾時 label 有界重查 3 次（間隔 2 秒）；A5 沿用需工作樹乾淨，否則拒絕並記 pending，不 reset／clean；補回相對 c2f6617 消失的斷言。測試在 `test/remote-checkout.test.ts`。
+**審查修正（A）：**第一輪：`timeout -k 10`、斷線不清目錄、ssh 關轉送、固定分類、拒絕 `.` 段。Fable：(1) marker、(2) 缺 GNU `timeout` 先檢查、(3) cleanup_pending 在 console 留識別、(4) label 每次執行唯一。codex：A1 root／dir 以遠端 `realpath` 驗 canonical，符號連結（root、祖先、dir、`.git`）與 realpath 異常拒絕；A2 指紋階段 uncertain 失敗不刪目錄；A3 結果文字改白名單，其餘「遠端 review 失敗：未分類」；A4 create 逾時 label 有界重查 3 次（間隔 2 秒）；A5 沿用需工作樹乾淨，否則拒絕並記 pending，不 reset／clean；補回相對 c2f6617 消失的斷言。
 
-**A 測試（2026-11-11，本機，fake exec／fake ssh）：**`npm run check` exit 0：1737 項／1736 pass／0 fail／1 既有 skipped；`npm run lint`、`git diff --check` 通過；既有測試檔未修改。單元測試不是 Herdr／pod 實機驗收。
+**第四輪（codex 驗證複審 `225df0b`，A 部分，2026-11-11）：**A1 驗證與 `rm -rf` 分屬不同遠端指令，中間置換符號連結會刪到 root 外：改成單一 `sh -c` 固定腳本，值走位置參數；剩餘視窗縮到單一指令內，無法完全消除，列為已知限制。A3 `BLOCKED_AT_START` 含「常見原因：」被誤映射成「未分類」：先比完整字串再比切割後標籤。A4 重查耗盡仍找不到不能當未建立：改記 `cleanup_pending：workspace`。測試：`test/remote-checkout.test.ts`（含真實 `sh` 對真實符號連結）。
+
+**A 測試（2026-11-11，本機，fake exec／fake ssh）：**`npm run check` exit 0：1739 項／1738 pass／0 fail／1 既有 skipped；`npm run lint`、`git diff --check` 通過；既有測試檔未修改。單元測試不是 Herdr／pod 實機驗收。
 
 **未驗證：**實機（pod 的 git 與 repo 權限、GNU `timeout`、`realpath`、`refs/pull` fetch、marker 寫入）；cleanup_pending 不重試；clone 中斷留下的半成品沒有 marker，不會被清理（記 pending，需人工）；需使用者加 `cardReview` 並重啟。A 單獨 merge 不會啟用任何 remote 功能。
 

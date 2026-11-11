@@ -42,24 +42,31 @@ export function assertRemoteValue(name: string, value: unknown): string {
 const LABEL_ATTEMPTS = 3;
 const LABEL_RECHECK_MS = 2000;
 
-/** 固定分類白名單（flow 與 agent-ready 產生、不含機器或遠端輸出）。 */
-const KNOWN_TEXT = [
-  /^無法取得工作樹指紋，不開始 review$/,
-  /^reviewer 卡住了（blocked，可能在等人確認）$/,
-  /^reviewer 沒有回覆$/,
-  /^review 之後無法確認工作樹沒被改動$/,
-  /^reviewer 改動了工作樹（review 前後的指紋不同），整份 review 不採用$/,
-  /^reviewer 在 \d+ 秒內沒有就緒（狀態 [a-z_]+）$/,
-  /^等待 reviewer 就緒時讀取 Agent 清單失敗$/,
-  /^等待 reviewer 就緒時，它的 pane 不見了（消失或被換掉）$/,
-  /^cleanup_pending$/,
+/**
+ * 固定分類白名單（flow 與 agent-ready 產生、不含機器或遠端輸出）；字串是完整比對，RegExp 附 sample 供測試逐項斷言。
+ * BLOCKED_AT_START 本身含「：」（「常見原因：…」），所以先比完整字串，再比「：」前的固定標籤。
+ */
+export const RESULT_WHITELIST: readonly (string | { re: RegExp; sample: string })[] = [
+  "無法取得工作樹指紋，不開始 review",
+  BLOCKED_AT_START,
+  "reviewer 卡在啟動提示，已保留 pane 供人處理",
+  "reviewer 卡住了（blocked，可能在等人確認）",
+  "reviewer 沒有回覆",
+  "review 之後無法確認工作樹沒被改動",
+  "reviewer 改動了工作樹（review 前後的指紋不同），整份 review 不採用",
+  { re: /^reviewer 在 \d+ 秒內沒有就緒（狀態 [a-z_]+）$/, sample: "reviewer 在 30 秒內沒有就緒（狀態 idle）" },
+  "等待 reviewer 就緒時讀取 Agent 清單失敗",
+  "等待 reviewer 就緒時，它的 pane 不見了（消失或被換掉）",
+  "cleanup_pending",
 ];
+const whitelisted = (text: string) => RESULT_WHITELIST.some((e) => (typeof e === "string" ? e === text : e.re.test(text)));
 export const UNCLASSIFIED = "遠端 review 失敗：未分類";
 
-/** 只放行「：」前在白名單內的標籤，其餘一律未分類。 */
+/** 只放行白名單內的完整文字，或「：」前在白名單內的標籤，其餘一律未分類。 */
 export function fixedResultText(text: string): string {
+  if (whitelisted(text)) return text;
   const head = text.split("：")[0]!;
-  return KNOWN_TEXT.some((re) => re.test(head)) || head === BLOCKED_AT_START ? head : UNCLASSIFIED;
+  return whitelisted(head) ? head : UNCLASSIFIED;
 }
 
 export function githubOriginRepo(url: string): { owner: string; repo: string } | undefined {
@@ -203,11 +210,26 @@ export async function remoteFingerprint(exec: RemoteExec, dir: string): Promise<
   return `${head}\n${await must(exec, [...GIT, "-C", dir, "status", "--porcelain"], "git status 失敗")}`;
 }
 
-/** 只刪 root 的直接子目錄，且路徑是 canonical、marker 相符；目錄已不存在視為已清理。 */
+/**
+ * 驗證與刪除在同一個遠端指令內（固定腳本，值只經位置參數 $1 root、$2 dir、$3 目錄名、$4 marker 傳入）：
+ * 重取 root 的 realpath 並 cd 進去、dir 非符號連結且 realpath 等於 dir、marker 相符，才刪直接子目錄 `$3`。
+ * 退出碼：0 已刪或不存在、11 root 非 canonical、12 dir 是符號連結、13 無 marker、14 marker 不符。
+ */
+export const REMOVE_SCRIPT =
+  'r=$(realpath -- "$1") && [ "$r" = "$1" ] && cd -P -- "$r" || exit 11; [ -L "$3" ] && exit 12; [ -e "$3" ] || exit 0; ' +
+  `d=$(realpath -- "$3") && [ "$d" = "$2" ] || exit 12; m=$(cat -- "$3/.git/${MARKER_FILE}") || exit 13; [ "$m" = "$4" ] || exit 14; rm -rf -- "$3"`;
+const REMOVE_REFUSED: Record<number, string> = { 11: "root 是符號連結或在符號連結之下", 12: "既有目錄是符號連結", 13: "既有目錄沒有 bridge marker", 14: "既有目錄 marker 不符" };
+
+/** 只刪 root 的直接子目錄；剩餘視窗縮到單一指令內，無法完全消除（已知限制）。 */
 export async function removeRemoteCheckout(exec: RemoteExec, root: string, dir: string, hash: string): Promise<void> {
-  if (!(await verifyCheckoutPath(exec, root, dir))) return;
-  await assertMarker(exec, dir, hash);
-  await must(exec, ["rm", "-rf", "--", dir], "清理失敗");
+  assertRemoteValue("root", root);
+  assertRemoteValue("dir", dir);
+  assertRemoteValue("cardHash", hash);
+  const base = root.replace(/\/+$/, "");
+  const name = dir.slice(base.length + 1);
+  if (!base.startsWith("/") || !dir.startsWith(`${base}/`) || !NAME.test(name)) throw new RemoteFailure("拒絕清理 root 以外的目錄");
+  const { code } = await exec(["sh", "-c", REMOVE_SCRIPT, "sh", base, dir, name, markerContent(hash)], SHORT_MS);
+  if (code !== 0) throw new RemoteFailure(REMOVE_REFUSED[code] ?? "清理失敗", `exit ${code}`);
 }
 
 /** 任何失敗都不改在本機開 pane 或啟動 Agent。 */
@@ -246,7 +268,7 @@ export async function reviewOnRemote(
   const label = `review-${hash}-${randomBytes(4).toString("hex")}`;
   let owned = false;
   // cleanup_pending 的定位資訊（workspace id／label、完整目錄）只進 console，紀錄與通知維持固定標籤。
-  // create 逾時時遠端可能稍後才建好：有界重查，最後仍找不到才當作沒建立。
+  // create 逾時時遠端可能稍後才建好：有界重查，耗盡仍找不到就記 pending。
   const closeByLabel = async (): Promise<void> => {
     let last: unknown;
     for (let i = 0; i < LABEL_ATTEMPTS; i++) {
@@ -258,8 +280,8 @@ export async function reviewOnRemote(
         last = e;
       }
     }
-    if (last) throw last;
-    console.error(`remote review ${machineId}: workspace label ${label} 重查 ${LABEL_ATTEMPTS} 次都沒有找到，視為沒有建立`);
+    // 耗盡仍找不到：create 可能稍後才完成，狀態不明，記 cleanup_pending：workspace。
+    throw last ?? new Error(`workspace label ${label} 重查 ${LABEL_ATTEMPTS} 次都沒有找到，狀態不明，請人工確認 ${machineId} 上有沒有它`);
   };
   const cleanup = async (workspace?: string, uncertain = false): Promise<string> => {
     const pending: string[] = [];
