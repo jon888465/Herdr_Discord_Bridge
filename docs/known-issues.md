@@ -1,5 +1,29 @@
 # Known Issues
 
+## ISSUE-139：執行 run.sh 後 Herdr Desktop 看不到 bridge
+
+更新日期：2026-11-10。狀態：待調查（runtime 差異已確認，Desktop 相容層尚未實作）。
+
+追蹤卡：`REQ-20261110-desktop-core-support`，2026-11-10 已建於本機執行中 bridge 的營運目錄 `/home/jones/.local/state/herdr/plugins/herdr-discord-bridge/cards/`，狀態 draft，notify 指向建立卡片的 Agent pane。使用者明確要求本卡不得 merge，最多交付 PR；因此未設 ready，避免 L2 自動流程越過限制。`scripts/herdr-card-check` 當日結果 OK。尚未開始實作或驗收。
+
+使用者可見症狀：執行 `scripts/run.sh` 後，Herdr Desktop 未顯示 bridge。預期：能在 Desktop 使用 Discord bridge；目前實作僅針對舊 Herdr socket／plugin API，不保證 Desktop 相容。
+
+重現／環境：2026-11-10，目前 Ubuntu 同時有 `herdr server`、`herdr`、`herdr-app`、`herdr-core connect`、`herdr-core serve` 程序。`herdr status server` 回報 0.8.0、protocol 19、socket `/home/jones/.config/herdr/herdr.sock`；`herdr workspace list` 有 `bridge`（`w4`），`herdr pane list` 有 `Discord bridge`（`w4:p35`，tab `w4:t1`）。使用者貼回相同 server status 與 workspace list。`herdr-app --version` 為 0.1.14，`herdr-core --version` 為 hc 0.1.19；Desktop core socket 為 `/run/user/1000/herdr-core/default.sock`。
+
+已確認根因／範圍：run.sh 使用舊 `herdr` plugin／workspace／pane 命令，Desktop 程序則使用獨立的 herdr-core runtime。`herdr-core --help` 顯示 terminal 地址（如 t7）、run／ls／send／connect／schema 介面，與 bridge 所依賴的舊 workspace／pane／agent API 不同；不能僅把 socket 路徑改成 core socket 就宣稱相容。`--no-focus` 不是 runtime 不同的修正方式。尚未調查完整 core schema 或實作移植。
+
+修正範圍：本輪只同步已知限制至 SPEC 與本紀錄，未改程式、重啟或部署。現有 pane 登記不代表 bot 健康，也不代表 Desktop 可見。
+
+驗證（2026-11-10）：`herdr status server`、`herdr workspace list`、`herdr pane list`、程序清單、`herdr-core --help`、兩個 Desktop 元件的 `--version` 均成功。純文件變更，未跑 build／程式測試；`git diff --check` 通過。
+
+未驗證／下一步：調查 core schema、狀態與完成訊號及 Desktop 終端機呈現方式，設計獨立 adapter／啟動流程並完成 Discord／Desktop 端到端驗收。當前版本不可宣稱已支援 Desktop。
+
+**2026-11-11 autopick 嘗試：**卡片 `REQ-20261111-herdr-core-support` 轉為 ready 後由 bridge 撿起，但在 assign 前置檢查失敗，卡片流程紀錄為 `autopick_failed`：「無法使用 worktree：Herdr 0.8.0 is older than 0.9.1, which worktree support was tested on」。因此沒有建立 worktree、沒有派送 Agent 任務；卡片 frontmatter 仍為 ready，但本 bridge 程序已記錄此卡嘗試過、不會自行重試。這是舊 Herdr server 版本不符合現有 worktree 最低版本檢查，尚非 Core adapter 的實作／驗收結果；需要先在 Core 相容性工作中決定如何為 Core 提供隔離 worktree 能力及安全的啟動路徑。當日未改程式或重啟，無額外測試。
+
+**2026-11-11 bridge 重啟後再次嘗試：**確認 Herdr client/server 為 0.9.5；卡片仍是 `ready`，bridge 再次 `autopick_picked` 並建立了卡片 worktree（`/home/jones/.herdr/worktrees/Herdr_Discord_Bridge/card-req-20261111-herdr-core-support`，workspace `w7`）。隨後流程以 `autopick_stopped` 結束：「task 沒有完成：找不到這張卡的 task」；尚未確認為何 `taskIdForCard` 未找到 task，不能視為已派工或開始實作。Lead pane `w7:p1` 當時狀態為 blocked。之後檢查到該 pane 顯示 Codex 0.163.0 更新至 0.167.0 的提示；依使用者指示選擇 `Skip` 後 Lead 回到 idle，但原 autopick 流程已結束。這確認了 blocked UI 是更新提示，但尚未證實它與 task 關聯缺失的因果關係。追蹤卡 `REQ-20261111-codex-update-check-skip` 已建立為 ready，notify 已填並通過 `scripts/herdr-card-check`；修正此流程後再重試 Core 支援卡。當時 Core 支援卡仍為 ready，失敗後 worktree 現場保留；之後依使用者要求改為 `draft`，暫停 Core 卡的 autopick。兩張卡均未有程式實作或驗收；未改程式、未重啟，無額外測試。
+
+**2026-11-11 更新提示修復卡的 autopick 結果：**`REQ-20261111-codex-update-check-skip` 被撿起，Lead pane `wA:p1` 已結束；assign 在 task 啟動前失敗，流程紀錄 `autopick_failed`：「`--coding` 任務需要至少一個 Worker」。worktree 留在 `/home/jones/.herdr/worktrees/Herdr_Discord_Bridge/card-req-20261111-codex-update-check-skip`（workspace `wB`），沒有 task／程式修正；卡片仍為 ready，本程序不會重試。這張修復卡未配置或建立 Worker；失敗符合現有 coding 派工守門，不能宣稱更新提示已修正。之後 bridge 又因 Core 支援卡已有作用中 worktree 而停止重試（workspace `w9`）。當時需先提供合法 Worker 並由人決定如何處理保留 worktree／重派；未調整私人設定、未關閉 workspace、未重啟，未跑程式測試。2026-11-11 使用者授權清理閒置資源後，Core 卡仍為 draft；乾淨的 w8 card worktree 已用 `card cleanup` 移除、分支保留，w6／w7 的 autopick workspace 已關閉，w9 在後續清單中已不存在。這不代表 Core 實作或 Desktop 驗收完成。
+
 ## ISSUE-138：卡片缺少六角色 machine／agent／model 指定與 bridge 強制守門
 
 更新日期：2026-11-10。狀態：已修正、待驗收（原始碼與自動化檢查完成；尚未實機驗收）。卡片：REQ-20261110-card-role-assignment。

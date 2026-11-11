@@ -38,6 +38,10 @@ Bridge 不是 ACP broker；Team 可透過明確啟用的 Agent profile，按需�
 `herdr-hail` 的 blocked/approval 模式：觀察狀態、讀取 terminal context、
 建立 Discord thread，再透過 API 傳送回應。
 
+### Herdr Desktop 相容性（2026-11-10，ISSUE-139）
+
+目前 bridge 與 `scripts/run.sh` 使用舊 Herdr 的 plugin、workspace、pane 與 agent socket API。Ubuntu 實機的 `herdr-app 0.1.14` 使用 `herdr-core 0.1.19` 獨立 runtime，與 `herdr 0.8.0` server 不共用 pane；舊 server 的 bridge 不會因此出現在 Desktop。Desktop adapter 尚未實作或驗收，僅更改 socket 路徑不足以支援不同 API。
+
 ## 2. 執行環境與設定
 
 Plugin 以 TypeScript 編譯至 `dist/`，由 manifest pane 以
