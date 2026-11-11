@@ -94,7 +94,7 @@ instances; legacy processes without the lock still require explicit migration.
 - [Cross-CLI session handoff](docs/session-handoff.md): portable [skill](skills/handoff-session/SKILL.md), native-history-first recovery and quota checkpoints, including Grok Build via `grok export` or filtered `updates.jsonl`; comparison with bounded Bridge handoff. The standalone skill has no quota watcher and does not make the Bridge runtime decode Grok session files. Bridge Phase 4 uses explicit observations below. Live skill acceptance is tracked in ISSUE-017.
 
 - [Agent Pool and console separation](docs/agent-pool-console.md): 2026-09-18 implementation of per-workspace profile permissions, lazy persistent CLI startup, explicit existing-session binding, session continuity checks, dynamic Lead replanning, and console selection/inspection modes.
-- Profiles are definitions, sessions hold CLI context, panes host processes. Removing a profile from a Team does not stop its session.
+- Profiles are definitions, sessions hold CLI context, panes host processes. Removing a profile from a Team does not stop its session. For `--coding`, automatic candidates include claude/codex/pi plus capability-opted-in agy; one profile suffices, with fresh sessions per assignment to preserve independent review (ISSUE-140; live acceptance pending).
 - Team roster may contain live mappings and enabled profiles; only selected profiles start. Lead may choose zero Workers. Tasks now have durable state and conservative restart reconciliation; automatic resume is not implemented.
 
 ## Durable Tasks
@@ -195,3 +195,7 @@ ISSUE-127（2026-11-08，待實機驗收）：新增 role_assigned 固定模板�
 - [遠端卡片 reviewer](docs/remote-card-reviewer.md)：ISSUE-143，基礎層 PR #207＋角色接線 PR #206，未實機驗收。
 
 - [卡片角色指定](docs/card-role-assignment.md)：REQ-20261110-card-role-assignment，2026-11-10 原始碼實作、待驗收（ISSUE-138）。六角色 machine／agent／model 宣告、preflight、Lead 計畫／實際身分守門、fresh session、strict 角色紀錄及獨立壞卡診斷。Lead 決定本卡 machine 只交付 local 強制執行；已配置 remote 明確拒絕，跨機器尚未支援。無宣告卡維持舊行為；merge／重啟後三張實機驗收卡尚未執行。
+
+## Codex startup update menu (ISSUE-141, 2026-11-11)
+
+Lead and fresh/persistent profile Worker readiness use the strict observed update menu matcher and only send `2. Skip`, once, after identity checks. Other blocked UI fails closed. Task/card failure evidence remains durable; live acceptance is pending and the bridge has not been restarted. See SPEC.md and docs/known-issues.md.

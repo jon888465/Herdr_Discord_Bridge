@@ -3,6 +3,7 @@
 
 import type { AgentStartPort } from "./agent-start.js";
 import type { AgentRecord } from "./types.js";
+import { hasAgentSession, sameAgentSession } from "./response-stream.js";
 import { matchUpdatePrompt } from "./update-prompts.js";
 
 export interface ReadyDeps {
@@ -12,6 +13,8 @@ export interface ReadyDeps {
   readyPollMs?: number;
   /** 訊息裡稱呼被等的 Agent（預設 reviewer；autopick 的 Lead 用 Lead）。 */
   role?: string;
+  /** Startup must observe this kind before reporting ready (profile detection can lag). */
+  expectedKind?: string;
 }
 
 // Shared across calls on the same bridge port, including concurrent waits.
@@ -26,6 +29,8 @@ export type ReadyResult =
   | { ok: false; reason: string; updateSkip?: UpdateSkip };
 
 const skippedPanes = new WeakMap<AgentStartPort, Set<string>>();
+
+const sourcePorts = new WeakMap<AgentStartPort, AgentStartPort>();
 
 const settledPorts = new WeakMap<AgentStartPort, AgentStartPort>();
 
@@ -47,6 +52,7 @@ export function doneAsReady(port: AgentStartPort): AgentStartPort {
         ),
     };
     settledPorts.set(port, adapted);
+    sourcePorts.set(adapted, port);
   }
   return adapted;
 }
@@ -62,10 +68,12 @@ export const BLOCKED_AT_START = blockedAtStart("reviewer");
 
 async function skipKnownUpdate(
   deps: ReadyDeps,
-  paneId: string,
-  kind: string | undefined,
+  expected: AgentRecord,
 ): Promise<{ proceed: boolean; skip?: UpdateSkip }> {
-  let sent = skippedPanes.get(deps.panePort);
+  const paneId = expected.pane_id;
+  const kind = expected.agent;
+  const sourcePort = sourcePorts.get(deps.panePort) ?? deps.panePort;
+  let sent = skippedPanes.get(sourcePort);
   if (sent?.has(paneId)) return { proceed: false };
   const readScreen = async (): Promise<string | undefined> => {
     const result = await deps.panePort.request("agent.read", {
@@ -84,10 +92,23 @@ async function skipKnownUpdate(
     const entry =
       screen === undefined ? undefined : matchUpdatePrompt(kind, screen);
     if (!entry) return { proceed: false };
+    const live = (await deps.panePort.listAgentsWithWorkspaceNames()).find(
+      (agent) => agent.pane_id === paneId,
+    );
+    if (
+      !live ||
+      live.terminal_id !== expected.terminal_id ||
+      live.workspace_id !== expected.workspace_id ||
+      live.agent !== kind ||
+      live.agent_status !== "blocked" ||
+      (hasAgentSession(expected.agent_session) &&
+        !sameAgentSession(expected.agent_session, live.agent_session))
+    )
+      return { proceed: false };
     // Recheck after the read: another wait may have sent while we awaited it.
     if (!sent) {
-      sent = skippedPanes.get(deps.panePort) ?? new Set<string>();
-      skippedPanes.set(deps.panePort, sent);
+      sent = skippedPanes.get(sourcePort) ?? new Set<string>();
+      skippedPanes.set(sourcePort, sent);
     }
     if (sent.has(paneId)) return { proceed: false };
     sent.add(paneId); // Uncertain delivery must never be retried.
@@ -107,7 +128,7 @@ async function skipKnownUpdate(
     return {
       proceed:
         after !== undefined &&
-        !entry.match.every((text) => after.includes(text)),
+        !entry.match.some((text) => after.includes(text)),
       skip,
     };
   } catch {
@@ -130,9 +151,19 @@ export async function waitUntilReady(
   let updateSkip: UpdateSkip | undefined;
   const withSkip = <T extends object>(result: T) =>
     updateSkip ? { ...result, updateSkip } : result;
-  if (agent.agent_status === "idle") return { ok: true, agent };
+  const identityMatches = (current: AgentRecord) =>
+    current.pane_id === pane.paneId &&
+    current.terminal_id === pane.terminalId &&
+    current.workspace_id === started.workspace_id &&
+    (!current.agent || current.agent === (deps.expectedKind ?? started.agent));
+  const isReady = (current: AgentRecord) =>
+    current.agent_status === "idle" &&
+    (!deps.expectedKind || current.agent === deps.expectedKind);
+  if (!identityMatches(agent))
+    return { ok: false, reason: `${role} 啟動身分與要求不符` };
+  if (isReady(agent)) return { ok: true, agent };
   if (agent.agent_status === "blocked") {
-    const handled = await skipKnownUpdate(deps, pane.paneId, agent.agent);
+    const handled = await skipKnownUpdate(deps, agent);
     updateSkip = handled.skip ?? updateSkip;
     if (!handled.proceed)
       return withSkip({ ok: false as const, reason: blockedAtStart(role) });
@@ -165,10 +196,12 @@ export async function waitUntilReady(
         ok: false as const,
         reason: `等待 ${role} 就緒時，它的 pane 不見了（消失或被換掉）`,
       });
+    if (!identityMatches(current))
+      return withSkip({ ok: false as const, reason: `${role} 啟動身分已改變` });
     agent = current;
-    if (agent.agent_status === "idle") return withSkip({ ok: true as const, agent });
+    if (isReady(agent)) return withSkip({ ok: true as const, agent });
     if (agent.agent_status === "blocked") {
-      const handled = await skipKnownUpdate(deps, pane.paneId, agent.agent);
+      const handled = await skipKnownUpdate(deps, agent);
       updateSkip = handled.skip ?? updateSkip;
       if (!handled.proceed)
         return withSkip({ ok: false as const, reason: blockedAtStart(role) });

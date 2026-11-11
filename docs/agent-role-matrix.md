@@ -1,6 +1,8 @@
 # Agent 角色矩陣：讓每個 Agent 都能扮演每個角色
 
-日期：2026-11-09。相關：[多種 Lead 規劃](multi-lead-plan.md)、[ISSUE-130](known-issues.md)、ISSUE-134、ISSUE-137。
+日期：2026-11-11。相關：[多種 Lead 規劃](multi-lead-plan.md)、[ISSUE-130](known-issues.md)、ISSUE-134、ISSUE-137、[ISSUE-140](known-issues.md)。
+
+使用者於 2026-11-11 確認 pi coding Worker 已驗證並要求納入自動候選；具體卡片、環境與流程紀錄尚未提供，故矩陣仍不把 pi 的 implement／diagnose／verify／review 次數記為已核實成功。
 
 > **本文是現況盤點與計畫，不是已達成的功能。** 目標還沒達成：28 格（7 個角色 × 4 種 Agent）裡，有 13 格完全沒有證據，其餘的多數也只有少量或單次的證據。所有數字附日期與來源；沒有證據的格子寫「無」，不等於「做不到」。
 
@@ -46,7 +48,7 @@
 ## 阻礙與缺口（要讓每格都可行必須處理）
 
 **A. 程式明確限制（讀碼確認）：**
-- Worker 自動入池：`AUTO_CODING_KINDS = ["claude", "codex"]`；agy 只在 profile 宣告 `implementation` 或 `review` 時入池；**pi 不論怎麼宣告都不入池**（`src/coding-roster.ts`）。
+- Worker 自動入池（ISSUE-140，2026-11-11）：claude／codex／pi 自動入池；agy 僅在 profile 宣告 `implementation` 或 `review` 時入池。一個合格 profile 即可；單一 profile roster 每個 assignment 使用 fresh session。
 - reviewer 預設候選 `REVIEWER_KINDS = ["claude", "codex", "agy"]`，**不含 pi**；`--agent pi` 明確指定可以，bridge 只檢查格式（`src/review-pane.ts`）。
 - Lead：四種都被政策接受；agy、pi 要先在 `config.json` 宣告 `implementation`（目前兩者都已宣告，pi 是 2026-11-09 為測試加的）。
 

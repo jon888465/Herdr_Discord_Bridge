@@ -6,7 +6,7 @@ import type { AgentRecord } from "../src/types.js";
 
 const pane = { paneId: "w5:p9", terminalId: "term_new" };
 const update =
-  "Update available · 0.166.0 → 0.167.0\n3. Skip until next version";
+  "Update available · 0.166.0 → 0.167.0\n1. Update now\n2. Skip\n3. Skip until next version";
 function agent(kind = "codex", status = "blocked"): AgentRecord {
   return {
     pane_id: pane.paneId,
@@ -38,10 +38,14 @@ function fixture(screens: unknown[], statuses = [agent("codex", "idle")]) {
       if (method === "pane.send_keys") return {};
       throw new Error(`unexpected ${method}`);
     },
-    listAgentsWithWorkspaceNames: async () => statuses,
+    listAgentsWithWorkspaceNames: async () =>
+      calls.some((c) => c.method === "agent.read") &&
+      !calls.some((c) => c.method === "pane.send_keys")
+        ? [agent()]
+        : statuses,
   };
   return {
-    deps: { panePort: port, readyPollMs: 1, readyTimeoutMs: 50 },
+    deps: { panePort: port, readyPollMs: 1, readyTimeoutMs: 1000 },
     calls,
   };
 }
@@ -56,14 +60,14 @@ test("known update is skipped once and then readiness succeeds", async (t) => {
   assert.equal(result.ok, true);
   assert.deepEqual(
     log.mock.calls.map((call) => call.arguments),
-    [["已自動跳過 codex 的更新提示（pane w5:p9、按鍵 3）"]],
+    [["已自動跳過 codex 的更新提示（pane w5:p9、按鍵 2）"]],
   );
   assert.deepEqual(
     calls.filter((c) => c.method === "pane.send_keys"),
     [
       {
         method: "pane.send_keys",
-        params: { pane_id: pane.paneId, keys: ["3"] },
+        params: { pane_id: pane.paneId, keys: ["2"] },
         options: { retries: 0 },
       },
     ],
@@ -80,7 +84,7 @@ test("persistent update fails blocked and never sends again for that pane", asyn
   assert.deepEqual(await waitUntilReady(deps, pane, agent()), {
     ok: false,
     reason: blockedReason,
-    updateSkip: { kind: "codex", paneId: pane.paneId, key: "3" },
+    updateSkip: { kind: "codex", paneId: pane.paneId, key: "2" },
   });
   assert.deepEqual(await waitUntilReady(deps, pane, agent()), {
     ok: false,
@@ -147,7 +151,7 @@ test("update encountered during startup polling is skipped too", async (t) => {
   const { deps, calls } = fixture([{ text: update }, { text: "Ready" }]);
   let polls = 0;
   deps.panePort.listAgentsWithWorkspaceNames = async () => [
-    agent("codex", ++polls === 1 ? "blocked" : "idle"),
+    agent("codex", ++polls <= 2 ? "blocked" : "idle"),
   ];
   assert.equal(
     (await waitUntilReady(deps, pane, agent("codex", "working"))).ok,
@@ -195,7 +199,7 @@ test("a skipped update prompt is returned so callers can record it", async (t) =
   assert.deepEqual(result.updateSkip, {
     kind: "codex",
     paneId: pane.paneId,
-    key: "3",
+    key: "2",
   });
 });
 
