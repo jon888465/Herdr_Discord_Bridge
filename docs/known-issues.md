@@ -2,7 +2,18 @@
 
 ## ISSUE-143：remote machine（agy-pod）的 agent 不能擔任卡片角色；先開放 remote card reviewer
 
-更新日期：2026-11-11。狀態：已修正、待驗收（兩個 PR 都已 merge：A 基礎層 #207 `addee48`、B 角色接線 #206 `9ff908e`；自動化檢查與 codex 獨立複審通過）。**未實機驗收**；merge 後 bridge 尚未重啟、`config.json` 尚未加 `machines[].cardReview`，功能目前不會生效。卡片 REQ-20261111-remote-agy-role。
+更新日期：2026-11-11。狀態：已修正、待驗收（兩個 PR 都已 merge：A 基礎層 #207 `addee48`、B 角色接線 #206 `9ff908e`；自動化檢查與 codex 獨立複審通過；**主要成功路徑已實機驗過一次**，見下方 2026-11-11 實機段；失敗路徑與其他情境尚未驗）。卡片 REQ-20261111-remote-agy-role；實機驗收卡 REQ-20261111-remote-reviewer-live（PR #210）。
+
+**實機驗收（2026-11-11，本機 macOS，bridge 為 main `9ff908e`（#206、#207）重啟後的程序；`config.json` 的 agy-pod 已加 `cardReview {root: "/root/herdr-card-review", kinds: ["agy"]}`（備份 `config.json.bak-cardreview-20261111`）；pod：git 2.53.0、GNU `timeout`、`realpath`、agy 1.5.2，沒有 node；root 目錄由 Agent 在使用者同意後建立（權限 700、空目錄、非符號連結））：**測試卡 `REQ-20261111-remote-reviewer-live`（`lead: codex`、`roles: {reviewer: "agy-pod:agy"}`，bridge 序列化成 `"agy-pod:agy:"`），新增一行檔案的 PR #210。
+1. **撿卡前驗證通過：**06:59:28Z 撿起，沒有出現「卡片流程尚未支援 machine agy-pod」拒絕。
+2. **task 內的本機 agy Worker 卡住（與本功能無關，見 ISSUE-147）：**Agent 取消該 task（07:15:54Z）、接手 commit（`93ffcd6`）、開 PR #210、`card attach-pr`。
+3. **第 1 輪 review（07:16:46Z）`inconclusive`：**原因「reviewer 卡在啟動提示（blocked）」，pane 被保留。pod 上獨立佐證：`/root/herdr-card-review/jon888465__Herdr_Discord_Bridge__163ee5854b` 已 clone，`git rev-parse HEAD` = `93ffcd6a3435…` = PR 的 head sha，`.git/hdb-card-review` marker 存在（內容 `hdb-card-review-checkout:v1:163ee5854b`）；pod 的 Herdr 顯示 `w3:p2 agy·reviewer` 是 `blocked`，畫面原文：「Do you trust the contents of this project? Antigravity CLI requires permission to read, edit, and execute files here. > Yes, I trust this folder／No, exit」，工作目錄就是該 checkout。**這與預期一致（第一次信任提示）。**
+4. **信任：**Agent 依使用者的決定（第一次信任要信任），確認畫面路徑等於 bridge 管理且 marker 相符的目錄後，對這一個目錄按了確認；agy 的信任記在 pod 的 `/root/.gemini/antigravity-cli/settings.json` 的 `trustedWorkspaces`（原本 `['/root/workspace', '/root']`，新增 checkout 目錄）。**觀察：**`/root` 本來就在信任清單，checkout 目錄（它的子目錄）仍跳出提示，信任不會繼承上層。
+5. **第 2 輪 review（07:18:38Z `role_assigned`：`reviewer（第 2 輪）：agy；machine=agy-pod；v=2,cr=-,s=C,ss=CCD,me=U`；07:19:03Z）`pass`：**兩條驗收條件都 ✓；沿用上一輪的 checkout（沿用前工作樹乾淨：`git status --porcelain` 0 行，HEAD 仍是 `93ffcd6`）。bridge 回報「reviewer 的 pane 已關閉」。
+6. **清理：**第 2 輪結束後 `/root/herdr-card-review` 為空、pod 上只剩使用者原本的 `w2:p1`。**但 agy 的 `trustedWorkspaces` 裡那筆已刪除目錄的信任項目沒有被移除**（每個 reviewer 卡片都會累積一筆）。
+7. **review 次數：**第 1 輪 `inconclusive` 也算一次 verdict，這張卡用掉 2 次（上限 3）。
+
+**這個實機驗收證明的：**remote reviewer 的主要成功路徑（撿卡前驗證、pod 上 git clone、head sha 與 marker、agy 在 pod 執行 review、結果採用、沿用 checkout、清理目錄與 pane）一次成功；固定標籤與 pane 保留在信任提示時如設計。**沒有證明的：**agy-pod 不可達時不 fallback 到 local；clone／fetch／timeout／realpath 失敗路徑；`cleanup_pending`；marker 不符或工作樹不乾淨被拒；逾時；Lead 在 task 進行中自行選擇 remote（本來就不支援）；只有一張極簡卡、一次；pod 沒有 node，所以 verify 角色不能放在 pod。**新發現：**信任項目沒有清理（`REQ-20261111-agent-first-run-prompts` 的範圍已涵蓋）。
 
 **症狀／預期：**`reviewer: "agy-pod:agy"` 撿卡前被拒「卡片流程尚未支援 machine」。預期開放的 remote reviewer 派到 pod；remote implement／fixer 拒絕「remote 寫入尚未支援」；無 remote 配置時不變。
 
@@ -21,6 +32,22 @@
 **A 測試（2026-11-11，本機，fake exec／fake ssh）：**`npm run check` exit 0：1739 項／1738 pass／0 fail／1 既有 skipped；`npm run lint`、`git diff --check` 通過；既有測試檔未修改。單元測試不是 Herdr／pod 實機驗收。
 
 **未驗證：**實機（pod 的 git 與 repo 權限、GNU `timeout`、`realpath`、`refs/pull` fetch、marker 寫入）；cleanup_pending 不重試；clone 中斷留下的半成品沒有 marker，不會被清理（記 pending，需人工）；需使用者加 `cardReview` 並重啟。A 單獨 merge 不會啟用任何 remote 功能。
+
+## ISSUE-147：task 內本機 agy Worker 沒有收到第一個 prompt，Herdr 回 ok 但 pane 是空的，task 一直等到逾時
+
+更新日期：2026-11-11。狀態：待調查（現象已觀察一次；根因未確認）。
+
+**使用者可見症狀：**`REQ-20261111-remote-reviewer-live` 的 task 內 review（`team-review-card-file`，本機 agy Worker，pane `w6B:p4`）：07:03:37Z `role_assigned`、07:03:38.080Z `turn_dispatched`，bridge console 印出 `agent.prompt prompt+wait target=w6B:p4 chars=7266 ts=1794380618480`，**沒有任何錯誤**。之後 agy 的 pane 一直是剛啟動的歡迎畫面、輸入框是空的，Herdr 的 `agent explain` 說 `state: idle`，沒有 `hook Stop`；task 的最後一個事件就是那次 `turn_dispatched`，到 07:14:48Z 仍沒有變化（約 11 分鐘）。bridge 會等到單一回合上限（30 分鐘）才會判逾時。
+
+**預期行為：**prompt 送達 agy，或送不進去時明確失敗、有限度重試（ISSUE-137 的做法）；不應該靜默等 30 分鐘。
+
+**重現／環境：**2026-11-11，本機 macOS，bridge 為 main `9ff908e`；agy 1.5.4（本機，Gemini 3.8 Flash）；該 agy 是這張卡第一次需要的 Worker，bridge 在 07:03:33Z 才對這個 worktree 預先信任（`agy_worktree_trust`）並在 07:03:37Z 啟動；之前其他 Worker（codex）都正常。
+
+**根因：**未確認。與 ISSUE-137（Lead／Worker 第一個 prompt 在 Herdr 登記前被拒收，pi 上發生過）同一類，但這次 Herdr 沒有回 `agent_not_ready`，也沒有錯誤，所以 #198 的有上限重試沒有被觸發。可能是 agy 剛啟動時吞掉輸入、或預先信任剛寫入設定後的啟動時序；沒有驗證。
+
+**處理：**Agent 以 `wk use w6B` 切到卡片 workspace，用 `team cancel` 取消該 task（07:15:54Z），接手 commit、開 PR #210；task 內的 review 與 verify 沒有走完。
+
+**未驗證／下一步：**重跑能否重現；agy 啟動後多久才能收 prompt；bridge 對 `prompt+wait` 沒有任何「pane 內容沒有變化」的偵測。
 
 ## ISSUE-146：task 沒有完成、PR 由人工接手 merge 後，卡片永遠停在 in_progress，autopick Lead 的 workspace 不會被收尾
 
