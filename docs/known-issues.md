@@ -2,7 +2,7 @@
 
 ## ISSUE-143：remote machine（agy-pod）的 agent 不能擔任卡片角色；先開放 remote card reviewer
 
-更新日期：2026-11-11。狀態：修正中（拆成兩個相依 PR：A 基礎層 PR #207、B 角色接線 PR #206，B 依賴 A，A merge 後 B 要 rebase；自動化檢查通過，兩個都 merge 後改為已修正、待驗收）。**未實機驗收**；bridge 未重啟。卡片 REQ-20261111-remote-agy-role。
+更新日期：2026-11-11。狀態：已修正、待驗收（兩個 PR 都已 merge：A 基礎層 #207 `addee48`、B 角色接線 #206 `9ff908e`；自動化檢查與 codex 獨立複審通過）。**未實機驗收**；merge 後 bridge 尚未重啟、`config.json` 尚未加 `machines[].cardReview`，功能目前不會生效。卡片 REQ-20261111-remote-agy-role。
 
 **症狀／預期：**`reviewer: "agy-pod:agy"` 撿卡前被拒「卡片流程尚未支援 machine」。預期開放的 remote reviewer 派到 pod；remote implement／fixer 拒絕「remote 寫入尚未支援」；無 remote 配置時不變。
 
@@ -22,9 +22,25 @@
 
 **未驗證：**實機（pod 的 git 與 repo 權限、GNU `timeout`、`realpath`、`refs/pull` fetch、marker 寫入）；cleanup_pending 不重試；clone 中斷留下的半成品沒有 marker，不會被清理（記 pending，需人工）；需使用者加 `cardReview` 並重啟。A 單獨 merge 不會啟用任何 remote 功能。
 
+## ISSUE-145：單一指派的 30 分鐘等待上限，讓已完成的 Worker 成果被 bridge 判逾時丟掉
+
+更新日期：2026-11-11。狀態：待調查（現象已重現一次、根因為讀碼與時間序推論；沒有修正）。
+
+**使用者可見症狀：**`REQ-20261111-remote-agy-role` 的 implement Worker（claude opus，`implement-remote-reviewer`）從 02:15:30Z 開始實作，**02:45:32Z bridge 判定等待逾時**（task 事件 `Assignment implement-remote-reviewer 等待逾時（已等待 30 分 2 秒，上限 30 分鐘）`，task 標成 `blocked`，Lead 的彙整、task 內 review、verify 都沒有進行）；但 Worker 的 pane 顯示它在 **02:46（31 分 14 秒）完成並送出完整回報**（`BRIDGE_BEGIN`／`BRIDGE_END` 區塊，含 `codingResult` 與 18 個檔案清單）。bridge 已不收這份回報，成果只留在卡片 worktree（未 commit 的 18 個檔案），由人工接手驗證與提交。
+
+**預期行為：**Worker 在上限之後才完成、但回報有效時，不要整個 task 丟掉；至少要能「採用逾時後才到的回報」或明確讓人選擇重新等待，並在通知說清楚是等待逾時、成果可能在 worktree（現有訊息已有這句，但沒有後續動作）。
+
+**重現／環境：**2026-11-11，本機 macOS，bridge 為 main `796e0cb`；卡片大小是 31 檔以上的實作（約 +380／-17 行加 4 個新檔），opus 實作約 31 分鐘。
+
+**根因（推論）：**單一指派的等待上限是固定值（30 分鐘），Worker 的回合稍微超過就被判逾時，且逾時後沒有「事後採用回報」的路徑；與 ISSUE-124（回合逾時的分類）同一類，但這次是成果已完成、只是晚了約 1 分鐘。
+
+**影響：**task 內的 review、verify 與 Lead 彙整都被跳過；這張卡之後只能走人工接手與 PR 審查。相關：`REQ-20261111-quota-handoff` 的背景（task 內缺乏 Worker 狀況不明時的復原機制）。
+
+**未驗證／下一步：**逾時上限是否可設定（`timeoutMs` 的來源）；逾時後回報到達的處理要不要做成需求卡。
+
 ## ISSUE-144：autopick 在 task 開始前記「找不到這張卡的 task」的 autopick_stopped
 
-更新日期：2026-11-11。狀態：待調查（一次觀察，根因未確認）。
+更新日期：2026-11-11。狀態：待調查（一次觀察，根因未確認；**與 ISSUE-142 是同一次事件的兩份記錄**，ISSUE-142 有對 `card assign` 回覆與 codex 更新提示的讀碼推論，處理時合併看）。
 
 REQ-20261111-remote-agy-role 在 02:07:43Z picked 後，02:07:55Z 記 failed「task 沒有完成：找不到這張卡的 task」並排入通知，但 task 02:09:51Z 才開始且之後正常。預期 task 建立前不記失敗。可能與等待 task 的時序或 ISSUE-133／135 同類，未證實。下一步：對照 autopick 等待 task 的路徑與時間戳。
 
@@ -103,7 +119,13 @@ REQ-20261111-remote-agy-role 在 02:07:43Z picked 後，02:07:55Z 記 failed「t
 **未驗證項目／下一步：**讀 `src/card-review*.ts` 確認 note 被丟掉的位置；重做一張驗收條件只含 diff 可驗證內容的敏感路徑測試卡，才能驗到 ISSUE-133／135 的敏感路徑情境。
 ## ISSUE-138：卡片缺少六角色 machine／agent／model 指定與 bridge 強制守門
 
-更新日期：2026-11-10。狀態：已修正、待驗收（原始碼與自動化檢查完成；尚未實機驗收）。卡片：REQ-20261110-card-role-assignment。
+更新日期：2026-11-11。狀態：已修正、待驗收（原始碼與自動化檢查完成；**實機驗收只有部分證據**，見下方 2026-11-11 段）。卡片：REQ-20261110-card-role-assignment。
+
+**實機部分證據（2026-11-11，本機 macOS，bridge 為 main `796e0cb`（#205）重啟後的程序，`config.json` 的 claude profile 已加 `"model": "opus"`，備份 `config.json.bak-claude-opus-20261111`）：**
+1. **指定生效（部分）：**卡片 `REQ-20261111-remote-agy-role`（`lead: codex`、`roles: {implement: "local:claude:opus", diagnose: "local:claude:opus"}`）撿起後，流程紀錄出現 `diagnose-remote-role：claude（opus）；machine=local；…v=2,cr=d,s=C,ss=CCC,me=L`（02:10:09Z）與 `implement-remote-reviewer：claude（opus）；machine=local；…v=2,cr=i,s=C,ss=CCC,me=L`（02:15:30Z），來源 `s=C`（card）。獨立佐證：系統行程 `claude --model opus`（pid 31840），Herdr pane 標籤 `claude·worker·opus`。**限制：**兩個角色都是 claude，不是「兩角色不同 agent」；只有 implement 與 diagnose 兩個角色。
+2. **無效指定被拒（部分）：**使用者建的 `REQ-20261110-role-process-records`（`implement: agy-pod:agy:…`）在 bridge 重啟後被撿卡前拒絕，事件 `failed`／`autopick_stopped`：「卡片角色指定無效：implement：卡片流程尚未支援 machine agy-pod」（2026-11-10 08:06:11Z，另一次在 2026-11-11 重啟後）。這是 remote machine 這一種無效指定；不合法 agent、不合法 model 沒有實機驗過。
+3. **Lead 派工不符被擋：沒有驗。**
+4. 其餘（`card review`／`fix`／loop 使用卡片指定、fixer）沒有驗；該卡的 task 因單一指派等待逾時而 blocked（見 ISSUE-145），後續流程由 Agent 接手，沒有走完整的角色路徑。
 
 **2026-11-11 實機觀察（部分，非三卡驗收）：**REQ-20261111-remote-agy-role 首次實機用 roles（只宣告 local）；diagnose、implement 的 `role_assigned` 皆 `claude（opus）；machine=local；…；s=C,ss=CCC,me=L`，implement pane `w69:p3` 為 `claude·worker·opus`、同 worktree 有 `claude --model opus` 程序（pid↔pane 只由時間與 cwd 推定）。原文見 agent-role-matrix.md；另見 ISSUE-144。remote 拒絕文字已由 ISSUE-143 改變。
 
