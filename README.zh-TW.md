@@ -239,7 +239,7 @@ npm run build
 
 ### 遠端卡片 reviewer（選填）
 
-機器項目加 `"cardReview": { "root": "/root/hdb-card-review", "kinds": ["agy"] }` 後，卡片可寫 `roles: {reviewer: "agy-pod:agy"}`：PR push 之後，bridge 用匿名 https 把 GitHub `origin` clone 到該機器的 `<root>/`，checkout PR head 並驗證 HEAD 等於 PR head sha，再在該機器執行 reviewer（不轉送憑證、不 fallback 本機）。`root` 是 bridge 專用的絕對路徑，`kinds` 是允許的 Agent 種類。只有 reviewer 可以是 remote，卡片內容與 PR diff 會送到該機器。沒設定 `cardReview` 時一切不變。尚未實機驗收（ISSUE-143，見 [docs/remote-card-reviewer.md](docs/remote-card-reviewer.md)）。
+機器項目加 `"cardReview": { "root": "/root/hdb-card-review", "kinds": ["agy"] }` 後，卡片可寫 `roles: {reviewer: "agy-pod:agy"}`：PR push 之後，bridge 用匿名 https 把 GitHub `origin` clone 到該機器的 `<root>/`，checkout PR head 並驗證 HEAD 等於 PR head sha，再在該機器執行 reviewer（不轉送憑證、不 fallback 本機）。`root` 是 bridge 專用的絕對路徑，`kinds` 是允許的 Agent 種類。只有 reviewer 可以是 remote，卡片內容與 PR diff 會送到該機器。沒設定 `cardReview` 時一切不變；沒有 `roles` 的卡不支援由 Lead 自選 remote reviewer（後續卡片 REQ-20261111-remote-in-task-roles）。尚未實機驗收（ISSUE-143，見 [docs/remote-card-reviewer.md](docs/remote-card-reviewer.md)）。
 
 ## 可用 Agent 池與動態分工
 

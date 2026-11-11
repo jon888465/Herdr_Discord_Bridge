@@ -82,9 +82,11 @@ function harness(o: { origin?: string; head?: string; throwOn?: string; listing?
   const exec: RemoteExec = async (argv) => {
     const j = argv.join(" ");
     // timeout 檢查、目錄／marker 檢查與 marker 寫入是前置作業，不進流程 log。
-    if (!["timeout", "test", "cat", "sh"].includes(argv[0]!)) log.push(`exec:${["clone", "rm", "fetch"].find((a) => argv.includes(a)) ?? "git"}`);
+    if (!["timeout", "test", "cat", "sh", "realpath"].includes(argv[0]!)) log.push(`exec:${["clone", "rm", "fetch"].find((a) => argv.includes(a)) ?? "git"}`);
     if (argv.includes("clone")) cloned = true;
     if (o.throwOn && j.includes(o.throwOn)) throw new RemoteFailure("逾時", "pod secret", true);
+    if (argv[0] === "realpath") return { code: 0, stdout: `${argv[2]}\n` };
+    if (argv[0] === "test" && argv[1] === "-L") return { code: 1, stdout: "" };
     if (argv[0] === "cat") return { code: 0, stdout: `hdb-card-review-checkout:v1:${hash}\n` };
     if (argv[0] === "test") return { code: cloned && argv[2] === dir ? 0 : 1, stdout: "" };
     return { code: 0, stdout: j.includes("rev-parse") ? (o.head ?? HEAD) : "" };
@@ -112,9 +114,9 @@ function harness(o: { origin?: string; head?: string; throwOn?: string; listing?
     createWorkspace: async (_m, cwd) => (log.push(`create:${cwd.startsWith(`${ROOT}/acme__repo__`)}`), o.ws?.() ?? { workspaceId: "pod:w3", paneId: "pod:w3:p1" }),
     closeWorkspace: async (m, id) => {
       log.push(`close:${id}`);
-      if (o.closeFails) throw new Error("gone");
+      if (o.closeFails) throw new Error("gone pod stderr SECRET");
     },
-    closeWorkspaceLabeled: async (m, label) => void log.push(`closeLabeled:${m}:${/^review-[0-9a-f]{10}-[0-9a-f]{8}$/.test(label)}`),
+    closeWorkspaceLabeled: async (m, label) => (log.push(`closeLabeled:${m}:${/^review-[0-9a-f]{10}-[0-9a-f]{8}$/.test(label)}`), 1),
     panePort: () => port,
     startAgent: async (input) => (log.push(`start:${input.kind}@${input.paneId}`), agent({ agent_status: "working" })),
   };
@@ -189,7 +191,7 @@ test("blocked at start keeps pane, workspace and checkout; cleanup failure only 
   const failing = harness({ closeFails: true });
   const result = await failing.run();
   ok(result.ok && result.batch.verdict === "pass" && /cleanup_pending：workspace/.test(result.closeNote ?? "") && failing.log.at(-1) === "exec:rm");
-  ok(!/SECRET|pod/.test(JSON.stringify([kept.ok && kept.inconclusiveReason, result.ok && result.closeNote])));
+  for (const whole of [kept, result]) ok(!/SECRET|pod|stderr/.test(JSON.stringify(whole)), JSON.stringify(whole)); // 整份結果，不只單一欄位
 });
 
 test("wiring: frozen remote snapshot needs the running config to open the machine and a remote port before fetching material", async () => {
@@ -211,7 +213,10 @@ test("wiring: frozen remote snapshot needs the running config to open the machin
   await rejects(run({ roleContext: closed, remote: h.remote }), (e: unknown) => /machine 未開放卡片 review/.test(String(e)) && !/pod/.test(String(e)));
   await rejects(run({ roleContext: context }), /remote reviewer 介面不存在/);
   equal(fetched as number, 0);
-  ok((await run({ roleContext: context, remote: h.remote })).result.ok && fetched === 1 && h.log.includes("turn:pod") && !h.local.length);
+  // 舊快照允許 agy，目前配置只開放 codex：啟動前拒絕，固定標籤、不啟動任何東西。
+  await rejects(run({ roleContext: { ...context, remoteMachines: [{ id: "pod", kinds: ["codex"] }] }, remote: h.remote }), (e: unknown) => /machine 目前未開放這個 agent 種類/.test(String(e)) && !/pod|agy/.test(String(e)));
+  eq([...h.log, ...h.local], []);
+  ok((await run({ roleContext: context, remote: h.remote })).result.ok && fetched === 2 && h.log.includes("turn:pod") && !h.local.length);
 });
 
 test("main remoteReviewDeps: workspace.create parsing, label close, pane routing, startAgent machine from paneId, fresh listing", async () => {

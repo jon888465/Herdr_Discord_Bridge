@@ -269,7 +269,7 @@ After `herdr machine add`, list the machine under `machines` in the plugin confi
 
 ### Remote card reviewer (optional)
 
-Add `"cardReview": { "root": "/root/hdb-card-review", "kinds": ["agy"] }` to a machine to let a card declare `roles: {reviewer: "agy-pod:agy"}`: after the PR is pushed the bridge clones the GitHub `origin` over anonymous https into `<root>/` on that machine, checks out the PR head, verifies HEAD equals the PR head sha and runs the reviewer there (no credentials forwarded, no fallback to local). `root` is a bridge-only absolute path; `kinds` lists allowed agent kinds. Only `reviewer` can be remote; the card text and PR diff are sent to that machine. Without `cardReview` nothing changes. Not accepted on real machines yet (ISSUE-143, [docs/remote-card-reviewer.md](docs/remote-card-reviewer.md)).
+Add `"cardReview": { "root": "/root/hdb-card-review", "kinds": ["agy"] }` to a machine to let a card declare `roles: {reviewer: "agy-pod:agy"}`: after the PR is pushed the bridge clones the GitHub `origin` over anonymous https into `<root>/` on that machine, checks out the PR head, verifies HEAD equals the PR head sha and runs the reviewer there (no credentials forwarded, no fallback to local). `root` is a bridge-only absolute path; `kinds` lists allowed agent kinds. Only `reviewer` can be remote; the card text and PR diff are sent to that machine. Without `cardReview` nothing changes, and cards without `roles` cannot get a remote reviewer picked by the Lead (follow-up card REQ-20261111-remote-in-task-roles). Not accepted on real machines yet (ISSUE-143, [docs/remote-card-reviewer.md](docs/remote-card-reviewer.md)).
 
 ## Agent profiles and quiet console
 

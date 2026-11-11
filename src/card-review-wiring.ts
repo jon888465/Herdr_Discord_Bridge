@@ -147,6 +147,9 @@ export async function reviewCardPullRequest(
       : {}),
     ...(options.agent !== undefined ? { requestedKind: options.agent } : {}),
   };
+  // 舊快照允許的 kind，目前配置可能已不開放：啟動前重驗。
+  if (remote && !deps.roleContext?.remoteMachines?.find((m) => m.id === remote)?.kinds.includes(flowInput.launch?.kind ?? ""))
+    throw new Error("遠端 review 失敗：machine 目前未開放這個 agent 種類");
   const result = remote
     ? await reviewOnRemote(deps.remote!, deps.flow, remote, { ...flowInput, prRepo: pr.repo, localWorktree: entry.path })
     : await runCardReview(deps.flow, flowInput);
