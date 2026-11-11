@@ -406,7 +406,7 @@ catalog. New launches reject resume/session binding/model override arguments.
 CLI `--agent` / loop `--fix-agent` cannot conflict with a card agent assignment.
 Each constrained assignment and each review/fix round starts a fresh session.
 
-An agy reviewer's checkout is pre-trusted in the pod's agy settings and removed at cleanup; not accepted on real machines.
+agy reviewer pre-trust: see ISSUE-143; not accepted on real machines.
 
 Machine delivery in this change is declaration, validation and enforced **local**
 execution. Unknown machines are rejected; configured remote machines are rejected

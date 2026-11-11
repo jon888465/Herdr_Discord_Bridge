@@ -2,6 +2,8 @@
 
 REQ-20261111-remote-agy-role，ISSUE-143。2026-11-11，**未實機驗收**。
 
+agy reviewer 預先信任 checkout，狀態不明時不啟動 reviewer：見 ISSUE-143，**未實機驗收**。
+
 基礎層（設定、驗證、遠端 checkout、清理）在 PR #207（A），角色與接線在 PR #206（B，依賴 A；A merge 後 B 要 rebase）。沒有 `machines[].cardReview` 時一切不變。
 
 ## 範圍與限制
@@ -32,10 +34,6 @@ Lead prompt 列 remote reviewer 候選（machine／kind／profile／model），�
 - workspace 用 `requestOn` 開在該機器；label 每次執行唯一（`review-<雜湊>-<8 hex>`）。create 逾時依 label 有界重查 3 次（間隔 2 秒），找到就關；耗盡仍找不到時狀態不明（create 可能在最後一次查詢之後才完成），記 `cleanup_pending：workspace` 要人工確認，console 帶 machine 與 label。
 - 結束關 pane、workspace，刪目錄：「重取 realpath、確認 root 仍 canonical 且 dir 不是符號連結、marker 相符、再 `rm -rf -- <root 底下的直接子目錄名>`」合併成同一個遠端 `sh -c` 固定腳本，值只經位置參數傳入（不拼進腳本），先 `cd -P` 到 canonical root 再刪相對名稱；檢查失敗就不刪並回固定結果。**已知限制：**視窗只縮到單一指令內，無法完全消除（沒有 openat 語意的 shell 做不到），另一個程序在這個極短視窗內置換 root 或祖先仍有理論風險。`BLOCKED_AT_START` 保留；斷線、本機逾時或指紋階段 uncertain 失敗不刪，記 `cleanup_pending`，目前不重試。
 - 結果文字只放行白名單（`RESULT_WHITELIST`）：先比完整字串（`BLOCKED_AT_START` 含「：」，要保留「卡在信任提示、需人工處理」的原因），再比「：」前的固定標籤，其餘是「遠端 review 失敗：未分類」；紀錄與通知只帶固定分類。`cleanup_pending` 的 workspace id／label、完整目錄路徑與 stderr 只進 console。
-
-## agy 預先信任（REQ-20261111-agent-first-run-prompts，未做實機驗收）
-
-reviewer 是 agy 時，啟動前由 `src/remote-agy-trust.ts` 把 checkout 加進 pod 的 `$HOME/.gemini/antigravity-cli/settings.json`：讀檔附遠端 sha256，本機以 `editTrustedWorkspaces` 編輯，固定 `sh -c` 腳本（值只經位置參數）驗 root／dir／marker／設定檔非符號連結且雜湊未變才備份（`<root>/.hdb-agy-settings-backups`，600，留 5 份）並 `mktemp`＋`mv`；被改動就重讀（最多 4 次）。確定沒寫入的失敗不中止；**狀態不明**（斷線、遠端 timeout 124／137，mv 可能已完成）不啟動 reviewer、直接失敗走清理：仍嘗試移除，但仍在跑的寫入可能在清理讀設定後才完成，所以一律記 `cleanup_pending：trust` 並保留目錄。只移除「本次新增」的項目（`editRemoteAgyTrust` 回傳 false＝原本就在）；成功、失敗、例外、逾時都在刪目錄前移除，paneKept 保留。pod 的 `sha256sum`、`base64 -d`、`mktemp`、`cp -p` 未驗證（本機以真的 `sh` 測過）。
 
 ## 未驗證與後續
 
