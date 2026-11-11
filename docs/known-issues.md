@@ -22,6 +22,24 @@
 
 **未驗證：**實機（pod 的 git 與 repo 權限、GNU `timeout`、`realpath`、`refs/pull` fetch、marker 寫入）；cleanup_pending 不重試；clone 中斷留下的半成品沒有 marker，不會被清理（記 pending，需人工）；需使用者加 `cardReview` 並重啟。A 單獨 merge 不會啟用任何 remote 功能。
 
+## ISSUE-146：task 沒有完成、PR 由人工接手 merge 後，卡片永遠停在 in_progress，autopick Lead 的 workspace 不會被收尾
+
+更新日期：2026-11-11。狀態：待調查（現象已重現一次、根因為觀察與推論；沒有修正）。
+
+**使用者可見症狀：**`REQ-20261111-remote-agy-role` 的 task 因 ISSUE-145 標成 `blocked`，我接手 worktree、開 PR、用 `card attach-pr` 登記；PR #206 於 2026-11-11 06:45:07Z merge，bridge 在 06:45:44Z 記錄 `merged`、06:45:47Z 記錄 `cleanup_done`（worktree 與卡片 workspace 已移除）。**但卡片檔 `status` 一直是 `in_progress`**（至少到 07:0x，重啟 bridge 之後仍是），autopick 為 codex Lead 開的 workspace `autopick-codex-REQ-20261111-remote-agy-role` 也一直開著。我手動把卡片改成 `done` 後，約一分鐘內 bridge 的收尾掃描就關掉了那個 workspace。
+
+**預期行為：**卡片關聯的 PR 已 merge 且 bridge 已記錄 `merged` 與 `cleanup_done` 時，卡片應該進入終態（`done`），Lead workspace 隨後被收尾；不應該依賴 task 是否「完成」。
+
+**重現／環境：**2026-11-11，本機 macOS，bridge 為 main `796e0cb`（後續重啟為 `9ff908e`）。條件：task 沒有完成（`blocked`／failed）→ 人工接手 → `card attach-pr` → PR merge。
+
+**推論的根因：**卡片只有在 task 事件為完成時才被同步成 `done`（`Card sync updated`）；`merged` 事件只記流程紀錄並清理 worktree，不改卡片狀態。task 失敗後人工接手的卡片因此不會進入終態。之前同類的卡（`REQ-20261109-codex-lead-agy`、`REQ-20261109-pi-lead-live` 等 5 張）也停在 `in_progress`，已記為殘留孤兒卡，可能是同一原因。
+
+**未確認：**`merged` 事件是否在「只有 PR 登記、沒有 task 完成」時就不改卡片狀態是設計還是遺漏；卡片同步的實際程式位置。
+
+**修正方向（尚未實作）：**`merged` 與 `cleanup_done` 都已記錄、且卡片有關聯 PR 時，把卡片設成 `done`；要補測試涵蓋 task 未完成的路徑。
+
+**暫時做法：**人工確認 PR 確實已 merge 後，手動把卡片 `status` 改成 `done`（2026-11-11 對 `REQ-20261111-remote-agy-role` 這樣做了）。
+
 ## ISSUE-145：單一指派的 30 分鐘等待上限，讓已完成的 Worker 成果被 bridge 判逾時丟掉
 
 更新日期：2026-11-11。狀態：待調查（現象已重現一次、根因為讀碼與時間序推論；沒有修正）。
