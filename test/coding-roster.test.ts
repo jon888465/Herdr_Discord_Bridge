@@ -4,6 +4,7 @@ import {
   assertCodingRoster,
   autoEnableCodingProfiles,
   leadGateFor,
+  needsFreshCodingProfileSession,
 } from "../src/coding-roster.js";
 
 test("a coding task with no Worker is refused up front, naming the reason and the way out", () => {
@@ -25,8 +26,7 @@ test("a task that is not a coding task never needs a Worker", () => {
   assert.doesNotThrow(() => assertCodingRoster(false, 0));
 });
 
-// E14：沒有指定 Worker 時自動啟用 claude／codex profile；agy 只有 capabilities 宣告 implementation／review 才加入
-// （ISSUE-107，選用）；pi 仍排除（`--coding` 還沒在它驗過）。
+// E14：沒有指定 Worker 時自動啟用 claude／codex／pi profile；agy 只有 capabilities 宣告 implementation／review 才加入。
 function fakePool(
   profiles: Array<{ id: string; kind: string; capabilities?: string[] }>,
 ) {
@@ -42,7 +42,7 @@ function fakePool(
   };
 }
 
-test("with no Worker specified, claude and codex profiles are enabled for the Lead to assign; agy and pi are left out", () => {
+test("with no Worker specified, claude, codex and pi profiles are enabled; agy remains opt-in", () => {
   const { pool, selected } = fakePool([
     { id: "helper", kind: "codex" },
     { id: "reviewer", kind: "codex" },
@@ -54,23 +54,26 @@ test("with no Worker specified, claude and codex profiles are enabled for the Le
     "helper",
     "reviewer",
     "claude",
+    "pi",
   ]);
-  assert.deepEqual(selected, ["helper", "reviewer", "claude"]);
+  assert.deepEqual(selected, ["helper", "reviewer", "claude", "pi"]);
 });
 
-test("fewer than two usable profiles enable nothing, so the task is still refused", () => {
-  for (const profiles of [
-    [],
-    [{ id: "claude", kind: "claude" }],
-    [
-      { id: "claude", kind: "claude" },
-      { id: "agy", kind: "agy" },
-      { id: "pi", kind: "pi" },
-    ],
+test("no eligible profiles enables nothing, while one eligible profile is sufficient", () => {
+  const empty = fakePool([
+    { id: "agy", kind: "agy", capabilities: ["analysis"] },
+  ]);
+  assert.deepEqual(autoEnableCodingProfiles("w9", empty.pool), []);
+  assert.deepEqual(empty.selected, []);
+
+  for (const profile of [
+    { id: "codex", kind: "codex" },
+    { id: "pi", kind: "pi" },
+    { id: "agy", kind: "agy", capabilities: ["review"] },
   ]) {
-    const { pool, selected } = fakePool(profiles);
-    assert.deepEqual(autoEnableCodingProfiles("w9", pool), []);
-    assert.deepEqual(selected, []);
+    const { pool, selected } = fakePool([profile]);
+    assert.deepEqual(autoEnableCodingProfiles("w9", pool), [profile.id]);
+    assert.deepEqual(selected, [profile.id]);
   }
 });
 
@@ -113,7 +116,7 @@ test("agy declaring implementation, review or both is added alongside claude/cod
   }
 });
 
-test("an opted-in agy counts toward the two-profile minimum", () => {
+test("an opted-in agy can be the only coding profile", () => {
   const { pool, selected } = fakePool([
     { id: "claude", kind: "claude" },
     { id: "agy", kind: "agy", capabilities: ["review"] },
@@ -123,20 +126,20 @@ test("an opted-in agy counts toward the two-profile minimum", () => {
   const alone = fakePool([
     { id: "agy", kind: "agy", capabilities: ["implementation"] },
   ]);
-  assert.deepEqual(autoEnableCodingProfiles("w9", alone.pool), []);
-  assert.deepEqual(alone.selected, []);
+  assert.deepEqual(autoEnableCodingProfiles("w9", alone.pool), ["agy"]);
+  assert.deepEqual(alone.selected, ["agy"]);
 });
 
-test("capabilities never opt in other kinds such as pi", () => {
+test("pi is automatically eligible regardless of capabilities", () => {
   const { pool, selected } = fakePool([
-    ...base,
-    { id: "pi", kind: "pi", capabilities: ["implementation", "review"] },
+    { id: "pi", kind: "pi" },
+    { id: "pi-impl", kind: "pi", capabilities: ["implementation"] },
   ]);
-  assert.deepEqual(autoEnableCodingProfiles("w9", pool), ["helper", "claude"]);
-  assert.deepEqual(selected, ["helper", "claude"]);
+  assert.deepEqual(autoEnableCodingProfiles("w9", pool), ["pi", "pi-impl"]);
+  assert.deepEqual(selected, ["pi", "pi-impl"]);
 });
 
-test("the no-Worker error says agy is opt-in via capabilities and pi is unverified", () => {
+test("the no-Worker error names pi and the single-profile fresh-session behavior", () => {
   assert.throws(
     () => assertCodingRoster(true, 0),
     (error: Error) =>
@@ -144,9 +147,30 @@ test("the no-Worker error says agy is opt-in via capabilities and pi is unverifi
       /implementation/.test(error.message) &&
       /review/.test(error.message) &&
       /pi/.test(error.message) &&
-      /已有程式支援/.test(error.message) &&
-      /實機驗收尚未完成/.test(error.message) &&
-      !/第 2、3 部分尚未完成/.test(error.message),
+      /單一 profile/.test(error.message) &&
+      /fresh session/.test(error.message),
+  );
+});
+
+test("a lone coding profile uses fresh sessions; non-coding or multi-worker rosters do not", () => {
+  assert.equal(
+    needsFreshCodingProfileSession(true, [{ pane_id: "profile:pi" }]),
+    true,
+  );
+  assert.equal(
+    needsFreshCodingProfileSession(false, [{ pane_id: "profile:pi" }]),
+    false,
+  );
+  assert.equal(
+    needsFreshCodingProfileSession(true, [
+      { pane_id: "profile:pi" },
+      { pane_id: "profile:codex" },
+    ]),
+    false,
+  );
+  assert.equal(
+    needsFreshCodingProfileSession(true, [{ pane_id: "w1:p2" }]),
+    false,
   );
 });
 

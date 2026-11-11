@@ -24,6 +24,24 @@
 
 **2026-11-11 更新提示修復卡的 autopick 結果：**`REQ-20261111-codex-update-check-skip` 被撿起，Lead pane `wA:p1` 已結束；assign 在 task 啟動前失敗，流程紀錄 `autopick_failed`：「`--coding` 任務需要至少一個 Worker」。worktree 留在 `/home/jones/.herdr/worktrees/Herdr_Discord_Bridge/card-req-20261111-codex-update-check-skip`（workspace `wB`），沒有 task／程式修正；卡片仍為 ready，本程序不會重試。這張修復卡未配置或建立 Worker；失敗符合現有 coding 派工守門，不能宣稱更新提示已修正。之後 bridge 又因 Core 支援卡已有作用中 worktree 而停止重試（workspace `w9`）。當時需先提供合法 Worker 並由人決定如何處理保留 worktree／重派；未調整私人設定、未關閉 workspace、未重啟，未跑程式測試。2026-11-11 使用者授權清理閒置資源後，Core 卡仍為 draft；乾淨的 w8 card worktree 已用 `card cleanup` 移除、分支保留，w6／w7 的 autopick workspace 已關閉，w9 在後續清單中已不存在。這不代表 Core 實作或 Desktop 驗收完成。
 
+## ISSUE-140：`--coding` 自動 Worker 池排除 pi，且單一 profile 被錯誤拒絕
+
+更新日期：2026-11-11。狀態：已修正、待驗收（來源與相關自動化檢查完成；實機確認 Pi 已進入 roster，但尚未實際派送 Pi assignment，完整驗收受 ISSUE-141 阻擋）。
+
+**症狀／預期：**2026-11-11 autopick `REQ-20261111-codex-update-check-skip` 在 `card assign --worktree --coding` 啟動前因沒有 Worker 失敗。使用者指出 pi coding Worker 已驗證，要求 pi 納入自動候選；只有一個合格 profile 也應能工作。預期：自動候選包含 claude／codex／pi 與符合 capabilities 的 agy；一個 profile 即可入池；單一 profile 時仍為每個 coding assignment 啟動獨立 fresh session，保留 author／reviewer 不同 session 的驗收，不降低 review gate。
+
+**重現／環境（2026-11-11，本機）：** Herdr 0.9.5；autopick 建立 update-check 卡 worktree（workspace `wB`），`card assign --worktree --coding` 回報需要至少一個 Worker。使用者 config 的 `agentProfiles` 有一個 codex profile 與一個 pi profile；Lead 為 codex。沒有修改私人設定。
+
+**已確認根因：**`src/coding-roster.ts` 的自動候選只含 claude／codex，agy 需 capabilities opt-in，pi 被排除；`autoEnableCodingProfiles` 要求至少兩個候選。故只有一個符合條件的 codex profile 時不會勾選任何 profile，`assertCodingRoster` 隨即拒絕。單純把門檻降為一個而重用同一個 persistent session，會使同 session review 被 fail closed；必須在單一 profile roster 時為每個 coding assignment 建立 fresh session。
+
+**修正範圍（2026-11-11）：**`coding-roster.ts` 納入 pi、允許一個候選並補 fresh-session 判斷；`main.ts` 對單一 profile coding roster 使用 `startCardRoleSession`，每項 assignment 新開並依既有安全規則清理 pane；更新 roster 測試與相關文件。config／policy 不變。
+
+**驗證（2026-11-11）：**初次 targeted `coding-roster` 測試 12/13 通過、1 項因舊「agy 單獨不入池」預期失敗，該測試已依新決策更新。`npm run build`、`npm run lint`（200 TypeScript files）、`npm run typecheck` 通過；`node --test dist/test/coding-roster.test.js dist/test/team-task-engine.test.js` 54/54 pass；另 `node --test --test-name-pattern='one configured pi profile' dist/test/team-task-engine.test.js` 1/1 pass。全套 `npm test` 在 240 秒命令逾時前跑到 test 1162，沒有最後總結，不能算全套通過。`git diff --check` 通過。
+
+**實機測試（2026-11-11）：**依使用者要求執行 `scripts/run.sh` 重啟已連結本地 plugin（Herdr 0.9.5；使用已 build 的 `dist`，未改 config／policy）。清理先前乾淨的 wB card worktree（只移除 worktree、保留分支）後，ready 卡由 autopick 建立 task `task-2b7e7e84-9a5d-407d-9b2c-3f3a63eb795a`，task roster 明確含 `profile:codex` 與 `profile:pi`，Lead／task／卡片關聯也已建立。Lead 與 Codex diagnose Worker 都遇到版本 0.163.0 → 0.167.1 更新提示；依既有使用者指示僅選 `Skip`，未更新 Codex。Worker assignment 在互動前已以 `agent_blocked` 失敗，task 最終 `blocked`、卡片流程 `autopick_stopped`；沒有 Pi assignment、通過 review／verification 或程式修改。測試當下 wD worktree 與失敗 task 保留、工作樹乾淨；之後依使用者清理要求，`card cleanup` 已移除 wD worktree 並保留分支，workspace／Agents 已關閉；durable failed task 仍保留，不補派。此測試只證明目前 build 的自動 roster 含 Pi 及 task 可以建立，未證明 Pi 實際工作或單一 profile author→reviewer live 流程。
+
+**未驗證／下一步：**單一 profile 的完整 fake-runtime coding 任務與 Herdr／CLI 實機 author→獨立 reviewer 流程仍待驗證。使用者回報 pi 已驗證，但其環境、卡片與流程紀錄未提供。完整 live 驗收受 ISSUE-141 的 Codex 更新提示阻擋；本輪 bridge 已依使用者授權重啟且仍在執行，failed task 不會自動補送。
+
 ## ISSUE-138：卡片缺少六角色 machine／agent／model 指定與 bridge 強制守門
 
 更新日期：2026-11-10。狀態：已修正、待驗收（原始碼與自動化檢查完成；尚未實機驗收）。卡片：REQ-20261110-card-role-assignment。
@@ -4093,7 +4111,9 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 ## ISSUE-107：agy 作為 `--coding` Worker／Reviewer 的支援（分三部分）
 
-更新日期：2026-11-06。狀態：已修正、待驗收。
+更新日期：2026-11-11。狀態：已修正、待驗收（agy 原有 session／reviewer 驗收限制未變）。
+
+**2026-11-11 後續決定：**本節較早記錄的「pi 不入自動池」及「至少兩個 profile」是當時的歷史規則，已由使用者新決定 supersede；pi 與單一 profile 的新規則及實作追蹤見 ISSUE-140。agy 的 capability opt-in 與未完成 live acceptance 不受此決定改變。
 
 **第 1、2 部分已合併；本卡補齊第 3 部分，整合合併後三部分即全部合併（本工作樹尚未 commit／merge）。agy 作為 Worker／Reviewer 的 `--coding` 全流程尚未實機驗證。使用者須自行在 agy profile 的 capabilities 加入 `implementation` 或 `review` 才會自動啟用。**
 

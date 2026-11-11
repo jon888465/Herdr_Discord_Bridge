@@ -1,6 +1,8 @@
 # Agent 角色矩陣：讓每個 Agent 都能扮演每個角色
 
-日期：2026-11-09。相關：[多種 Lead 規劃](multi-lead-plan.md)、[ISSUE-130](known-issues.md)、ISSUE-134、ISSUE-137。
+日期：2026-11-11。相關：[多種 Lead 規劃](multi-lead-plan.md)、[ISSUE-130](known-issues.md)、ISSUE-134、ISSUE-137、[ISSUE-140](known-issues.md)。
+
+使用者於 2026-11-11 確認 pi coding Worker 已驗證並要求納入自動候選；具體卡片、環境與流程紀錄尚未提供，故矩陣仍不把 pi 的 implement／diagnose／verify／review 次數記為已核實成功。
 
 > **本文是現況盤點與計畫，不是已達成的功能。** 目標還沒達成：28 格（7 個角色 × 4 種 Agent）裡，有 13 格完全沒有證據，其餘的多數也只有少量或單次的證據。所有數字附日期與來源；沒有證據的格子寫「無」，不等於「做不到」。
 
@@ -46,12 +48,12 @@
 ## 阻礙與缺口（要讓每格都可行必須處理）
 
 **A. 程式明確限制（讀碼確認）：**
-- Worker 自動入池：`AUTO_CODING_KINDS = ["claude", "codex"]`；agy 只在 profile 宣告 `implementation` 或 `review` 時入池；**pi 不論怎麼宣告都不入池**（`src/coding-roster.ts`）。
+- Worker 自動入池（ISSUE-140，2026-11-11）：claude／codex／pi 自動入池；agy 僅在 profile 宣告 `implementation` 或 `review` 時入池。一個合格 profile 即可；單一 profile roster 每個 assignment 使用 fresh session。
 - reviewer 預設候選 `REVIEWER_KINDS = ["claude", "codex", "agy"]`，**不含 pi**；`--agent pi` 明確指定可以，bridge 只檢查格式（`src/review-pane.ts`）。
 - Lead：四種都被政策接受；agy、pi 要先在 `config.json` 宣告 `implementation`（目前兩者都已宣告，pi 是 2026-11-09 為測試加的）。
 
 **B. 設計缺口（2026-11-10 更新）：**
-- REQ-20261110-card-role-assignment 已有原始碼實作（ISSUE-138，待驗收）：roles inline map 指定六角色 machine／agent／model、計畫與實際派工守門，reviewer／fixer 同樣套用；語法與限制見 card-role-assignment.md。無宣告保留原行為。machine 本卡只強制 local，已配置 remote 撿前明確拒絕；跨機器未支援，pi Worker 未開放。本次未部署／重啟／跑實機卡，不新增任何矩陣成功格。
+- REQ-20261110-card-role-assignment 已有原始碼實作（ISSUE-138，待驗收）：roles inline map 指定六角色 machine／agent／model、計畫與實際派工守門，reviewer／fixer 同樣套用；語法與限制見 card-role-assignment.md。無宣告保留原行為。machine 本卡只強制 local，已配置 remote 撿前明確拒絕；跨機器未支援。本次未部署／重啟／跑實機卡，不新增任何矩陣成功格。pi 已於 2026-11-11 由使用者回報 coding Worker 驗證，但缺少可核對流程證據，待補記。
 - 以下為此功能之前的缺口背景；不再表示原始碼完全沒有指定機制：
 - implement／diagnose／verify／review（task 內）**由 Lead 在計畫裡決定**，卡片與使用者沒有「指定某角色必須由某 Agent 扮演」的機制。要驗證「claude 當 implement」只能靠 Lead 剛好選到，沒有可控的方法。
 - reviewer 與作者要是不同 session 的規則，意味著每個 Agent 當 reviewer 都需要一個不同 session 的作者。
@@ -68,7 +70,7 @@
 |---|---|---|
 | R0 | 本文與矩陣 | 本 PR |
 | R1 | **不需要新程式就能驗證的格子**：`card review --agent agy`（agy 當 reviewer）；`card loop --fix-agent codex`／`agy`（codex、agy 當 fixer）；~~pi 當 Lead 重測~~（**已於 2026-11-09 完成一次**，見註 4）；`card review --agent pi`（pi 當 reviewer） | 部分完成 |
-| R2 | **pi 納入 Worker 名單**：改 `coding-roster.ts` 的 pi 排除規則（需要使用者決定，因為目前是刻意寫死）；先驗 pi 當 implement／diagnose／verify | 未開始，需要決策 |
+| R2 | **pi 納入 Worker 名單**：使用者 2026-11-11 確認 pi coding Worker 已驗證並決定納入；`coding-roster.ts` 已納入 pi、允許單一 profile，保留 fresh-session 獨立 review | 原始碼與自動化測試完成（ISSUE-140）；實機驗收待完成 |
 | R3 | **可指定角色的機制**：roles 六角色指定，見 ISSUE-138 與 card-role-assignment.md；local 執行，remote 尚不支援 | 原始碼已實作、待三卡實機驗收（2026-11-10） |
 | R4 | **整張矩陣補齊**：依 R1 到 R3，每個還沒有證據的格子各跑一張無害卡，更新本文的矩陣與日期 | 未開始 |
 

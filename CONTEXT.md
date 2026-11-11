@@ -94,7 +94,7 @@ instances; legacy processes without the lock still require explicit migration.
 - [Cross-CLI session handoff](docs/session-handoff.md): portable [skill](skills/handoff-session/SKILL.md), native-history-first recovery and quota checkpoints, including Grok Build via `grok export` or filtered `updates.jsonl`; comparison with bounded Bridge handoff. The standalone skill has no quota watcher and does not make the Bridge runtime decode Grok session files. Bridge Phase 4 uses explicit observations below. Live skill acceptance is tracked in ISSUE-017.
 
 - [Agent Pool and console separation](docs/agent-pool-console.md): 2026-09-18 implementation of per-workspace profile permissions, lazy persistent CLI startup, explicit existing-session binding, session continuity checks, dynamic Lead replanning, and console selection/inspection modes.
-- Profiles are definitions, sessions hold CLI context, panes host processes. Removing a profile from a Team does not stop its session.
+- Profiles are definitions, sessions hold CLI context, panes host processes. Removing a profile from a Team does not stop its session. For `--coding`, automatic candidates include claude/codex/pi plus capability-opted-in agy; one profile suffices, with fresh sessions per assignment to preserve independent review (ISSUE-140; live acceptance pending).
 - Team roster may contain live mappings and enabled profiles; only selected profiles start. Lead may choose zero Workers. Tasks now have durable state and conservative restart reconciliation; automatic resume is not implemented.
 
 ## Durable Tasks

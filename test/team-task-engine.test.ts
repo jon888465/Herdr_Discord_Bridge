@@ -861,6 +861,8 @@ function codingRun(options: {
   reviewOnAuthorPane?: boolean;
   /** 計畫略過 implement。 */
   skipImplement?: boolean;
+  /** Single configured profile is reacquired as a fresh session per assignment. */
+  singleProfile?: boolean;
 }) {
   const repo = codingRepo();
   const dir = mkdtempSync(join(tmpdir(), "agy-coding-task-"));
@@ -926,7 +928,7 @@ function codingRun(options: {
       if (prompt.includes("Do not modify files while planning")) {
         const implement = {
           id: "impl",
-          workerPaneId: author.pane_id,
+          workerPaneId: options.singleProfile ? "profile:pi" : author.pane_id,
           instruction: "Add the feature",
           role: "implement",
           access: "write",
@@ -934,16 +936,18 @@ function codingRun(options: {
         };
         const review = {
           id: "rev",
-          workerPaneId: options.reviewOnAuthorPane
-            ? author.pane_id
-            : reviewer.pane_id,
+          workerPaneId: options.singleProfile
+            ? "profile:pi"
+            : options.reviewOnAuthorPane
+              ? author.pane_id
+              : reviewer.pane_id,
           instruction: "Review the current version",
           role: "review",
           access: "read",
         };
         const verify = {
           id: "ver",
-          workerPaneId: reviewer.pane_id,
+          workerPaneId: options.singleProfile ? "profile:pi" : reviewer.pane_id,
           instruction: "Run the local check",
           role: "verify",
           access: "read",
@@ -984,7 +988,29 @@ function codingRun(options: {
         taskId: "task-agy",
         prompt: "ship the local change",
         lead: record(leadAgent),
-        workers: [record(author), record(reviewer)],
+        workers: options.singleProfile
+          ? [
+              {
+                pane_id: "profile:pi",
+                terminal_id: "profile:pi",
+                workspace_id: "w1",
+                tab_id: "",
+                agent: "pi",
+                agent_status: "idle",
+                profile: { id: "pi", kind: "pi" },
+              },
+            ]
+          : [record(author), record(reviewer)],
+        ...(options.singleProfile
+          ? {
+              acquireWorker: async (_target, assignment) => ({
+                agent: record(
+                  assignment?.coding?.role === "implement" ? author : reviewer,
+                ),
+                continuity: "new-session" as const,
+              }),
+            }
+          : {}),
         replan: true,
         coding: true,
         timeoutMs: 500,
@@ -1020,6 +1046,36 @@ test("ISSUE-107: a session that agy gets only after its first turn becomes the i
       ),
     );
     assert.equal(task.state, "completed");
+  } finally {
+    h.close();
+  }
+});
+
+test("one configured pi profile can implement and independently review through fresh sessions", async () => {
+  const h = codingRun({
+    author: { agent: "pi", initial: "pi-author" },
+    reviewer: { agent: "pi", initial: "pi-reviewer" },
+    singleProfile: true,
+  });
+  try {
+    const task = await h.run();
+    const implement = task.coding?.artifacts.find(
+      (artifact) => artifact.role === "implement",
+    );
+    const review = task.coding?.artifacts.find(
+      (artifact) => artifact.role === "review",
+    );
+    assert.equal(task.state, "completed");
+    assert.deepEqual(implement?.authorSession, {
+      kind: "id",
+      value: "pi-author",
+    });
+    assert.deepEqual(review?.reviewerSession, {
+      kind: "id",
+      value: "pi-reviewer",
+    });
+    assert.equal(review?.independentReview, true);
+    assert.equal(review?.verdict, "pass");
   } finally {
     h.close();
   }
