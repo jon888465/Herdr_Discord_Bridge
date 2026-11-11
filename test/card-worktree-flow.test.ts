@@ -441,19 +441,31 @@ import { doneAsReady, waitUntilReady } from "../src/agent-ready.js";
 // ISSUE-142：與 main 相同的 awaitReady（waitUntilReady(doneAsReady(port))、真的 matchUpdatePrompt）先跳過，才算 agentReady。
 test("a codex update prompt on the new Agent is skipped before agentReady is computed", async (t) => {
   t.mock.method(console, "log", () => {});
-  const screens = ["Update available\n  3. Skip until next version", "› Ready"];
+  const update = [
+    "  Update available · 0.166.0 → 0.167.0",
+    "  Release notes: https://github.com/openai/codex/releases/latest",
+    "",
+    "› 1. Update now (runs `brew upgrade --cask codex`)",
+    "  2. Skip",
+    "  3. Skip until next version",
+    "",
+    "  enter continue · esc skip",
+  ].join("\n");
+  const screens = [update, "› Ready"];
+  // PR #211 之後送鍵前會重驗 pane 此刻真的是 blocked：第一次列出回 blocked，之後回 idle。
+  const statuses = ["blocked", "idle"];
   const { deps, log } = setup({
     lead: { ...lead, agent: "codex" },
     startAgent: async () => ({ ...started, agent: "codex", agent_status: "blocked" }),
   });
   const panePort = doneAsReady({
     request: async (m, p) => (log.push(`${m}${p?.keys ?? ""}`), m === "agent.read" ? { read: { text: screens.shift() } } : {}),
-    listAgentsWithWorkspaceNames: async () => [{ ...started, agent: "codex", agent_status: "idle" }],
+    listAgentsWithWorkspaceNames: async () => [{ ...started, agent: "codex", agent_status: statuses.length > 1 ? statuses.shift()! : statuses[0] }],
   });
   deps.awaitReady = async (a) => {
     const ready = await waitUntilReady({ panePort, readyPollMs: 1 }, { paneId: a.pane_id, terminalId: a.terminal_id }, a);
     return ready.ok ? ready.agent : undefined;
   };
   assert.equal((await prepareCardWorktree(deps, CARD)).agentReady, true);
-  assert.deepEqual(log.slice(-4), ["agent.read", "pane.send_keys3", "agent.read", "switch:w9:w9:p1"]);
+  assert.deepEqual(log.slice(-4), ["agent.read", "pane.send_keys2", "agent.read", "switch:w9:w9:p1"]);
 });

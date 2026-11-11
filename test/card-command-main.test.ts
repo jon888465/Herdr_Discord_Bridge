@@ -94,10 +94,22 @@ test("ISSUE-142: a codex update prompt on the worktree Lead is skipped before as
   const id = "REQ-20261111-update-lead";
   const order: string[] = [];
   const agent = (agent_status: string) => ({ pane_id: "w9:p1", terminal_id: "t9", workspace_id: "w9", agent: "codex", agent_status, foreground_cwd: "/r" }) as AgentRecord;
-  const screens = ["Update available · 0.166.0 → 0.167.0\n  3. Skip until next version", "› Ready"];
+  const update = [
+    "  Update available · 0.166.0 → 0.167.0",
+    "  Release notes: https://github.com/openai/codex/releases/latest",
+    "",
+    "› 1. Update now (runs `brew upgrade --cask codex`)",
+    "  2. Skip",
+    "  3. Skip until next version",
+    "",
+    "  enter continue · esc skip",
+  ].join("\n");
+  const screens = [update, "› Ready"];
+  // PR #211 之後送鍵前會重驗 pane 此刻真的是 blocked：第一次列出回 blocked，之後回 idle。
+  const statuses = ["blocked", "idle"];
   const panePort = doneAsReady({
     request: async (method, params) => (order.push(`${method}${params?.keys ?? ""}`), method === "agent.read" ? { read: { text: screens.shift() } } : {}),
-    listAgentsWithWorkspaceNames: async () => [agent("idle")],
+    listAgentsWithWorkspaceNames: async () => [agent(statuses.length > 1 ? statuses.shift()! : statuses[0])],
   });
   const rootDir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "issue142-")), "cards");
   new CardStore(rootDir).create({ id, type: "requirement", status: "ready", title: "t", version: 1, created: "2026-11-11", updated: "2026-11-11", body: "# t\n\n## 描述\nx\n\n## 驗收條件\n- ok\n" });
@@ -125,7 +137,7 @@ test("ISSUE-142: a codex update prompt on the worktree Lead is skipped before as
     startTask: async () => (order.push("startTask"), { taskId: "task-1111-aaaa", lead: { agent: "codex", machine: "local" } }),
   } as unknown as CardCommandDeps;
   const reply = await runCardCommand(["assign", id, "--worktree", "--coding"], deps);
-  assert.deepEqual(order, ["agent.read", "pane.send_keys3", "agent.read", "ready:true", "startTask"]);
+  assert.deepEqual(order, ["agent.read", "pane.send_keys2", "agent.read", "ready:true", "startTask"]);
   assert.doesNotMatch(reply, /任務沒有啟動/);
   assert.match(reply, new RegExp(`已指派 ${id}`));
 });
