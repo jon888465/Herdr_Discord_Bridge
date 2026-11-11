@@ -81,13 +81,40 @@ Use the restart script in one of three modes:
 
 If the Herdr server is not running, `run.sh` starts the headless server and waits for its socket before continuing; you do not need to type `herdr` first, and the script does not stop an existing Herdr server.
 
-All modes place the bridge in tab 1 of a dedicated workspace named `bridge`.
+All Herdr modes place the bridge in tab 1 of a dedicated workspace named `bridge`.
 The script reuses that workspace or creates it with the project cwd and
 `--no-focus`; duplicate names are rejected. Other Agent panes stay in place.
 If an old bridge still runs in another workspace, the script reports its pane
 ID and stops: explicitly move or stop that old bridge before restarting.
 Only labelled non-Agent bridge panes in the dedicated tab are replaced.
 The script does not modify the plugin configuration or Discord token.
+
+### Select Herdr or Herdr Core
+
+```text
+Usage: scripts/run.sh [--herdr|--core] [-r|-rg]
+Backend defaults to --herdr. Options may appear in any order.
+-r: rebuild local checkout; -rg: reinstall from GitHub (Herdr only).
+--core -rg is unsupported; no changes are made.
+```
+
+The existing commands above keep their Herdr behavior; `--herdr` makes that choice explicit. For Core, install `herdr-core` (tested with hc 0.1.20), Node.js, npm and jq. Use `./scripts/run.sh --core -r` to build this checkout and start a Core terminal, or `./scripts/run.sh --core` to use its existing build. Duplicate/conflicting flags, unknown arguments and Core `-rg` exit 2 before runtime/npm calls; `-h`/`--help` prints usage.
+
+For direct Node startup, selection is `HERDR_BRIDGE_RUNTIME` > config `runtime` > `herdr`; unknown values fail without fallback. Set Core configuration in the usual bridge config directory (default `~/.config/herdr-discord-bridge/config.json`, overridden by `HERDR_PLUGIN_CONFIG_DIR`), including the Discord token/allowlists and:
+
+```json
+{"runtime":"core","coreAllowedTerminals":["t2"],"allowedWorkspaceIds":[],"machines":[]}
+```
+
+Use addresses obtained from Core, not the example t2 blindly. Empty `coreAllowedTerminals` allows listing and reading but rejects all input. Input also requires a current, live terminal and matching Core identity. Nonempty `allowedWorkspaceIds` or legacy `machines` rejects Core startup. Core socket selection is `HC_SOCKET` > `HC_SESSION` (maps to `~/.local/state/herdr-core/<session>/<session>.sock`) > `~/.local/state/herdr-core/default/default.sock`; `HERDR_SOCKET_PATH` applies only to Herdr. For nonstandard Core socket locations, set HC_SOCKET explicitly.
+
+Core currently supports listing, visible-screen reading, sending, keys and runtime status: `/herdr agents`, `read [terminal]`, `ask <terminal> <text>`, `status`, `agent keys <terminal> <keys...>` and `cancel [terminal]`. Within a thread, `target <terminal>`, `use <terminal>` or `agent use <terminal>` explicitly binds an authorized target before free-text prompts can be sent. Read uses lines:0 and marks incomplete output. Missing status remains unknown; sends do not force blocked programs or retry uncertain delivery. Other commands, including workspace, Team/card, pool/start, worktree, handoff, approval and failover, are explicitly rejected. There is no automatic final-response streaming in this minimal Core mode; use read to inspect output. The remaining command documentation describes Herdr unless stated otherwise.
+
+Core run.sh checks status, starts the server once only on an explicit “no core running” failure, then polls readiness. Other errors stop. It checks live terminals for the same bridge role/project (using get if ls omits labels) and refuses duplicates. It never kills/removes terminals or stops/restarts Core, and never calls the old herdr CLI. The same bot instance lock prevents both backends from logging in together; an existing production bridge must be handled explicitly by its operator. `Core bridge terminal: <address>` confirms terminal creation, not successful Discord login.
+
+The Herdr launcher explicitly passes `--env HERDR_BRIDGE_RUNTIME=herdr` (supported by the installed CLI), so `--herdr` and the default path select Herdr even when plugin config says core. Config is not rewritten. Core explicitly passes HERDR_PLUGIN_CONFIG_DIR and HERDR_PLUGIN_STATE_DIR (caller values, or resolved defaults), plus caller HC_SOCKET/HC_SESSION when set. Inherited Core locator variables are cleared first. Tokens never appear in argv: Core launch clears HERDR_DISCORD_BOT_TOKEN/DISCORD_BOT_TOKEN and uses discord.botToken from JSONC config.json. If the caller supplies only an environment token and the file has none, run.sh refuses before launching; move that token into the private config file.
+
+Core uses separate `core-routing.json` and `core-discord.json` under the bridge state directory; old Herdr routes are not migrated. Read-only validation is available with `HERDR_BRIDGE_RUNTIME=core node dist/src/index.js --dry-run`. As of 2026-11-12, automated tests and local Core dry-run passed; deployment, a running-bridge restart and real Core/Herdr startup plus Discord round trips remain pending. Design, errors, limits and acceptance steps: [Herdr Core runtime](docs/herdr-core-runtime.md), tracked in ISSUE-151.
 
 Fill in the bot token and explicit guild/channel/user allowlists in `config.json`
 or use environment variables. Never commit that file. Discord Message Content

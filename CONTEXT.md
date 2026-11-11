@@ -69,6 +69,8 @@
 
 ## Project maintenance
 
+- [Herdr Core runtime](docs/herdr-core-runtime.md)：ISSUE-151（2026-11-12），獨立 Core terminal 最小路由、輸入白名單、狀態隔離與 run.sh 雙後端；自動化／唯讀 dry-run 通過，未部署／重啟，Core/Herdr 實機啟動及 Discord 往返待驗收。workspace/Team/card/pool/worktree/handoff 等高階功能在 Core 明確拒絕。
+
 All contributors must follow [AGENTS.md](AGENTS.md), including same-session
 issue/spec documentation updates and reopening issues after failed acceptance.
 The current issue and verification ledger is [known issues](docs/known-issues.md).
@@ -81,7 +83,7 @@ thread route, sharing active Agent and Team changes. `thread off` restores the
 independent console route. Selecting an Agent keeps the console in conversation mode. Explicit `attach` displays bounded visible terminal snapshots; `watch` displays state changes. Blocked questions remain visible and replyable in every mode.
 Controls remain available in every state. Direct Agent-pane mirroring to Discord
 is still pending (ISSUE-010). Explicit Team question correlation is implemented; live acceptance is tracked in ISSUE-012.
-Bridge restart preserves other Agent panes and targets tab 1
+Herdr backend restart preserves other Agent panes and targets tab 1
 within the dedicated workspace named `bridge` (created if absent). Legacy bridge
 panes elsewhere must be explicitly migrated/stopped before restart.
 
