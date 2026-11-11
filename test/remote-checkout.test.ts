@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import assert, { ok, deepEqual as eq, equal, throws, rejects, match } from "node:assert/strict";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -16,10 +16,13 @@ const HASH = "0a1b2c3d4e";
 const MARKER = `hdb-card-review-checkout:v1:${HASH}`;
 const PROBE = ["timeout", "-k", "1", "5", "true"];
 const WRITE_MARKER = ["sh", "-c", 'printf %s "$1" > "$2"', "sh", MARKER, `${DIR}/.git/hdb-card-review`];
-const input = { dir: DIR, owner: "acme", repo: "repo", prNumber: 7, headSha: HEAD, cardHash: HASH };
+const REPO = [DIR, `${DIR}/.git`];
+const input = { root: ROOT, dir: DIR, owner: "acme", repo: "repo", prNumber: 7, headSha: HEAD, cardHash: HASH };
 const label = (l: string) => (e: unknown) => e instanceof RemoteFailure && e.label === l;
 
-function fake(o: { exists?: string[]; origin?: string; head?: string; failOn?: string; throwOn?: string; marker?: string | null; probe?: number } = {}) {
+type FakeOptions = { exists?: string[]; origin?: string; head?: string; failOn?: string; throwOn?: string; marker?: string | null; probe?: number; links?: string[]; realMap?: Record<string, string>; realpath?: (path: string) => { code: number; stdout: string }; dirty?: string };
+
+function fake(o: FakeOptions = {}) {
   const calls: string[][] = [];
   const exec: rc.RemoteExec = async (argv) => {
     calls.push(argv);
@@ -28,12 +31,15 @@ function fake(o: { exists?: string[]; origin?: string; head?: string; failOn?: s
     if (o.failOn && j.includes(o.failOn)) return { code: 128, stdout: "" };
     if (argv[0] === "timeout") return { code: o.probe ?? 0, stdout: "" };
     if (argv[0] === "cat") return o.marker === null ? { code: 1, stdout: "" } : { code: 0, stdout: `${o.marker ?? MARKER}\n` };
+    if (argv[0] === "realpath") return o.realpath ? o.realpath(argv[2]!) : { code: 0, stdout: `${o.realMap?.[argv[2]!] ?? argv[2]}\n` };
+    if (argv[0] === "test" && argv[1] === "-L") return { code: o.links?.includes(argv[2]!) ? 0 : 1, stdout: "" };
     if (argv[0] === "test") return { code: o.exists?.includes(argv[2]!) ? 0 : 1, stdout: "" };
+    if (argv.includes("status")) return { code: 0, stdout: o.dirty ?? "" };
     return { code: 0, stdout: j.includes("get-url") ? (o.origin ?? URL) : j.includes("rev-parse") ? `${o.head ?? HEAD}\n` : "" };
   };
   return { exec, calls };
 }
-async function prepare(o: Parameters<typeof fake>[0], patch = {}) {
+async function prepare(o: FakeOptions, patch = {}) {
   const f = fake(o);
   let owned = false;
   const error = await rc.prepareRemoteCheckout(f.exec, { ...input, ...patch }, () => (owned = true)).catch((e: unknown) => e as InstanceType<typeof RemoteFailure>);
@@ -41,21 +47,23 @@ async function prepare(o: Parameters<typeof fake>[0], patch = {}) {
 }
 
 test("argument and path validation: .., . segments, control chars, spaces, newlines, leading -", () => {
-  for (const bad of ["a/../b", "/root/.", "/./.", "a\u0001b", "a b", "a\nb", "-oProxyCommand=x", "/a/-x", "", "a;b"])
+  for (const bad of ["a/../b", "..", "/root/.", "/./.", "a\u0001b", "a\u007fb", "a b", "a\tb", "a\nb", "-oProxyCommand=x", "--upload-pack=x", "/a/-x", "", "a;b", "a$(b)", "a'b"])
     throws(() => rc.assertRemoteValue("v", bad), label("參數不合法"));
   equal(rc.assertRemoteValue("v", "/a/.b/c.d"), "/a/.b/c.d");
   match(rc.remoteCheckoutDir(`${ROOT}/`, "acme", "repo", "REQ-1"), /^\/home\/agy\/r\/acme__repo__[0-9a-f]{10}$/);
-  for (const root of ["relative", "/a/../b", "/root/."]) throws(() => rc.remoteCheckoutDir(root, "acme", "repo", "x"));
+  equal(rc.remoteCheckoutDir(`${ROOT}/`, "acme", "repo", "REQ-1"), rc.remoteCheckoutDir(ROOT, "acme", "repo", "REQ-1"));
+  for (const [root, owner] of [["relative", "acme"], [ROOT, "ac me"], ["/a/../b", "acme"], ["/root/.", "acme"]] as const) throws(() => rc.remoteCheckoutDir(root, owner, "repo", "x"));
   const base = { id: "pod", ssh: "pod", socket: "/r/h.sock" };
   eq(validateMachines([base]), [base]);
   eq(validateMachines([{ ...base, cardReview: { root: `${ROOT}/`, kinds: ["agy"] } }])[0]?.cardReview, { root: ROOT, kinds: ["agy"] });
-  for (const cardReview of [null, { root: "rel/x" }, { root: "/" }, { root: "/tmp" }, { root: "/./." }, { root: "/root/." }, { root: "/a/../b" }, { root: "/a b/c" }, { root: "/a/-x" }, { kinds: [] }, { kinds: ["bash"] }, { kinds: ["agy", "agy"] }, { ssh: "x" }])
+  throws(() => validateMachines([{ ...base, cardReview: [] }]), /cardReview/);
+  for (const cardReview of [null, { root: "rel/x" }, { root: "/" }, { root: "/tmp" }, { root: "/./." }, { root: "/root/." }, { root: "/a/../b" }, { root: "/a b/c" }, { root: "/a/-x" }, { root: "/a/b\nc" }, { root: "/a/b\u0000c" }, { kinds: [] }, { kinds: ["bash"] }, { kinds: ["agy", "agy"] }, { ssh: "x" }])
     throws(() => validateMachines([{ ...base, cardReview: cardReview && { root: ROOT, kinds: ["agy"], ...cardReview } }]), /cardReview/);
 });
 
 test("only github.com origins parse", () => {
   for (const url of [URL, "https://github.com/acme/repo", "git@github.com:acme/repo.git", "ssh://git@github.com/acme/repo.git"]) eq(rc.githubOriginRepo(url), { owner: "acme", repo: "repo" });
-  for (const url of ["http://github.com/acme/repo", "https://gitlab.com/acme/repo", "https://github.com.evil.io/acme/repo", "https://t@github.com/acme/repo", "https://github.com/acme/../repo", `${URL}\nx`, "https://github.com/acme/.h", "/tmp/repo"])
+  for (const url of ["http://github.com/acme/repo", "https://gitlab.com/acme/repo", "https://github.com.evil.io/acme/repo", "https://t@github.com/acme/repo", "https://github.com/acme/../repo", `${URL}\nx`, "https://github.com/acme/.h", `${URL} extra`, "/tmp/repo"])
     equal(rc.githubOriginRepo(url), undefined);
 });
 
@@ -64,7 +72,8 @@ test("missing project: owned, fixed-argument clone, PR head fetch, detached chec
   ok(!r.error && r.owned);
   eq(r.calls, [
     PROBE,
-    ["test", "-e", `${DIR}/.git`],
+    ["realpath", "--", ROOT],
+    ["test", "-L", DIR],
     ["test", "-e", DIR],
     [...GIT, "clone", "--no-checkout", "--no-tags", "--no-recurse-submodules", "--quiet", "--", URL, DIR],
     WRITE_MARKER,
@@ -75,15 +84,15 @@ test("missing project: owned, fixed-argument clone, PR head fetch, detached chec
 });
 
 test("existing repo needs a matching marker and origin; no marker, wrong marker, other origin or non-repo dir is refused, not owned, untouched", async () => {
-  const same = await prepare({ exists: [`${DIR}/.git`] });
+  const same = await prepare({ exists: REPO });
   ok(!same.error && same.owned && !same.calls.some((a) => a.includes("clone")));
-  const bare = await prepare({ exists: [`${DIR}/.git`], marker: null });
+  const bare = await prepare({ exists: REPO, marker: null });
   ok(label("既有目錄沒有 bridge marker")(bare.error) && !bare.owned && !bare.calls.some((a) => a.includes("remote") || a.includes("fetch") || a.includes("clone") || a.includes("rm")));
-  const wrong = await prepare({ exists: [`${DIR}/.git`], marker: "hdb-card-review-checkout:v1:ffffffffff" });
+  const wrong = await prepare({ exists: REPO, marker: "hdb-card-review-checkout:v1:ffffffffff" });
   ok(label("既有目錄 marker 不符")(wrong.error) && !wrong.owned && !wrong.calls.some((a) => a.includes("fetch")));
-  const foreign = await prepare({ exists: [`${DIR}/.git`], marker: "something else" });
+  const foreign = await prepare({ exists: REPO, marker: "something else" });
   ok(label("既有目錄 marker 不符")(foreign.error) && !foreign.owned);
-  const other = await prepare({ exists: [`${DIR}/.git`], origin: "https://github.com/evil/repo.git" });
+  const other = await prepare({ exists: REPO, origin: "https://github.com/evil/repo.git" });
   ok(label("既有目錄 origin 不符")(other.error) && !other.owned && !other.calls.some((a) => a.includes("fetch")));
   const plain = await prepare({ exists: [DIR] });
   ok(label("既有目錄不是 repo")(plain.error) && !plain.owned && !plain.calls.some((a) => a.includes("clone")));
@@ -96,7 +105,6 @@ test("remote without GNU timeout fails first with a fixed label, not as clone fa
     ok(label("遠端缺少 timeout")(r.error) && !r.error!.uncertain && !r.owned);
     eq(r.calls, [PROBE]);
   }
-  // 經 ssh 包裝時，缺 timeout 的遠端 shell 回 127／busybox 回 1：兩者都走同一個標籤。
   const dir = await mkdtemp(join(tmpdir(), "hdb-notimeout-"));
   try {
     for (const code of [127, 1]) {
@@ -116,7 +124,7 @@ test("sha mismatch, timeout, git exit and bad PR input fail with fixed labels", 
   const t = await prepare({ throwOn: "fetch" });
   ok(label("逾時")(t.error) && t.error!.uncertain && t.owned);
   ok(label("clone 失敗")((await prepare({ failOn: "clone" })).error));
-  for (const patch of [{ prNumber: 0 }, { headSha: "HEAD" }, { dir: `${ROOT}/../e` }, { dir: "-rf" }]) {
+  for (const patch of [{ prNumber: 0 }, { prNumber: 1.5 }, { headSha: "HEAD" }, { headSha: `${HEAD}\n` }, { dir: `${ROOT}/../e` }, { dir: `${ROOT}/a b` }, { dir: "-rf" }]) {
     const r = await prepare({}, patch);
     ok(label("參數不合法")(r.error) && !r.calls.length);
   }
@@ -126,17 +134,17 @@ test("fingerprint is read-only; cleanup removes only a direct child of root", as
   const f = fake();
   equal(await rc.remoteFingerprint(f.exec, DIR), `${HEAD}\n`);
   eq(f.calls.map((a) => a.slice(GIT.length + 2)), [["rev-parse", "HEAD"], ["status", "--porcelain"]]);
-  const owned = fake({ exists: [DIR] });
+  const owned = fake({ exists: REPO });
   await rc.removeRemoteCheckout(owned.exec, ROOT, DIR, HASH);
-  eq(owned.calls.slice(-3), [["test", "-e", DIR], ["cat", "--", `${DIR}/.git/hdb-card-review`], ["rm", "-rf", "--", DIR]]);
-  for (const dir of [ROOT, "/home/agy", `${ROOT}/a/b`, `${ROOT}/../x`, `${ROOT}x/y`, `${ROOT}/.git`, `${ROOT}/.`]) {
+  eq(owned.calls.map((a) => a.slice(0, 3).join(" ")), ["realpath -- /home/agy/r", "test -L " + DIR, "test -e " + DIR, "realpath -- " + DIR, "test -L " + DIR + "/.git", "cat -- " + DIR + "/.git/hdb-card-review", "rm -rf --"]);
+  eq(owned.calls.at(-1), ["rm", "-rf", "--", DIR]);
+  for (const dir of [ROOT, `${ROOT}/`, "/home/agy", `${ROOT}/a/b`, `${ROOT}/../x`, `${ROOT}x/y`, `${ROOT}/.git`, `${ROOT}/.`]) {
     const spy = fake();
     await rejects(rc.removeRemoteCheckout(spy.exec, ROOT, dir, HASH));
     equal(spy.calls.length, 0);
   }
-  // 沒有 marker、marker 不符：拒絕且不刪；目錄已不存在：視為已清理。
   for (const [marker, wanted] of [[null, "既有目錄沒有 bridge marker"], ["hdb-card-review-checkout:v1:ffffffffff", "既有目錄 marker 不符"]] as const) {
-    const spy = fake({ exists: [DIR], marker });
+    const spy = fake({ exists: REPO, marker });
     await rejects(rc.removeRemoteCheckout(spy.exec, ROOT, DIR, HASH), label(wanted));
     ok(!spy.calls.some((a) => a[0] === "rm"));
   }
@@ -178,9 +186,9 @@ test("hub requestOn stays on that machine; a down remote fails instead of return
   equal(hub.machineConfig("pod")?.ssh, "pod");
 });
 
-// reviewOnRemote 在進入 review flow 之前的失敗路徑（flow 與本機 Agent 在這裡都不會被呼叫）。
-function reviewHarness(o: { exec: rc.RemoteExec; closeFails?: boolean; createFails?: boolean }) {
+function reviewHarness(o: { exec: rc.RemoteExec; closeFails?: boolean; createFails?: boolean; labeled?: (label: string) => Promise<number> }) {
   const closed: string[] = [];
+  const sleeps: number[] = [];
   const created: string[] = [];
   const remote: rc.RemoteReviewDeps = {
     machine: () => ({ id: "pod", ssh: "pod", socket: "/s", cardReview: { root: ROOT, kinds: ["agy"] } }),
@@ -195,25 +203,32 @@ function reviewHarness(o: { exec: rc.RemoteExec; closeFails?: boolean; createFai
     closeWorkspaceLabeled: async (_m, l) => {
       closed.push(l);
       if (o.closeFails) throw new Error("close failed SECRET");
+      return o.labeled ? o.labeled(l) : 1;
     },
-    panePort: () => assert.fail("no pane"),
+    sleep: async (ms) => void sleeps.push(ms),
+    panePort: () => ({}) as never,
     startAgent: async () => assert.fail("no agent"),
   };
-  const run = () =>
-    rc.reviewOnRemote(remote, {} as never, "pod", { card: { id: "REQ-1", title: "SECRET", roles: {} }, pr: { number: 7, headSha: HEAD }, prRepo: "acme/repo", localWorktree: "/l" } as never);
-  return { run, closed, created };
+  const card = { id: "REQ-1", type: "requirement", status: "done", title: "SECRET", version: 1, created: "", updated: "", body: "# x\n\n## 描述\nSECRET\n\n## 驗收條件\n- ok\n", roles: { reviewer: { machine: "pod", agent: "agy" } } };
+  const run = (deps: rc.RemoteReviewDeps = remote) =>
+    rc.reviewOnRemote(deps, {} as never, "pod", {
+      card, round: 1, scope: "whole", pr: { number: 7, headSha: HEAD }, material: { files: ["x.ts"], diff: "diff --git a/x.ts b/x.ts\n+x\n" },
+      author: { agent: "claude", paneId: "w1:p1", workspaceId: "w1" }, worktreePath: "/l", prRepo: "acme/repo", localWorktree: "/l",
+      launch: { id: "agy", kind: "agy", model: "gemini", modelFlag: "--model", capabilities: ["review"] },
+    } as never);
+  return { run, closed, created, sleeps, remote };
 }
 
-/** clone 之後目錄才存在（模擬剛建立的 checkout）。 */
+/** clone 之後目錄才存在。 */
 function existsAfterClone(exec: rc.RemoteExec, dir: string): rc.RemoteExec {
   let cloned = false;
   return async (argv, ms) => {
     if (argv.includes("clone")) cloned = true;
-    return cloned && argv[0] === "test" && argv[2] === dir ? { code: 0, stdout: "" } : exec(argv, ms);
+    return cloned && argv[0] === "test" && argv[1] === "-e" && argv[2] === dir ? { code: 0, stdout: "" } : exec(argv, ms);
   };
 }
 
-async function captured<T>(t: { mock: { method: (o: object, m: "error", f: (...a: unknown[]) => void) => unknown } }, body: () => Promise<T>) {
+async function captured<T>(t: TestContext, body: () => Promise<T>) {
   const lines: string[] = [];
   t.mock.method(console, "error", (...a: unknown[]) => void lines.push(a.join(" ")));
   const error = await body().then(() => undefined, (e: unknown) => String(e));
@@ -233,7 +248,6 @@ test("cleanup_pending: uncertain timeout keeps the directory; console names the 
 
 test("cleanup_pending: workspace close failure logs workspace id and label to console only; marker-less directory is never deleted", async (t) => {
   const dir = rc.remoteCheckoutDir(ROOT, "acme", "repo", "REQ-1");
-  // 沒有 marker 的目錄（例如別人的 repo 剛好同路徑）：清理拒絕，不刪，目錄 pending。
   const f = fake({ marker: null });
   const exec = existsAfterClone(f.exec, dir);
   const h = reviewHarness({ exec, createFails: true, closeFails: true });
@@ -245,24 +259,122 @@ test("cleanup_pending: workspace close failure logs workspace id and label to co
   ok(lines.includes(`cleanup_pending directory ${dir}`));
   ok(!f.calls.some((a) => a[0] === "rm"));
   for (const hidden of [dir, label, "pod:w3", "SECRET"]) ok(!error.includes(hidden), hidden);
-  // 對照：有 marker 時正常清掉目錄，只剩 workspace pending。
-  const ok2 = fake({ marker: `hdb-card-review-checkout:v1:${rc.cardHash("REQ-1")}` });
-  const h2 = reviewHarness({ exec: existsAfterClone(ok2.exec, dir), createFails: true, closeFails: true });
-  const second = await captured(t, () => h2.run());
-  equal(second.error, "Error: 遠端 review 失敗：workspace 失敗（cleanup_pending：workspace）");
 });
 
-test("workspace label is unique per run, so a failed create never closes a workspace an earlier run kept for the trust prompt", async (t) => {
-  const hash = rc.cardHash("REQ-1");
-  const labels: string[] = [];
-  for (let i = 0; i < 2; i++) {
-    const h = reviewHarness({ exec: existsAfterClone(fake().exec, rc.remoteCheckoutDir(ROOT, "acme", "repo", "REQ-1")), createFails: true });
-    await captured(t, () => h.run());
-    equal(h.created.length, 1);
-    equal(h.closed.length, 1);
-    equal(h.closed[0], h.created[0]); // 失敗清理關的是這次的 label
-    match(h.created[0]!, new RegExp(`^review-${hash}-[0-9a-f]{8}$`));
-    labels.push(h.created[0]!);
+const DIR1 = rc.remoteCheckoutDir(ROOT, "acme", "repo", "REQ-1");
+const MARKER1 = `hdb-card-review-checkout:v1:${rc.cardHash("REQ-1")}`;
+const untouched = (calls: string[][]) => !calls.some((a) => ["cat", "rm", "clone", "fetch", "checkout", "sh"].includes(a[0]!) || a.some((x) => ["clone", "fetch", "checkout"].includes(x)));
+
+test("symlinks and bad realpath output are refused before marker, reuse or rm", async () => {
+  const cases: [string, FakeOptions, string][] = [
+    ["root", { realMap: { [ROOT]: "/srv/real" } }, "root 是符號連結或在符號連結之下"],
+    ["ancestor", { exists: REPO, realMap: { [ROOT]: "/mnt/home/agy/r", [DIR]: "/mnt/home/agy/r/acme__repo__x" } }, "root 是符號連結或在符號連結之下"],
+    ["dir", { exists: REPO, links: [DIR] }, "既有目錄是符號連結"],
+    ["dangling dir", { links: [DIR] }, "既有目錄是符號連結"],
+    ["dir elsewhere", { exists: REPO, realMap: { [DIR]: "/other/place" } }, "既有目錄是符號連結"],
+    [".git", { exists: REPO, links: [`${DIR}/.git`] }, "既有目錄是符號連結"],
+    ["fails", { realpath: () => ({ code: 1, stdout: "" }) }, "路徑驗證失敗"],
+    ["two lines", { realpath: () => ({ code: 0, stdout: `${ROOT}\n/x\n` }) }, "路徑驗證失敗"],
+    ["relative", { realpath: () => ({ code: 0, stdout: "r\n" }) }, "路徑驗證失敗"],
+    ["control char", { realpath: () => ({ code: 0, stdout: `${ROOT}\u0001\n` }) }, "路徑驗證失敗"],
+  ];
+  for (const [name, o, wanted] of cases) {
+    const r = await prepare(o);
+    ok(label(wanted)(r.error) && !r.owned && untouched(r.calls), `prepare: ${name}`);
+    const spy = fake({ marker: MARKER, ...o });
+    await rejects(rc.removeRemoteCheckout(spy.exec, ROOT, DIR, HASH), label(wanted), `remove: ${name}`);
+    ok(untouched(spy.calls) && !spy.calls.some((a) => a[0] === "rm"), `remove: ${name}`);
   }
-  ok(labels[0] !== labels[1]);
+});
+
+test("uncertain fingerprint failure keeps the directory; a certain one removes it", async (t) => {
+  const run = async (throwOn: string | undefined, failOn: string | undefined) => {
+    const f = fake({ marker: MARKER1, throwOn, failOn });
+    const h = reviewHarness({ exec: existsAfterClone(f.exec, DIR1) });
+    const captured_ = await captured(t, async () => h.run());
+    return { f, h, ...captured_ };
+  };
+  const uncertain = await run("status", undefined);
+  ok(uncertain.lines.includes(`cleanup_pending directory ${DIR1}`));
+  ok(!uncertain.f.calls.some((a) => a[0] === "rm"));
+  ok(uncertain.h.closed.includes("pod:w3")); // workspace 仍然關閉
+  const certain = await run(undefined, "status");
+  ok(certain.f.calls.some((a) => a[0] === "rm") && !certain.lines.includes(`cleanup_pending directory ${DIR1}`));
+});
+
+test("fixed result text: only known labels pass, the rest is unclassified", () => {
+  for (const known of ["無法取得工作樹指紋，不開始 review", "reviewer 沒有回覆", "等待 reviewer 就緒時讀取 Agent 清單失敗", "reviewer 在 30 秒內沒有就緒", "cleanup_pending"])
+    equal(rc.fixedResultText(`${known}：machine pod stderr SECRET`), rc.fixedResultText(known));
+  equal(rc.fixedResultText("reviewer 沒有回覆：pod secret"), "reviewer 沒有回覆");
+  for (const sample of ["agent.start failed on agy-pod: permission denied", "machine pod unreachable", "pod：stderr SECRET", "reviewer 沒有回覆 pod", "stderr: /root/hdb-card-review/x", ""]) {
+    equal(rc.fixedResultText(sample), rc.UNCLASSIFIED);
+    ok(!/pod|SECRET|stderr|\/root/.test(rc.fixedResultText(sample)));
+  }
+});
+
+test("results never carry machine id or stderr; details only reach the console", async (t) => {
+  const f = fake({ marker: MARKER1, throwOn: "status" });
+  const h = reviewHarness({ exec: existsAfterClone(f.exec, DIR1) });
+  let result: unknown;
+  const { lines } = await captured(t, async () => (result = await h.run()));
+  const text = JSON.stringify(result);
+  match(text, /無法取得工作樹指紋，不開始 review/);
+  ok(!/pod|SECRET|stderr|REQ-1|\/home\/agy/.test(text), text);
+  ok(/error:/.test(lines));
+});
+
+test("create timeout re-checks the labelled workspace 3 times, 2 s apart", async (t) => {
+  const f = fake({ marker: MARKER1 });
+  let calls = 0;
+  const h = reviewHarness({ exec: existsAfterClone(f.exec, DIR1), createFails: true, labeled: async () => (++calls < 2 ? 0 : 1) });
+  const second = await captured(t, () => h.run());
+  equal(h.closed.length, 2);
+  eq(h.sleeps, [2000]);
+  ok(!/cleanup_pending/.test(second.error) && f.calls.some((a) => a[0] === "rm"));
+  const none = reviewHarness({ exec: existsAfterClone(fake({ marker: MARKER1 }).exec, DIR1), createFails: true, labeled: async () => 0 });
+  const r = await captured(t, () => none.run());
+  equal(none.closed.length, 3);
+  eq(none.sleeps, [2000, 2000]);
+  ok(r.lines.includes("重查 3 次都沒有找到") && !/cleanup_pending/.test(r.error));
+  const broken = reviewHarness({ exec: existsAfterClone(fake({ marker: MARKER1 }).exec, DIR1), createFails: true, closeFails: true });
+  match((await captured(t, () => broken.run())).error, /cleanup_pending：workspace/);
+  equal(broken.closed.length, 3);
+  const labels = [h.created[0], none.created[0], broken.created[0]]; // 每次執行唯一
+  ok(new Set(labels).size === 3 && labels.every((l) => new RegExp(`^review-${rc.cardHash("REQ-1")}-[0-9a-f]{8}$`).test(l!)));
+});
+
+test("fake hub: a workspace listed only on the second query is closed on the retry", async (t) => {
+  let lists = 0;
+  const closes: string[] = [];
+  const holder: { label?: string } = {};
+  const hub = {
+    request: async () => ({}),
+    requestOn: async (_m: string, method: string, p?: Record<string, unknown>) =>
+      method === "workspace.close" ? void closes.push(String(p?.workspace_id)) : { workspaces: ++lists < 2 ? [] : [{ workspace_id: "pod:w9", label: `pod:${holder.label}` }] },
+    freshAgentsOn: async () => [],
+    machineConfig: () => undefined,
+  };
+  const h = reviewHarness({ exec: existsAfterClone(fake({ marker: MARKER1 }).exec, DIR1), createFails: true });
+  let sleeps = 0;
+  const remote: rc.RemoteReviewDeps = { ...h.remote, closeWorkspaceLabeled: rc.remoteReviewDeps(hub as never).closeWorkspaceLabeled, sleep: async () => void sleeps++ };
+  h.created.push = (l: string) => ((holder.label = l), 1);
+  await captured(t, () => h.run(remote));
+  eq([lists, closes, sleeps], [2, ["pod:w9"], 1]);
+});
+
+test("reuse needs a clean work tree: refused, kept as cleanup_pending, never reset or cleaned", async (t) => {
+  for (const dirty of [" M src/x.ts\n", "?? new.txt\n"]) {
+    const r = await prepare({ exists: REPO, dirty });
+    ok(label("既有目錄工作樹不乾淨")(r.error) && r.error!.uncertain && r.owned);
+    ok(r.calls.some((a) => a.includes("status") && a.includes("--untracked-files=all")));
+    ok(!r.calls.some((a) => ["reset", "clean", "checkout", "fetch", "clone", "rm"].some((w) => a.includes(w))));
+  }
+  const clean = await prepare({ exists: REPO });
+  ok(!clean.error && clean.calls.some((a) => a.includes("fetch")));
+  const f = fake({ exists: [DIR1, `${DIR1}/.git`], marker: MARKER1, dirty: " M a.ts\n" });
+  const h = reviewHarness({ exec: f.exec });
+  const { lines, error } = await captured(t, () => h.run());
+  match(error, /遠端 review 失敗：既有目錄工作樹不乾淨（cleanup_pending：directory）/);
+  ok(lines.includes(`cleanup_pending directory ${DIR1}`) && !error.includes(DIR1));
+  ok(!f.calls.some((a) => a[0] === "rm" || a.includes("reset") || a.includes("clean")));
 });

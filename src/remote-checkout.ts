@@ -4,6 +4,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { startAgentInPane, type AgentStartPort } from "./agent-start.js";
 import { runCardReview, type ReviewFlowDeps, type ReviewFlowInput, type ReviewFlowResult } from "./card-review-flow.js";
+import { BLOCKED_AT_START } from "./agent-ready.js";
 import { defaultExec } from "./github.js";
 import { shellQuote, unsafeRemoteValue, type HerdrHub, type MachineConfig } from "./machines.js";
 
@@ -38,6 +39,29 @@ export function assertRemoteValue(name: string, value: unknown): string {
   return value as string;
 }
 
+const LABEL_ATTEMPTS = 3;
+const LABEL_RECHECK_MS = 2000;
+
+/** 固定分類白名單（flow 與 agent-ready 產生、不含機器或遠端輸出）。 */
+const KNOWN_TEXT = [
+  /^無法取得工作樹指紋，不開始 review$/,
+  /^reviewer 卡住了（blocked，可能在等人確認）$/,
+  /^reviewer 沒有回覆$/,
+  /^review 之後無法確認工作樹沒被改動$/,
+  /^reviewer 改動了工作樹（review 前後的指紋不同），整份 review 不採用$/,
+  /^reviewer 在 \d+ 秒內沒有就緒（狀態 [a-z_]+）$/,
+  /^等待 reviewer 就緒時讀取 Agent 清單失敗$/,
+  /^等待 reviewer 就緒時，它的 pane 不見了（消失或被換掉）$/,
+  /^cleanup_pending$/,
+];
+export const UNCLASSIFIED = "遠端 review 失敗：未分類";
+
+/** 只放行「：」前在白名單內的標籤，其餘一律未分類。 */
+export function fixedResultText(text: string): string {
+  const head = text.split("：")[0]!;
+  return KNOWN_TEXT.some((re) => re.test(head)) || head === BLOCKED_AT_START ? head : UNCLASSIFIED;
+}
+
 export function githubOriginRepo(url: string): { owner: string; repo: string } | undefined {
   if (unsafeRemoteValue(url)) return undefined;
   const match =
@@ -57,7 +81,7 @@ export function remoteCheckoutDir(root: string, owner: string, repo: string, car
   return `${root.replace(/\/+$/, "")}/${owner}__${repo}__${cardHash(cardId)}`;
 }
 
-/** clone 之後寫在 `.git` 裡（不弄髒工作樹與指紋）；沒有這個檔案的目錄一律不是 bridge 的。 */
+/** clone 後寫在 `.git` 裡（不弄髒工作樹）；沒有它的目錄一律不是 bridge 的。 */
 const MARKER_FILE = "hdb-card-review";
 const markerContent = (hash: string) => `hdb-card-review-checkout:v1:${hash}`;
 
@@ -104,13 +128,40 @@ async function must(exec: RemoteExec, argv: string[], label: string, ms = SHORT_
   return result.stdout;
 }
 
-/**
- * 先確認遠端有 GNU timeout（之後每個指令都靠它）。目錄不存在才 clone 並寫 marker；既有目錄只有 marker 內容
- * 與卡片雜湊相符（且 origin 相同）才沿用並視為 bridge 所有；沒有 marker（即使 origin 相同）一律拒絕且不碰。
- */
+const DIRTY = "既有目錄工作樹不乾淨";
+
+/** 遠端 canonical path；失敗或不是單行絕對路徑就拒絕（同 sshRealpath）。 */
+async function canonical(exec: RemoteExec, target: string): Promise<string> {
+  const { code, stdout } = await exec(["realpath", "--", target], SHORT_MS);
+  const real = stdout.replace(/\n$/, "");
+  if (code !== 0 || !real.startsWith("/") || /[\u0000-\u001F\u007F]/.test(real)) throw new RemoteFailure("路徑驗證失敗", `realpath exit ${code}`);
+  return real;
+}
+
+/** root 與 dir 須是 canonical path（符號連結拒絕）、dir 是 root 的直接子目錄；回傳 dir 是否已存在。 */
+async function verifyCheckoutPath(exec: RemoteExec, root: string, dir: string): Promise<boolean> {
+  assertRemoteValue("root", root);
+  assertRemoteValue("dir", dir);
+  const base = root.replace(/\/+$/, "");
+  if (!base.startsWith("/") || !dir.startsWith(`${base}/`) || !NAME.test(dir.slice(base.length + 1)))
+    throw new RemoteFailure("拒絕清理 root 以外的目錄");
+  if ((await canonical(exec, base)) !== base) throw new RemoteFailure("root 是符號連結或在符號連結之下");
+  const test = async (flag: string, path: string) => {
+    const { code } = await exec(["test", flag, path], SHORT_MS);
+    if (code > 1) throw new RemoteFailure("目錄檢查失敗", `exit ${code}`);
+    return code === 0;
+  };
+  if (await test("-L", dir)) throw new RemoteFailure("既有目錄是符號連結");
+  if (!(await test("-e", dir))) return false;
+  if ((await canonical(exec, dir)) !== dir) throw new RemoteFailure("既有目錄是符號連結");
+  if (await test("-L", `${dir}/.git`)) throw new RemoteFailure("既有目錄是符號連結");
+  return true;
+}
+
+/** 先確認遠端有 GNU timeout。不存在才 clone 並寫 marker；既有目錄要 marker 相符、origin 相同、工作樹乾淨才沿用，否則拒絕且不碰（不 reset／clean）。 */
 export async function prepareRemoteCheckout(
   exec: RemoteExec,
-  input: { dir: string; owner: string; repo: string; prNumber: number; headSha: string; cardHash: string },
+  input: { root: string; dir: string; owner: string; repo: string; prNumber: number; headSha: string; cardHash: string },
   onOwned: () => void,
 ): Promise<void> {
   const { dir, prNumber } = input;
@@ -119,21 +170,21 @@ export async function prepareRemoteCheckout(
     throw new RemoteFailure("參數不合法", "PR number／head sha");
   const url = assertRemoteValue("url", `https://github.com/${input.owner}/${input.repo}.git`);
   assertRemoteValue("cardHash", input.cardHash);
-  // `true` 不會失敗：127（沒有 timeout）或 busybox 的 usage error（1）都是缺 GNU timeout，不是 clone 失敗。
+  // `true` 不會失敗：127 或 busybox 的 usage error（1）都是缺 GNU timeout。
   const probe = await exec(["timeout", "-k", "1", "5", "true"], SHORT_MS);
   if (probe.code !== 0) throw new RemoteFailure("遠端缺少 timeout", `exit ${probe.code}`);
   const ref = `refs/remotes/hdb/pr-${prNumber}`;
-  const exists = async (path: string) => {
-    const { code } = await exec(["test", "-e", path], SHORT_MS);
-    if (code > 1) throw new RemoteFailure("目錄檢查失敗", `exit ${code}`);
-    return code === 0;
-  };
-  if (await exists(`${dir}/.git`)) {
+  if (await verifyCheckoutPath(exec, input.root, dir)) {
+    if ((await exec(["test", "-e", `${dir}/.git`], SHORT_MS)).code !== 0) throw new RemoteFailure("既有目錄不是 repo");
     await assertMarker(exec, dir, input.cardHash);
     const origin = await must(exec, [...GIT, "-C", dir, "remote", "get-url", "origin"], "讀取 origin 失敗");
     if (origin.trim() !== url) throw new RemoteFailure("既有目錄 origin 不符");
+    if ((await must(exec, [...GIT, "-C", dir, "status", "--porcelain", "--untracked-files=all"], "git status 失敗")).trim()) {
+      onOwned();
+      throw new RemoteFailure(DIRTY, DIRTY, true);
+    }
     onOwned();
-  } else if (await exists(dir)) throw new RemoteFailure("既有目錄不是 repo");
+  }
   else {
     onOwned();
     await must(exec, [...GIT, "clone", "--no-checkout", "--no-tags", "--no-recurse-submodules", "--quiet", "--", url, dir], "clone 失敗", LONG_MS);
@@ -152,16 +203,9 @@ export async function remoteFingerprint(exec: RemoteExec, dir: string): Promise<
   return `${head}\n${await must(exec, [...GIT, "-C", dir, "status", "--porcelain"], "git status 失敗")}`;
 }
 
-/** 只刪 root 的直接子目錄，且要有相符的 marker；目錄已不存在視為已清理。 */
+/** 只刪 root 的直接子目錄，且路徑是 canonical、marker 相符；目錄已不存在視為已清理。 */
 export async function removeRemoteCheckout(exec: RemoteExec, root: string, dir: string, hash: string): Promise<void> {
-  assertRemoteValue("root", root);
-  assertRemoteValue("dir", dir);
-  const base = root.replace(/\/+$/, "");
-  if (!base.startsWith("/") || !dir.startsWith(`${base}/`) || !NAME.test(dir.slice(base.length + 1)))
-    throw new RemoteFailure("拒絕清理 root 以外的目錄");
-  const { code } = await exec(["test", "-e", dir], SHORT_MS);
-  if (code === 1) return;
-  if (code !== 0) throw new RemoteFailure("目錄檢查失敗", `exit ${code}`);
+  if (!(await verifyCheckoutPath(exec, root, dir))) return;
   await assertMarker(exec, dir, hash);
   await must(exec, ["rm", "-rf", "--", dir], "清理失敗");
 }
@@ -173,7 +217,8 @@ export interface RemoteReviewDeps {
   originUrl(worktreePath: string): Promise<string>;
   createWorkspace(machine: string, cwd: string, label: string): Promise<{ workspaceId: string; paneId: string }>;
   closeWorkspace(machine: string, workspaceId: string): Promise<void>;
-  closeWorkspaceLabeled(machine: string, label: string): Promise<void>;
+  closeWorkspaceLabeled(machine: string, label: string): Promise<number>;
+  sleep?(ms: number): Promise<void>;
   panePort(machine: string): AgentStartPort;
   startAgent: ReviewFlowDeps["startAgent"];
 }
@@ -197,20 +242,35 @@ export async function reviewOnRemote(
   const exec = remote.exec(machine);
   const dir = remoteCheckoutDir(root, origin.owner, origin.repo, input.card.id);
   const hash = cardHash(input.card.id);
-  // 每次執行唯一：workspace.create 失敗時依 label 關閉，不能關到前一次保留給人處理信任提示的 workspace。
+  // 每次執行唯一，才不會關到前一次保留給人處理信任提示的 workspace。
   const label = `review-${hash}-${randomBytes(4).toString("hex")}`;
   let owned = false;
   // cleanup_pending 的定位資訊（workspace id／label、完整目錄）只進 console，紀錄與通知維持固定標籤。
+  // create 逾時時遠端可能稍後才建好：有界重查，最後仍找不到才當作沒建立。
+  const closeByLabel = async (): Promise<void> => {
+    let last: unknown;
+    for (let i = 0; i < LABEL_ATTEMPTS; i++) {
+      if (i) await (remote.sleep ?? ((ms) => new Promise<void>((r) => setTimeout(r, ms))))(LABEL_RECHECK_MS);
+      try {
+        last = undefined;
+        if ((await remote.closeWorkspaceLabeled(machineId, label)) > 0) return;
+      } catch (e) {
+        last = e;
+      }
+    }
+    if (last) throw last;
+    console.error(`remote review ${machineId}: workspace label ${label} 重查 ${LABEL_ATTEMPTS} 次都沒有找到，視為沒有建立`);
+  };
   const cleanup = async (workspace?: string, uncertain = false): Promise<string> => {
     const pending: string[] = [];
-    const close = workspace === label ? remote.closeWorkspaceLabeled(machineId, label) : workspace && remote.closeWorkspace(machineId, workspace);
+    const close = workspace === label ? closeByLabel() : workspace && remote.closeWorkspace(machineId, workspace);
     await (close || undefined)?.catch((e) => {
       pending.push("workspace");
       console.error(`remote review ${machineId}: cleanup_pending workspace ${workspace} label ${label}: ${String(e)}`);
     });
     if (owned && uncertain) {
       pending.push("directory");
-      console.error(`remote review ${machineId}: cleanup_pending directory ${dir}: 遠端狀態不明，未刪除`);
+      console.error(`remote review ${machineId}: cleanup_pending directory ${dir}: 未刪除（遠端狀態不明或工作樹不乾淨）`);
     } else if (owned)
       await removeRemoteCheckout(exec, root, dir, hash).catch((e) => {
         pending.push("directory");
@@ -218,12 +278,12 @@ export async function reviewOnRemote(
       });
     return pending.length ? `cleanup_pending：${pending.join("、")}` : "";
   };
-  const fail = async (error: unknown, fallback: string, workspace?: string): Promise<never> => {
-    const uncertain = error instanceof RemoteFailure && error.uncertain;
+  const fail = async (error: unknown, fallback: string, workspace?: string, flowUncertain = false): Promise<never> => {
+    const uncertain = flowUncertain || (error instanceof RemoteFailure && error.uncertain);
     throw failed(error instanceof RemoteFailure ? error.label : fallback, error, await cleanup(workspace, uncertain));
   };
   try {
-    await prepareRemoteCheckout(exec, { dir, ...origin, prNumber: input.pr.number, headSha: input.pr.headSha, cardHash: hash }, () => (owned = true));
+    await prepareRemoteCheckout(exec, { root, dir, ...origin, prNumber: input.pr.number, headSha: input.pr.headSha, cardHash: hash }, () => (owned = true));
   } catch (error) {
     return fail(error, "checkout 失敗");
   }
@@ -236,19 +296,29 @@ export async function reviewOnRemote(
     return fail(error, "workspace 失敗", label);
   }
   let result: ReviewFlowResult;
+  // flow 會把指紋階段的 uncertain 失敗轉成字串：在這裡記住，清理才不會刪遠端可能還在用的目錄。
+  let flowUncertain = false;
+  const fingerprint = async (cwd: string): Promise<string> => {
+    try {
+      return await remoteFingerprint(exec, cwd);
+    } catch (error) {
+      if (error instanceof RemoteFailure && error.uncertain) flowUncertain = true;
+      throw error;
+    }
+  };
   try {
     result = await runCardReview(
-      { ...flow, panePort: remote.panePort(machineId), startAgent: remote.startAgent, fingerprint: (cwd) => remoteFingerprint(exec, cwd) },
+      { ...flow, panePort: remote.panePort(machineId), startAgent: remote.startAgent, fingerprint },
       { ...input, author: { ...input.author, paneId: ws.paneId, workspaceId: ws.workspaceId }, worktreePath: dir },
     );
   } catch (error) {
-    return fail(error, /身分已改變/.test(String(error)) ? "身分不符" : "review 中斷", ws.workspaceId);
+    return fail(error, /身分已改變/.test(String(error)) ? "身分不符" : "review 中斷", ws.workspaceId, flowUncertain);
   }
-  const note = result.ok && result.paneKept ? "" : await cleanup(ws.workspaceId);
+  const note = result.ok && result.paneKept ? "" : await cleanup(ws.workspaceId, flowUncertain);
   const fields = result as unknown as Record<string, unknown>;
   for (const key of ["error", "closeNote", "inconclusiveReason"]) {
     const text = fields[key];
-    const scrubbed = typeof text === "string" ? text.split("：")[0]!.replaceAll(machineId, "remote") : text;
+    const scrubbed = typeof text === "string" ? fixedResultText(text) : text;
     if (scrubbed !== text) console.error(`remote review ${machineId}: ${key}: ${String(text)}`);
     fields[key] = scrubbed;
   }
@@ -271,11 +341,15 @@ export function remoteReviewDeps(hub: Pick<HerdrHub, "request" | "requestOn" | "
     },
     closeWorkspace: async (machine, workspace_id) => void (await hub.requestOn(machine, "workspace.close", { workspace_id })),
     closeWorkspaceLabeled: async (machine, label) => {
+      let closed = 0;
       const { workspaces } = (await hub.requestOn(machine, "workspace.list")) as { workspaces?: { workspace_id?: unknown; label?: unknown }[] };
       if (!Array.isArray(workspaces)) throw new Error("workspace.list 沒有 workspaces");
       for (const w of workspaces)
-        if (typeof w.workspace_id === "string" && [label, `${machine}:${label}`].includes(String(w.label)))
+        if (typeof w.workspace_id === "string" && [label, `${machine}:${label}`].includes(String(w.label))) {
           await hub.requestOn(machine, "workspace.close", { workspace_id: w.workspace_id });
+          closed++;
+        }
+      return closed;
     },
     panePort,
     startAgent: ({ paneId, kind, name, args }) =>
