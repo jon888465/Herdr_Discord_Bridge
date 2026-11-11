@@ -435,3 +435,26 @@ test("an Agent that starts blocked on a skippable prompt is awaited the same way
   assert.deepEqual(seen, ["blocked"]);
   assert.equal(result.agentReady, true);
 });
+
+import { doneAsReady, waitUntilReady } from "../src/agent-ready.js";
+
+test("update prompt skipped before agentReady", async (t) => {
+  t.mock.method(console, "log", () => {});
+  const update = "Update available · 0.166.0 → 0.167.0\n› 1. Update now\n  2. Skip\n  3. Skip until next version";
+  const screens = [update, "› Ready"];
+  const statuses = ["blocked", "idle"];
+  const { deps, log } = setup({
+    lead: { ...lead, agent: "codex" },
+    startAgent: async () => ({ ...started, agent: "codex", agent_status: "blocked" }),
+  });
+  const panePort = doneAsReady({
+    request: async (m, p) => (log.push(`${m}${p?.keys ?? ""}`), m === "agent.read" ? { read: { text: screens.shift() } } : {}),
+    listAgentsWithWorkspaceNames: async () => [{ ...started, agent: "codex", agent_status: statuses.length > 1 ? statuses.shift()! : statuses[0] }],
+  });
+  deps.awaitReady = async (a) => {
+    const ready = await waitUntilReady({ panePort, readyPollMs: 1 }, { paneId: a.pane_id, terminalId: a.terminal_id }, a);
+    return ready.ok ? ready.agent : undefined;
+  };
+  assert.equal((await prepareCardWorktree(deps, CARD)).agentReady, true);
+  assert.deepEqual(log.slice(-4), ["agent.read", "pane.send_keys2", "agent.read", "switch:w9:w9:p1"]);
+});

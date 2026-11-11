@@ -190,7 +190,7 @@ Agent 完成後，回覆會更新原本的 progress message；預設不會另外
 
 臨時啟動 Agent：`agent start <machine:agent:model:level> [--cwd <路徑>]`（Discord 加 `/herdr`）。省略的 `machine`／`agent` 沿用目前 Agent，省略的 `model`／`level` 用 CLI 預設，例如 `agent start :codex:gpt-6.1-sol:medium`。不自動 `agent use`、不自動確認信任提示。見 `SPEC.md`、ISSUE-114（尚未實機驗證）。
 
-agy 的信任提示（ISSUE-113，已實作、待實機驗收；使用者預先授權）：bridge 啟動本機 agy 前，會把**自己建立的卡片 worktree** 的完整路徑加入 agy 的 `trustedWorkspaces`，卡片清理時只移除它自己加的那一筆；不信任 `agent start --cwd` 或其他路徑，遠端 agy 仍需人工處理，bridge 不對 pane 送按鍵。例外：你在 `config.json` 的 `agyTrustedDirectories` 明列的絕對路徑（預設空），本機 agy 的工作目錄正好等於其中一個時，bridge 也會補進信任清單，且不會自動移除。
+agy 的信任提示（ISSUE-113，已實作、待實機驗收；使用者預先授權）：bridge 啟動本機 agy 前，會把**自己建立的卡片 worktree** 的完整路徑加入 agy 的 `trustedWorkspaces`，卡片清理時只移除它自己加的那一筆；不信任 `agent start --cwd` 或其他路徑，一般遠端 agy 仍需人工處理，bridge 不對 pane 送按鍵（唯一例外：卡片的 remote agy reviewer，見 ISSUE-143）。例外：你在 `config.json` 的 `agyTrustedDirectories` 明列的絕對路徑（預設空），本機 agy 的工作目錄正好等於其中一個時，bridge 也會補進信任清單，且不會自動移除。
 
 ### 選擇 Agent
 
@@ -387,6 +387,8 @@ model 必須在同種類已開放配置 profile 允許清單，沿用該 profile
 不是供應商模型目錄。新啟動禁止 resume／session 綁定／覆寫 model 參數。
 CLI 的 --agent 與 loop 的 --fix-agent 不得和卡片 agent 衝突；指定的 assignment
 與每次 review／fix 都用新 session。
+
+remote agy reviewer 只預先信任 bridge 管理的那個 checkout 目錄，見 ISSUE-143；尚未實機驗收。
 
 本卡 machine 交付是「宣告＋驗證＋**local 強制執行**」。不存在的 machine 拒絕；
 已配置 remote 在撿卡前拒絕，只有 `machines[].cardReview` 開放的機器上的 `reviewer` 例外（ISSUE-143，見上）。其他跨機器卡片執行尚未支援。

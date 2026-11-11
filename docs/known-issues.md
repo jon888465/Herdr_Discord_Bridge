@@ -2,6 +2,8 @@
 
 ## ISSUE-143：remote machine（agy-pod）的 agent 不能擔任卡片角色；先開放 remote card reviewer
 
+**2026-11-11 reviewer 預先信任（已修正、待驗收，**沒有任何實機驗收**）：**契約見 SPEC.md「遠端 reviewer 的 agy 預先信任」。經過：bridge card review 三輪（第 1 輪 head 3023316、第 2 輪 b580fe9、第 3 輪 9302325）**都是 changes_requested，review 次數已用完，這個 PR 需要人工決定 merge**。第 1 輪：F1 `verifyCardWorktree` 驗 `.git`、gitdir、回指、HEAD 分支，不符拒絕且不寫設定；F2 只移除本次新增的；F3 逾時 124／137 與寫入失敗皆 uncertain，清理嘗試移除、失敗記 pending；F4 uncertain 不啟動 reviewer（仍在跑的寫入可能在清理讀設定後才完成），一律記 `cleanup_pending：trust`；F5 補 C1。第 2 輪：F6 保留 pane 時保留信任（pane 還在等人處理）並記 `cleanup_pending：trust`；F7 腳本內 `mkdir` 鎖（`<root>/.hdb-agy-settings-backups/lock`）涵蓋雜湊重驗到 `mv`，逾時 exit 19，超過 1 分鐘的殘留鎖回收、未過期的不碰；F8 沒有取消訊號（取消即 runTurn 或 exec 丟錯），補兩個測試。第 3 輪：F11 SPEC 仍寫「不信任遠端 agy」而與預先信任互相矛盾 → 已改成一致（SPEC、README 兩份、docs/remote-card-reviewer.md；ISSUE-113 的「遠端 agy 不在範圍」是歷史紀錄，不改）；F12 本條缺測試證據 → 已補。**F9、F10 為已知限制，未採納**：F9 兩個等待者在毫秒級同時判定同一把鎖過期並回收時，後者可能刪掉前者剛重建的新鎖，兩個 writer 可能同時通過雜湊檢查而互相覆蓋設定；bridge 一次只做一張卡、同一台 pod 同時寫兩張卡的機會低，視窗已縮小但無法完全消除，pod 上 `find -mmin` 未驗證。F10 reviewer 卡在啟動提示而保留 pane 時，信任與目錄保留、記 `cleanup_pending：trust`、不自動移除（不重試，需人工撤銷），理由是 pane 還在等人處理、移除信任對仍在執行的 agy 的影響沒有驗證；reviewer（codex 第 2、3 輪）認為此時也應嘗試撤銷，此取捨未採納。**驗證（單元測試，不是實機驗收）：**`npm run check`（2026-11-11，本機 macOS，卡片 worktree，head 9302325，本輪重跑確認）：1814 項、1813 pass、0 fail、1 skipped；`npm run lint`（206 個 TypeScript 檔）、`git diff --check` 通過。測試在 `test/agy-worktree-trust.test.ts`、`test/remote-agy-trust.test.ts`（含真 sh 並行與鎖，本機 macOS，不是 pod）；為 F1 改了 `fixture()`（加 `linkWorktree`，既有斷言未改）。**沒有任何實機驗收：**bridge 沒重啟、沒在 pod 上跑過。其他限制：agy 執行中同時改寫設定檔的競態只能縮小視窗；本機 worktree 名稱只要求 `card-req-` 開頭；pod 的 `sha256sum`／`base64 -d`／`mktemp`／`cp -p`／`find -mmin` 未驗證。
+
 更新日期：2026-11-11。狀態：已修正、待驗收（兩個 PR 都已 merge：A 基礎層 #207 `addee48`、B 角色接線 #206 `9ff908e`；自動化檢查與 codex 獨立複審通過；**主要成功路徑已實機驗過一次**，見下方 2026-11-11 實機段；失敗路徑與其他情境尚未驗）。卡片 REQ-20261111-remote-agy-role；實機驗收卡 REQ-20261111-remote-reviewer-live（PR #210）。
 
 **實機驗收（2026-11-11，本機 macOS，bridge 為 main `9ff908e`（#206、#207）重啟後的程序；`config.json` 的 agy-pod 已加 `cardReview {root: "/root/herdr-card-review", kinds: ["agy"]}`（備份 `config.json.bak-cardreview-20261111`）；pod：git 2.53.0、GNU `timeout`、`realpath`、agy 1.5.2，沒有 node；root 目錄由 Agent 在使用者同意後建立（權限 700、空目錄、非符號連結））：**測試卡 `REQ-20261111-remote-reviewer-live`（`lead: codex`、`roles: {reviewer: "agy-pod:agy"}`，bridge 序列化成 `"agy-pod:agy:"`），新增一行檔案的 PR #210。
@@ -91,7 +93,7 @@ REQ-20261111-remote-agy-role 在 02:07:43Z picked 後，02:07:55Z 記 failed「t
 
 ## ISSUE-142：autopick 開 Lead 時 codex 剛好跳出更新提示，`card assign --worktree` 沒有啟動任務，autopick 卻報成「找不到這張卡的 task」
 
-更新日期：2026-11-11。狀態：待調查（現象已重現一次；根因是讀碼與時間序推論，**尚未直接看到 `card assign` 的回覆**）。
+更新日期：2026-11-11。狀態：已修正、待驗收（**未做實機驗收**）：autopick 遇「任務沒有啟動」停在 `assign`；#211（原 ISSUE-141）修更新提示本身，兩者分工。先前：待調查（根因為推論）。
 
 **使用者可見症狀：**`REQ-20261111-remote-agy-role`（`lead: codex`）在 bridge 重啟後 2026-11-11 02:07:43Z 被撿起，02:07:55Z 卡片流程紀錄只有 `worktree_created`，隨即 `failed`／`autopick_stopped`，原因「task：task 沒有完成：找不到這張卡的 task」；沒有 `role_assigned`（lead）、`assigned`、`started`。Lead（codex）的 workspace `w69` 留著，卡片仍是 `ready`。使用者看到的原因沒有說真正發生什麼（Lead 還沒就緒）。
 
@@ -4400,7 +4402,7 @@ H2 自動撿卡 L2 進度（2026-11-06）：四次嘗試各停在不同環節—
 
 **實機驗證（2026-11-08，本機 macOS，Antigravity CLI，bridge 載入 main `2351f06`（PR #163）後；測試卡 `REQ-20261108-agy-trust-live-test`，task `task-9f4d9bd3-b42d-4e44-ab3e-106f068f144a`，PR #164）：**bridge 在 08:08:26Z 把卡片 worktree 寫進 `~/.gemini/antigravity-cli/settings.json` 的 `trustedWorkspaces`（寫入前先備份真實設定檔，與備份只差這一行），之後 agy Worker（pane `w4W:p2`）**沒有跳出信任提示**、直接收下 prompt，並只在 `docs/known-issues.md` 加了要求的那一行（PR #164 為 +1／-0）；08:11:39Z `card cleanup` 後信任項目被移除，`settings.json` 與備份**逐位元組相同**，所有權檔 `agy-worktree-trust.json` 為空，卡片事件有 `agy_worktree_trust` added 與 removed。因此未驗證項目①的答案：**agy 會在啟動時讀取 `settings.json`，預先授權有效**（一次實測，agy 每次啟動是否都重讀仍只是這一次的觀察）。**同一次測試的其他觀察：**(a) autopick 在 review 步驟停下（`loop_stopped`，狀態 `failed`），原因是測試卡沒有 `## 驗收條件` 條列、`card review` 無法逐條對照——是卡片寫法問題，不是信任機制問題；PR #164 因此沒有經過 bridge review，也沒有被合併；(b) agy pane 同時顯示警告「Sign-in update needed：登入缺少新要求的權限，部分請求可能失敗，請 `/logout` 重新登入」，本次任務沒受影響，**原因與影響未調查**，若之後 agy 請求失敗要先看這個。仍未驗證：遠端 agy、並行寫入的遺失更新（已知限制）、使用者驗收。
 
-**未驗證：**①~~agy 啟動時是否重新讀取 `settings.json`~~（2026-11-08 已實測，見上）；②遠端 agy（`agy-pod`）不在範圍；③agy 的其他 profile（pi、opencode）有沒有類似提示；agy 是否有設定可改成信任子資料夾。
+**未驗證：**①~~agy 啟動時是否重新讀取 `settings.json`~~（2026-11-08 已實測，見上）；②遠端 agy（`agy-pod`）不在範圍（之後 ISSUE-143 只對 remote reviewer 的 checkout 加了例外）；③agy 的其他 profile（pi、opencode）有沒有類似提示；agy 是否有設定可改成信任子資料夾。
 
 ## ISSUE-114：新增 `agent start <machine:agent:model:level>`，臨時指定機器、Agent、model 與推理強度（level）
 

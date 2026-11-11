@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { CardWorktreeStore } from "./card-worktrees.js";
+import { CardWorktreeStore, type CardWorktree } from "./card-worktrees.js";
 import { CardStore } from "./card-store.js";
 import { stateDirectory } from "./config.js";
 import type { CardEvent } from "./card-events.js";
@@ -53,6 +53,74 @@ function arraySpan(source: string): [number, number] {
     }
   }
   throw new Error("trustedWorkspaces array not found");
+}
+
+/** 純函式：加入或移除 target，其餘位元組不動；沒變更回傳 null。 */
+export function editTrustedWorkspaces(original: string, target: string, add: boolean): string | null {
+  const parsed = JSON.parse(original);
+  const entries: unknown = parsed?.trustedWorkspaces;
+  if (!Array.isArray(entries) || !entries.every((v) => typeof v === "string"))
+    throw new Error("trustedWorkspaces must be a string array");
+  const index = entries.indexOf(target);
+  if (add ? index >= 0 : index < 0) return null;
+  const [start, end] = arraySpan(original);
+  const body = original.slice(start + 1, end);
+  const strings = [...body.matchAll(/"(?:\\.|[^"\\])*"/g)];
+  const at = (i: number) => strings[i].index!;
+  const after = (i: number) => at(i) + strings[i][0].length;
+  let inner: string;
+  // 新增插在最後一筆後面，沿用第一筆前的縮排；只多一行。
+  if (add) {
+    const last = strings.length - 1;
+    inner = last < 0 ? body + JSON.stringify(target)
+      : body.slice(0, after(last)) + "," + body.slice(0, at(0)) + JSON.stringify(target) + body.slice(after(last));
+  } else {
+    const from = index > 0 ? after(index - 1) : at(index);
+    const to = index > 0 || strings.length === 1 ? after(index) : at(1);
+    inner = body.slice(0, from) + body.slice(to);
+  }
+  return original.slice(0, start) + "[" + inner + "]" + original.slice(end + 1);
+}
+
+export type TrustScope = { ok: true; target: string; cardId: string } | { ok: false; reason: string };
+
+/** 純函式：只接受作用中紀錄的正規 `<home>/.herdr/worktrees/<repo>/card-req-…` 目錄；`..`、控制字元、符號連結與其他路徑拒絕。 */
+export function checkLocalTrustScope(input: {
+  cwd: string;
+  entries: readonly CardWorktree[];
+  home: string;
+  realpath: (p: string) => string;
+  isDirectory: (p: string) => boolean;
+  /** `verifyCardWorktree`；不給就不驗（純函式測試用）。 */
+  verifyIdentity?: (cwd: string, entry: CardWorktree) => boolean;
+}): TrustScope {
+  const { cwd } = input;
+  const no = (reason: string): TrustScope => ({ ok: false, reason });
+  if (/[\u0000-\u001F\u007F-\u009F]/.test(cwd)) return no("control");
+  if (!path.isAbsolute(cwd) || cwd.split("/").some((p) => p === ".." || p === ".")) return no("dotdot");
+  const entry = input.entries.find((e) => !e.removedAt && e.path === cwd);
+  if (!entry) return no("not_indexed");
+  const root = path.join(input.home, ".herdr/worktrees");
+  const relative = path.relative(root, cwd).split(path.sep);
+  if (relative.length !== 2 || relative[0] === ".." || !relative[0] || !/^card-req-.+/.test(relative[1])) return no("outside_root");
+  if (input.realpath(cwd) !== cwd) return no("symlink");
+  if (input.realpath(root) !== root) return no("root_not_canonical");
+  if (!input.isDirectory(cwd)) return no("not_directory");
+  if (input.verifyIdentity && !input.verifyIdentity(cwd, entry)) return no("not_card_worktree");
+  return { ok: true, target: cwd, cardId: entry.cardId };
+}
+
+/** 唯讀驗證 cwd 是為該紀錄建立的 worktree（.git 檔、gitdir、回指、HEAD）；失敗即拒絕。 */
+export function verifyCardWorktree(cwd: string, entry: CardWorktree): boolean {
+  try {
+    const dotGit = path.join(cwd, ".git");
+    if (!fs.lstatSync(dotGit).isFile()) return false;
+    const gitdir = fs.realpathSync(fs.readFileSync(dotGit, "utf8").replace(/^gitdir: /, "").trim());
+    const read = (name: string) => fs.readFileSync(path.join(gitdir, name), "utf8").trim();
+    return path.dirname(gitdir) === path.join(fs.realpathSync(entry.repoPath), ".git/worktrees") && read("gitdir") === dotGit && read("HEAD") === `ref: refs/heads/${entry.branch}`;
+  } catch {
+    return false;
+  }
 }
 
 export class AgyWorktreeTrust {
@@ -158,53 +226,8 @@ export class AgyWorktreeTrust {
       this.assertNotSymlink();
       const stat = fs.statSync(this.settings);
       const original = fs.readFileSync(this.settings, "utf8");
-      const parsed = JSON.parse(original);
-      if (
-        !parsed ||
-        !Array.isArray(parsed.trustedWorkspaces) ||
-        !parsed.trustedWorkspaces.every((v: unknown) => typeof v === "string")
-      )
-        throw new Error("trustedWorkspaces must be a string array");
-      const entries: string[] = parsed.trustedWorkspaces;
-      const index = entries.indexOf(target);
-      if (add ? index >= 0 : index < 0) return false;
-      const [start, end] = arraySpan(original);
-      let replacement: string;
-      if (add) {
-        // 插在最後一筆後面，沿用第一筆前的縮排；這樣只多一行，移除後逐位元組還原。
-        const body = original.slice(start + 1, end);
-        const strings = [...body.matchAll(/"(?:\\.|[^"\\])*"/g)];
-        if (!strings.length)
-          replacement = "[" + body + JSON.stringify(target) + "]";
-        else {
-          const last = strings[strings.length - 1];
-          const lastEnd = last.index! + last[0].length;
-          const separator = body.slice(0, strings[0].index!);
-          replacement =
-            "[" +
-            body.slice(0, lastEnd) +
-            "," +
-            separator +
-            JSON.stringify(target) +
-            body.slice(lastEnd) +
-            "]";
-        }
-      } else {
-        const body = original.slice(start + 1, end);
-        const strings = [...body.matchAll(/"(?:\\.|[^"\\])*"/g)];
-        const match = strings[index];
-        const from =
-          index > 0
-            ? strings[index - 1].index! + strings[index - 1][0].length
-            : match.index!;
-        const to =
-          index > 0 || strings.length === 1
-            ? match.index! + match[0].length
-            : strings[1].index!;
-        replacement = "[" + body.slice(0, from) + body.slice(to) + "]";
-      }
-      const next =
-        original.slice(0, start) + replacement + original.slice(end + 1);
+      const next = editTrustedWorkspaces(original, target, add);
+      if (next === null) return false;
       const tmp = `${this.settings}.${randomUUID()}.tmp`;
       try {
         fs.writeFileSync(tmp, next, { flag: "wx", mode: stat.mode & 0o777 });
@@ -297,25 +320,21 @@ export class AgyWorktreeTrust {
         return;
       }
       if (!entry) return;
-      target = fs.realpathSync(cwd);
-      // 已登記的路徑本身必須是正規路徑：登記的是 symlink（目標即使也在 worktree 根目錄底下）也不信任，
-      // 否則已登記的 card-req-A 被換成指向未登記 card-req-B 的 symlink，就會信任到不是 bridge 建立的目錄。
-      if (target !== path.resolve(cwd))
+      const scope = checkLocalTrustScope({
+        cwd,
+        entries: [entry],
+        home: this.home,
+        realpath: (p) => fs.realpathSync(p),
+        isDirectory: (p) => fs.statSync(p).isDirectory(),
+        verifyIdentity: verifyCardWorktree,
+      });
+      // 已登記的是 symlink（即使目標是另一個卡片目錄）：沿用原本的錯誤回報；其他範圍外的路徑靜默略過。
+      if (!scope.ok && scope.reason === "symlink")
         throw new Error(
           "registered worktree path is a symlink; not trusting it",
         );
-      const root = path.join(this.home, ".herdr/worktrees");
-      const relative = path.relative(root, target).split(path.sep);
-      if (
-        relative.length !== 2 ||
-        relative[0] === ".." ||
-        !relative[0] ||
-        !/^card-req-.+/.test(relative[1]) ||
-        !fs.statSync(target).isDirectory()
-      )
-        return;
-      // Canonical root must not itself redirect outside the authorized home tree.
-      if (fs.realpathSync(root) !== root) return;
+      if (!scope.ok) return;
+      target = scope.target;
       const owners = this.owners();
       const added = this.edit(target, true);
       if (added) {

@@ -406,6 +406,8 @@ catalog. New launches reject resume/session binding/model override arguments.
 CLI `--agent` / loop `--fix-agent` cannot conflict with a card agent assignment.
 Each constrained assignment and each review/fix round starts a fresh session.
 
+A remote agy reviewer's own bridge-managed checkout (only that directory) is pre-trusted: ISSUE-143; not accepted on real machines.
+
 Machine delivery in this change is declaration, validation and enforced **local**
 execution. Unknown machines are rejected; configured remote machines are rejected
 before picking unless it is a `reviewer` on a machine that opted in with

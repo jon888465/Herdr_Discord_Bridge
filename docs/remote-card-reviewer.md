@@ -2,6 +2,10 @@
 
 REQ-20261111-remote-agy-role，ISSUE-143。2026-11-11，**未實機驗收**。
 
+agy reviewer 預先信任 checkout：契約（範圍、生命週期、`cleanup_pending：trust` 不自動重試、需人工撤銷）見 SPEC.md「遠端 reviewer 的 agy 預先信任」，限制見 ISSUE-143（F9、F10），**未實機驗收**。
+
+**已知限制（未採納 review 建議）：**F9 兩個等待者在毫秒級同時判定同一把鎖過期並回收時，後者可能刪掉前者剛重建的新鎖，兩個 writer 可能同時通過雜湊檢查而互相覆蓋設定；bridge 一次只做一張卡、同一台 pod 同時寫兩張卡的機會低，視窗已縮小但無法完全消除，pod 上的 `find -mmin` 未驗證。F10 reviewer 卡在啟動提示而保留 pane 時，信任與目錄保留、記 `cleanup_pending：trust`、不自動移除：pane 還在等人處理，且移除信任對仍在執行的 agy 的影響沒有驗證；reviewer（codex 第 2、3 輪）認為此時也應嘗試撤銷，這個取捨未採納，需人工撤銷。
+
 基礎層（設定、驗證、遠端 checkout、清理）在 PR #207（A），角色與接線在 PR #206（B，依賴 A；A merge 後 B 要 rebase）。沒有 `machines[].cardReview` 時一切不變。
 
 ## 範圍與限制
@@ -35,4 +39,4 @@ Lead prompt 列 remote reviewer 候選（machine／kind／profile／model），�
 
 ## 未驗證與後續
 
-實機未跑：pod 的 git／`timeout`／`realpath`／repo 權限、`refs/pull` fetch、marker 寫入、agy 信任提示（第一次很可能停在這裡並保留 workspace，需人工關閉）。測試：`test/remote-checkout.test.ts`（A）、`test/card-role-remote.test.ts`（B）。驗收：兩個 PR merge、加 `cardReview`、重啟後跑一張無害卡。後續：`git bundle` 上傳、remote 寫入角色、cleanup_pending 重試。
+實機未跑：pod 的 git／`timeout`／`realpath`／repo 權限、`refs/pull` fetch、marker 寫入、agy 啟動提示與預先信任是否生效（若卡在提示會保留 workspace 與信任並記 `cleanup_pending：trust`，需人工處理）。測試：`test/remote-checkout.test.ts`（A）、`test/card-role-remote.test.ts`（B）。驗收：兩個 PR merge、加 `cardReview`、重啟後跑一張無害卡。後續：`git bundle` 上傳、remote 寫入角色、cleanup_pending 重試。

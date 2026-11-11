@@ -5,6 +5,13 @@ import os from "node:os";
 import path from "node:path";
 import { AgyWorktreeTrust } from "../src/agy-worktree-trust.js";
 
+function linkWorktree(repo: string, cwd: string, branch: string) {
+  const gitdir = path.join(repo, ".git/worktrees", path.basename(cwd));
+  fs.mkdirSync(gitdir, { recursive: true });
+  for (const [file, text] of [[path.join(gitdir, "gitdir"), `${cwd}/.git`], [path.join(gitdir, "HEAD"), `ref: refs/heads/${branch}`], [path.join(cwd, ".git"), `gitdir: ${gitdir}`]]) fs.writeFileSync(file!, `${text}\n`);
+  return gitdir;
+}
+
 function fixture() {
   const root = fs.realpathSync(
     fs.mkdtempSync(path.join(os.tmpdir(), "agy-trust-")),
@@ -12,6 +19,7 @@ function fixture() {
   const home = path.join(root, "home");
   const cwd = path.join(home, ".herdr/worktrees/repo/card-req-test");
   fs.mkdirSync(cwd, { recursive: true });
+  linkWorktree(root, cwd, "card/test");
   const settings = path.join(root, "settings.json");
   assert.ok(!settings.startsWith(os.homedir() + path.sep));
   const state = path.join(root, "state");
@@ -216,7 +224,7 @@ test("text outside the array and escaped existing entries remain byte-for-byte u
 import { startAgentInPane } from "../src/agent-start.js";
 import { runAgentStart } from "../src/agent-launch.js";
 import { cleanupCardWorktree } from "../src/card-worktree-flow.js";
-import { HerdrClient } from "../src/herdr.js";
+import { HerdrClient, HerdrError } from "../src/herdr.js";
 import type { AgentRecord } from "../src/types.js";
 
 function agent(cwd: string): AgentRecord {
@@ -603,4 +611,77 @@ test("configured directory does not weaken card worktree trust or trust an unlis
   assert.deepEqual(f.read().trustedWorkspaces, ["/user/original", f.cwd]);
   trust.cleanup("REQ-20261107-test", f.cwd);
   assert.deepEqual(f.read(), f.original);
+});
+
+import { checkLocalTrustScope, editTrustedWorkspaces } from "../src/agy-worktree-trust.js";
+
+test("checkLocalTrustScope accepts only the indexed canonical card directory", () => {
+  const good = "/h/.herdr/worktrees/repo/card-req-a";
+  const check = (cwd: string, o: { link?: string; removedAt?: string; file?: boolean } = {}) =>
+    checkLocalTrustScope({ cwd, entries: [{ cardId: "REQ-20261111-a", workspaceId: "w1", sourceWorkspaceId: "w0", path: cwd, repoPath: "/r", branch: "b", createdAt: "", ...(o.removedAt ? { removedAt: o.removedAt } : {}) }], home: "/h", realpath: (p) => (p === o.link ? "/elsewhere" : p), isDirectory: () => !o.file });
+  assert.deepEqual(check(good), { ok: true, target: good, cardId: "REQ-20261111-a" });
+  for (const [cwd, reason, o] of [
+    [`${good}\nx`, "control"], [`${good}\u007f`, "control"], [`${good}\u0080`, "control"], [`${good}\u0085`, "control"], [`${good}\u009f`, "control"],
+    ["/h/.herdr/worktrees/repo/card-req-b/../card-req-a", "dotdot"], ["/h/.herdr/worktrees/repo/./card-req-a", "dotdot"], ["rel/card-req-a", "dotdot"],
+    [good, "not_indexed", { removedAt: "x" }],
+    ["/", "outside_root"], ["/h", "outside_root"], ["/h/.herdr/worktrees", "outside_root"], ["/h/.herdr/worktrees/repo", "outside_root"],
+    ["/tmp/repo/card-req-a", "outside_root"], [`${good}/sub`, "outside_root"], ["/h/.herdr/worktrees/repo/feature-a", "outside_root"],
+    [good, "symlink", { link: good }], [good, "root_not_canonical", { link: "/h/.herdr/worktrees" }], [good, "not_directory", { file: true }],
+  ] as const)
+    assert.deepEqual(check(cwd, o), { ok: false, reason }, cwd);
+});
+
+test("an indexed path with .. is never trusted", () => {
+  const f = fixture();
+  fs.mkdirSync(path.join(path.dirname(f.cwd), "card-req-other"));
+  const indexPath = path.join(f.state, "card-worktrees.json");
+  const index = JSON.parse(fs.readFileSync(indexPath, "utf8"));
+  index.worktrees[0].path = `${path.dirname(f.cwd)}/card-req-other/../card-req-test`;
+  fs.writeFileSync(indexPath, JSON.stringify(index));
+  f.trust.beforeLaunch("agy", "w1:p1", index.worktrees[0].path);
+  assert.deepEqual(f.read(), f.original);
+  assert.ok(!fs.existsSync(path.join(f.state, "agy-worktree-trust.json")));
+});
+
+test("editTrustedWorkspaces add/remove restores byte-for-byte", () => {
+  for (const original of ['{"a":1,"trustedWorkspaces":[],"b":[2]}', '{\n  "trustedWorkspaces": [\n    "/x",\n    "/y"\n  ],\n  "z": "\\"]"\n}\n']) {
+    const added = editTrustedWorkspaces(original, "/w/dir", true)!;
+    assert.equal(JSON.parse(added).trustedWorkspaces.at(-1), "/w/dir");
+    assert.deepEqual([editTrustedWorkspaces(added, "/w/dir", true), editTrustedWorkspaces(added, "/w/dir", false), editTrustedWorkspaces(original, "/w/dir", false)], [null, original, null]);
+  }
+  for (const bad of ["{", "{}", '{"trustedWorkspaces":[1]}']) assert.throws(() => editTrustedWorkspaces(bad, "/w", true));
+});
+
+test("removal failure keeps trust and ownership", async () => {
+  const f = fixture();
+  f.trust.beforeLaunch("agy", "w1:p1", f.cwd);
+  const entry = JSON.parse(fs.readFileSync(path.join(f.state, "card-worktrees.json"), "utf8")).worktrees[0];
+  const port = { request: async () => { throw new HerdrError("worktree.remove", "dirty_worktree_requires_force", "dirty"); }, cleanupWorkspaceTrust: (id: string, cwd: string) => f.trust.cleanup(id, cwd) };
+  const deps = { port, worktrees: { active: () => entry, markRemoved: () => {} }, deauthorize: () => {}, now: () => "" };
+  assert.equal((await cleanupCardWorktree(deps as never, "REQ-20261107-test")).removed, false);
+  assert.deepEqual(f.read().trustedWorkspaces, ["/user/original", f.cwd]);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(f.state, "agy-worktree-trust.json"), "utf8")).length, 1);
+});
+
+test("F1: a replaced or misdirected worktree is refused", () => {
+  type F = ReturnType<typeof fixture>;
+  const wt = (f: F, file: string) => path.join(f.root, ".git/worktrees/card-req-test", file);
+  const dotGit = (f: F) => path.join(f.cwd, ".git");
+  const cases: Array<[string, (f: F) => void]> = [
+    ["plain directory", (f) => fs.rmSync(dotGit(f))],
+    [".git is a directory", (f) => { fs.rmSync(dotGit(f)); fs.mkdirSync(dotGit(f)); }],
+    [".git is a symlink", (f) => { fs.rmSync(dotGit(f)); fs.symlinkSync(wt(f, ""), dotGit(f)); }],
+    ["gitdir missing", (f) => fs.writeFileSync(dotGit(f), `gitdir: ${f.root}/.git/worktrees/missing\n`)],
+    ["gitdir in another repo", (f) => { fs.mkdirSync(path.join(f.root, "other")); fs.writeFileSync(dotGit(f), `gitdir: ${linkWorktree(path.join(f.root, "other"), f.cwd, "card/test")}\n`); }],
+    ["back pointer elsewhere", (f) => fs.writeFileSync(wt(f, "gitdir"), `${f.root}/elsewhere/.git\n`)],
+    ["branch mismatch", (f) => fs.writeFileSync(wt(f, "HEAD"), "ref: refs/heads/card/other\n")],
+    ["detached HEAD", (f) => fs.writeFileSync(wt(f, "HEAD"), `${"a".repeat(40)}\n`)],
+  ];
+  for (const [name, tamper] of cases) {
+    const f = fixture();
+    tamper(f);
+    f.trust.beforeLaunch("agy", "w1:p1", f.cwd);
+    assert.deepEqual(f.read(), f.original, name);
+    assert.ok(!fs.existsSync(path.join(f.state, "agy-worktree-trust.json")), name);
+  }
 });
