@@ -410,7 +410,7 @@ Machine delivery in this change is declaration, validation and enforced **local*
 execution. Unknown machines are rejected; configured remote machines are rejected
 before picking unless it is a `reviewer` on a machine that opted in with
 `machines[].cardReview` (ISSUE-143, see above). Other cross-machine
-card execution and pi Workers remain unsupported. Invalid declarations retain
+card execution remains unsupported. Invalid declarations retain
 queryable rejection diagnostics; malformed cards use a separate persistent
 `.role-rejections` store, with retrying notifications through strictly validated
 routes. `card show` exposes the reason/delivery status. `role_assigned` records

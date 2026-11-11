@@ -389,7 +389,7 @@ CLI 的 --agent 與 loop 的 --fix-agent 不得和卡片 agent 衝突；指定�
 與每次 review／fix 都用新 session。
 
 本卡 machine 交付是「宣告＋驗證＋**local 強制執行**」。不存在的 machine 拒絕；
-已配置 remote 在撿卡前拒絕，只有 `machines[].cardReview` 開放的機器上的 `reviewer` 例外（ISSUE-143，見上）。其他跨機器卡片執行、pi Worker 尚未支援。
+已配置 remote 在撿卡前拒絕，只有 `machines[].cardReview` 開放的機器上的 `reviewer` 例外（ISSUE-143，見上）。其他跨機器卡片執行尚未支援。
 無效宣告保留可查拒絕診斷；壞卡使用獨立持久化 `.role-rejections`，只向嚴格驗證的路由
 送出可重試通知，card show 可查原因／送達狀態。role_assigned 用有上界的 v2 格式記錄
 machine、agent、已知 model 與各維度來源。完整契約、重試語意與 merge／重啟後仍須完成的
