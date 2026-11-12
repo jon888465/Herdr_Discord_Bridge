@@ -171,6 +171,8 @@ function harness(o: { listing?: AgentRecord[][]; turn?: () => Promise<{ state: "
   const remote: RemoteReviewDeps = {
     machine: () => ({ id: "pod", ssh: "pod", socket: "/s", cardReview: { root: ROOT, kinds: ["agy"] } }), exec: () => exec, originUrl: async () => "git@github.com:acme/repo.git", createWorkspace: async () => ({ workspaceId: "pod:w3", paneId: "pod:w3:p1" }), closeWorkspace: async () => void log.push("close"), closeWorkspaceLabeled: async () => 1, panePort: () => port, startAgent: async (input) => (log.push(`start:${input.kind}`), agent({ agent_status: "working", agent: input.kind })),
   };
+  const events: string[] = [];
+  remote.onTrust = (e) => void events.push(`${e.action}:${e.result}:${e.machine}:${e.path}`);
   const recorded: unknown[] = [];
   const local = async () => fail("local") as never;
   const flow: ReviewFlowDeps = {
@@ -181,7 +183,7 @@ function harness(o: { listing?: AgentRecord[][]; turn?: () => Promise<{ state: "
     card, round: 1, scope: "whole", pr: { number: 7, headSha: "0".repeat(40) }, material: { files: ["x.ts"], diff: "diff --git a/x.ts b/x.ts\n+x\n" },
     author: { agent: "claude", paneId: "w1:p1", workspaceId: "w1" }, worktreePath: "/l", launch: profiles[o.kind === "claude" ? 1 : 0]!, prRepo: "acme/repo", localWorktree: "/l",
   });
-  return { run, log, p, recorded };
+  return { run, log, p, recorded, events };
 }
 
 async function quietly<T>(t: TestContext, body: () => Promise<T>) {
@@ -310,4 +312,13 @@ test("F7: a fresh lock is kept and times out without writing; a stale lock is re
   equal((await writeAdd(exec, root, dir)).code, 0);
   equal(await readFile(file, "utf8"), "{}");
   await lockGone(root);
+});
+
+test("pod 端信任寫入與移除都有 onTrust 事件（ISSUE-149）；寫入失敗記 error", async (t) => {
+  const ok1 = harness();
+  await quietly(t, ok1.run);
+  eq(ok1.events, [`add:added:pod:${DIR}`, `remove:removed:pod:${DIR}`]);
+  const failed = harness({ writeCode: (mode) => (mode === "add" ? 17 : 0) });
+  await quietly(t, failed.run);
+  eq(failed.events, [`add:error:pod:${DIR}`]);
 });
