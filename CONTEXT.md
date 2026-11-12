@@ -201,3 +201,5 @@ ISSUE-127（2026-11-08，待實機驗收）：新增 role_assigned 固定模板�
 ## Codex startup update menu (ISSUE-141, 2026-11-11)
 
 Lead and fresh/persistent profile Worker readiness use the strict observed update menu matcher and only send `2. Skip`, once, after identity checks. Other blocked UI fails closed. Task/card failure evidence remains durable; live acceptance is pending and the bridge has not been restarted. See SPEC.md and docs/known-issues.md.
+
+ISSUE-152（2026-11-12）：Linux X11／ibus 的中文貼上及獨立英文 UTF-8 XIM 手動 workaround 均由使用者確認有效；`scripts/run-herdr-app.sh` 自動重用／建立 ibus-herdr 再啟動 Desktop，與 run.sh --core 分開。macOS／Wayland 直接 passthrough，macOS 中文輸入未在本輪實測。使用方式見中英文 README。

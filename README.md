@@ -121,6 +121,14 @@ or use environment variables. Never commit that file. Discord Message Content
 must be enabled because the bridge accepts the `/herdr ...` text commands,
 direct prompts in mapped threads, and free-text replies in approval threads.
 
+### Chinese input on Linux X11 with ibus (ISSUE-152)
+
+Herdr Desktop 0.1.15 can produce `%/2…big5…` garbage when typing Chinese through X11/ibus under zh_TW.UTF-8. Clipboard paste works. On 2026-11-12 the user confirmed that a dedicated ibus XIM bridge running under en_US.UTF-8 restores direct Chinese input.
+
+Launch Desktop with `./scripts/run-herdr-app.sh`. Close an existing Desktop window first if it used the ordinary ibus server. The launcher reuses the registered `ibus-herdr` server, or starts it with `LC_ALL=en_US.UTF-8` and waits for registration. It needs that locale, ibus-x11, xprop, flock and a valid user-owned XDG_RUNTIME_DIR. Startup is serialized; its log is `$XDG_RUNTIME_DIR/herdr-ibus-x11.log`. The dedicated XIM stays available for later windows. It does not restart the ordinary ibus daemon or change global/private settings. An externally started server with the same name must use the intended locale; registration alone cannot verify that environment.
+
+`./scripts/run.sh --core` starts the Discord bridge and cannot change the input environment of an already running Desktop. Run the two scripts separately as needed. macOS and Wayland bypass the X11 workaround and launch herdr-app directly. This particular X11/ibus path does not apply to macOS; macOS Chinese input has not been tested in this session. The underlying decoder still needs an upstream fix.
+
 ## Commands
 
 The bridge accepts both command forms:

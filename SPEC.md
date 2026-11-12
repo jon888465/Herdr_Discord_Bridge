@@ -871,3 +871,7 @@ card review／fix／loop 的 CLI agent 與卡片指定衝突時開 pane 前拒�
 
 
 ISSUE-138 r1 修正契約（2026-11-10，仍待實機驗收）：profile.model 省略時允許 CLI 預設的可觀察 model，保留值並標 observed；只有明確配置 model 才要求相等。fresh Worker cleanup 區分派工前失敗／確認完成（可關閉 owned terminal）與執行中 blocked／逾時／送達不明（保留 pane／session，由既有任務停止／清理處理，問題可回覆續接）。每次實際 prompt 嘗試前重新驗 terminal／session／model，包含 agent_not_ready 重試；beforeDispatch 事件仍只一次。角色拒絕只適用 ready 且 autopickFor 政策選用的 eligible 卡；draft／done／未 opt-in 卡不記事件不通知。壞卡 Agent 通知與正常 notifier 共用完整選單檢查，兩次送前核對，且讀畫面後再確認身分／狀態。文件 roles 範例必須是 parser 可讀的單行 inline map，以 prettier-ignore 保護並由回歸測試解析。
+
+### Desktop 中文輸入 launcher（2026-11-12，ISSUE-152）
+
+`scripts/run-herdr-app.sh` 與 bridge 的 run.sh 分開。僅 Linux 且 XDG_SESSION_TYPE=x11 時，以 X11 XIM_SERVERS 精確查 `@server=ibus-herdr`；查詢失敗拒絕。不存在時以 en_US.UTF-8 啟動獨立 ibus-x11（不帶 --kill-daemon），最多約 5 秒輪詢登記；以使用者擁有的絕對 XDG_RUNTIME_DIR 下 flock 序列化啟動，取得鎖最多等 10 秒。已存在者重用（無法驗證外部同名服務的 locale），不重啟全域 ibus。新 XIM 保持執行，不隨 Desktop 關閉；log 放 runtime directory。成功才以 XMODIFIERS=@im=ibus-herdr 啟動 Desktop，原樣傳 argv；其他 OS／session 直接 passthrough。既有 Desktop 視窗不自動關閉或重啟；使用者需先關閉用舊輸入環境開的視窗。腳本不改設定、不啟動 bridge／Core terminal，也不改 run.sh --core 契約。macOS 不走 X11 XIM，因此此特定轉碼原因不適用；本輪未做 macOS 實機中文輸入驗收。

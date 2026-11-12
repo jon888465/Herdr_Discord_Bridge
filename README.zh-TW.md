@@ -121,6 +121,22 @@ herdr plugin pane open \
   --entrypoint bridge
 ```
 
+### Linux X11／ibus 中文輸入（ISSUE-152）
+
+Herdr Desktop 0.1.15 在 Linux X11＋ibus、zh_TW.UTF-8 環境，直接輸入中文可能出現 `%/2…big5…` 亂碼；剪貼簿貼上正常。2026-11-12 使用者已確認：以英文 UTF-8 locale 啟動專用 ibus XIM bridge，再讓 Desktop 使用它，可以直接輸入中文。
+
+之後用這支腳本啟動 Desktop：
+
+```bash
+./scripts/run-herdr-app.sh
+```
+
+若 Desktop 已用原本的 ibus 開啟，先關閉該視窗再執行。腳本重用已登記的 `ibus-herdr`，沒有才以 `LC_ALL=en_US.UTF-8` 啟動；須有該 locale、ibus-x11、xprop、flock 與正常的 XDG_RUNTIME_DIR。啟動有界等待並序列化，log 在 `$XDG_RUNTIME_DIR/herdr-ibus-x11.log`；專用 XIM 保留供後續開窗使用，不停止原 ibus、不改全域語系或私人設定。若外部同名 XIM 使用不同 locale，腳本不能驗證其編碼環境；請勿用同名啟動其他服務。
+
+`./scripts/run.sh --core` 仍負責啟動 Discord bridge；它無法修正已開啟 Desktop 的輸入法環境。兩支腳本按需求分別執行，launcher 不啟動／重啟 bridge。
+
+這是 **Linux X11 XIM 的特定問題**。macOS 不使用這條輸入路徑，腳本會直接執行 herdr-app；本次沒有實測 macOS 中文輸入，不宣稱所有平台／輸入法都已驗收。Wayland 亦直接啟動，不套用此 workaround。底層解碼問題仍待上游修正。
+
 ## 切換模型
 
 使用目前 thread 的 Agent：
