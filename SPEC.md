@@ -38,14 +38,49 @@ Bridge 不是 ACP broker；Team 可透過明確啟用的 Agent profile，按需�
 `herdr-hail` 的 blocked/approval 模式：觀察狀態、讀取 terminal context、
 建立 Discord thread，再透過 API 傳送回應。
 
-### Herdr Desktop 相容性（2026-11-10，ISSUE-139）
+### Runtime 選擇與 Herdr Core（2026-11-12，ISSUE-151）
 
-目前 bridge 與 `scripts/run.sh` 使用舊 Herdr 的 plugin、workspace、pane 與 agent socket API。Ubuntu 實機的 `herdr-app 0.1.14` 使用 `herdr-core 0.1.19` 獨立 runtime，與 `herdr 0.8.0` server 不共用 pane；舊 server 的 bridge 不會因此出現在 Desktop。Desktop adapter 尚未實作或驗收，僅更改 socket 路徑不足以支援不同 API。
+Bridge 入口以 `HERDR_BRIDGE_RUNTIME` > config `runtime` > `herdr` 選擇後端，值僅接受 `herdr`、`core`；未知值明確失敗。Core 失敗、版本／協定不符或缺少能力時不得靜默退回 Herdr。舊 Herdr 分支維持 HerdrHub 與既有 socket／重試行為；Core 使用獨立 core-bridge 與 CoreAdapter，不把舊 method 送入 Core。
+
+Core 依已安裝 `hc 0.1.20` 的 generation 1 schema 實作。hello 檢查 generation、版本欄位與必要 methods，再以 server.status 核對版本／Core identity；不是僅以 semver 字串判定相容。Socket 選擇為 `HC_SOCKET` > `HC_SESSION` 對應 `~/.local/state/herdr-core/<session>/<session>.sock` > `~/.local/state/herdr-core/default/default.sock`。不使用 `HERDR_SOCKET_PATH`；本版不解析 Core config.socket 或 XDG socket 優先序，非標準位置須明確設 HC_SOCKET。
+
+| 能力 | Core 契約 |
+| --- | --- |
+| 列出／查核 terminal | terminal.list/get；顯示 address、title/name、status。未回報 OSC 7501 或 status null 為 unknown，不從 foreground／畫面推定 |
+| 被動畫面 | terminal.read 固定 lines:0；保留 complete/why，不完整時附註 |
+| prompt／按鍵 | terminal.send，不帶 force；terminal.keys，cancel 明確送 ctrl+c，不換成 interrupt |
+| 等待結果 | adapter 保留 ended/reason/turn、毫秒轉秒；Discord wait 指令仍拒絕 |
+| workspace/pane/tab/worktree | 拒絕；terminal labels 不等同 workspace 授權，kill/rm 不等同 pane.close |
+| Team/card/pool/handoff/failover 等高階功能 | 拒絕；缺少 workspace roster、布局或 CLI session 證據，不合成身分 |
+
+Core Discord 支援 `agents`／無子指令的 `agent`、`status`、`read [terminal]`、`ask <terminal> <text>`、thread 內 `target/use <terminal>`／`agent use <terminal>`、`agent keys <terminal> <keys...>`、`cancel [terminal]`、`help`。其他指令全部明確拒絕；完整清單與 API 差異見 [Core 設計文件](docs/herdr-core-runtime.md)。此模式不提供舊 Herdr console／watcher／自動 final 串流或 approval 流程，輸入確認不等於 Agent 任務完成。
+
+`coreAllowedTerminals: string[]` 預設空；空清單仍可列出與讀取，但所有輸入拒絕並提示設定欄位。每次 send/keys 及綁定前先檢查白名單，再重查 Core identity、canonical terminal address 與 live 狀態；查不到、alias 與 address 不符或身分不同均拒絕。白名單不是 workspace 白名單；Core 與非空 allowedWorkspaceIds／machines 互斥，啟動前拒絕並要求移除設定。既有 Discord guild/channel/user allowlist 與 mention 規則仍適用。
+
+Core 只在已明確綁定且仍通過授權的 thread 轉送自由文字。`core-routing.json` 包含 runtime、Core identity、guild/channel/thread 綁定，舊 Core identity 的綁定不採用；DiscordAdapter 的核准查詢使用獨立 `core-discord.json`。兩者位於既有 state directory，不讀寫舊 routing.json、不自動遷移 Herdr mapping。
+
+| 錯誤碼 | 固定訊息 |
+| --- | --- |
+| RUNTIME_UNSUPPORTED_OPERATION | `Core 不支援操作 <operation>（缺少 <capability>）；未執行操作。` |
+| RUNTIME_IDENTITY_UNVERIFIED | Core 目標身分或授權無法確認；未送出輸入。 |
+| RUNTIME_UNREACHABLE | 無法連線所選 Core runtime；未切換至 Herdr。 |
+| RUNTIME_INCOMPATIBLE | Core 協定或必要 API 不相容；未切換 runtime。 |
+| RUNTIME_DELIVERY_UNKNOWN | Core 指令送達狀態不明；未自動重送。 |
+
+缺 method 時附其名稱；設定互斥時附需移除的欄位。Discord 回覆附錯誤碼；入口 CLI 目前只印 message。非 RuntimeError 記安全分類、回「處理失敗，已記錄」。診斷保留 numeric RPC code/data.kind，log 不含 prompt、token 或 params。每次請求新建有界連線，不重送；輸入送出後無有效確認即 DELIVERY_UNKNOWN，操作者須先讀畫面確認。
+
+run.sh 語法為 `scripts/run.sh [--herdr|--core] [-r|-rg]`，順序任意，預設 herdr；-h/--help exit 0。重複 backend（含相同值）、重複 mode、互斥／未知／位置參數及 --core -rg 均 exit 2，在 npm／runtime 呼叫前拒絕。Herdr 原預設／-r／-rg 順序與守門保留。Core 無 mode 使用目前 checkout 的 dist/src/index.js，缺 build 要求 --core -r；-r 執行 npm ci＋build，不 plugin relink。
+
+Core 分支只呼叫 herdr-core：status 成功須驗 JSON；僅非零且訊息精確為 no core running（純文字或 JSON error.message）才 start 一次，再有界輪詢約 10 秒。權限、不相容、逾時或不明 socket 錯誤不得當未啟動。ls --json --all 查 live terminal；缺 labels 時 get 補查。若 bridge.role=discord-bridge 且 bridge.project=專案 pwd -P 已存在，列 address 並拒絕，要求人工處理；不 kill/rm/stop/restart。run 帶 bridge.backend=core、role/project labels、no-parent/no-notify、bg 與 HERDR_BRIDGE_RUNTIME=core；不操作舊 Herdr pane。run 回 address 只表示建立 terminal，不代表 Discord 登入或 bot lock 成功。跨後端沿用同一 bot instance lock，衝突不清理對方。
+
+run.sh 的 Herdr launcher 已由實際 help 確認支援 --env，預設／--herdr 均傳 `--env HERDR_BRIDGE_RUNTIME=herdr`，因此即使 plugin config runtime=core 也固定新程序走 Herdr，不改寫設定；不採無 env 旗標時才需要的衝突拒絕方案。直接 Node 啟動優先序不變。Core env 前綴明確傳 HERDR_BRIDGE_RUNTIME=core、HERDR_PLUGIN_CONFIG_DIR、HERDR_PLUGIN_STATE_DIR、caller 有設定的 HC_SOCKET/HC_SESSION；未設目錄依 configDirectory/stateDirectory 規則解析。新程序先清除 inherited HC_SOCKET/HC_SESSION 再套 caller 值，清除 HERDR_DISCORD_BOT_TOKEN/DISCORD_BOT_TOKEN；token 不經 argv/log，只讀 config.json 的 discord.botToken。caller 僅環境 token 且檔案無 token 時在副作用前拒絕，不偷偷選另一份設定。
+
+**驗收要求：**自動化測試不得取代 Core／Herdr 兩種實機啟動與 Discord 往返。2026-11-12 自動化與 Core 唯讀 dry-run 通過；正式 bridge 尚未重啟、未部署、實機往返未做。記錄原始碼/build/執行程序版本、Core/Desktop/Herdr 版本、命令、日期與結果；未驗收項目留 ISSUE-151。原 Ubuntu herdr-app 0.1.14／Core 0.1.19 與舊 Herdr 0.8.0 不共用 pane 的觀察仍成立；本版沒有 Desktop workspace/layout adapter。
 
 ## 2. 執行環境與設定
 
 Plugin 以 TypeScript 編譯至 `dist/`，由 manifest pane 以
-`node dist/src/index.js` 啟動。本機 restart script 在所有模式下都以名為 `bridge` 的專用 workspace 之 tab 1
+`node dist/src/index.js` 啟動。本機 restart script 在 Herdr 後端的所有模式下都以名為 `bridge` 的專用 workspace 之 tab 1
 為目標：無參數時啟動已安裝 plugin，`-r` 重新建置並連結本機 checkout，
 `-rg` 從 GitHub 重新安裝 `jon888465/Herdr_Discord_Bridge`。它不會聚焦該
 tab，也不搬移其他 Agent pane。依名稱查找 `bridge` workspace，沒有時以專案 cwd
@@ -76,7 +111,7 @@ reply 或 button 處理前會檢查 guild、channel 與 user allowlist。空清�
 該維度不限制；敏感部署應改用明確 ID。非空的 `allowedWorkspaceIds` 會再增加
 一層 Herdr workspace 授權邊界。
 
-## 3. Herdr protocol client
+## 3. Herdr protocol client（Herdr 後端）
 
 `HerdrClient` 會在新的本機 socket connection 上送出一筆以換行分隔的 JSON
 request。帶有 `error` 的 response 會轉成 typed `HerdrError`；錯誤 log 不會

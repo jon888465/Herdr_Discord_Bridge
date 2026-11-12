@@ -1,5 +1,35 @@
 # Known Issues
 
+## ISSUE-151：Herdr Core runtime 支援
+
+更新日期：2026-11-12。狀態：已修正、待驗收。
+
+**使用者可見症狀／預期行為：**原 bridge 與 run.sh 只操作舊 Herdr；Desktop 使用獨立 Core runtime，換 socket 路徑不能取得同等 API。預期可明確選擇後端，省略時保持 Herdr；Core 支援 terminal 基本讀寫，缺少能力或連線失敗時明確拒絕，不切換 runtime、不關閉另一後端的資源。
+
+**重現／環境與根因：**2026-11-11 至 2026-11-12，本機 macOS，已安裝 `hc 0.1.20`、protocol generation 1。實際 schema 與 socket 讀取確認 Core 是 terminal runtime，沒有舊 workspace/pane/tab/worktree API；舊 Herdr 的字串 error code 與 Core numeric JSON-RPC error 也不同。此 API 差異已確認；真實 Discord 往返尚未驗收。
+
+**修正範圍：**`src/runtime/` adapter 契約／selector／錯誤分類、Core 逐行 JSON-RPC transport／握手、中立結果、獨立 Core Discord 最小路由與 `coreAllowedTerminals` 授權；Core routing 帶 Core identity、與舊 routing 隔離。run.sh 加 `--herdr/--core` 與 mode 組合解析；Core status → 明確未啟動才 start 一次 → ls/get 查同專案 bridge → run，不 kill/rm/stop/restart。舊 Herdr client wire 與專用 workspace/tab 守門保留。設計與限制見 [Herdr Core runtime](herdr-core-runtime.md)。
+
+**Core 明確不支援：**workspace 選取／建立／關閉；pane/tab 布局、命名、搬移及通用關閉；指定既有 pane 啟動 Agent、profile pool／fresh Worker；原生 worktree、card/autopick、Team、handoff、quota/failover、CLI session continuity；舊 machines tunnel 設定、hook/approval/model 等高階指令；history/recent/detection read、raw input、強制 blocked 回答。Discord `wait` 也拒絕，雖然低階 adapter 有 terminal.wait mapping。Core 與非空 `allowedWorkspaceIds` 或 `machines` 設定互斥。
+
+**測試命令與結果（2026-11-12，本機 macOS）：**前四段執行 `npm run typecheck`、`npm run build`、`npm run lint`、`bash -n scripts/run.sh`、`/bin/bash -n scripts/run.sh` 均通過（系統 Bash 3.2.57）。第 4 段最終 `npm test`（含 build）為 **1889 項、1888 pass、0 fail、1 skipped**；fake CLI 的 restart＋run-sh-args 共 41 項通過。涵蓋 transport/id/fragments/error、mapping、授權與 routing 隔離、送達不明零重送、參數矩陣及跨後端零操作。`HERDR_BRIDGE_RUNTIME=core node dist/src/index.js --dry-run` 唯讀成功：generation=1、terminals=2、allowed=0；Core 版本 0.1.20，沒有登入 Discord。這些是分段驗證紀錄，不代表本次純文件更新重跑了全套。
+
+**未驗證項目／部署狀態：**Core 模式實機啟動與 Discord 指令往返未做；舊 Herdr 模式實機重啟未做；執行中的 bridge 未重啟，未部署。真實 Core 停機後 start、正式 bot instance lock 衝突、Desktop 呈現亦未驗收。唯讀 schema/socket/dry-run 與自動化不得替代實機驗收；舊事件／訊息不因新程式而自動補送。下一步依設計文件草案由 Lead 安排獨立驗收，記錄程序版本、日期、環境與結果；失敗須重新開啟本 issue。
+
+**編號更正：**卡片 `REQ-20261111-herdr-core-support` 所寫「ISSUE-139」是編號誤植。本功能使用 ISSUE-151；原 ISSUE-139（reviewer inconclusive 原因記錄）內容及狀態不變。
+
+
+
+### Review 修正（2026-11-12）
+
+Review 發現兩項問題後重新開啟調查；本輪修正完成後恢復「已修正、待驗收」，保留未實機驗收狀態。
+
+r7-f1：原 Herdr 分支只選 CLI，plugin config runtime=core 時新 pane 會啟動 Core。唯讀 `herdr plugin pane open --help` 確認實際支援 `--env KEY=VALUE`，現於 launcher 明確傳 `--env HERDR_BRIDGE_RUNTIME=herdr`，適用預設與 --herdr；直接 Node 啟動仍保留 env > config 優先序。因旗標存在，採固定新程序環境而非衝突拒絕方案；Core config 不被改寫。
+
+r7-f2：Core terminal 不繼承 caller shell。現 run 的 env 前綴傳 HERDR_BRIDGE_RUNTIME=core、HERDR_PLUGIN_CONFIG_DIR、HERDR_PLUGIN_STATE_DIR，以及 caller 有設定的 HC_SOCKET/HC_SESSION；未設目錄時依 config.ts 規則解析預設絕對路徑。先清除 server 環境的 HC_SOCKET/HC_SESSION 再套 caller 值，避免查詢與新程序定位不同。HERDR_DISCORD_BOT_TOKEN／DISCORD_BOT_TOKEN 不放 argv，並在新程序清除，以 config.json 的 discord.botToken 為準。caller 只有環境 token、JSONC config.json 無 token 時，在 npm／Core 呼叫前拒絕，訊息不含秘密。
+
+新增測試：r7-f1 launcher env 固定 Herdr（含 runtime=core config／caller、預設與 --herdr）、原 Herdr config／缺欄位保持可啟動；r7-f2 清空 Core server 環境仍傳相同定位與目錄（預設與自訂）、兩個 token 環境變數單獨供應時拒絕且零 CLI。fake Core/Herdr launcher 以 env -i 執行假 node，實際擷取 child env，檢查 argv/log 無假 token。首輪新增測試因 macOS 暫存目錄 canonical 路徑不同造成 4 項 fixture 失敗，已修正假 node 路徑辨識；另一次 lint 將測試假 token 的直接字面值判為憑證，已改為具名 fixture 常數並通過。最終檢查（2026-11-12）：`bash -n scripts/run.sh && /bin/bash -n scripts/run.sh`、`npm run typecheck`、`npm run lint`（220 TypeScript files）、`git diff --check` 通過；`npm test`（含 build）1897 項、1896 pass、0 fail、1 skipped，包含上述新增 8 項與原 restart fixtures。未使用真實 bot，未實機啟動／重啟或部署；狀態維持已修正、待驗收，需獨立複審。
+
 ## ISSUE-143：remote machine（agy-pod）的 agent 不能擔任卡片角色；先開放 remote card reviewer
 
 **2026-11-11 reviewer 預先信任（已修正、待驗收；**主要成功路徑已於 2026-11-11 實機驗過一次，失敗路徑尚未驗**）：**契約見 SPEC.md「遠端 reviewer 的 agy 預先信任」。經過：bridge card review 三輪（第 1 輪 head 3023316、第 2 輪 b580fe9、第 3 輪 9302325）**都是 changes_requested，review 次數已用完，這個 PR 需要人工決定 merge**。第 1 輪：F1 `verifyCardWorktree` 驗 `.git`、gitdir、回指、HEAD 分支，不符拒絕且不寫設定；F2 只移除本次新增的；F3 逾時 124／137 與寫入失敗皆 uncertain，清理嘗試移除、失敗記 pending；F4 uncertain 不啟動 reviewer（仍在跑的寫入可能在清理讀設定後才完成），一律記 `cleanup_pending：trust`；F5 補 C1。第 2 輪：F6 保留 pane 時保留信任（pane 還在等人處理）並記 `cleanup_pending：trust`；F7 腳本內 `mkdir` 鎖（`<root>/.hdb-agy-settings-backups/lock`）涵蓋雜湊重驗到 `mv`，逾時 exit 19，超過 1 分鐘的殘留鎖回收、未過期的不碰；F8 沒有取消訊號（取消即 runTurn 或 exec 丟錯），補兩個測試。第 3 輪：F11 SPEC 仍寫「不信任遠端 agy」而與預先信任互相矛盾 → 已改成一致（SPEC、README 兩份、docs/remote-card-reviewer.md；ISSUE-113 的「遠端 agy 不在範圍」是歷史紀錄，不改）；F12 本條缺測試證據 → 已補。**F9、F10 為已知限制，未採納**：F9 兩個等待者在毫秒級同時判定同一把鎖過期並回收時，後者可能刪掉前者剛重建的新鎖，兩個 writer 可能同時通過雜湊檢查而互相覆蓋設定；bridge 一次只做一張卡、同一台 pod 同時寫兩張卡的機會低，視窗已縮小但無法完全消除，pod 上 `find -mmin` 未驗證。F10 reviewer 卡在啟動提示而保留 pane 時，信任與目錄保留、記 `cleanup_pending：trust`、不自動移除（不重試，需人工撤銷），理由是 pane 還在等人處理、移除信任對仍在執行的 agy 的影響沒有驗證；reviewer（codex 第 2、3 輪）認為此時也應嘗試撤銷，此取捨未採納。**驗證（單元測試，不是實機驗收）：**`npm run check`（2026-11-11，本機 macOS，卡片 worktree，head 9302325，本輪重跑確認）：1814 項、1813 pass、0 fail、1 skipped；`npm run lint`（206 個 TypeScript 檔）、`git diff --check` 通過。測試在 `test/agy-worktree-trust.test.ts`、`test/remote-agy-trust.test.ts`（含真 sh 並行與鎖，本機 macOS，不是 pod）；為 F1 改了 `fixture()`（加 `linkWorktree`，既有斷言未改）。**實機驗收（2026-11-11 13:07Z，本機 macOS，bridge 為 main `b44ab90`（#211、#212）、pod 為 agy 1.5.2；pod 工具 `sha256sum`／`base64`／`mktemp`／`cp`／`find`／`timeout`／`realpath` 都存在；測試卡 `REQ-20261111-pretrust-live`、PR #214，`roles: {reviewer: "agy-pod:agy"}`）：**reviewer 13:07:16Z 啟動（`role_assigned`：reviewer（第 1 輪）：agy；machine=agy-pod；v=2,cr=-,s=C,ss=CCD,me=U）、13:07:40Z `pass`，**沒有人介入、agy 沒有停在信任提示**（#210 同情境曾停在「Do you trust…」）。輪詢 pod：checkout `…__9a229d824a` 出現後 `trustedWorkspaces` 多了這一項，約 20 秒後被移除；結束時 `trustedWorkspaces` 只剩原本三項，`/root/herdr-card-review` 沒有 checkout 目錄，pod 只剩原本的 `w2:p1`。**沒有驗證：**寫入失敗、狀態不明（斷線、124／137）、`cleanup_pending：trust`、保留 pane 時保留信任、清理失敗；舊的殘留項目 `…__163ee5854b`（#210 留下，bridge 不碰）仍在 `trustedWorkspaces`，需人工決定是否移除。新發現見 ISSUE-149、ISSUE-150。其他限制（修正當時的紀錄）：agy 執行中同時改寫設定檔的競態只能縮小視窗；本機 worktree 名稱只要求 `card-req-` 開頭；pod 的 `sha256sum`／`base64 -d`／`mktemp`／`cp -p`／`find -mmin` 未驗證。
@@ -701,6 +731,7 @@ Review3 文件修正（2026-11-09，f4）：SPEC 的 PR merge 自動清理段落
 
 | ID        | 問題                                                                            | 狀態             | 下一步                                                                                                                                    |
 | --------- | ------------------------------------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| ISSUE-151 | Herdr Core runtime 支援 | 已修正、待驗收 | 2026-11-12 自動化及唯讀 dry-run 通過；待 Core/Herdr 實機啟動與 Discord 往返，未部署 |
 | ISSUE-001 | Discord reply 未觸發 bridge                                                     | 重新開啟、待驗收 | 重啟後在 mapped thread 回覆 bot                                                                                                           |
 | ISSUE-002 | Discord 圖片未交付 Agent                                                        | 已修正、待驗收   | 重啟後以副檔名與內容不符（如 PNG/JPEG 互換）之圖片驗收本機交付                                                                            |
 | ISSUE-003 | 預覽與 final 未更新                                                             | 重新開啟／待調查 | 暫時缺失子缺陷已修正；2026-10-02 重跑 195/195，載入新版原 thread 驗收與核對 live identity                                                 |

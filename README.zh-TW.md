@@ -76,9 +76,36 @@ herdr plugin pane open \
 ./scripts/run.sh -rg   # 從 GitHub 重新安裝 main 並啟動
 ```
 
-如果 Herdr server 尚未啟動，`run.sh` 會先自動啟動 headless server 並等待 socket ready，再執行 bridge 重建流程；不需要先手動輸入 `herdr`，也不會停止既有 Herdr server。
+如果 Herdr server 尚未啟動，`run.sh` 會先自動啟動 headless server 並等待 socket ready，再執行 bridge pane 流程；不需要先手動輸入 `herdr`，也不會停止既有 Herdr server。
 
-三種模式固定使用名為 `bridge` 的專用 workspace 之 tab 1；不存在時以專案 cwd 建立並保留 focus，同名多個則拒絕。其他 Agent pane 留在原位置。若其他 workspace 仍有舊 bridge，script 會列出 pane ID 並停止，需先明確搬移或停止舊 bridge，避免兩個 bot 程序同時執行。只替換專用 tab 中明確標示且無 Agent 的 bridge pane，不修改 plugin 設定或 Discord token。
+Herdr 後端的三種模式固定使用名為 `bridge` 的專用 workspace 之 tab 1；不存在時以專案 cwd 建立並保留 focus，同名多個則拒絕。其他 Agent pane 留在原位置。若其他 workspace 仍有舊 bridge，script 會列出 pane ID 並停止，需先明確搬移或停止舊 bridge，避免兩個 bot 程序同時執行。只替換專用 tab 中明確標示且無 Agent 的 bridge pane，不修改 plugin 設定或 Discord token。
+
+### 選擇 Herdr 或 Herdr Core
+
+```text
+Usage: scripts/run.sh [--herdr|--core] [-r|-rg]
+Backend defaults to --herdr. Options may appear in any order.
+-r: rebuild local checkout; -rg: reinstall from GitHub (Herdr only).
+--core -rg is unsupported; no changes are made.
+```
+
+上面的既有命令維持 Herdr 行為；`--herdr` 可明確選擇。Core 需安裝 herdr-core（已測 hc 0.1.20）、Node.js、npm 與 jq。`./scripts/run.sh --core -r` 建置目前 checkout 並開 Core terminal；`./scripts/run.sh --core` 使用既有 build。旗標可任意排序；重複／互斥／未知參數及 Core -rg 都在 runtime/npm 呼叫前 exit 2；-h/--help 印 usage。
+
+直接用 Node 啟動時，選擇優先序為 `HERDR_BRIDGE_RUNTIME` > config `runtime` > `herdr`，未知值失敗且不 fallback。Core 沿用 bridge 設定目錄（預設 `~/.config/herdr-discord-bridge/config.json`，可由 HERDR_PLUGIN_CONFIG_DIR 覆蓋），填好 Discord token／allowlists，並設定：
+
+```json
+{"runtime":"core","coreAllowedTerminals":["t2"],"allowedWorkspaceIds":[],"machines":[]}
+```
+
+地址應由 Core 查得，不要直接照抄 t2。coreAllowedTerminals 為空時仍可列出／讀取，但拒絕所有輸入；輸入也須重新查到 live terminal 且 Core identity 相符。非空 allowedWorkspaceIds 或舊 machines 會讓 Core 啟動失敗。Core socket 選擇為 `HC_SOCKET` > `HC_SESSION`（對應 `~/.local/state/herdr-core/<session>/<session>.sock`）> `~/.local/state/herdr-core/default/default.sock`；HERDR_SOCKET_PATH 僅屬 Herdr。Core 非標準 socket 位置須明確設 HC_SOCKET。
+
+Core 目前只支援列出、visible 畫面讀取、送出、按鍵與 runtime 狀態：`/herdr agents`、`read [terminal]`、`ask <terminal> <text>`、`status`、`agent keys <terminal> <keys...>`、`cancel [terminal]`。thread 內先以 `target <terminal>`、`use <terminal>` 或 `agent use <terminal>` 明確綁定授權目標，才能轉送自由文字。read 固定 lines:0，不完整時附註；未回報 status 保持 unknown。send 不強制回答 blocked，也不重送送達不明的輸入。workspace、Team/card、pool/start、worktree、handoff、approval、failover 等其他指令明確拒絕。此最小 Core 模式沒有自動 final 串流，請用 read 查看輸出；後文未特別註明的命令說明適用 Herdr。
+
+Core run.sh 先查 status，只有明確 no core running 的失敗才 start 一次並有界等待；其他錯誤停止。它以 live terminal 的 bridge role/project 查重，ls 缺 labels 時用 get 補查，已存在就拒絕。不 kill/rm terminal、不 stop/restart Core，也不呼叫舊 herdr CLI。同 bot instance lock 跨後端防重，正式 bridge 已執行時須由操作者明確處理；`Core bridge terminal: <address>` 只確認建立 terminal，不代表 Discord 登入成功。
+
+已安裝的 Herdr launcher 支援 --env，因此預設／--herdr 明確傳 `--env HERDR_BRIDGE_RUNTIME=herdr`，即使 plugin config 設 core 也固定新程序走 Herdr，不改寫 config。Core 明確傳 HERDR_PLUGIN_CONFIG_DIR／HERDR_PLUGIN_STATE_DIR（caller 值或解析出的預設）、caller 有設定的 HC_SOCKET／HC_SESSION；先清除繼承的 Core 定位變數再套值。token 不進 argv：新程序清除 HERDR_DISCORD_BOT_TOKEN／DISCORD_BOT_TOKEN，使用 JSONC config.json 的 discord.botToken。caller 僅環境 token、檔案無 token 時，run.sh 在啟動前拒絕；請將 token 放入私人設定檔。
+
+Core state directory 使用獨立 core-routing.json／core-discord.json，不遷移舊 Herdr 路由。可用 `HERDR_BRIDGE_RUNTIME=core node dist/src/index.js --dry-run` 唯讀驗證。2026-11-12 自動化與本機 Core dry-run 已通過；尚未部署、執行中的 bridge 尚未重啟，Core／Herdr 實機啟動與 Discord 往返仍待驗收。設計、錯誤、限制與驗收步驟見 [Herdr Core runtime](docs/herdr-core-runtime.md)，追蹤 ISSUE-151。
 
 若要手動執行：
 
