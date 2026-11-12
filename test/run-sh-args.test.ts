@@ -21,6 +21,7 @@ function runFixture(
     env?: Record<string, string>;
     fileToken?: string;
     customDirs?: boolean;
+    noConfigFile?: boolean;
   } = {},
 ) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "run backend "));
@@ -46,14 +47,15 @@ function runFixture(
       ? path.join(directory, "custom state")
       : path.join(configDir, "state");
     fs.mkdirSync(configDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(configDir, "config.json"),
-      "// JSONC\n" +
-        JSON.stringify({
-          runtime: settings.runtime,
-          discord: { botToken: settings.fileToken ?? "" },
-        }),
-    );
+    if (!settings.noConfigFile)
+      fs.writeFileSync(
+        path.join(configDir, "config.json"),
+        "// JSONC\n" +
+          JSON.stringify({
+            runtime: settings.runtime,
+            discord: { botToken: settings.fileToken ?? "" },
+          }),
+      );
     const dump = path.join(directory, "environment.json");
     fs.writeFileSync(
       path.join(bin, "node"),
@@ -295,6 +297,28 @@ for (const flag of ["--help", "-h"])
     assert.deepEqual(result.calls, []);
   });
 
+for (const [args, customDirs] of [
+  [["--core"], false],
+  [["--core", "-r"], false],
+  [["-r", "--core"], true],
+] as const)
+  test(`Core 設定檔不存在時在任何 CLI 呼叫前拒絕 ${args.join(" ")} custom=${customDirs}`, () => {
+    const result = runFixture([...args], "running", true, {
+      noConfigFile: true,
+      customDirs,
+      env: { HERDR_DISCORD_BOT_TOKEN: fakeEnvironmentToken },
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Core bridge config not found: /);
+    assert.ok(
+      result.stderr.includes(path.join(result.configDir, "config.json")),
+      result.stderr,
+    );
+    assert.match(result.stderr, /HERDR_PLUGIN_CONFIG_DIR/);
+    assert.deepEqual(result.calls, []);
+    assert.equal(result.childEnv, undefined);
+    assert.doesNotMatch(result.stderr, /fake-env-secret/);
+  });
 test("Core 未 build 時提示 -r 且零 CLI 呼叫", () => {
   const result = runFixture(["--core"], "running", false);
   assert.equal(result.status, 1);

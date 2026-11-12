@@ -72,7 +72,8 @@ if [[ "$backend" == core ]]; then
 const fs = require("node:fs"), path = require("node:path");
 try {
   const file = path.join(process.argv[2], "config.json");
-  let text = fs.existsSync(file) ? fs.readFileSync(file,"utf8") : "{}";
+  if (!fs.existsSync(file)) {console.log("missing");process.exit(0);}
+  let text = fs.readFileSync(file,"utf8");
   let out="", quoted=false, escaped=false, line=false, block=false;
   for(let i=0;i<text.length;i++) {
     const c=text[i], n=text[i+1];
@@ -86,6 +87,12 @@ try {
 } catch {console.error("Cannot read bridge config.json; Core was not started.");process.exit(1);}
 NODE
 )"
+  if [[ "$file_has_token" == missing ]]; then
+    # A missing file would otherwise launch a Core terminal that exits at once
+    # (ISSUE-151). Herdr plugin installs keep config.json in the plugin config dir.
+    echo "Core bridge config not found: $bridge_config_dir/config.json; set HERDR_PLUGIN_CONFIG_DIR (Herdr plugin installs: herdr plugin config-dir herdr-discord-bridge). Core was not started." >&2
+    exit 1
+  fi
   if [[ "$file_has_token" != yes && ( -n "${HERDR_DISCORD_BOT_TOKEN:-}" || -n "${DISCORD_BOT_TOKEN:-}" ) ]]; then
     echo "Core 模式需把 token 放在 config 檔，不透過環境變數傳遞；未啟動" >&2
     exit 1
