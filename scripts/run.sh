@@ -168,6 +168,15 @@ NODE
     fi
     printf '%s' "$terminal" | jq -e --arg address "$address" '.address == $address and .state == "live" and (.labels | type == "object")' >/dev/null || { echo "Could not verify Core terminal $address; no terminal was started." >&2; exit 1; }
     if printf '%s' "$terminal" | jq -e --arg project "$project_dir" '.labels["bridge.role"] == "discord-bridge" and .labels["bridge.project"] == $project' >/dev/null; then
+      # Desktop adoption turns on core keep: a bridge whose program exited may
+      # live on as a shell with the same labels. Read the foreground program
+      # (get is read-only); anything other than node is a stale terminal.
+      detail="$(herdr-core get "$address" --json)"
+      foreground="$(printf '%s' "$detail" | jq -r 'if (.foreground.name | type) == "string" then .foreground.name else "" end')"
+      if [[ -n "$foreground" && "$foreground" != node ]]; then
+        echo "Stale Core bridge terminal $address: the bridge exited and the terminal now runs $foreground. Run herdr-core kill $address, then retry. No terminals were changed." >&2
+        exit 1
+      fi
       existing="${existing}${address} "
     fi
   done < <(printf '%s' "$core_list" | jq -c '.terminals[] | select(.state == "live")')
@@ -176,9 +185,16 @@ NODE
     echo "Stop it explicitly before starting another bridge. No terminals were changed." >&2
     exit 1
   fi
+  # Herdr Desktop shows only terminals labelled herdr.space/herdr.tab; unknown ids
+  # become a new space (named after the folder) and tab. Derive both from the
+  # project path so every start of this project's bridge lands in the same place.
+  desktop_ids="$(node -e 'const c=require("node:crypto");const p=process.argv[1];const h=s=>c.createHash("sha256").update(s).digest("hex").slice(0,32);console.log("sp"+h("herdr-discord-bridge:space:"+p)+" tb"+h("herdr-discord-bridge:tab:"+p))' "$project_dir")"
+  desktop_space="${desktop_ids% *}"
+  desktop_tab="${desktop_ids#* }"
   run_result="$(herdr-core run --json --bg --no-parent --no-notify \
     --cwd "$project_dir" --label bridge.role=discord-bridge \
     --label bridge.backend=core --label "bridge.project=$project_dir" \
+    --label "herdr.space=$desktop_space" --label "herdr.tab=$desktop_tab" \
     -- "${core_env[@]}" node "$project_dir/dist/src/index.js")"
   address="$(printf '%s' "$run_result" | jq -er '.address | select(type == "string" and length > 0)')" || { echo "Could not identify the new Core terminal; inspect Core before retrying." >&2; exit 1; }
   echo "Core bridge terminal: $address"

@@ -89,7 +89,7 @@ Backend defaults to --herdr. Options may appear in any order.
 --core -rg is unsupported; no changes are made.
 ```
 
-上面的既有命令維持 Herdr 行為；`--herdr` 可明確選擇。Core 需安裝 herdr-core（已測 hc 0.1.20）、Node.js、npm 與 jq。`./scripts/run.sh --core -r` 建置目前 checkout 並開 Core terminal；`./scripts/run.sh --core` 使用既有 build。旗標可任意排序；重複／互斥／未知參數及 Core -rg 都在 runtime/npm 呼叫前 exit 2；-h/--help 印 usage。
+上面的既有命令維持 Herdr 行為；`--herdr` 可明確選擇。Core 需安裝 herdr-core（已測 hc 0.1.20）、Node.js、npm 與 jq。`./scripts/run.sh --core -r` 建置目前 checkout 並開 Core terminal，terminal 帶由專案路徑推導的 `herdr.space`／`herdr.tab` 標籤，Herdr Desktop 會在以專案資料夾命名的 space 顯示 bridge pane（Desktop 會把該 terminal 設成 keep；bridge 結束後若留下 shell，run.sh 會判定 stale 並要求 `herdr-core kill`）；`./scripts/run.sh --core` 使用既有 build。旗標可任意排序；重複／互斥／未知參數及 Core -rg 都在 runtime/npm 呼叫前 exit 2；-h/--help 印 usage。
 
 直接用 Node 啟動時，選擇優先序為 `HERDR_BRIDGE_RUNTIME` > config `runtime` > `herdr`，未知值失敗且不 fallback。Core 沿用 bridge 設定目錄（預設 `~/.config/herdr-discord-bridge/config.json`，可由 HERDR_PLUGIN_CONFIG_DIR 覆蓋），填好 Discord token／allowlists，並設定：
 

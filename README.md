@@ -98,7 +98,7 @@ Backend defaults to --herdr. Options may appear in any order.
 --core -rg is unsupported; no changes are made.
 ```
 
-The existing commands above keep their Herdr behavior; `--herdr` makes that choice explicit. For Core, install `herdr-core` (tested with hc 0.1.20), Node.js, npm and jq. Use `./scripts/run.sh --core -r` to build this checkout and start a Core terminal, or `./scripts/run.sh --core` to use its existing build. Duplicate/conflicting flags, unknown arguments and Core `-rg` exit 2 before runtime/npm calls; `-h`/`--help` prints usage.
+The existing commands above keep their Herdr behavior; `--herdr` makes that choice explicit. For Core, install `herdr-core` (tested with hc 0.1.20), Node.js, npm and jq. Use `./scripts/run.sh --core -r` to build this checkout and start a Core terminal, or `./scripts/run.sh --core` to use its existing build. The terminal carries `herdr.space`/`herdr.tab` labels derived from the project path, so Herdr Desktop shows the bridge in a space named after the project folder (Desktop then keeps the terminal; if the bridge exits and a shell remains, run.sh reports it as stale and asks you to `herdr-core kill` it). Duplicate/conflicting flags, unknown arguments and Core `-rg` exit 2 before runtime/npm calls; `-h`/`--help` prints usage.
 
 For direct Node startup, selection is `HERDR_BRIDGE_RUNTIME` > config `runtime` > `herdr`; unknown values fail without fallback. Set Core configuration in the usual bridge config directory (default `~/.config/herdr-discord-bridge/config.json`, overridden by `HERDR_PLUGIN_CONFIG_DIR`), including the Discord token/allowlists and:
 

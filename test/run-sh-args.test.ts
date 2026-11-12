@@ -4,6 +4,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import crypto from "node:crypto";
+
+// Mirrors run.sh: Desktop space/tab ids derived from the project path.
+function desktopIds(project: string) {
+  const h = (s: string) =>
+    crypto.createHash("sha256").update(s).digest("hex").slice(0, 32);
+  return {
+    space: `sp${h(`herdr-discord-bridge:space:${project}`)}`,
+    tab: `tb${h(`herdr-discord-bridge:tab:${project}`)}`,
+  };
+}
 
 const fakeEnvironmentToken = "fake-env-secret";
 const fakeOtherToken = "fake-other-secret";
@@ -108,9 +119,9 @@ if(cli==='herdr-core') {
   if(scenario==='other-project')terminal.labels['bridge.project']='/somewhere/else';
   if(scenario==='finished')terminal.state='finished';
   if(scenario==='compact')delete terminal.labels;
-  output({terminals:['existing','compact','other-project','finished'].includes(scenario)?[terminal]:[]});process.exit(0);
+  output({terminals:['existing','compact','other-project','finished','stale'].includes(scenario)?[terminal]:[]});process.exit(0);
  }
- if(args[0]==='get') {output({address:args[1],state:'live',labels:{'bridge.role':'discord-bridge','bridge.project':root}});process.exit(0);}
+ if(args[0]==='get') {const detail={address:args[1],state:'live',labels:{'bridge.role':'discord-bridge','bridge.project':root}};if(scenario==='stale')detail.foreground={name:'bash',pid:1};if(scenario==='existing')detail.foreground={name:'node',pid:1};output(detail);process.exit(0);}
  if(args[0]==='run') {
   if(scenario==='clean-launch') {const tail=args.slice(args.indexOf('--')+1);const result=require('node:child_process').spawnSync('/usr/bin/env',['-i','PATH='+process.env.PATH,...tail],{encoding:'utf8'});if(result.status!==0)throw new Error('clean launch failed');}
   output(scenario==='bad-run'?{}:{address:'t9'});process.exit(0);
@@ -253,6 +264,10 @@ for (const args of [["--core"], ["-r", "--core"], ["--core", "-r"]])
       "bridge.backend=core",
       "--label",
       `bridge.project=${result.project}`,
+      "--label",
+      `herdr.space=${desktopIds(result.project).space}`,
+      "--label",
+      `herdr.tab=${desktopIds(result.project).tab}`,
       "--",
       "env",
       "-u",
@@ -467,6 +482,23 @@ for (const scenario of ["existing", "compact"])
     if (scenario === "compact")
       assert.ok(result.calls.some((call) => call.args[0] === "get"));
   });
+test("Core 同專案 bridge terminal 的程式已結束（keep 留下 shell）時視為 stale 並拒絕", () => {
+  const result = runFixture(["--core"], "stale");
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Stale Core bridge terminal t8: .*now runs bash/);
+  assert.match(result.stderr, /herdr-core kill t8/);
+  assert.equal(
+    result.calls.some((call) => ["run", "kill", "rm"].includes(call.args[0])),
+    false,
+  );
+});
+test("Desktop space/tab id 由專案路徑決定，同一專案每次相同", () => {
+  const a = desktopIds("/p/one");
+  assert.match(a.space, /^sp[0-9a-f]{32}$/);
+  assert.match(a.tab, /^tb[0-9a-f]{32}$/);
+  assert.deepEqual(desktopIds("/p/one"), a);
+  assert.notEqual(desktopIds("/p/two").space, a.space);
+});
 for (const scenario of ["finished", "other-project"])
   test(`Core ${scenario} 不關閉且可啟動`, () => {
     const result = runFixture(["--core"], scenario);

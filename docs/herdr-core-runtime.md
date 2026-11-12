@@ -102,6 +102,7 @@ ls --json --all 查 live terminals；摘要缺 labels 時 get address --json 補
 herdr-core run --json --bg --no-parent --no-notify \
   --cwd "$project_dir" --label bridge.role=discord-bridge \
   --label bridge.backend=core --label "bridge.project=$project_dir" \
+  --label "herdr.space=$desktop_space" --label "herdr.tab=$desktop_tab" \
   -- env -u HERDR_DISCORD_BOT_TOKEN -u DISCORD_BOT_TOKEN -u HC_SOCKET -u HC_SESSION \
   HERDR_BRIDGE_RUNTIME=core "HERDR_PLUGIN_CONFIG_DIR=$bridge_config_dir" \
   "HERDR_PLUGIN_STATE_DIR=$bridge_state_dir" node "$project_dir/dist/src/index.js"
@@ -110,6 +111,8 @@ herdr-core run --json --bg --no-parent --no-notify \
 上例省略 caller 設定時才加入的 HC_SOCKET/HC_SESSION assignments；script 以 Bash array 原樣傳值。先清除 server 的定位變數，再套 caller 有設定的值，避免繼承舊 session/socket。config/state 目錄有 caller 值則保留；否則先取 standalone 預設 `~/.config/herdr-discord-bridge`，該處沒有 config.json 而 `~/.config/herdr/plugins/config/herdr-discord-bridge/config.json` 存在時改用 Herdr plugin 設定目錄與 `~/.local/state/herdr/plugins/herdr-discord-bridge`（純檔案系統檢查，不呼叫 herdr），stdout 印 `Using Herdr plugin config: …`（2026-11-12 使用者決定）。最後選定的目錄沒有 config.json 時，在任何 npm／herdr-core 呼叫前 exit 1，印出該路徑與 HERDR_PLUGIN_CONFIG_DIR 提示，不建立 terminal（同日修正；原本把缺檔當空設定，建立的 terminal 立刻結束）；caller 明確指定的目錄缺檔而 plugin 設定存在時只印 `Found Herdr plugin config: …` 與 `Rerun with: …`，不覆寫 caller 的選擇。config.json 以與 config.ts 相同的 JSONC 註解／尾逗號方式讀取；只查 token 是否存在，不輸出值。環境 token 不能經可見 argv 傳遞；caller 僅用 HERDR_DISCORD_BOT_TOKEN/DISCORD_BOT_TOKEN 而檔案無 token 時拒絕。新程序也清除這兩個變數，確保使用檔案 token。
 
 r7-f1 的 launcher 問題以實際可用的 `herdr plugin pane open --env HERDR_BRIDGE_RUNTIME=herdr` 修正；config core 不會使舊 pane 跑成 Core，不改寫 config，也不需要缺少 --env 時的衝突拒絕 fallback。r7-f2 以 env -i fake server 啟動假 node 驗證目錄、runtime、HC 定位與秘密不入 argv；實機程序驗收仍待安排。
+
+`herdr.space`／`herdr.tab`（2026-11-12 加入）：Herdr Desktop 只顯示帶這兩個標籤的 Core terminal（Desktop 文件：「Terminals without the labels stay out of Herdr's screens」；不認識的 id 會變成新 space／tab，space 以第一個 terminal 所在資料夾命名）。run.sh 以專案路徑的 sha256 前 32 hex 產生固定 id（`sp…`／`tb…`），同一專案每次啟動都落在同一個 space／tab；本機實測對已在跑的 t7 補上標籤後，Desktop 立即建立以專案資料夾命名的 space 並把 t7 放進去，同時把 terminal 的 `keep` 設為 true（Desktop adoption 的行為）。keep 的後果：bridge 程式結束後 terminal 可能變成同標籤的 shell 繼續 live，因此重複檢查對每個同專案 bridge terminal 都 `get` 一次讀 `foreground.name`，不是 `node` 就印 `Stale Core bridge terminal <address>: … Run herdr-core kill <address>` 並 exit 1，不自動 kill；`foreground` 欄位缺少時維持原本「視為既有 bridge」的保守判定。
 
 script 印 Core bridge terminal: address，只確認 terminal 建立；程序可能因設定、bot lock 或 Discord 登入失敗而結束，須另驗。Core 分支完全不呼叫 herdr。同一 bot 的 OS instance lock 跨 backend 防重，不替操作者關閉已執行的 bridge。
 
