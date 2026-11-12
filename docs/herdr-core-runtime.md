@@ -1,6 +1,6 @@
 # Herdr Core runtime：邊界、限制與驗收
 
-更新：2026-11-12；追蹤 ISSUE-151。原始碼與自動化已完成，實機啟動／Discord 往返待驗收，執行中的 bridge 未重啟、未部署。本文的驗收命令是待執行草案，不是已完成的證據。
+更新：2026-11-12；追蹤 ISSUE-151。原始碼與自動化已完成；2026-11-12 本機 Linux 實機 `run.sh --core` 兩次啟動都在數秒內 exit 1（設定目錄沒有 config.json、Core socket 在 `$XDG_RUNTIME_DIR`），同日修正 run.sh 缺檔守門與 socket 解析（見 ISSUE-151「實機驗收」與「修正」）；真實 Core bridge 啟動與 Discord 往返仍待驗收，執行中的 bridge 未重啟、未部署。本文的驗收命令是待執行草案，不是已完成的證據。
 
 ## 邊界與設定
 
@@ -17,7 +17,7 @@ Node entry: env HERDR_BRIDGE_RUNTIME > config runtime > herdr
 
 RuntimeAdapter／RuntimeCapability 定義操作邊界；HerdrAdapter 是既有 client 的委派包裝，舊主入口仍直接走 HerdrHub，並非整份 main 已遷移到 adapter。Core 不共用舊 request port 或 machines tunnel，不把 workspace/pane/tab 身分合成成 terminal 身分。
 
-Core socket 實作規則：HC_SOCKET > HC_SESSION 對應 `~/.local/state/herdr-core/<session>/<session>.sock` > `~/.local/state/herdr-core/default/default.sock`。空白／非法 session 或非絕對 HC_SOCKET 明確拒絕。不讀 HERDR_SOCKET_PATH，也未實作 Core config.socket／XDG 優先序解析；這些安裝需顯式 HC_SOCKET。CLI 與 bridge 必須指向同一個 session/socket。
+Core socket 實作規則（`resolveCoreSocketPath`，2026-11-12 修正）：Core socket 選擇為 `HC_SOCKET` > 未設 HC_SESSION 時 Core terminal 注入的 `HC_TERMINAL_SOCKET` > 依 session（`HC_SESSION`，預設 default）的 `$XDG_RUNTIME_DIR/herdr-core/<session>.sock`（Linux Core 的實際位置）與 `$XDG_STATE_HOME|~/.local/state/herdr-core/<session>/<session>.sock`（macOS）兩個候選，取實際存在者，都不存在取 XDG_RUNTIME_DIR 候選。空白／非法 session，或 HC_SOCKET／HC_TERMINAL_SOCKET／XDG_RUNTIME_DIR／XDG_STATE_HOME 非絕對路徑時明確拒絕；空字串視為未設。不讀 HERDR_SOCKET_PATH，也不解析 Core config.toml 的 `socket`（該情況需顯式 HC_SOCKET）。CLI 與 bridge 必須指向同一個 session/socket。背景：2026-11-12 Linux 實機確認 Core 0.1.20 在 Linux 的 socket 是 `$XDG_RUNTIME_DIR/herdr-core/<session>.sock`（`~/.local/state/herdr-core/<session>/core.lock` 內容即此路徑），`~/.local/state/.../default.sock` 不存在，原本只認後者所以必定 RUNTIME_UNREACHABLE；run.sh 啟動的 terminal 內 Core 另注入 HC_TERMINAL_SOCKET，直接指向啟動它的 Core。
 
 `coreAllowedTerminals` 是 canonical address 白名單，預設空；列出與讀取不受該輸入白名單限制。綁定或輸入前重新 hello/status 核對啟動時 Core identity、get 查核 address 與 live；alias 不會自動變成授權 address。非空 allowedWorkspaceIds／machines 啟動前拒絕，要求移除設定；沿用 Discord guild/channel/user allowlists。Core 的 CLI session continuity 無證據，不開放依賴它的 Team／handoff 功能。
 
@@ -107,7 +107,7 @@ herdr-core run --json --bg --no-parent --no-notify \
   "HERDR_PLUGIN_STATE_DIR=$bridge_state_dir" node "$project_dir/dist/src/index.js"
 ```
 
-上例省略 caller 設定時才加入的 HC_SOCKET/HC_SESSION assignments；script 以 Bash array 原樣傳值。先清除 server 的定位變數，再套 caller 有設定的值，避免繼承舊 session/socket。config/state 目錄有 caller 值則保留，否則依 bridge 規則解析預設絕對路徑。config.json 以與 config.ts 相同的 JSONC 註解／尾逗號方式讀取；只查 token 是否存在，不輸出值。環境 token 不能經可見 argv 傳遞；caller 僅用 HERDR_DISCORD_BOT_TOKEN/DISCORD_BOT_TOKEN 而檔案無 token 時拒絕。新程序也清除這兩個變數，確保使用檔案 token。
+上例省略 caller 設定時才加入的 HC_SOCKET/HC_SESSION assignments；script 以 Bash array 原樣傳值。先清除 server 的定位變數，再套 caller 有設定的值，避免繼承舊 session/socket。config/state 目錄有 caller 值則保留，否則依 bridge 規則解析預設絕對路徑（`~/.config/herdr-discord-bridge`；Herdr plugin 安裝的設定在 `herdr plugin config-dir herdr-discord-bridge`，需由 caller 傳入）。解析出的目錄沒有 config.json 時，在任何 npm／herdr-core 呼叫前 exit 1，印出該路徑與 HERDR_PLUGIN_CONFIG_DIR 提示，不建立 terminal（2026-11-12 修正；原本把缺檔當空設定，建立的 terminal 立刻結束）。config.json 以與 config.ts 相同的 JSONC 註解／尾逗號方式讀取；只查 token 是否存在，不輸出值。環境 token 不能經可見 argv 傳遞；caller 僅用 HERDR_DISCORD_BOT_TOKEN/DISCORD_BOT_TOKEN 而檔案無 token 時拒絕。新程序也清除這兩個變數，確保使用檔案 token。
 
 r7-f1 的 launcher 問題以實際可用的 `herdr plugin pane open --env HERDR_BRIDGE_RUNTIME=herdr` 修正；config core 不會使舊 pane 跑成 Core，不改寫 config，也不需要缺少 --env 時的衝突拒絕 fallback。r7-f2 以 env -i fake server 啟動假 node 驗證目錄、runtime、HC 定位與秘密不入 argv；實機程序驗收仍待安排。
 
@@ -116,6 +116,8 @@ script 印 Core bridge terminal: address，只確認 terminal 建立；程序可
 Core 本身有 server start/status/stop/restart CLI，沒有 server.start RPC。schema/manual：stop 停止 Core 與程式，kept terminal 待下一次啟動給新 shell；restart 保存畫面、保留程式，下一個 Core 接管。holder 管 terminal 程序；同 build holder 接受新 terminals，舊 holder 可排空。macOS GUI 通常透過 launchd 啟動 Core，SSH 啟動可直接執行；這些屬 Core 生命週期，不是 script 已驗證的功能。run.sh 不 stop/restart server；停止 bridge 應先核對其 Core identity/address/project 與程序身分，不能用 server stop 或清理另一 runtime 代替。
 
 ## 測試證據與剩餘限制
+
+2026-11-12 本機 Linux（Ubuntu、X11、hc 0.1.20、Desktop 0.1.15）實機：`scripts/run.sh --core`（09:24）與 `--core -r`（09:34）都成功建立帶正確 labels 的 Core terminal（t4、t5），但 bridge 程序分別因「設定目錄 `~/.config/herdr-discord-bridge` 沒有 config.json（實際設定在 Herdr plugin 目錄）」與「socket 預設路徑在 Linux 不存在」exit 1；run.sh 把缺檔當 `{}`，沒有在 run 前拒絕。設 HC_SOCKET、HERDR_PLUGIN_CONFIG_DIR、HERDR_PLUGIN_STATE_DIR 後 `--dry-run` 回 generation=1、terminals=1、allowed=0。未啟動真實 Core bridge（舊 Herdr bridge 持有同一 bot 的 instance lock）。驗收草案第 4 步視為失敗，ISSUE-151 重新開啟；同日修正 run.sh 缺檔守門與 socket 解析後，不設 HC_SOCKET 的 `--dry-run` 印 `socket=/run/user/1000/herdr-core/default.sock`、generation=1、terminals=1，狀態回到已修正、待驗收。同日 09:57 使用者授權停掉舊 Herdr bridge（`herdr pane close w4:p3F`）後真實執行 `run.sh --core`（傳 plugin 的 config／state 目錄、不設 HC_SOCKET）：建立 t6，live、labels 正確、持有 bot instance lock、與 Discord gateway 保持 TLS 連線；Core 路徑登入後不印訊息。Discord 指令往返仍需使用者在 Discord 驗證；`coreAllowedTerminals` 為空，輸入類指令會被拒絕。目前本機是 Core bridge 在跑、Herdr bridge 已停，card／team／hooks／send socket 都不可用。
 
 2026-11-12 分段驗證：npm test（含 build）1889 項、1888 pass、0 fail、1 skipped；typecheck、lint 通過。Bash 語法檢查與系統 Bash 3.2.57 fake CLI 執行通過；restart＋run-sh-args 共 41 項。runtime tests 涵蓋 selector、capabilities、分段 UTF-8/id/錯誤 JSON/timeout/disconnect/numeric RPC error、握手、unknown/read incomplete、send 不 force／零重送、wait reason/秒制、keys、Discord 授權與獨立路由。fake CLI 涵蓋 backend×mode×順序、非法參數零副作用、status/start 判定、未就緒、重複 bridge 與缺 labels 補查。
 
@@ -126,7 +128,7 @@ Core 本身有 server start/status/stop/restart CLI，沒有 server.start RPC。
 1. 先記錄日期、OS、`git rev-parse HEAD`、build 時間、`herdr-core --version`、`herdr --version`、Desktop 版本，以及既有 bridge 的 backend／程序版本。以 `herdr-core server status --json`、`herdr-core ls --json --all` 核對 Core identity 與目標；不要記錄 token。
 2. 準備測試 bot 或由操作者明確安排既有正式 bridge 的停機窗口。同一 bot 的正式 bridge 正持鎖時，不直接啟動第二個；不可用 pkill、server stop/restart 或另一 runtime 的 pane 關閉來繞過鎖。共用設定需確認 runtime env 優先序，並使用正確 config/state directory；Core 的 allowedWorkspaceIds/machines 必須為空。
 3. 設 coreAllowedTerminals 為操作者明確選定的安全測試 terminal，先執行 `HERDR_BRIDGE_RUNTIME=core node dist/src/index.js --dry-run`。記錄 socket、generation、版本、數量與 exit code；驗證不可達 socket 立即失敗、不 fallback。
-4. 在授權的窗口執行 `scripts/run.sh --core -r`，記錄建立的 address、labels、實際 bridge 程序與 Discord 登入結果；不能只憑 script exit 0 宣告成功。再次 --core 應因同專案 live bridge 而拒絕，確認未關閉／搬移任何資源。
+4. 在授權的窗口執行 `scripts/run.sh --core -r`，記錄建立的 address、labels、實際 bridge 程序與 Discord 登入結果；不能只憑 script exit 0 宣告成功。再次 --core 應因同專案 live bridge 而拒絕，確認未關閉／搬移任何資源。（2026-11-12 09:57 本機 Linux 已做第一半：t6 建立、live、持鎖、gateway 連線；「再次 --core 被拒絕」與 Discord 登入訊息未做，Core 路徑不印登入訊息。）
 5. Discord 測 `/herdr status`、`/herdr agents`、`/herdr read <terminal>`；白名單外 ask/cancel 應拒絕且畫面無輸入。對安全測試 terminal 執行 `/herdr ask <terminal> <harmless-text>`，再 read 核對，記錄送出一次與畫面結果。以 target 綁 thread、送自由文字，並在未綁 thread 驗證拒絕。keys/cancel 只在操作者允許的測試程序驗證。送達不明先讀畫面，不重送。
 6. 測試 card/team/workspaces 等明確拒絕及 state 隔離；不要要求跑真實卡片。由操作者明確停止本次 Core bridge 後，另安排 `scripts/run.sh --herdr` 啟動與 Discord 基本往返，核對舊 Herdr workspace/tab 守門及 Core 資源未變。
 7. 把每步命令、日期、版本、成功／失敗、未驗項、部署／重啟狀態補進 ISSUE-151。任一步失敗即重新開啟，保留先前自動化及唯讀歷史；舊事件不自動補送。

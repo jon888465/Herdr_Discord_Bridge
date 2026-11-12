@@ -69,7 +69,7 @@
 
 ## Project maintenance
 
-- [Herdr Core runtime](docs/herdr-core-runtime.md)：ISSUE-151（2026-11-12），獨立 Core terminal 最小路由、輸入白名單、狀態隔離與 run.sh 雙後端；自動化／唯讀 dry-run 通過，未部署／重啟，Core/Herdr 實機啟動及 Discord 往返待驗收。workspace/Team/card/pool/worktree/handoff 等高階功能在 Core 明確拒絕。
+- [Herdr Core runtime](docs/herdr-core-runtime.md)：ISSUE-151（2026-11-12），獨立 Core terminal 最小路由、輸入白名單、狀態隔離與 run.sh 雙後端；自動化／唯讀 dry-run 通過；2026-11-12 本機 Linux 實機 `--core` 啟動失敗（設定目錄缺 config.json、Core socket 在 `$XDG_RUNTIME_DIR`）後同日修正 run.sh 缺檔守門與 socket 解析（XDG_RUNTIME_DIR／HC_TERMINAL_SOCKET），不設 HC_SOCKET 的 dry-run 通過；同日 09:57 本機真實 `run.sh --core` 啟動成功（t6），舊 Herdr bridge 已停，Discord 指令往返待使用者驗證。Desktop 中文輸入亂碼另見 ISSUE-152。workspace/Team/card/pool/worktree/handoff 等高階功能在 Core 明確拒絕。
 
 All contributors must follow [AGENTS.md](AGENTS.md), including same-session
 issue/spec documentation updates and reopening issues after failed acceptance.

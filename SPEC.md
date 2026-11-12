@@ -42,7 +42,7 @@ Bridge 不是 ACP broker；Team 可透過明確啟用的 Agent profile，按需�
 
 Bridge 入口以 `HERDR_BRIDGE_RUNTIME` > config `runtime` > `herdr` 選擇後端，值僅接受 `herdr`、`core`；未知值明確失敗。Core 失敗、版本／協定不符或缺少能力時不得靜默退回 Herdr。舊 Herdr 分支維持 HerdrHub 與既有 socket／重試行為；Core 使用獨立 core-bridge 與 CoreAdapter，不把舊 method 送入 Core。
 
-Core 依已安裝 `hc 0.1.20` 的 generation 1 schema 實作。hello 檢查 generation、版本欄位與必要 methods，再以 server.status 核對版本／Core identity；不是僅以 semver 字串判定相容。Socket 選擇為 `HC_SOCKET` > `HC_SESSION` 對應 `~/.local/state/herdr-core/<session>/<session>.sock` > `~/.local/state/herdr-core/default/default.sock`。不使用 `HERDR_SOCKET_PATH`；本版不解析 Core config.socket 或 XDG socket 優先序，非標準位置須明確設 HC_SOCKET。
+Core 依已安裝 `hc 0.1.20` 的 generation 1 schema 實作。hello 檢查 generation、版本欄位與必要 methods，再以 server.status 核對版本／Core identity；不是僅以 semver 字串判定相容。Core socket 選擇為 `HC_SOCKET` > 未設 HC_SESSION 時 Core terminal 注入的 `HC_TERMINAL_SOCKET` > 依 session（`HC_SESSION`，預設 default）的 `$XDG_RUNTIME_DIR/herdr-core/<session>.sock`（Linux Core 的實際位置）與 `$XDG_STATE_HOME|~/.local/state/herdr-core/<session>/<session>.sock`（macOS）兩個候選，取實際存在者，都不存在取 XDG_RUNTIME_DIR 候選。HC_SOCKET、HC_TERMINAL_SOCKET、XDG_RUNTIME_DIR、XDG_STATE_HOME 非絕對路徑時拒絕（RUNTIME_INCOMPATIBLE），空字串視為未設。不使用 `HERDR_SOCKET_PATH`；不解析 Core config.toml 的 `socket`，該情況須明確設 HC_SOCKET。（2026-11-12 ISSUE-151：原本只認 `~/.local/state` 路徑，在 Linux 必定連不上。）run.sh `--core` 在解析出的設定目錄沒有 config.json 時，於任何 npm／herdr-core 呼叫前 exit 1 並印出該路徑與 HERDR_PLUGIN_CONFIG_DIR 提示，不建立 terminal。
 
 | 能力 | Core 契約 |
 | --- | --- |
