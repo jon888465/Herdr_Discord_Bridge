@@ -4,6 +4,7 @@ import { normalizeTerminalResponse } from "./cli-adapter.js";
 import type { Clock } from "./agent-start.js";
 import { HerdrError } from "./herdr.js";
 import { stripAnsi } from "./format.js";
+import { hookEvents } from "./hook-events.js";
 import {
   CodexTranscript,
   findCodexRolloutByNonce,
@@ -118,8 +119,17 @@ export async function runTeamTurn(
   > => {
     if (!context?.observeSession) return undefined;
     if (!isCodex) {
+      // ISSUE-154：遠端 machine 的 Herdr 版本較舊時 pane 沒有 agent_session，但 pod 的 session hook 仍會回報
+      // Stop 事件（帶 session id 與 `<machine>:` 前綴的 pane ID）。只在遠端 pane、Herdr 沒有 session、
+      // 且是本回合開始後到達的 Stop 事件時採用，其他情況維持原行為。
+      if (!hasAgentSession(expectedSession)) {
+        if (!agent.machine) return undefined;
+        const stop = hookEvents.stopForPane(agent.pane_id, since);
+        return stop?.sessionId
+          ? { kind: "id" as const, value: stop.sessionId }
+          : undefined;
+      }
       // ISSUE-107：expectedSession 每次等待後都核對過，所以是回合內一致的 session。
-      if (!hasAgentSession(expectedSession)) return undefined;
       const { kind, value } = expectedSession as {
         kind: string;
         value: string;

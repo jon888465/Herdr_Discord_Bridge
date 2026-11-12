@@ -862,6 +862,7 @@ PR #189（`88e1ce6`）已於 2026-11-09 merge，並重啟 bridge 載入（`card 
 - **快照：**暫時 `GIT_INDEX_FILE` 上 `read-tree HEAD`、`add -A`（含未追蹤、不含 ignored）、`write-tree`、`commit-tree`（固定身分與時間），分支、HEAD、index 不動；前後指紋不同作廢。暫時 ref 打 bundle（`--not --remotes=origin`）後即刪，上限 50 MiB。不推送到 origin。
 - **pod：**目錄須不存在；同一指令建目錄與 marker，再 `init`、fetch origin、ssh stdin 收 bundle（`head -c` 上限）、`bundle verify`、`fetch`（只此步開 `protocol.file.allow`）、`checkout --detach`；HEAD 與 tree 須等於快照。
 - **版本與清理：**入帳前 pod 工作樹或本機工作樹與快照不同就不採用。本機暫存一律刪；完成與派工前失敗（含取消）關 workspace（建立逾時依 label 重查 3 次）、撤信任、刪目錄；**blocked、timeout、uncertain 保留 workspace、信任項目與 pod 目錄**（與 `card-role-session` 對同一 `RoleCleanupReason` 一致，避免丟掉現場），記 `cleanup_pending`；workspace 沒關成或狀態不明不刪目錄。唯讀基準指紋在 Agent 啟動前取。task 內快照目錄與 PR 階段 remote reviewer 目錄用不同的雜湊與 marker（key 前綴 `task-snapshot:`）。不 fallback 本機；對外只有固定標籤「遠端角色失敗：…」。
+- **身分（ISSUE-154）：**遠端 pane 若 Herdr 沒有回報 `agent_session`（例如 pod 的 Herdr 版本較舊），task 內 review 的 reviewer 身分改用本回合開始後該 pane 的 Stop hook 的 session id；本機 pane 與 Herdr 已有 session 時不看 hook。身分未知仍是 `inconclusive`。
 - **限制：**取消等進行中的 ssh 步驟結束；ignored 檔案不送；Lead 仍不能自選 PR 後的 remote reviewer。快照 bundle 以本機 `refs/remotes/origin/*` 為前置物件，本機過期的 remote-tracking ref 會讓 pod 端驗證失敗（標籤只顯示 bundle 驗證失敗）；建立快照與 `afterTurn` 的本機讀取是同步的，大工作樹會卡住事件迴圈；超過檔案數／大小上限只回泛用失敗；pod 端 `head -c` 截斷超大 bundle 時錯誤以 bundle 驗證失敗出現；工作樹內未追蹤的巢狀 git repo 會變成空目錄；pod 沒有 agy settings 檔時 agy 角色派不出去（agy 信任寫入確定失敗即中止，與 PR 階段 reviewer 只記錄後繼續不同）；pod 目錄只以 key 區分、不含角色，同一 task 前一個 remote 角色被保留後，後續 remote 角色會因「快照目錄已存在」失敗，需人工清理。只有單元測試，**未做實機驗收**。
 
 ### 卡片角色 machine／agent／model（2026-11-10，ISSUE-138，已修正、待驗收）
