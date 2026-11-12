@@ -2,19 +2,39 @@
 
 ## ISSUE-152：Herdr Desktop（Linux X11＋ibus）輸入中文變成亂碼
 
-更新日期：2026-11-12。狀態：受阻（問題在 Herdr Desktop 0.1.15 的 X11 輸入法路徑，不在 bridge；需上游修正或改用其他輸入路徑）。
+更新日期：2026-11-12。狀態：已修正、待驗收（專用 XIM 手動 workaround 已由使用者驗收；新增 launcher 已通過隔離測試，真實由 launcher 開窗後的中文輸入待驗收；上游原生轉碼缺口仍存在）。
 
 **使用者可見症狀／預期行為：**在 Herdr Desktop 的 terminal pane（Claude Code 輸入列）用 ibus 輸入中文，畫面出現 `herdr core%/2◆◆big5-◆Ұ◆%/2◆◆bi` 之類的亂碼（使用者截圖 `/media/sf_tmp/3.png`，2026-11-12）。預期輸入的中文原樣進入 terminal。
 
 **重現／環境：**Ubuntu（Linux 7.0.0-38-generic）、XFCE、`XDG_SESSION_TYPE=x11`、`GTK_IM_MODULE=ibus`／`XMODIFIERS=@im=ibus`、`LANG=zh_TW.UTF-8`；Herdr Desktop `herdr-app` 0.1.15（settings.json 字型 AR PL UKai TW）、Core hc 0.1.20。Core terminal 內程式的環境 `LANG=zh_TW.UTF-8`、`TERM_PROGRAM=ghostty`，locale 正常。
 
-**根因（機制已確認；Desktop 原始碼未讀）：**`herdr-core read t1` 讀回的 pty 畫面已經是 `herdr core%/2��big5-�Ұ�%/2��bi`（U+FFFD 與 Big5 位元組），所以不是字型或顯示問題，而是輸入進 pty 前就已錯。結構與 X11 COMPOUND_TEXT 的 extended segment 一致：本機用 Xlib `Xutf8TextListToTextProperty(XCompoundTextStyle)` 在 zh_TW.UTF-8 下編碼「啟動後沒看到」得到 `ESC % / 2 0x80 0x93 big5-0 STX <Big5 位元組>`；ibus-x11 經 XIM 交給 Desktop 的 commit 字串就是這種格式。Desktop 沒有解碼 `big5-0` extended segment，把位元組當 UTF-8 直接送進 pty（ESC 被 Claude Code 當按鍵吃掉，留下 `%/2`、兩個長度位元組、`big5-`、Big5 位元組；兩段 `%/2` 對應兩次 commit）。Desktop changelog 寫過「On Linux, Chinese typed through fcitx or ibus on X11 comes out right (#97)」與 fcitx4（#558），但 zh_TW locale 的 Big5 extended segment 在 0.1.15 仍錯。同一測試在 en_US.UTF-8／C.UTF-8 下得到 `ESC % G <UTF-8> ESC % @ ESC $ ( B <JIS X 0208>`，Desktop 是否能解 JIS 段未驗證，所以「換 locale 啟動 Desktop」不保證有效。
+**初始根因紀錄（當時 Desktop 原始碼未讀；後續上游讀碼補證見下）：**`herdr-core read t1` 讀回的 pty 畫面已經是 `herdr core%/2��big5-�Ұ�%/2��bi`（U+FFFD 與 Big5 位元組），所以不是字型或顯示問題，而是輸入進 pty 前就已錯。結構與 X11 COMPOUND_TEXT 的 extended segment 一致：本機用 Xlib `Xutf8TextListToTextProperty(XCompoundTextStyle)` 在 zh_TW.UTF-8 下編碼「啟動後沒看到」得到 `ESC % / 2 0x80 0x93 big5-0 STX <Big5 位元組>`；此編碼與截圖相符；尚未攔截實際 ibus-x11 → Desktop 的 commit 封包，該連線實際使用此格式仍屬有實驗支持的推論。Desktop 沒有解碼 `big5-0` extended segment，把位元組當 UTF-8 直接送進 pty（ESC 被 Claude Code 當按鍵吃掉，留下 `%/2`、兩個長度位元組、`big5-`、Big5 位元組；兩段 `%/2` 對應兩次 commit）。Desktop changelog 寫過「On Linux, Chinese typed through fcitx or ibus on X11 comes out right (#97)」與 fcitx4（#558），但 zh_TW locale 的 Big5 extended segment 在 0.1.15 仍錯。同一測試在 en_US.UTF-8／C.UTF-8 下得到 `ESC % G <UTF-8> ESC % @ ESC $ ( B <JIS X 0208>`，Desktop 是否能解 JIS 段未驗證，所以「換 locale 啟動 Desktop」不保證有效。
 
-**未驗證：**Desktop 對中文「輸出」的顯示（截圖裡沒有任何中文輸出；所選字型有 CJK 字形）；剪貼簿貼上（走 UTF8_STRING，不經 XIM）；Wayland session（text-input 協定，UTF-8）。後兩者可能是可用的替代輸入方式，尚未測。
+**驗收補充（2026-11-12）：**使用者確認剪貼簿貼上中文正常；此替代輸入路徑已驗收，直接 IME 輸入問題仍存在。中文輸出與 Wayland 路徑仍未驗證。
 
 **與 bridge 的關係：**bridge 經 Core API（JSON-RPC、UTF-8）送文字，不經 XIM；`herdr-core send <terminal> "中文"` 可作對照測試（未執行，避免打進使用者正在用的 pane）。
 
 **下一步：**向 Herdr Desktop 回報（X11 XIM commit 的 COMPOUND_TEXT `big5-0` extended segment 未解碼）；使用者可先試剪貼簿貼上或 Wayland；本 repo 沒有可修的地方。
+
+**再次唯讀核對（2026-11-12）：**Desktop PID 65694，`herdr-app --version` 為 0.1.15；`/proc/<pid>/environ` 僅取語系／輸入法欄位確認 `LANG=zh_TW.UTF-8`、X11、ibus；啟動器為無額外參數的 herdr-app，`--help` 未列出 UTF-8 開關。`fc-match :lang=zh-tw` 回 Noto Sans CJK TC，不能以缺中文字型解釋 Big5 協定殘片。沒有更改設定、啟動第二個 Desktop、送按鍵或重啟。
+
+**可重複機制驗證（2026-11-12）：**Python ctypes 呼叫本機 libX11 `Xutf8TextListToTextProperty`，locale 明設 zh_TW.UTF-8、style=XCompoundTextStyle，在記憶體內編碼固定文字「啟動後沒看到」（不送入 terminal）；return 0，位元組為 `\x1b%/2\x80\x93big5-0\x02...`，以 UTF-8 replacement decode 產生 `%/2��big5-0...`，與截圖症狀相符。這驗證編碼機制，並非重跑真實 IME 端到端。
+
+**上游讀碼補證（2026-11-12）：**公開 master `4c8c622d7965a6f6787f55b1896b70795fc68918` 的 `vendor/xim-ctext/src/lib.rs`／`compound_text_to_utf8` 未處理 `ESC % / 2` extended segment，會回 UnsupportedEncoding；`vendor/zed-xim/src/client.rs`／`decode_text` 在錯誤時改用 `String::from_utf8_lossy`。與機制驗證及截圖一致，但本機 0.1.15 binary 與此 commit 的逐位元組對應未核對，不宣稱已攔截實際輸入。來源：https://github.com/herdrdev/herdr-app/blob/4c8c622d7965a6f6787f55b1896b70795fc68918/vendor/xim-ctext/src/lib.rs 、https://github.com/herdrdev/herdr-app/blob/4c8c622d7965a6f6787f55b1896b70795fc68918/vendor/zed-xim/src/client.rs 。
+
+結論：不是單純缺 `LANG` 的 UTF-8 設定；最符合現有證據的是 Desktop XIM COMPOUND_TEXT 轉碼缺口。仍需使用者對照剪貼簿貼上／中文輸出／直接 IME 輸入三種路徑，或擷取真實 commit 封包才能完成端到端根因驗收。未向上游送出回報；純診斷文件更新，未跑 bridge 程式測試，`git diff --check` 驗證文件差異。
+
+**Linux 局部調整調查（2026-11-12，提出方案時尚未套用）：**本機 IBus 1.5.29-rc2；ibus-daemon 與 ibus-x11 的 LANG 均為 zh_TW.UTF-8。上游 ibus `client/x11/main.c` 的 commit callback 呼叫 Xutf8TextListToTextProperty(XCompoundTextStyle)，初始化以程序環境 setlocale；因此僅改 Desktop LANG 不會更改 ibus-x11 的編碼 locale。公開 Desktop XIM handler 另固定 client.open("C")，不是 GTK／Qt 輸入框，不能直接套用 GTK_IM_MODULE 設定作為已證實修正。來源：https://github.com/ibus/ibus/blob/main/client/x11/main.c 。
+
+本機 `/usr/libexec/ibus-x11 --help` 確認支援 `--server-name`。可待使用者安排 Desktop 關窗後，手動以 `env LC_ALL=en_US.UTF-8 /usr/libexec/ibus-x11 --server-name=ibus-herdr` 開獨立 XIM bridge（不加 --kill-daemon），再以 `env XMODIFIERS=@im=ibus-herdr herdr-app` 啟動 Desktop 作對照；不修改全域 ibus 或登入設定。英文 locale 的編碼機制先前已測，真正使用獨立 XIM server 的直接輸入尚未驗證，仍屬實驗方案；中文特殊字、候選框與組字需逐項核對。未啟動這些程序、未重啟 Desktop／Core／bridge、未改私人設定；本輪僅更新診斷文件並做 diff check。根治仍需 Desktop 正確處理 Big5 extended segment／unsupported decode，不把更換輸入法視為已驗證修正。
+
+**workaround 使用者驗收與 launcher（2026-11-12）：**使用者在執行上述獨立 ibus-herdr＋en_US.UTF-8 啟動 Desktop 後回報「可以了」，確認本機 X11／ibus 的直接中文輸入恢復。唯讀程序清單也有獨立 `ibus-x11 --server-name=ibus-herdr` 與新 Desktop 程序。此證據取代上方「方案未實測」的階段狀態，不代表上游 decoder 已修正、所有中文特殊字／候選框／組字情境均驗過。
+
+新增 `scripts/run-herdr-app.sh`，Linux X11 精確辨識／重用同名 XIM，缺少時以 en_US.UTF-8 建立，flock 序列化、有界等待、查詢失敗不啟動 Desktop；不加 --kill-daemon、不改全域設定。`run.sh --core` 只啟動 bridge，不更動其流程。macOS／Wayland passthrough，**macOS 不走 X11／ibus 路徑，因此此特定原因不適用；本輪沒有 macOS 中文輸入實機測試**。已同步 README.md、README.zh-TW.md、SPEC.md 與 CONTEXT.md。
+
+驗證（2026-11-12）：`bash -n scripts/run-herdr-app.sh`、`npm run build`、`npm run lint`、`git diff --check` 通過；`node --test dist/test/herdr-app-launcher.test.js` 4/4 pass（假 CLI：重用、不誤認近似名稱／新啟動與正確 locale、macOS passthrough、X11 查詢失敗零啟動）；真實 `scripts/run-herdr-app.sh --version` 重用現有 XIM、印 herdr-app 0.1.15，未開第二個視窗。新 launcher 真實開窗後中文輸入尚待使用者驗收；不自動關閉現有 Desktop。既有 shell／bridge／Core 程序未重啟，未 commit／push／部署，私人 .desktop 設定未修改。
+
+**提交前驗證（2026-11-12）：**本輪 `npm run check` 的 typecheck／build 通過；預設並行全套曾在本機高負載下出現既有 `card-fix-flow`／`card-review-flow` 啟動等待測試逾時失敗，跑至約 test 1198 後停止本輪 runner，沒有全套最終總結，不視為全套通過。未改動這兩個測試或其實作；`node --test --test-concurrency=1 dist/test/herdr-app-launcher.test.js dist/test/card-fix-flow.test.js dist/test/card-review-flow.test.js` 重跑 **43/43 pass、0 fail、0 cancelled**。`npm run lint`、shell syntax、diff check 通過。之後使用者授權 commit／push／PR；runtime 重啟／部署未授權，原生解碼缺口仍在，launcher 實機開窗驗收仍待完成。
 
 ## ISSUE-151：Herdr Core runtime 支援
 
@@ -783,7 +803,7 @@ Review3 文件修正（2026-11-09，f4）：SPEC 的 PR merge 自動清理段落
 
 | ID        | 問題                                                                            | 狀態             | 下一步                                                                                                                                    |
 | --------- | ------------------------------------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| ISSUE-152 | Herdr Desktop（Linux X11＋ibus）輸入中文變成亂碼 | 受阻 | Desktop 0.1.15 未解碼 XIM COMPOUND_TEXT 的 big5-0 段；向上游回報，先試剪貼簿貼上或 Wayland，與 bridge 無關 |
+| ISSUE-152 | Herdr Desktop（Linux X11＋ibus）輸入中文變成亂碼 | 已修正、待驗收 | 使用者確認專用 en_US.UTF-8 ibus-herdr 手動方案有效；新增 run-herdr-app.sh，launcher 中文開窗待驗收；macOS 不走此 X11 路徑、未實測 |
 | ISSUE-151 | Herdr Core runtime 支援 | 已修正、待驗收 | 2026-11-12 09:57 本機 Linux 真實 `run.sh --core` 啟動成功（t6 live、持鎖、連上 Discord gateway），舊 Herdr bridge 已停；待使用者在 Discord 送 `/herdr status`／`agents`／`read` 驗證往返，coreAllowedTerminals 仍空；完整測試套件在高負載下有逾時失敗，待閒置重跑 |
 | ISSUE-001 | Discord reply 未觸發 bridge                                                     | 重新開啟、待驗收 | 重啟後在 mapped thread 回覆 bot                                                                                                           |
 | ISSUE-002 | Discord 圖片未交付 Agent                                                        | 已修正、待驗收   | 重啟後以副檔名與內容不符（如 PNG/JPEG 互換）之圖片驗收本機交付                                                                            |
