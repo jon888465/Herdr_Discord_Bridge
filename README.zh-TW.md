@@ -133,6 +133,20 @@ Herdr Desktop 0.1.15 在 Linux X11＋ibus、zh_TW.UTF-8 環境，直接輸入中
 
 若 Desktop 已用原本的 ibus 開啟，先關閉該視窗再執行。腳本重用已登記的 `ibus-herdr`，沒有才以 `LC_ALL=en_US.UTF-8` 啟動；須有該 locale、ibus-x11、xprop、flock 與正常的 XDG_RUNTIME_DIR。啟動有界等待並序列化，log 在 `$XDG_RUNTIME_DIR/herdr-ibus-x11.log`；專用 XIM 保留供後續開窗使用，不停止原 ibus、不改全域語系或私人設定。若外部同名 XIM 使用不同 locale，腳本不能驗證其編碼環境；請勿用同名啟動其他服務。
 
+腳本會自動完成以下兩步，不需要事先手動啟動 ibus-x11。若要手動對照，先關閉原 Desktop 視窗，在一個終端機執行並保持它開著：
+
+```bash
+env LC_ALL=en_US.UTF-8 /usr/libexec/ibus-x11 --server-name=ibus-herdr
+```
+
+再於另一個終端機執行：
+
+```bash
+env XMODIFIERS=@im=ibus-herdr herdr-app
+```
+
+上面是本機 Ubuntu 已驗證的路徑；腳本另會尋找 PATH 或 `/usr/lib/ibus/ibus-x11`。已有 `ibus-herdr` 時腳本會重用，避免重複啟動。
+
 `./scripts/run.sh --core` 仍負責啟動 Discord bridge；它無法修正已開啟 Desktop 的輸入法環境。兩支腳本按需求分別執行，launcher 不啟動／重啟 bridge。
 
 這是 **Linux X11 XIM 的特定問題**。macOS 不使用這條輸入路徑，腳本會直接執行 herdr-app；本次沒有實測 macOS 中文輸入，不宣稱所有平台／輸入法都已驗收。Wayland 亦直接啟動，不套用此 workaround。底層解碼問題仍待上游修正。
