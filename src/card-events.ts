@@ -65,6 +65,8 @@ export type CardEvent = { time: string; eventId: string } & (
     }
   | {
       event: "agy_worktree_trust";
+      /** 只有 remote 機器（pod）的信任事件有；本機沒有這個欄位（ISSUE-149）。 */
+      machine?: string;
       path: string;
       action: "add" | "remove";
       result: "added" | "removed" | "unchanged" | "error" | "remote";
@@ -392,7 +394,7 @@ function render(fields: Fields): { text: string; suspicious: boolean } {
     }
     case "agy_worktree_trust":
       return {
-        text: `agy trust ${oneOf(fields, "action", ["add", "remove"])} ${oneOf(fields, "result", ["added", "removed", "unchanged", "error", "remote"])} ${absolutePath(fields, "path")}`,
+        text: `agy trust ${oneOf(fields, "action", ["add", "remove"])} ${oneOf(fields, "result", ["added", "removed", "unchanged", "error", "remote"])} ${fields.machine === undefined ? "" : `${text(fields, "machine", MACHINE, "machine id")}:`}${absolutePath(fields, "path")}`,
         suspicious: false,
       };
     case "started":

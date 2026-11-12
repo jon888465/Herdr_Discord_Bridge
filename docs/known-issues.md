@@ -202,15 +202,19 @@ r7-f2：Core terminal 不繼承 caller shell。現 run 的 env 前綴傳 HERDR_B
 
 ## ISSUE-149：pod 上 agy 設定備份只增不減，且卡片流程紀錄沒有 pod 端信任寫入／移除事件
 
-更新日期：2026-11-11。狀態：待調查（現象已觀察；沒有修正）。
+更新日期：2026-11-12。狀態：已修正、待驗收（備份上限本來就有，症狀 (1) 不成立；症狀 (2) 的 pod 信任事件已補，原始碼與自動化檢查完成，**未實機驗收**）。先前：待調查。
 
 **使用者可見症狀：**(1) 每次預先信任寫入都在 `/root/herdr-card-review/.hdb-agy-settings-backups/` 留一份 `settings-<時間>-<pid>.json`，一次 reviewer（寫入、移除）就多 2 份，沒有任何清理；長期使用會一直累積。(2) 本機 worktree 的信任有 `agy_worktree_trust` 事件，pod 端的寫入與移除沒有對應的卡片流程紀錄，驗收時只能靠 ssh 讀 pod 檔案佐證。
 
 **預期行為：**備份有數量或時間上限；pod 端信任的寫入與移除在卡片紀錄留痕（固定標籤，不含路徑原文）。
 
-**根因：**設計取捨，#212 只保證「改前備份」，沒有定保留數量；紀錄缺口未查是否為遺漏。
+**更正（2026-11-12）：**症狀 (1) 不成立。`TRUST_WRITE_SCRIPT`（`src/remote-agy-trust.ts`）從 #212 起就以 `ls -1 | sort -r | tail -n +6 | rm` 只保留最近 5 份備份；pod 實際目錄 2026-11-12 數到 5 份（ssh `ls /root/herdr-card-review/.hdb-agy-settings-backups | wc -l`），本條原本「只增不減」是誤讀。
 
-**未驗證／下一步：**決定保留數量（例如最近 N 份）；補事件。不影響 review 結果。
+**根因：**症狀 (2) 是遺漏：`agy_worktree_trust` 事件只在本機信任路徑（`src/agy-worktree-trust.ts`）記錄，remote 的 `editRemoteAgyTrust` 沒有對應紀錄。
+
+**修正（2026-11-12，已修正、待驗收）：**`src/remote-checkout.ts` 的 `reviewOnRemote` 在 pod 信任寫入、移除後呼叫新的 `RemoteReviewDeps.onTrust`（結果 `added`／`removed`／`unchanged`／`error`，丟錯誤不影響 review）；`src/main.ts` 的 `remoteReviewInjection` 把它記成卡片事件 `agy_worktree_trust`，新增選填欄位 `machine`（`src/card-events.ts`），文字為 `agy trust add added <machine>:<完整路徑>`（路徑是 pod 目錄，與本機事件同樣顯示）。測試：`test/remote-agy-trust.test.ts`（成功為 add:added、remove:removed；寫入失敗為 add:error）、`test/card-events.test.ts`（有／無 machine 的文字）。本機 `npm run check`（2026-11-12）：第一次 tests 1931、pass 1929、fail 1、skipped 1，**失敗的測試沒有抓到名稱**；同一份程式馬上重跑 tests 1931、pass 1930、fail 0，推測為既有的偶發失敗，未查明。
+
+**未驗證／下一步：**實機看到卡片紀錄出現 pod 端 `agy trust` 事件；**範圍限制：**只涵蓋卡片流程 reviewer（`reviewOnRemote`），task 內 remote 唯讀角色（`remote-snapshot.ts`）沒有補事件；pod 上舊的 `…__163ee5854b` 信任項目仍需人工移除。不影響 review 結果。
 
 ## ISSUE-147：task 內本機 agy Worker 沒有收到第一個 prompt，Herdr 回 ok 但 pane 是空的，task 一直等到逾時
 

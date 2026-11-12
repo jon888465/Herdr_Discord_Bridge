@@ -250,6 +250,8 @@ export async function removeRemoteCheckout(exec: RemoteExec, root: string, dir: 
 
 /** 任何失敗都不改在本機開 pane 或啟動 Agent。 */
 export interface RemoteReviewDeps {
+  /** pod 端 agy 信任的寫入／移除結果，供卡片紀錄留痕（ISSUE-149）；丟錯誤不影響 review。 */
+  onTrust?(event: { cardId: string; machine: string; path: string; action: "add" | "remove"; result: "added" | "removed" | "unchanged" | "error" }): void;
   machine(id: string): MachineConfig | undefined;
   exec(machine: MachineConfig): RemoteExec;
   originUrl(worktreePath: string): Promise<string>;
@@ -286,6 +288,13 @@ export async function reviewOnRemote(
   // 只移除本次新增或寫入狀態不明的信任；原本就在清單內的不碰。
   let trustAdded = false;
   let trustUncertain = false;
+  const trustEvent = (action: "add" | "remove", result: "added" | "removed" | "unchanged" | "error") => {
+    try {
+      remote.onTrust?.({ cardId: input.card.id, machine: machineId, path: dir, action, result });
+    } catch {
+      /* 紀錄失敗不影響 review */
+    }
+  };
   // cleanup_pending 的定位資訊（workspace id／label、完整目錄）只進 console，紀錄與通知維持固定標籤。
   // create 逾時時遠端可能稍後才建好：有界重查，耗盡仍找不到就記 pending。
   const closeByLabel = async (): Promise<void> => {
@@ -311,9 +320,13 @@ export async function reviewOnRemote(
     });
     if (trustAdded || trustUncertain)
       await editRemoteAgyTrust(exec, { root, dir, cardHash: hash }, false).then(
-        () => void (trustAdded = false),
+        (changed) => {
+          trustAdded = false;
+          trustEvent("remove", changed ? "removed" : "unchanged");
+        },
         (e) => {
           pending.push("trust");
+          trustEvent("remove", "error");
           console.error(`remote review ${machineId}: cleanup_pending trust ${dir}: ${(e as Partial<RemoteFailure>)?.detail ?? String(e)}`);
         },
       );
@@ -364,8 +377,11 @@ export async function reviewOnRemote(
   const startAgent: ReviewFlowDeps["startAgent"] = async (agent) => {
     if (agent.kind === "agy")
       try {
-        if (await editRemoteAgyTrust(exec, { root, dir, cardHash: hash }, true)) trustAdded = true;
+        const changed = await editRemoteAgyTrust(exec, { root, dir, cardHash: hash }, true);
+        if (changed) trustAdded = true;
+        trustEvent("add", changed ? "added" : "unchanged");
       } catch (error) {
+        trustEvent("add", "error");
         const detail = (error as Partial<RemoteFailure>)?.detail ?? String(error);
         if (error instanceof RemoteFailure && error.uncertain) {
           trustUncertain = flowUncertain = true;

@@ -117,7 +117,7 @@ import { basename, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { existsSync, statSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { splitFinalMarkdown } from "./final-format.js";
 import {
   extractAttachMarkers,
@@ -2025,7 +2025,22 @@ async function teamRemove(
 }
 
 export function remoteReviewInjection(herdr: HerdrClient): { remote?: RemoteReviewDeps } {
-  return herdr instanceof HerdrHub ? { remote: remoteReviewDeps(herdr) } : {};
+  if (!(herdr instanceof HerdrHub)) return {};
+  const remote = remoteReviewDeps(herdr);
+  // pod 端信任寫入／移除留在卡片紀錄（固定標籤；ISSUE-149）。
+  remote.onTrust = (e) => {
+    const time = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+    new CardStore(join(stateDirectory(), "cards")).recordEvent(e.cardId, {
+      event: "agy_worktree_trust",
+      machine: e.machine,
+      path: e.path,
+      action: e.action,
+      result: e.result,
+      time,
+      eventId: `agy-trust-${createHash("sha256").update(`${e.cardId}:${e.machine}:${e.path}:${e.action}:${e.result}:${time}`).digest("hex").slice(0, 40)}`,
+    });
+  };
+  return { remote };
 }
 
 /** 遠端 reviewer 讀當下清單，不用斷線快取；本機走原本的路徑。 */
