@@ -2,7 +2,7 @@
 
 ## ISSUE-154：task 內 remote review 在 pod 上被判 inconclusive（reviewer session 身分未知）；取消後 task 卡在 cancelling
 
-更新日期：2026-11-12。狀態：待調查（現象已重現兩次；根因為推論；沒有修正）。
+更新日期：2026-11-12。狀態：已驗收（閘門通過路徑，2026-11-12，本機 macOS，bridge 為 main `cd54dc4`（含 #233）重啟後的程序；其餘子問題未解，見「未驗證」與「下一步」）。先前：待調查（現象重現兩次、根因為推論）。
 
 **使用者可見症狀：**實機驗收 `REQ-20261112-remote-in-task-live`／`live2`（`lead: agy`，`roles: {implement: local:claude:opus, verify: local:claude:opus, reviewer: agy-pod:agy}`，bridge 為 main `3d8b07f`，含 #230、#231）。(1) **路由成功：**task 內 `review-1` 的 `role_assigned` 是 `agy；machine=agy-pod`，快照送到 pod、pod 上 agy 實際執行 review，沒有派給本機。(2) **第一輪（09:09 至 09:16Z）：**pod 的 agy 停在工具權限提示「Run this command?」（blocked），因為 pod 上的 agy 沒有自動批准權限旗標。使用者要求 pod 給最大權限；Agent 在 pod 放了包裝腳本 `/usr/local/sbin/agy`（`/usr/local/sbin` 在 PATH 排在 `/usr/local/bin` 前；非子指令時加 `--dangerously-skip-permissions`，刪除該檔即停用）。(3) **第二輪（09:21 至 09:31Z）：**沒有再卡權限，pod 的 agy 回報 `pass`，但 bridge 把 artifact 判成 `inconclusive`，`independenceFailure: "unknown reviewer identity is not an independent review"`、`reviewerSession: null`，驗收閘門回「no passing review for the current version」，task 無法完成。
 
@@ -14,11 +14,13 @@
 
 **Lead 越權觀察：**第二輪 Lead（本機 agy）在規劃階段自行嘗試 `ssh agy-pod herdr integration install antigravity-cli`（修改 pod），被 Agent 以 Escape 中斷；pod 的 integration 本來就是最新。Lead 的 prompt 寫「Do not modify files while planning」，沒有禁止修改遠端機器。
 
-**修正（2026-11-12，選 B，使用者決定；已修正、待驗收）：**`src/team-turn.ts` 的 `observedSession`：非 codex 的**遠端 pane**（`agent.machine` 有值）在 Herdr 沒有 `agent_session` 時，採用「本回合開始後」該 pane 的 Stop hook 事件的 session id（`hookEvents.stopForPane`）；本機 pane、別的 pane 的事件、回合開始前的舊事件、Herdr 已有 session 的情況都維持原行為。測試：`test/team-turn.test.ts` 新增 2 項。本機 `npm run check`（2026-11-12）tests 1928、pass 1927、fail 0、skipped 1；lint 通過。**尚未實機驗收**（merge 並重啟後再跑一張 remote review 卡）。`cancelling` 收尾與 Lead 越權兩項仍未修。
+**修正（2026-11-12，選 B，使用者決定；已修正、待驗收）：**`src/team-turn.ts` 的 `observedSession`：非 codex 的**遠端 pane**（`agent.machine` 有值）在 Herdr 沒有 `agent_session` 時，採用「本回合開始後」該 pane 的 Stop hook 事件的 session id（`hookEvents.stopForPane`）；本機 pane、別的 pane 的事件、回合開始前的舊事件、Herdr 已有 session 的情況都維持原行為。測試：`test/team-turn.test.ts` 新增 2 項。本機 `npm run check`（2026-11-12）tests 1928、pass 1927、fail 0、skipped 1；lint 通過。merge 並重啟後已於 2026-11-12 實機驗收（見下方「實機驗收」）。`cancelling` 收尾與 Lead 越權兩項仍未修。
 
-**已驗證：**remote 角色路由與快照送到 pod（review 實際在 agy-pod 執行）；第二輪取消後的清理（pod `/root/herdr-card-review` 為空、本次 `trustedWorkspaces` 項目移除、GitHub 沒有出現半成品分支）。**未驗證：**閘門通過路徑、`cancelling` 的收尾、升級 pod Herdr 後的身分。
+**實機驗收（2026-11-12，本機 macOS，bridge 為 main `cd54dc4`（含 #233）重啟後的程序；pod agy 由 `/usr/local/sbin/agy` wrapper 加 `--dangerously-skip-permissions`；卡片 `REQ-20261112-remote-in-task-live3`（`lead: agy`，`roles: {implement: local:claude:opus, verify: local:claude:opus, reviewer: agy-pod:agy}`），task `task-02c1dc79-…`）：**(1) 09:43:02Z review 派給 agy-pod，pod 的 agy 沒有再卡工具權限提示；(2) artifact `a-rev-2.json`：`reviewerPaneId: agy-pod:w9:p1`、`reviewerSession: {kind: id, value: 08a92b63-b034-4020-a4f7-dde60da06b33}`（來自 Stop hook，不再是 null）、`independentReview: true`、`verdict: pass`；(3) `a-ver-3.json` `verificationPassed: true`；(4) 事件 `coding_assessed` 後 `task_completed`（09:44:48Z），卡片 `done`；(5) 結束後 pod `/root/herdr-card-review` 為空、本次沒有新增 `trustedWorkspaces` 項目、GitHub 沒有半成品分支。**證明的：**remote review 的 `pass` 在 hook session 下通過驗收閘門。
 
-**下一步：**決定升級 pod 的 Herdr（k3s pod 映像）或讓 bridge 用 hook 的 session；修 `cancel_unconfirmed` 對無身分 remote pane 的收尾；Lead prompt 禁止修改遠端機器。
+**已驗證：**remote 角色路由與快照送到 pod；第二輪取消後的清理；閘門通過路徑（上方 2026-11-12 實機驗收）。**未驗證／未解：**`cancelling` 的收尾（`cancel_unconfirmed` 對無身分 remote pane）、升級 pod Herdr 後的身分、Lead 越權（修改遠端機器）；pod `settings.json` 仍有舊的 `…__163ee5854b` 信任項目（ISSUE-149 範圍）。
+
+**下一步：**修 `cancel_unconfirmed` 對無身分 remote pane 的收尾；Lead prompt 禁止修改遠端機器；是否升級 pod Herdr 另議（現在不是必要條件）。
 
 ## ISSUE-153：`Core send json 為送達不明且零重送` 在 macOS CI 偶發失敗（測試逾時過短）
 
@@ -144,7 +146,7 @@ r7-f2：Core terminal 不繼承 caller shell。現 run 的 env 前綴傳 HERDR_B
 
 **2026-11-11 reviewer 預先信任（已修正、待驗收；**主要成功路徑已於 2026-11-11 實機驗過一次，失敗路徑尚未驗**）：**契約見 SPEC.md「遠端 reviewer 的 agy 預先信任」。經過：bridge card review 三輪（第 1 輪 head 3023316、第 2 輪 b580fe9、第 3 輪 9302325）**都是 changes_requested，review 次數已用完，這個 PR 需要人工決定 merge**。第 1 輪：F1 `verifyCardWorktree` 驗 `.git`、gitdir、回指、HEAD 分支，不符拒絕且不寫設定；F2 只移除本次新增的；F3 逾時 124／137 與寫入失敗皆 uncertain，清理嘗試移除、失敗記 pending；F4 uncertain 不啟動 reviewer（仍在跑的寫入可能在清理讀設定後才完成），一律記 `cleanup_pending：trust`；F5 補 C1。第 2 輪：F6 保留 pane 時保留信任（pane 還在等人處理）並記 `cleanup_pending：trust`；F7 腳本內 `mkdir` 鎖（`<root>/.hdb-agy-settings-backups/lock`）涵蓋雜湊重驗到 `mv`，逾時 exit 19，超過 1 分鐘的殘留鎖回收、未過期的不碰；F8 沒有取消訊號（取消即 runTurn 或 exec 丟錯），補兩個測試。第 3 輪：F11 SPEC 仍寫「不信任遠端 agy」而與預先信任互相矛盾 → 已改成一致（SPEC、README 兩份、docs/remote-card-reviewer.md；ISSUE-113 的「遠端 agy 不在範圍」是歷史紀錄，不改）；F12 本條缺測試證據 → 已補。**F9、F10 為已知限制，未採納**：F9 兩個等待者在毫秒級同時判定同一把鎖過期並回收時，後者可能刪掉前者剛重建的新鎖，兩個 writer 可能同時通過雜湊檢查而互相覆蓋設定；bridge 一次只做一張卡、同一台 pod 同時寫兩張卡的機會低，視窗已縮小但無法完全消除，pod 上 `find -mmin` 未驗證。F10 reviewer 卡在啟動提示而保留 pane 時，信任與目錄保留、記 `cleanup_pending：trust`、不自動移除（不重試，需人工撤銷），理由是 pane 還在等人處理、移除信任對仍在執行的 agy 的影響沒有驗證；reviewer（codex 第 2、3 輪）認為此時也應嘗試撤銷，此取捨未採納。**驗證（單元測試，不是實機驗收）：**`npm run check`（2026-11-11，本機 macOS，卡片 worktree，head 9302325，本輪重跑確認）：1814 項、1813 pass、0 fail、1 skipped；`npm run lint`（206 個 TypeScript 檔）、`git diff --check` 通過。測試在 `test/agy-worktree-trust.test.ts`、`test/remote-agy-trust.test.ts`（含真 sh 並行與鎖，本機 macOS，不是 pod）；為 F1 改了 `fixture()`（加 `linkWorktree`，既有斷言未改）。**實機驗收（2026-11-11 13:07Z，本機 macOS，bridge 為 main `b44ab90`（#211、#212）、pod 為 agy 1.5.2；pod 工具 `sha256sum`／`base64`／`mktemp`／`cp`／`find`／`timeout`／`realpath` 都存在；測試卡 `REQ-20261111-pretrust-live`、PR #214，`roles: {reviewer: "agy-pod:agy"}`）：**reviewer 13:07:16Z 啟動（`role_assigned`：reviewer（第 1 輪）：agy；machine=agy-pod；v=2,cr=-,s=C,ss=CCD,me=U）、13:07:40Z `pass`，**沒有人介入、agy 沒有停在信任提示**（#210 同情境曾停在「Do you trust…」）。輪詢 pod：checkout `…__9a229d824a` 出現後 `trustedWorkspaces` 多了這一項，約 20 秒後被移除；結束時 `trustedWorkspaces` 只剩原本三項，`/root/herdr-card-review` 沒有 checkout 目錄，pod 只剩原本的 `w2:p1`。**沒有驗證：**寫入失敗、狀態不明（斷線、124／137）、`cleanup_pending：trust`、保留 pane 時保留信任、清理失敗；舊的殘留項目 `…__163ee5854b`（#210 留下，bridge 不碰）仍在 `trustedWorkspaces`，需人工決定是否移除。新發現見 ISSUE-149、ISSUE-150。其他限制（修正當時的紀錄）：agy 執行中同時改寫設定檔的競態只能縮小視窗；本機 worktree 名稱只要求 `card-req-` 開頭；pod 的 `sha256sum`／`base64 -d`／`mktemp`／`cp -p`／`find -mmin` 未驗證。
 
-更新日期：2026-11-11。狀態：已修正、待驗收（兩個 PR 都已 merge：A 基礎層 #207 `addee48`、B 角色接線 #206 `9ff908e`；自動化檢查與 codex 獨立複審通過；**主要成功路徑已實機驗過一次**，見下方 2026-11-11 實機段；失敗路徑與其他情境尚未驗）。卡片 REQ-20261111-remote-agy-role；實機驗收卡 REQ-20261111-remote-reviewer-live（PR #210）。
+更新日期：2026-11-11。狀態：已修正、待驗收（兩個 PR 都已 merge：A 基礎層 #207 `addee48`、B 角色接線 #206 `9ff908e`；自動化檢查與 codex 獨立複審通過；**主要成功路徑已實機驗過一次**，見下方 2026-11-11 實機段；失敗路徑與其他情境尚未驗）。卡片 REQ-20261111-remote-agy-role；實機驗收卡 REQ-20261111-remote-reviewer-live（PR #210）。 **2026-11-12 補充：**task 內 remote 唯讀角色（#230、#231、#233）已實機通過閘門，見 ISSUE-154／150；本條原本範圍（卡片流程 remote reviewer）狀態不變。
 
 **實機驗收（2026-11-11，本機 macOS，bridge 為 main `9ff908e`（#206、#207）重啟後的程序；`config.json` 的 agy-pod 已加 `cardReview {root: "/root/herdr-card-review", kinds: ["agy"]}`（備份 `config.json.bak-cardreview-20261111`）；pod：git 2.53.0、GNU `timeout`、`realpath`、agy 1.5.2，沒有 node；root 目錄由 Agent 在使用者同意後建立（權限 700、空目錄、非符號連結））：**測試卡 `REQ-20261111-remote-reviewer-live`（`lead: codex`、`roles: {reviewer: "agy-pod:agy"}`，bridge 序列化成 `"agy-pod:agy:"`），新增一行檔案的 PR #210。
 1. **撿卡前驗證通過：**06:59:28Z 撿起，沒有出現「卡片流程尚未支援 machine agy-pod」拒絕。
@@ -184,7 +186,7 @@ r7-f2：Core terminal 不繼承 caller shell。現 run 的 env 前綴傳 HERDR_B
 
 ## ISSUE-150：task 內本機 agy 的 review（`review-card-acceptance`）回報「no passing review for the current version」，task 失敗
 
-更新日期：2026-11-12。狀態：已修正、待驗收（根因 2026-11-12 讀 task artifact 確認；修正 #230、#231 已 merge）。**實機驗收部分通過、尚未通過閘門：**task 內 review 已實際派到 agy-pod（路由與快照成功），但 pod 的 reviewer 身分未知被判 inconclusive，task 仍因「no passing review」失敗，見 ISSUE-154。
+更新日期：2026-11-12。狀態：已驗收（task 內 remote review 閘門通過路徑，2026-11-12 見 ISSUE-154 實機驗收：`REQ-20261112-remote-in-task-live3`，task `task_completed`；範圍是 `lead: agy`＋remote reviewer 一張極簡卡一次；根因確認 2026-11-12，修正 #230、#231、#233）。先前：已修正、待驗收（部分通過，曾因 reviewer 身分未知失敗，ISSUE-154）。
 
 **使用者可見症狀：**`REQ-20261111-pretrust-live`（一行檔案卡，`lead: codex`）：implement、verify 都完成，13:01:21Z 本機 agy 的 `review-card-acceptance` 之後 task 以「no passing review for the current version」失敗，卡片 worktree 有未 commit 的檔案（內容 `ok`，正確）。Agent 接手 commit、開 PR #214、`card attach-pr`，後續 remote reviewer 正常。
 
