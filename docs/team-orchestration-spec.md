@@ -126,7 +126,7 @@ partial synthesis 必須明確標示未完成工作。
 
 ### Timeout、重試與送達
 
-- 目前實作用 `teamTurnTimeoutMs`（預設 1800000 ms，ISSUE-124）作為 Lead
+- 目前實作用 `teamTurnTimeoutMs`（預設 3600000 ms，ISSUE-124）作為 Lead
   planning、Worker execution 與 Lead synthesis 的單一回合 wait timeout；
   `approvalTimeoutMs`（預設 900000 ms）只管批准提示的有效期。後續可再拆成
   planning、assignment、synthesis 與 task timeout。
