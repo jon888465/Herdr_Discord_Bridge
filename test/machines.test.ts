@@ -49,6 +49,19 @@ test("validateMachines accepts good entries and rejects confusable ids", () => {
   );
 });
 
+test("cardReview.toolchain: only a boolean is accepted, true is kept, false is omitted", () => {
+  const base = { id: "agy-pod", ssh: "agy-pod", socket: "/s.sock" };
+  const review = (toolchain?: unknown) =>
+    validateMachines([
+      { ...base, cardReview: { root: "/root/review", kinds: ["agy"], ...(toolchain === undefined ? {} : { toolchain }) } },
+    ])[0].cardReview;
+  assert.equal(review(true)?.toolchain, true);
+  assert.equal("toolchain" in (review(false) ?? {}), false);
+  assert.equal("toolchain" in (review() ?? {}), false);
+  for (const bad of ["yes", 1, null, {}])
+    assert.throws(() => review(bad), /toolchain, if set, must be a boolean/);
+});
+
 test("hub routes unprefixed ids to local and prefixed ids to the machine", async () => {
   const dir = await mkdtemp(join(tmpdir(), "bm-"));
   const seen: string[] = [];

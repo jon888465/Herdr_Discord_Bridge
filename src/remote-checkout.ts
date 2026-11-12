@@ -2,6 +2,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
+import { createReadStream } from "node:fs";
 import { startAgentInPane, type AgentStartPort } from "./agent-start.js";
 import { runCardReview, type ReviewFlowDeps, type ReviewFlowInput, type ReviewFlowResult } from "./card-review-flow.js";
 import { BLOCKED_AT_START } from "./agent-ready.js";
@@ -12,6 +13,7 @@ import { editRemoteAgyTrust } from "./remote-agy-trust.js";
 export type RemoteExec = (
   argv: string[],
   timeoutMs: number,
+  stdinFile?: string,
 ) => Promise<{ code: number; stdout: string }>;
 
 /** uncertain：遠端可能還在跑，不可立刻清理。 */
@@ -25,12 +27,12 @@ export class RemoteFailure extends Error {
   }
 }
 
-const LONG_MS = 5 * 60 * 1000;
-const SHORT_MS = 30_000;
+export const LONG_MS = 5 * 60 * 1000;
+export const SHORT_MS = 30_000;
 export const LOCAL_GRACE_MS = 20_000;
 export const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
-const SHA = /^[0-9a-f]{40}$/;
-const GIT = ["git", "-c", "protocol.allow=never", "-c", "protocol.https.allow=always", "-c", "core.hooksPath=/dev/null"];
+export const SHA = /^[0-9a-f]{40}$/;
+export const GIT = ["git", "-c", "protocol.allow=never", "-c", "protocol.https.allow=always", "-c", "core.hooksPath=/dev/null"];
 /** 即使 ~/.ssh/config 開了也不轉送。 */
 export const SSH_OPTIONS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "ForwardAgent=no", "-o", "ForwardX11=no", "-o", "ClearAllForwardings=yes"];
 
@@ -90,7 +92,7 @@ export function remoteCheckoutDir(root: string, owner: string, repo: string, car
 }
 
 /** clone 後寫在 `.git` 裡（不弄髒工作樹）；沒有它的目錄一律不是 bridge 的。 */
-const MARKER_FILE = "hdb-card-review";
+export const MARKER_FILE = "hdb-card-review";
 export const markerContent = (hash: string) => `hdb-card-review-checkout:v1:${hash}`;
 
 async function assertMarker(exec: RemoteExec, dir: string, hash: string): Promise<void> {
@@ -102,13 +104,26 @@ async function assertMarker(exec: RemoteExec, dir: string, hash: string): Promis
 
 /** 遠端 `timeout` 先結束 git（124／137）；本機計時多等寬限，先到或 ssh 255 時遠端狀態不明。 */
 export function sshRemoteExec(machine: MachineConfig, sshCommand = "ssh", graceMs = LOCAL_GRACE_MS): RemoteExec {
-  return (argv, timeoutMs) =>
+  return (argv, timeoutMs, stdinFile) =>
     new Promise((resolve, reject) => {
       if (!argv.length || argv.some((a) => !a || /[\u0000-\u001F\u007F]/.test(a)))
         return reject(new RemoteFailure("參數不合法", "argv"));
       const seconds = String(Math.max(1, Math.ceil(timeoutMs / 1000)));
       const command = ["timeout", "-k", "10", seconds, ...argv].map(shellQuote).join(" ");
-      const child = spawn(sshCommand, [...SSH_OPTIONS, machine.ssh, command], { stdio: ["ignore", "pipe", "pipe"] });
+      const child = spawn(sshCommand, [...SSH_OPTIONS, machine.ssh, command], { stdio: [stdinFile ? "pipe" : "ignore", "pipe", "pipe"] });
+      if (stdinFile && child.stdin) {
+        // 遠端提早結束（例如超過 head -c 上限）時 EPIPE 不算錯，結果看 exit code。
+        child.stdin.on("error", () => {});
+        const source = createReadStream(stdinFile);
+        source
+          .once("error", (error) => {
+            child.kill("SIGKILL");
+            reject(new RemoteFailure("傳送失敗", error.message));
+          })
+          .pipe(child.stdin);
+        // ssh 提早結束或被本機計時 kill 時，不讓來源串流的檔案描述子留到 GC。
+        child.once("close", () => source.destroy());
+      }
       let stdout = "";
       let stderr = "";
       const timer = setTimeout(() => {
@@ -130,7 +145,7 @@ export function sshRemoteExec(machine: MachineConfig, sshCommand = "ssh", graceM
     });
 }
 
-async function must(exec: RemoteExec, argv: string[], label: string, ms = SHORT_MS): Promise<string> {
+export async function must(exec: RemoteExec, argv: string[], label: string, ms = SHORT_MS): Promise<string> {
   const result = await exec(argv, ms);
   if (result.code !== 0) throw new RemoteFailure(label, `exit ${result.code}`);
   return result.stdout;
@@ -147,7 +162,7 @@ async function canonical(exec: RemoteExec, target: string): Promise<string> {
 }
 
 /** root 與 dir 須是 canonical path（符號連結拒絕）、dir 是 root 的直接子目錄；回傳 dir 是否已存在。 */
-async function verifyCheckoutPath(exec: RemoteExec, root: string, dir: string): Promise<boolean> {
+export async function verifyCheckoutPath(exec: RemoteExec, root: string, dir: string): Promise<boolean> {
   assertRemoteValue("root", root);
   assertRemoteValue("dir", dir);
   const base = root.replace(/\/+$/, "");
