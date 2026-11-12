@@ -183,6 +183,12 @@ test("ssh: forwarding off, remote timeout wraps argv, 124 clean timeout, 255/loc
     await rejects(rc.sshRemoteExec(m, await sh("d", "echo secret >&2; exit 255"))(["true"], 2000), fails("連線失敗", true));
     await rejects(rc.sshRemoteExec(m, await sh("s", "sleep 5"), 0)(["true"], 50), fails("逾時", true));
     await rejects(rc.sshRemoteExec(m, echo)(["a\nb"], 2000), fails("參數不合法", false));
+    // task 內 remote 角色：bundle 檔經 stdin 串流；沒有 stdinFile 時 stdin 仍是關閉的。
+    const cat = await sh("cat", "cat");
+    await writeFile(join(dir, "bundle"), "BUNDLE-BYTES");
+    eq(await rc.sshRemoteExec(m, cat)(["true"], 2000, join(dir, "bundle")), { code: 0, stdout: "BUNDLE-BYTES" });
+    eq(await rc.sshRemoteExec(m, cat)(["true"], 2000), { code: 0, stdout: "" });
+    await rejects(rc.sshRemoteExec(m, cat)(["true"], 2000, join(dir, "missing")), fails("傳送失敗", false));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

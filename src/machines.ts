@@ -20,8 +20,8 @@ export interface MachineConfig {
    * 遠端 Agent 的 Stop hook 才能把事件送回本機（ISSUE-045）。未設定則遠端只用 parser。
    */
   hookSocket?: string;
-  /** 選填：開放卡片 reviewer；root 是遠端 checkout 根目錄，kinds 是允許種類。 */
-  cardReview?: { root: string; kinds: string[] };
+  /** 選填：開放卡片 reviewer 與 task 內唯讀角色；toolchain 為 true 才可分配 verify。 */
+  cardReview?: { root: string; kinds: string[]; toolchain?: boolean };
 }
 
 /** 遠端 shell／git 參數：不可含 `..`、`.` 路徑段、控制字元、空白、shell 字元，路徑段不以 `-` 開頭。 */
@@ -34,15 +34,15 @@ export function unsafeRemoteValue(value: unknown): string | undefined {
 
 function validateCardReview(id: string, value: unknown): MachineConfig["cardReview"] {
   if (value === undefined) return undefined;
-  const { root, kinds, ...rest } = (value ?? {}) as Record<string, unknown>;
+  const { root, kinds, toolchain, ...rest } = (value ?? {}) as Record<string, unknown>;
   const list = Array.isArray(kinds) ? (kinds as string[]) : [];
   if (
     !value || Array.isArray(value) || Object.keys(rest).length || typeof root !== "string" || !root.startsWith("/") ||
     unsafeRemoteValue(root) || root.split("/").filter(Boolean).length < 2 || !list.length || new Set(list).size !== list.length ||
-    list.some((kind) => !["claude", "codex", "agy", "pi"].includes(kind))
+    list.some((kind) => !["claude", "codex", "agy", "pi"].includes(kind)) || (toolchain !== undefined && typeof toolchain !== "boolean")
   )
     throw new Error(`machines[${id}].cardReview needs an absolute root (2+ segments) and kinds from claude, codex, agy, pi`);
-  return { root: root.replace(/\/+$/, ""), kinds: [...list] };
+  return { root: root.replace(/\/+$/, ""), kinds: [...list], ...(toolchain ? { toolchain: true } : {}) };
 }
 
 const MACHINE_ID = /^[A-Za-z][A-Za-z0-9_-]{1,31}$/;
