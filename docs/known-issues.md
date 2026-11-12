@@ -1,5 +1,21 @@
 # Known Issues
 
+## ISSUE-152：Herdr Desktop（Linux X11＋ibus）輸入中文變成亂碼
+
+更新日期：2026-11-12。狀態：受阻（問題在 Herdr Desktop 0.1.15 的 X11 輸入法路徑，不在 bridge；需上游修正或改用其他輸入路徑）。
+
+**使用者可見症狀／預期行為：**在 Herdr Desktop 的 terminal pane（Claude Code 輸入列）用 ibus 輸入中文，畫面出現 `herdr core%/2◆◆big5-◆Ұ◆%/2◆◆bi` 之類的亂碼（使用者截圖 `/media/sf_tmp/3.png`，2026-11-12）。預期輸入的中文原樣進入 terminal。
+
+**重現／環境：**Ubuntu（Linux 7.0.0-38-generic）、XFCE、`XDG_SESSION_TYPE=x11`、`GTK_IM_MODULE=ibus`／`XMODIFIERS=@im=ibus`、`LANG=zh_TW.UTF-8`；Herdr Desktop `herdr-app` 0.1.15（settings.json 字型 AR PL UKai TW）、Core hc 0.1.20。Core terminal 內程式的環境 `LANG=zh_TW.UTF-8`、`TERM_PROGRAM=ghostty`，locale 正常。
+
+**根因（機制已確認；Desktop 原始碼未讀）：**`herdr-core read t1` 讀回的 pty 畫面已經是 `herdr core%/2��big5-�Ұ�%/2��bi`（U+FFFD 與 Big5 位元組），所以不是字型或顯示問題，而是輸入進 pty 前就已錯。結構與 X11 COMPOUND_TEXT 的 extended segment 一致：本機用 Xlib `Xutf8TextListToTextProperty(XCompoundTextStyle)` 在 zh_TW.UTF-8 下編碼「啟動後沒看到」得到 `ESC % / 2 0x80 0x93 big5-0 STX <Big5 位元組>`；ibus-x11 經 XIM 交給 Desktop 的 commit 字串就是這種格式。Desktop 沒有解碼 `big5-0` extended segment，把位元組當 UTF-8 直接送進 pty（ESC 被 Claude Code 當按鍵吃掉，留下 `%/2`、兩個長度位元組、`big5-`、Big5 位元組；兩段 `%/2` 對應兩次 commit）。Desktop changelog 寫過「On Linux, Chinese typed through fcitx or ibus on X11 comes out right (#97)」與 fcitx4（#558），但 zh_TW locale 的 Big5 extended segment 在 0.1.15 仍錯。同一測試在 en_US.UTF-8／C.UTF-8 下得到 `ESC % G <UTF-8> ESC % @ ESC $ ( B <JIS X 0208>`，Desktop 是否能解 JIS 段未驗證，所以「換 locale 啟動 Desktop」不保證有效。
+
+**未驗證：**Desktop 對中文「輸出」的顯示（截圖裡沒有任何中文輸出；所選字型有 CJK 字形）；剪貼簿貼上（走 UTF8_STRING，不經 XIM）；Wayland session（text-input 協定，UTF-8）。後兩者可能是可用的替代輸入方式，尚未測。
+
+**與 bridge 的關係：**bridge 經 Core API（JSON-RPC、UTF-8）送文字，不經 XIM；`herdr-core send <terminal> "中文"` 可作對照測試（未執行，避免打進使用者正在用的 pane）。
+
+**下一步：**向 Herdr Desktop 回報（X11 XIM commit 的 COMPOUND_TEXT `big5-0` extended segment 未解碼）；使用者可先試剪貼簿貼上或 Wayland；本 repo 沒有可修的地方。
+
 ## ISSUE-151：Herdr Core runtime 支援
 
 更新日期：2026-11-12。狀態：已修正、待驗收。
@@ -731,6 +747,7 @@ Review3 文件修正（2026-11-09，f4）：SPEC 的 PR merge 自動清理段落
 
 | ID        | 問題                                                                            | 狀態             | 下一步                                                                                                                                    |
 | --------- | ------------------------------------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| ISSUE-152 | Herdr Desktop（Linux X11＋ibus）輸入中文變成亂碼 | 受阻 | Desktop 0.1.15 未解碼 XIM COMPOUND_TEXT 的 big5-0 段；向上游回報，先試剪貼簿貼上或 Wayland，與 bridge 無關 |
 | ISSUE-151 | Herdr Core runtime 支援 | 已修正、待驗收 | 2026-11-12 自動化及唯讀 dry-run 通過；待 Core/Herdr 實機啟動與 Discord 往返，未部署 |
 | ISSUE-001 | Discord reply 未觸發 bridge                                                     | 重新開啟、待驗收 | 重啟後在 mapped thread 回覆 bot                                                                                                           |
 | ISSUE-002 | Discord 圖片未交付 Agent                                                        | 已修正、待驗收   | 重啟後以副檔名與內容不符（如 PNG/JPEG 互換）之圖片驗收本機交付                                                                            |
