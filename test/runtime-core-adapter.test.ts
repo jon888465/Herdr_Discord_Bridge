@@ -136,7 +136,8 @@ for (const scenario of ["disconnect", "timeout", "json"])
     try {
       await assert.rejects(
         new CoreAdapter(fake.socketPath).send("t1", "secret", {
-          timeoutMs: 40,
+          // 只有 timeout 情境靠逾時結束；其他情境用寬鬆上限，避免慢 runner 在伺服器收到請求前就逾時（ISSUE-153）。
+          timeoutMs: scenario === "timeout" ? 200 : 5000,
           retries: 9,
         }),
         (error: unknown) =>

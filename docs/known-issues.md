@@ -1,5 +1,15 @@
 # Known Issues
 
+## ISSUE-153：`Core send json 為送達不明且零重送` 在 macOS CI 偶發失敗（測試逾時過短）
+
+更新日期：2026-11-12。狀態：已修正、待驗收（CI 觀察）。
+
+**使用者可見症狀：**PR #227（純文件）的 CI `Full tests (macos-latest, Node 22)` 失敗：`test/runtime-core-adapter.test.ts` 的 `Core send json 為送達不明且零重送`，`fake.calls.length` 預期 1、實際 0（1912 通過、1 失敗）；ubuntu 同一份提交通過。
+
+**根因（推論，未在 CI 重現）：**測試把 `timeoutMs` 設成 40 毫秒。慢的 macOS runner 上客戶端在 fake Core 收到請求之前就逾時，回 `RUNTIME_DELIVERY_UNKNOWN`（斷言的錯誤碼仍符合），但此時 `calls` 還是空的。非 bridge 程式的錯誤。
+
+**修正：**`json`／`disconnect` 情境的上限改 5000 毫秒，`timeout` 情境改 200 毫秒（`test/runtime-core-adapter.test.ts`）。本機 `npm run check`（2026-11-12）通過；CI 是否不再偶發待觀察。
+
 ## ISSUE-152：Herdr Desktop（Linux X11＋ibus）輸入中文變成亂碼
 
 更新日期：2026-11-12。狀態：已驗收（2026-11-12，本機 Linux X11＋ibus／Herdr Desktop 0.1.15，使用者確認修正後 launcher 可輸入注音；範圍為專用 XIM workaround 與失效 owner 修正，非上游原生解碼或 macOS 實機驗收）。
