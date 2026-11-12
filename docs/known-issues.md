@@ -147,13 +147,15 @@ r7-f2：Core terminal 不繼承 caller shell。現 run 的 env 前綴傳 HERDR_B
 
 ## ISSUE-150：task 內本機 agy 的 review（`review-card-acceptance`）回報「no passing review for the current version」，task 失敗
 
-更新日期：2026-11-11。狀態：待調查（現象已觀察一次；原因未查）。
+更新日期：2026-11-12。狀態：待調查→根因已確認、尚未修正（2026-11-12 讀 task artifact 確認）。
 
 **使用者可見症狀：**`REQ-20261111-pretrust-live`（一行檔案卡，`lead: codex`）：implement、verify 都完成，13:01:21Z 本機 agy 的 `review-card-acceptance` 之後 task 以「no passing review for the current version」失敗，卡片 worktree 有未 commit 的檔案（內容 `ok`，正確）。Agent 接手 commit、開 PR #214、`card attach-pr`，後續 remote reviewer 正常。
 
 **預期行為：**一行檔案這種卡 task 內 review 可通過；失敗時要能看出 review 回報了什麼。
 
-**根因：**未確認（沒有讀 agy 的 review 輸出與 task artifact）。與 ISSUE-147（本機 agy Worker 第一個 prompt 沒收到）可能相關，沒有驗證。
+**根因（2026-11-12 已確認，讀 `team-tasks/artifacts/task-69b9341c-…/a-review-card-acceptance-3.json` 與 task 事件）：**這張卡 `roles.reviewer` 是 `agy-pod:agy`（remote），但 task 內的角色只能在本機執行（remote 只支援 PR 後的 card review）。task 內的 `review-card-acceptance` 仍被派給**本機 agy**（pane `w6H:p4`），它收到「reviewer 約束 machine=agy-pod」，如實回報 `verdict: inconclusive`、finding `f-reviewer-machine-blocked`：「Reviewer 約束 machine=agy-pod 無法在指定機器執行（目前執行環境為本機 pane w6H:p4，且 ssh agy-pod 逾時無法連線）……依指示回報受阻，不改用 local reviewer 判定通過」。`acceptanceReasons`（`src/coding-workflow.ts`）要求至少一份 `verdict: pass` 的獨立 review，所以 task 以「no passing review for the current version」失敗。**與 ISSUE-147 無關**（implement、verify 都正常完成，agy 有收到 prompt）。這是 remote reviewer 與 task 內驗收閘門的設計衝突，不是 agy 的 bug。
+
+**修正方向（待決定，尚未實作）：**remote reviewer 的卡，task 內驗收閘門不要求 in-task review（PR 後的 remote card review 才是獨立審查），並且 Lead prompt 不要規劃 reviewer assignment；或維持閘門、讓 in-task review 不帶 machine 約束。前者放寬閘門，需使用者決定。
 
 **未驗證／下一步：**讀 task 的 review artifact；判斷是 agy 的回報格式、版本指紋，還是 review 沒有真正執行。
 
