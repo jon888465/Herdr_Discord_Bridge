@@ -136,7 +136,7 @@ function harness(o: Opts = {}) {
 const fixed = (label: RegExp) => (e: unknown) => label.test(String(e)) && /^Error: 遠端角色失敗：/.test(String(e)) && !/SECRET|\/home|\/local|acme/.test(String(e));
 const OK_LOG = ["mkdir", "send", "dispose", "create:pod:true:true", "start:pod:w3:p1:--model opus", "close:pod:w3", "rm"];
 
-test("remote role: completion, cancellation, timeout and dispatch failure close and remove; blocked／timeout／uncertain retain; verify needs toolchain", async () => {
+test("remote role: completed／before_dispatch_failure close and remove, blocked／timeout／uncertain retain; verify needs toolchain", async () => {
   for (const reason of ["completed", "uncertain", "timeout", "before_dispatch_failure", "blocked"] as const) {
     const h = harness();
     const s = await h.start();

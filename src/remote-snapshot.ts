@@ -22,7 +22,7 @@ const IDENTITY = Object.fromEntries(["AUTHOR", "COMMITTER"].flatMap((w) => [[`GI
 
 export type LocalGit = (args: string[], env?: Record<string, string>) => string;
 export const localGit = (cwd: string): LocalGit => (args, extra = {}) =>
-  execFileSync("git", ["-c", "core.hooksPath=/dev/null", "-C", cwd, ...args], {
+  execFileSync("git", ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-C", cwd, ...args], {
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024,
     stdio: ["ignore", "pipe", "pipe"],
@@ -149,7 +149,7 @@ export async function startRemoteRole(
     (cleaned ??= (async () => {
       if (reason === "blocked" || reason === "timeout" || reason === "uncertain") {
         console.error(`remote role ${id}: cleanup_pending workspace ${st.workspace} directory ${dir}: ${reason}，保留給人處理`);
-        return "（cleanup_pending：workspace、directory）";
+        return `（cleanup_pending：workspace、${st.trust || st.trustUnknown ? "trust、" : ""}directory）`;
       }
       const pending: string[] = [];
       let closed = true;
@@ -194,6 +194,8 @@ export async function startRemoteRole(
         throw error;
       }
     input.signal?.throwIfAborted();
+    // 唯讀基準要在 Agent 啟動之前取（與 card-review-flow 一致），啟動期間寫進 pod 工作樹的檔案不會被算進基準。
+    before = await remoteFingerprint(exec, dir);
     const args = [...(profile.args ?? []), ...(profile.model ? [profile.modelFlag!, profile.model] : [])];
     const started = await deps.startAgent({ paneId: ws.paneId, kind: profile.kind, name: input.name, ...(args.length ? { args } : {}) });
     const port = deps.panePort(id);
@@ -203,7 +205,6 @@ export async function startRemoteRole(
     if (!live) throw new RemoteFailure("Worker 就緒後 pane 已不存在");
     assertReadyIdentity(started, live, profile.kind, ws.workspaceId, id);
     if (profile.model && live.model && live.model !== profile.model) throw new RemoteFailure("身分不符", "model");
-    before = await remoteFingerprint(exec, dir);
     agent = { ...live, machine: id, profileId: profile.id, ...(profile.model ? { model: profile.model, modelEvidence: "launch" } : {}) };
   } catch (error) {
     if (error instanceof RemoteFailure && error.uncertain) st.uncertain = true;
@@ -216,7 +217,13 @@ export async function startRemoteRole(
       throw fail("唯讀檢查失敗", error);
     });
     if (after !== before) throw fail("遠端工作樹在唯讀角色中被改動，結果不採用");
-    if ((deps.treeDigest ?? treeDigest)(input.cwd) !== digestAtSnapshot) throw fail("快照已作廢（本機工作樹已改變），結果不採用");
+    let local: string;
+    try {
+      local = (deps.treeDigest ?? treeDigest)(input.cwd);
+    } catch (error) {
+      throw fail("唯讀檢查失敗", error instanceof Error ? error.message.split("\n")[0] : "本機讀取失敗");
+    }
+    if (local !== digestAtSnapshot) throw fail("快照已作廢（本機工作樹已改變），結果不採用");
   };
   return { agent, continuity: "new-session", cleanup: async (reason) => void (await cleanup(reason)), afterTurn };
 }
