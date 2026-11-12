@@ -9,7 +9,8 @@
   // Empty: listing/visible reads allowed, all input denied. Bind threads with target/use.
   // Core requires allowedWorkspaceIds and machines to be empty.
   "coreAllowedTerminals": [],
-  // Core standalone default: ~/.config/herdr-discord-bridge/config.json.
+  // Core standalone default: ~/.config/herdr-discord-bridge/config.json; when that file
+  // is missing, run.sh --core falls back to the Herdr plugin config directory below.
   // HERDR_PLUGIN_CONFIG_DIR overrides the bridge config directory for either backend.
   // For Herdr plugins, copy this file to the directory printed by:
   //   herdr plugin config-dir herdr-discord-bridge

@@ -66,6 +66,17 @@ if [[ "$backend" == core ]]; then
   project_dir="$(pwd -P)"
   bridge_config_dir="${HERDR_PLUGIN_CONFIG_DIR:-$(node -e 'console.log(require("node:path").join(require("node:os").homedir(),".config","herdr-discord-bridge"))')}"
   bridge_state_dir="${HERDR_PLUGIN_STATE_DIR:-$(node -e 'console.log(require("node:path").resolve(process.argv[1],"state"))' "$bridge_config_dir")}"
+  # Herdr plugin installs keep config.json where Herdr injects HERDR_PLUGIN_CONFIG_DIR.
+  # Without explicit directories, fall back to that config (and Herdr's plugin state
+  # directory) when the standalone default has no config.json; say so on stdout.
+  # Filesystem checks only; no herdr call. Explicit directories are never overridden.
+  plugin_config_dir="$HOME/.config/herdr/plugins/config/herdr-discord-bridge"
+  plugin_state_dir="$HOME/.local/state/herdr/plugins/herdr-discord-bridge"
+  if [[ -z "${HERDR_PLUGIN_CONFIG_DIR:-}" && ! -f "$bridge_config_dir/config.json" && -f "$plugin_config_dir/config.json" ]]; then
+    bridge_config_dir="$plugin_config_dir"
+    [[ -n "${HERDR_PLUGIN_STATE_DIR:-}" ]] || bridge_state_dir="$plugin_state_dir"
+    echo "Using Herdr plugin config: $bridge_config_dir/config.json (state: $bridge_state_dir)"
+  fi
   # Match config.ts: config.json accepts JSONC comments and trailing commas.
   # Print only token presence; never copy a token into argv, stdout or stderr.
   file_has_token="$(node - "$bridge_config_dir" <<'NODE'
@@ -91,10 +102,8 @@ NODE
     # A missing file would otherwise launch a Core terminal that exits at once
     # (ISSUE-151). Herdr plugin installs keep config.json in the plugin config dir.
     echo "Core bridge config not found: $bridge_config_dir/config.json; set HERDR_PLUGIN_CONFIG_DIR (Herdr plugin installs: herdr plugin config-dir herdr-discord-bridge). Core was not started." >&2
-    # Filesystem-only hint at Herdr's plugin config directory; no herdr call and
-    # no silent switch to that config (SPEC: never pick another config file).
-    plugin_config_dir="$HOME/.config/herdr/plugins/config/herdr-discord-bridge"
-    plugin_state_dir="$HOME/.local/state/herdr/plugins/herdr-discord-bridge"
+    # Explicit HERDR_PLUGIN_CONFIG_DIR pointing elsewhere is respected; only hint
+    # at the plugin config so the operator can choose it.
     if [[ "$plugin_config_dir" != "$bridge_config_dir" && -f "$plugin_config_dir/config.json" ]]; then
       echo "Found Herdr plugin config: $plugin_config_dir/config.json" >&2
       rerun="HERDR_PLUGIN_CONFIG_DIR=$plugin_config_dir"

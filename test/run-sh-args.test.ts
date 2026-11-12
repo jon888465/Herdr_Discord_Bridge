@@ -342,10 +342,54 @@ for (const [args, customDirs] of [
 for (const [pluginInstall, args] of [
   ["config", ["--core"]],
   ["config+state", ["--core", "-r"]],
+  ["config+state", ["--core"]],
 ] as const)
-  test(`Core 設定檔不存在但 Herdr plugin 目錄有設定時印出該路徑與重跑指令 ${pluginInstall} ${args.join(" ")}`, () => {
+  test(`standalone 目錄沒有設定時 Core 改用 Herdr plugin 設定與 state 目錄 ${pluginInstall} ${args.join(" ")}`, () => {
+    const result = runFixture([...args], "clean-launch", true, {
+      noConfigFile: true,
+      pluginInstall,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const home = result.home;
+    const pluginConfigDir = `${home}/.config/herdr/plugins/config/herdr-discord-bridge`;
+    const pluginStateDir = `${home}/.local/state/herdr/plugins/herdr-discord-bridge`;
+    assert.ok(
+      result.stdout.includes(
+        `Using Herdr plugin config: ${pluginConfigDir}/config.json (state: ${pluginStateDir})`,
+      ),
+      result.stdout,
+    );
+    assert.doesNotMatch(result.stderr, /Core bridge config not found/);
+    assert.equal(result.childEnv?.HERDR_PLUGIN_CONFIG_DIR, pluginConfigDir);
+    assert.equal(result.childEnv?.HERDR_PLUGIN_STATE_DIR, pluginStateDir);
+    assert.equal(result.childEnv?.HERDR_BRIDGE_RUNTIME, "core");
+    assert.equal(result.calls.at(-1)?.args[0], "run");
+    assert.doesNotMatch(
+      JSON.stringify(result.calls) + result.stdout + result.stderr,
+      /fake-file-secret/,
+    );
+  });
+test("standalone 目錄沒有設定但 caller 指定 HERDR_PLUGIN_STATE_DIR 時保留該 state 目錄", () => {
+  const result = runFixture(["--core"], "clean-launch", true, {
+    noConfigFile: true,
+    pluginInstall: "config",
+    env: { HERDR_PLUGIN_STATE_DIR: "/tmp/custom core state" },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(
+    result.childEnv?.HERDR_PLUGIN_CONFIG_DIR,
+    `${result.home}/.config/herdr/plugins/config/herdr-discord-bridge`,
+  );
+  assert.equal(result.childEnv?.HERDR_PLUGIN_STATE_DIR, "/tmp/custom core state");
+});
+for (const [pluginInstall, args] of [
+  ["config", ["--core"]],
+  ["config+state", ["--core", "-r"]],
+] as const)
+  test(`明確指定的目錄沒有設定時不改用 plugin 設定，只印路徑與重跑指令 ${pluginInstall} ${args.join(" ")}`, () => {
     const result = runFixture([...args], "running", true, {
       noConfigFile: true,
+      customDirs: true,
       pluginInstall,
     });
     assert.equal(result.status, 1);
