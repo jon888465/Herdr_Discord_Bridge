@@ -19,8 +19,10 @@ export interface RoleConstraint {
   model?: string;
 }
 export type CardRoles = Partial<Record<CardRole, RoleConstraint>>;
-/** `machines[].cardReview` 開放的遠端 id 與 kinds。 */
-export type RemoteReviewMachine = { id: string; kinds: readonly string[] };
+/** `machines[].cardReview` 開放的遠端 id 與 kinds；toolchain 才可分配 verify。 */
+export type RemoteReviewMachine = { id: string; kinds: readonly string[]; toolchain?: boolean };
+/** task 內可以派到遠端的角色；都是唯讀，implement／fixer 不在內。 */
+export const REMOTE_TASK_ROLES = ["diagnose", "review", "verify"] as const;
 export interface RoleSnapshot {
   roles: CardRoles;
   candidates: Partial<Record<CardRole, AgentProfile[]>>;
@@ -171,17 +173,78 @@ export function preflightRoles(
         roleError(role, `profile ${p.id} 的 model／modelFlag 不合法`);
     }
     candidates[role] = structuredClone(matches);
-    if (remote) remoteMachines.push({ id: remote.id, kinds: [...remote.kinds] });
+    if (remote && !remoteMachines.some((m) => m.id === remote.id))
+      remoteMachines.push({ id: remote.id, kinds: [...remote.kinds], ...(remote.toolchain ? { toolchain: true } : {}) });
   }
   return { roles: structuredClone(roles), candidates, ...(remoteMachines.length ? { remoteMachines } : {}) };
 }
 function remoteReviewMachine(role: CardRole, c: RoleConstraint, context: RoleContext): RemoteReviewMachine {
   const unsupported = `卡片流程尚未支援 machine ${c.machine}`;
   if (role === "implement" || role === "fixer") roleError(role, `remote 寫入尚未支援：${unsupported} 的寫入角色`);
-  if (role !== "reviewer") roleError(role, `remote 目前只支援 reviewer：${unsupported} 的 ${role}`);
   const remote = context.remoteMachines?.find((m) => m.id === c.machine);
   if (!remote || (c.agent && !remote.kinds.includes(c.agent))) roleError(role, `machine 未開放卡片 review（${c.machine}）`);
+  if (role === "verify" && !remote.toolchain) roleError(role, `remote verify 不可用：machine ${c.machine} 沒有工具鏈`);
   return remote;
+}
+/** Lead 候選；沒有工具鏈的 verify 標 unavailable。 */
+export function remoteRoleCandidates(context: RoleContext) {
+  return (context.remoteMachines ?? []).flatMap((m) =>
+    REMOTE_TASK_ROLES.flatMap((role) =>
+      context.profiles
+        .filter((p) => m.kinds.includes(p.kind) && roleProfileEnabled(role, p) && (context.enabledProfileIds?.includes(p.id) ?? true))
+        .map((p) => ({
+          machine: m.id,
+          role,
+          kind: p.kind,
+          profileId: p.id,
+          ...(p.model ? { model: p.model } : {}),
+          available: role !== "verify" || !!m.toolchain,
+          ...(role === "verify" && !m.toolchain ? { reason: "no toolchain on machine" } : {}),
+        })),
+    ),
+  );
+}
+const REMOTE_TARGET = /^remote:([A-Za-z][A-Za-z0-9_-]{1,31}):(diagnose|review|verify):([a-z][a-z0-9_-]{0,31})$/;
+export function parseRemoteTarget(paneId: string) {
+  const m = REMOTE_TARGET.exec(paneId);
+  return m ? { machine: m[1]!, role: m[2] as (typeof REMOTE_TASK_ROLES)[number], profileId: m[3]! } : undefined;
+}
+/** 取得時才在 pod 建快照與 session。 */
+export function remoteRoleTargets(context: RoleContext, workspace: string): AgentRecord[] {
+  return remoteRoleCandidates(context)
+    .filter((c) => c.available)
+    .map((c) => {
+      const id = `remote:${c.machine}:${c.role}:${c.profileId}`;
+      return {
+        pane_id: id,
+        terminal_id: id,
+        workspace_id: workspace,
+        tab_id: "",
+        agent: c.kind,
+        agent_status: "idle",
+        machine: c.machine,
+        model: c.model,
+        profile: structuredClone(context.profiles.find((p) => p.id === c.profileId)),
+        roleTarget: c.role,
+      };
+    });
+}
+/** pod 上的 Worker 只在 roster 有同機器 remote target 時算 Team 成員。 */
+export function teamMember(agent: AgentRecord, workspaceId: string, roster: readonly AgentRecord[]): boolean {
+  if (agent.workspace_id === workspaceId) return true;
+  const machine = machineOfActor(agent);
+  return (
+    machine !== "local" &&
+    agent.pane_id.startsWith(`${machine}:`) &&
+    agent.workspace_id.startsWith(`${machine}:`) &&
+    roster.some((r) => r.machine === machine && parseRemoteTarget(r.pane_id)?.machine === machine)
+  );
+}
+/** 卡片 reviewer 在 remote、沒宣告 review 時，task 內 review 也必須在同一台（ISSUE-150）。 */
+export function roleConstraint(snapshot: RoleSnapshot, role: CardRole): RoleConstraint | undefined {
+  const reviewer = snapshot.roles.reviewer;
+  if (snapshot.roles[role]) return snapshot.roles[role];
+  return role === "review" && reviewer?.machine && reviewer.machine !== "local" ? structuredClone(reviewer) : undefined;
 }
 /** Lead 候選：每個開放遠端上的可用 reviewer profile，標明 machine。 */
 export function remoteReviewerCandidates(context: RoleContext) {
@@ -221,7 +284,8 @@ export function roleTargets(
   snapshot: RoleSnapshot,
   workspace: string,
 ): AgentRecord[] {
-  return CARD_ROLES.filter((r) => !["reviewer", "fixer"].includes(r)).flatMap(
+  // 宣告在 remote 的角色只能用 remote target。
+  return CARD_ROLES.filter((r) => !["reviewer", "fixer"].includes(r) && !snapshot.roles[r]?.machine?.replace(/^local$/, "")).flatMap(
     (role) =>
       (snapshot.candidates[role] ?? []).map((p) => ({
         pane_id: `role:${role}:${p.id}`,
@@ -247,7 +311,7 @@ export function roleMetadata(
   return {
     source: constraint ? "card" : source,
     selectionSources: {
-      machine: constraint?.machine ? "card" : "default",
+      machine: constraint?.machine ? "card" : machineOfActor(actor) !== "local" ? source : "default",
       agent: constraint?.agent ? "card" : source,
       model: constraint?.model
         ? "card"
@@ -284,7 +348,7 @@ export function resolveFlowRole(
 export function validateRoleSnapshot(snapshot: RoleSnapshot): void {
   const remote = snapshot.remoteMachines;
   const machineOk = (m: RemoteReviewMachine) =>
-    Object.keys(m ?? 0).join() === "id,kinds" && /^(?!local$)[A-Za-z][\w-]{1,31}$/.test(m.id) && m.kinds?.length && m.kinds.every((k) => KINDS.includes(k));
+    ["id,kinds", "id,kinds,toolchain"].includes(Object.keys(m ?? 0).join()) && (m.toolchain ?? true) === true && /^(?!local$)[A-Za-z][\w-]{1,31}$/.test(m.id) && m.kinds?.length && m.kinds.every((k) => KINDS.includes(k));
   if (remote && !(Array.isArray(remote) && remote.length && remote.length <= 8 && remote.every(machineOk)))
     throw new Error("invalid role remote machines");
   const names = Object.keys(snapshot.roles);

@@ -1,7 +1,10 @@
 import type { RoleCleanupReason } from "./card-role-session.js";
 import {
   assertRoleMatches,
+  parseRemoteTarget,
+  roleConstraint,
   roleMetadata,
+  teamMember,
   type RoleSnapshot,
 } from "./card-role-assignment.js";
 import {
@@ -124,6 +127,8 @@ export interface TeamTaskInput {
   roleSnapshot?: RoleSnapshot;
   /** 開放的遠端 card reviewer（PR 後由 bridge 派工，不是 Worker target）。 */
   remoteReviewers?: object[];
+  /** task 內 remote 唯讀角色候選。 */
+  remoteRoles?: object[];
   recordRoleStrict?: (identity: RoleIdentity) => void | Promise<void>;
   validateRoleActor?: (actor: AgentRecord) => Promise<void>;
   onRoleAssigned?: (identity: RoleIdentity) => void;
@@ -153,10 +158,13 @@ export interface TeamTaskInput {
   acquireWorker?: (
     worker: AgentRecord,
     assignment?: AssignmentPlan["assignments"][number],
+    signal?: AbortSignal,
   ) => Promise<{
     agent: AgentRecord;
     continuity: string;
     cleanup?: (reason?: RoleCleanupReason) => Promise<void>;
+    /** 入帳前檢查；丟錯 = assignment 失敗。 */
+    afterTurn?: () => Promise<void>;
   }>;
   /**
    * ISSUE-107：Worker 的回合完成、且回合內驗證過它的 session（例如 agy 處理完第一個 prompt 才被登記）。
@@ -626,13 +634,15 @@ async function runAssignment(
   try {
     input.signal?.throwIfAborted();
     const acquired = input.acquireWorker
-      ? await input.acquireWorker(worker, assignment)
+      ? await input.acquireWorker(worker, assignment, input.signal)
       : { agent: worker, continuity: "unknown" };
     cleanup = acquired.cleanup;
     input.signal?.throwIfAborted();
+    const target = worker;
     worker = acquired.agent;
     if (
-      worker.workspace_id !== input.lead.workspace_id ||
+      (worker.workspace_id !== input.lead.workspace_id &&
+        !(parseRemoteTarget(target.pane_id) && teamMember(worker, input.lead.workspace_id, [target]))) ||
       worker.pane_id === input.lead.pane_id
     )
       throw new Error("acquired Worker is outside the Team or is the Lead");
@@ -648,7 +658,7 @@ async function runAssignment(
       throw new Error(`Worker is ${worker.agent_status}`);
     if (input.roleSnapshot) {
       const role = assignment.coding!.role;
-      const constraint = input.roleSnapshot.roles[role];
+      const constraint = roleConstraint(input.roleSnapshot, role);
       if (constraint) assertRoleMatches(role, constraint, worker);
       if (!input.recordRoleStrict)
         throw new Error("卡片角色紀錄介面不存在，未派工");
@@ -730,6 +740,7 @@ async function runAssignment(
     );
     cleanupReason = settled.state === "blocked" ? "blocked" : "completed";
     input.signal?.throwIfAborted();
+    if (settled.state !== "blocked") await acquired.afterTurn?.();
     emit({
       type: "turn_settled",
       taskId: input.taskId,
@@ -881,7 +892,7 @@ export function validateAssignmentPlan(
         throw new Error("卡片角色指定不可用非 coding assignment 繞過");
       const role = assignment.coding.role;
       const actor = workers.find((w) => w.pane_id === assignment.workerPaneId)!;
-      const c = roleSnapshot.roles[role];
+      const c = roleConstraint(roleSnapshot, role);
       if (c) {
         assertRoleMatches(role, c, actor);
         if (actor.roleTarget !== role)
@@ -890,6 +901,9 @@ export function validateAssignmentPlan(
       if (actor.roleTarget && actor.roleTarget !== role)
         throw new Error("不可跨角色使用 role target");
     }
+    const remote = parseRemoteTarget(assignment.workerPaneId);
+    if (remote && assignment.coding?.role !== remote.role)
+      throw new Error(`remote target ${assignment.workerPaneId} 只能用於 ${remote.role}`);
     if (!assignment.instruction.trim())
       throw new Error(`Assignment ${assignment.id} has no instruction`);
   }
@@ -962,6 +976,14 @@ export function planningInstruction(input: TeamTaskInput): string {
       : []),
     ...(input.roleSnapshot?.remoteMachines ? [`Card reviewer runs on machine ${input.roleSnapshot.roles.reviewer?.machine} after the PR.`] : []),
     ...(input.remoteReviewers?.length ? [`Remote card reviewer candidates (bridge-dispatched after the PR, not Worker targets): ${JSON.stringify(input.remoteReviewers)}`] : []),
+    ...(input.remoteRoles?.length
+      ? [
+          `Remote in-task role candidates (read-only; available ones are Worker targets remote:<machine>:<role>:<profileId>, used only for that coding.role; the bridge sends an uncommitted snapshot of the current worktree, never pushes): ${JSON.stringify(input.remoteRoles)}`,
+        ]
+      : []),
+    ...(input.roleSnapshot && roleConstraint(input.roleSnapshot, "review") && !input.roleSnapshot.roles.review
+      ? [`In-task review must use a remote:${input.roleSnapshot.roles.reviewer!.machine}:review:<profile> target (card reviewer is remote).`]
+      : []),
     "Do not modify files while planning. Return ONLY JSON as the result body, inside the response transport markers.",
     "The JSON object must have an assignments array. Each assignment has id (unique string), workerPaneId (listed Worker target), instruction (concrete subtask), and dependsOn (array of assignment IDs).",
     "Worker targets may be existing panes or profile:<id> entries. Profiles start lazily only when selected. Assign only listed targets; do not invent IDs or assign yourself. Decide roles dynamically; there is no fixed coding/review pipeline.",

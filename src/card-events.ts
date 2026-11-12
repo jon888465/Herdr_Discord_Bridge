@@ -279,10 +279,11 @@ function render(fields: Fields): { text: string; suspicious: boolean } {
           : `（${text(fields, "model", MODEL, "model id, max 80")}）`;
       if (fields.source !== undefined) {
         // v2 has a proven <=300 character bound: local + supported kinds only
-        // (a remote machine id, max 32, is allowed only for the 8-char reviewer role);
+        // (a remote machine id, max 32, is allowed only for reviewer and read-only coding roles);
         // assignmentId aliases role, profile is omitted (not duplicated metadata).
         oneOf(fields, "agent", ["claude", "codex", "agy", "pi"]);
-        if (role !== "reviewer") oneOf(fields, "machine", ["local"]);
+        if (role !== "reviewer" && !["diagnose", "review", "verify"].includes(String(fields.codingRole)))
+          oneOf(fields, "machine", ["local"]);
         if (
           fields.assignmentId !== undefined &&
           fields.assignmentId !== role &&

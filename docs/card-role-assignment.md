@@ -4,7 +4,7 @@
 
 ## 範圍與語法
 
-本卡依 Lead 決定交付 machine 宣告、驗證與 **local 強制執行**，不存在的 machine 報不存在。2026-11-11 起只有 reviewer 可指定開放的 remote（ISSUE-143，[remote-card-reviewer.md](remote-card-reviewer.md)），其他角色宣告 remote 仍在撿卡前拒絕。
+本卡依 Lead 決定交付 machine 宣告、驗證與 **local 強制執行**，不存在的 machine 報不存在。2026-11-11 起 reviewer 可指定開放的 remote（ISSUE-143，[remote-card-reviewer.md](remote-card-reviewer.md)）；2026-11-12 起 diagnose、review 也可（verify 要機器有工具鏈），Lead 也能在 task 內自選 `remote:<machine>:<role>:<profile>` target，卡片 reviewer 在 remote 時 task 內 review 必須在同一台（REQ-20261111-remote-in-task-roles，未做實機驗收）。implement／fixer 宣告 remote 仍在撿卡前拒絕。
 
 <!-- prettier-ignore -->
 ```yaml
@@ -46,7 +46,7 @@ impl-1：claude（sonnet）；machine=local；task=task-…；v=2,cr=i,s=C,ss=CC
 
 codingRole：`cr=i/d/r/v`＝implement／diagnose／review／verify；reviewer／fixer 為 `-`。assignmentId 由 role 還原，不重複印：一般同 role；若原 id 是 lead（或 assignment- 前綴的 lead），role 多加一個 assignment-，還原移除一個前綴。source：`s=C/L/D/I`＝card／lead／default／CLI。selectionSources：`ss` 三碼依序 machine／agent／model，使用相同代碼（Lead 選了帶 model 的候選且卡片未約束 model 時，model 來源記 `L`）。modelEvidence：`me=L/O/U`＝launch／observed／unknown。未知 model 不寫 model 值。
 
-v2 僅 local 與四種 agent；role 最多64、model80、task64、round最大1000000，完整組合仍不超300字。profileId 不重複印入 v2，完整配置候選在 durable task。parser／serializer／輪替沿用300字與既有格式；model 不截斷。v2 hash 加入來源 metadata，避免舊的少 metadata 紀錄先寫後吃掉新資訊；同一完整事件仍去重。role_assigned 表示已準備派工身分，**不代表 prompt 已送達或任務完成**；後續失敗另記。
+v2 只有四種 agent；machine 只能是 local，例外是 reviewer 與 `cr=d/r/v` 的 task 內 remote 角色（machine id 最多 32）；role 最多64、model80、task64、round最大1000000，完整組合仍不超300字。profileId 不重複印入 v2，完整配置候選在 durable task。parser／serializer／輪替沿用300字與既有格式；model 不截斷。v2 hash 加入來源 metadata，避免舊的少 metadata 紀錄先寫後吃掉新資訊；同一完整事件仍去重。role_assigned 表示已準備派工身分，**不代表 prompt 已送達或任務完成**；後續失敗另記。
 
 ## 無法解析的卡片
 
