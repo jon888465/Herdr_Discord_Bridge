@@ -15,20 +15,44 @@ fi
 [[ "${XDG_RUNTIME_DIR:-}" == /* && -d "$XDG_RUNTIME_DIR" && -O "$XDG_RUNTIME_DIR" ]] || {
   echo 'An absolute, existing, user-owned XDG_RUNTIME_DIR is required' >&2; exit 1;
 }
-for tool in xprop flock locale nohup; do
+for tool in python3 flock locale nohup; do
   command -v "$tool" >/dev/null || { echo "$tool not found" >&2; exit 1; }
 done
 # A per-user lock serializes startup; never restart the ordinary ibus daemon.
 exec 9>"$XDG_RUNTIME_DIR/herdr-ibus-x11.lock"
 flock -w 10 9 || { echo 'Timed out waiting for Herdr XIM startup lock' >&2; exit 1; }
 xim_ready() {
-  local snapshot
-  snapshot="$(xprop -root XIM_SERVERS)" || return 2
-  [[ "$snapshot" =~ (^|[[:space:],])@server=ibus-herdr([[:space:],]|$) ]]
+  # XIM_SERVERS can retain names after the server exits. Only the live
+  # selection owner proves that this XIM is still registered on this display.
+  python3 - <<'PY_XIM'
+import ctypes as c
+import sys
+try:
+    x = c.CDLL("libX11.so.6")
+    x.XOpenDisplay.argtypes = [c.c_char_p]
+    x.XOpenDisplay.restype = c.c_void_p
+    x.XInternAtom.argtypes = [c.c_void_p, c.c_char_p, c.c_int]
+    x.XInternAtom.restype = c.c_ulong
+    x.XGetSelectionOwner.argtypes = [c.c_void_p, c.c_ulong]
+    x.XGetSelectionOwner.restype = c.c_ulong
+    x.XCloseDisplay.argtypes = [c.c_void_p]
+    display = x.XOpenDisplay(None)
+    if not display:
+        raise RuntimeError("Cannot open X11 display")
+    try:
+        atom = x.XInternAtom(display, b"@server=ibus-herdr", 1)
+        owner = x.XGetSelectionOwner(display, atom) if atom else 0
+    finally:
+        x.XCloseDisplay(display)
+except Exception as error:
+    print("Cannot query Herdr XIM owner: " + str(error), file=sys.stderr)
+    sys.exit(2)
+sys.exit(0 if owner else 1)
+PY_XIM
 }
 status=0
 xim_ready || status=$?
-[[ "$status" != 2 ]] || { echo 'Cannot query X11 XIM servers' >&2; exit 1; }
+[[ "$status" != 2 ]] || { echo 'Cannot query X11 XIM owner' >&2; exit 1; }
 if [[ "$status" != 0 ]]; then
   ibus_x11="$(command -v ibus-x11 || true)"
   for candidate in /usr/libexec/ibus-x11 /usr/lib/ibus/ibus-x11; do
