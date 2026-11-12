@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HerdrError } from "../src/herdr.js";
+import { hookEvents } from "../src/hook-events.js";
 import { runTeamTurn } from "../src/team-turn.js";
 import type { OrchestrationPort } from "../src/team-orchestration.js";
 import type { AgentRecord } from "../src/types.js";
@@ -296,6 +297,103 @@ test("codex never takes its session from Herdr's agent_session, only from its ro
     { ...codex, agent_session: session("hook-pane-session") },
   ]);
   assert.equal(result.session, undefined);
+});
+
+// ISSUE-154：遠端 pane 沒有 Herdr agent_session 時，採用本回合內該 pane 的 Stop hook 的 session。
+const remote = { ...base, pane_id: "pod:w8:p1", machine: "pod" } as AgentRecord;
+const stopFor = (
+  paneId: string,
+  sessionId: string,
+  port: OrchestrationPort,
+) => {
+  const send = port.promptAgent.bind(port);
+  port.promptAgent = async (target, text) => {
+    await send(target, text);
+    hookEvents.record({ event: "Stop", sessionId, paneId, message: "" });
+  };
+  return port;
+};
+
+test("a remote pane without Herdr agent_session takes the session from this turn's Stop hook (ISSUE-154)", async () => {
+  const result = await runTeamTurn(
+    remote,
+    "work",
+    stopFor(remote.pane_id, "hook-s1", fakePort([{ ...remote }])),
+    2_000,
+    20,
+    observing,
+  );
+  assert.deepEqual(result.session, { kind: "id", value: "hook-s1" });
+});
+
+test("hook sessions are ignored for local panes, other panes, stale events, or when Herdr already has a session (ISSUE-154)", async () => {
+  // 本機 pane 沒有 machine：不採用 hook。
+  assert.equal(
+    (
+      await runTeamTurn(
+        base,
+        "work",
+        stopFor(base.pane_id, "hook-local", fakePort([{ ...base }])),
+        2_000,
+        20,
+        observing,
+      )
+    ).session,
+    undefined,
+  );
+  // 事件屬於別的 pane。
+  assert.equal(
+    (
+      await runTeamTurn(
+        remote,
+        "work",
+        stopFor("pod:w8:p9", "hook-other", fakePort([{ ...remote }])),
+        2_000,
+        20,
+        observing,
+      )
+    ).session,
+    undefined,
+  );
+  // 本回合開始前就存在的舊事件。
+  hookEvents.record(
+    {
+      event: "Stop",
+      sessionId: "hook-stale",
+      paneId: "pod:w8:p2",
+      message: "",
+    },
+    Date.now() - 60_000,
+  );
+  const stale = { ...remote, pane_id: "pod:w8:p2" } as AgentRecord;
+  assert.equal(
+    (
+      await runTeamTurn(
+        stale,
+        "work",
+        fakePort([{ ...stale }]),
+        2_000,
+        20,
+        observing,
+      )
+    ).session,
+    undefined,
+  );
+  // Herdr 已經有 session：以它為準，不看 hook。
+  const known = { ...remote, agent_session: session("herdr-s") } as AgentRecord;
+  assert.deepEqual(
+    (
+      await runTeamTurn(
+        known,
+        "work",
+        stopFor(known.pane_id, "hook-ignored", fakePort([{ ...known }])),
+        2_000,
+        20,
+        observing,
+      )
+    ).session,
+    { kind: "id", value: "herdr-s" },
+  );
 });
 
 // ISSUE-134: card callers have hook context without a Team task id or phase.

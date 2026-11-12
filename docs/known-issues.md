@@ -14,6 +14,8 @@
 
 **Lead 越權觀察：**第二輪 Lead（本機 agy）在規劃階段自行嘗試 `ssh agy-pod herdr integration install antigravity-cli`（修改 pod），被 Agent 以 Escape 中斷；pod 的 integration 本來就是最新。Lead 的 prompt 寫「Do not modify files while planning」，沒有禁止修改遠端機器。
 
+**修正（2026-11-12，選 B，使用者決定；已修正、待驗收）：**`src/team-turn.ts` 的 `observedSession`：非 codex 的**遠端 pane**（`agent.machine` 有值）在 Herdr 沒有 `agent_session` 時，採用「本回合開始後」該 pane 的 Stop hook 事件的 session id（`hookEvents.stopForPane`）；本機 pane、別的 pane 的事件、回合開始前的舊事件、Herdr 已有 session 的情況都維持原行為。測試：`test/team-turn.test.ts` 新增 2 項。本機 `npm run check`（2026-11-12）tests 1928、pass 1927、fail 0、skipped 1；lint 通過。**尚未實機驗收**（merge 並重啟後再跑一張 remote review 卡）。`cancelling` 收尾與 Lead 越權兩項仍未修。
+
 **已驗證：**remote 角色路由與快照送到 pod（review 實際在 agy-pod 執行）；第二輪取消後的清理（pod `/root/herdr-card-review` 為空、本次 `trustedWorkspaces` 項目移除、GitHub 沒有出現半成品分支）。**未驗證：**閘門通過路徑、`cancelling` 的收尾、升級 pod Herdr 後的身分。
 
 **下一步：**決定升級 pod 的 Herdr（k3s pod 映像）或讓 bridge 用 hook 的 session；修 `cancel_unconfirmed` 對無身分 remote pane 的收尾；Lead prompt 禁止修改遠端機器。
