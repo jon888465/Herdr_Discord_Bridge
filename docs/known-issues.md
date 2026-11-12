@@ -65,7 +65,7 @@ r7-f2：Core terminal 不繼承 caller shell。現 run 的 env 前綴傳 HERDR_B
 
 狀態改回「已修正、待驗收」。修正範圍：
 
-1. `scripts/run.sh --core`：解析出的設定目錄沒有 config.json 時，在任何 npm／herdr-core 呼叫前 exit 1，印 `Core bridge config not found: <dir>/config.json; set HERDR_PLUGIN_CONFIG_DIR (Herdr plugin installs: herdr plugin config-dir herdr-discord-bridge). Core was not started.`。不再把缺檔當空設定；環境 token 不印出。
+1. `scripts/run.sh --core`：解析出的設定目錄沒有 config.json 時，在任何 npm／herdr-core 呼叫前 exit 1，印 `Core bridge config not found: <dir>/config.json; set HERDR_PLUGIN_CONFIG_DIR (Herdr plugin installs: herdr plugin config-dir herdr-discord-bridge). Core was not started.`。不再把缺檔當空設定；環境 token 不印出。使用者實測後（10:08 直接 `./scripts/run.sh --core -r` 被拒）再補：若 `~/.config/herdr/plugins/config/herdr-discord-bridge/config.json` 存在，另印 `Found Herdr plugin config: …` 與可直接重跑的 `Rerun with: HERDR_PLUGIN_CONFIG_DIR=… [HERDR_PLUGIN_STATE_DIR=…] scripts/run.sh --core [mode]`（state 目錄只在存在時加入）；純檔案系統檢查，不呼叫 herdr、不讀該檔、不自動切換。新增 fake CLI 測試 2 項（只有 config 目錄／config＋state 目錄；零 CLI、不讀 plugin 設定的 token），run-sh-args 共 49 項通過；本機不帶環境變數執行 `./scripts/run.sh --core -r` 印出提示、exit 1、Core terminal 不變。
 2. `resolveCoreSocketPath`（`src/runtime/core-adapter.ts`）：HC_SOCKET > 未設 HC_SESSION 時 Core terminal 注入的 HC_TERMINAL_SOCKET > 依 session 的兩個候選 `$XDG_RUNTIME_DIR/herdr-core/<session>.sock`（Linux）與 `$XDG_STATE_HOME|~/.local/state/herdr-core/<session>/<session>.sock`（macOS），取實際存在者，都不存在取 XDG_RUNTIME_DIR 候選；非絕對路徑拒絕、空字串視為未設。不讀 Core config.toml 的 `socket`。
 3. 失敗的 finished terminal t4、t5 已 `herdr-core rm`（`ls --all` 只剩 t1）。
 

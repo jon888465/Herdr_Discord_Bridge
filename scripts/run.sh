@@ -91,6 +91,16 @@ NODE
     # A missing file would otherwise launch a Core terminal that exits at once
     # (ISSUE-151). Herdr plugin installs keep config.json in the plugin config dir.
     echo "Core bridge config not found: $bridge_config_dir/config.json; set HERDR_PLUGIN_CONFIG_DIR (Herdr plugin installs: herdr plugin config-dir herdr-discord-bridge). Core was not started." >&2
+    # Filesystem-only hint at Herdr's plugin config directory; no herdr call and
+    # no silent switch to that config (SPEC: never pick another config file).
+    plugin_config_dir="$HOME/.config/herdr/plugins/config/herdr-discord-bridge"
+    plugin_state_dir="$HOME/.local/state/herdr/plugins/herdr-discord-bridge"
+    if [[ "$plugin_config_dir" != "$bridge_config_dir" && -f "$plugin_config_dir/config.json" ]]; then
+      echo "Found Herdr plugin config: $plugin_config_dir/config.json" >&2
+      rerun="HERDR_PLUGIN_CONFIG_DIR=$plugin_config_dir"
+      [[ -d "$plugin_state_dir" ]] && rerun+=" HERDR_PLUGIN_STATE_DIR=$plugin_state_dir"
+      echo "Rerun with: $rerun scripts/run.sh --core${mode:+ $mode}" >&2
+    fi
     exit 1
   fi
   if [[ "$file_has_token" != yes && ( -n "${HERDR_DISCORD_BOT_TOKEN:-}" || -n "${DISCORD_BOT_TOKEN:-}" ) ]]; then

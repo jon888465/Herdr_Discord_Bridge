@@ -22,6 +22,7 @@ function runFixture(
     fileToken?: string;
     customDirs?: boolean;
     noConfigFile?: boolean;
+    pluginInstall?: "config" | "config+state";
   } = {},
 ) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "run backend "));
@@ -56,6 +57,22 @@ function runFixture(
             discord: { botToken: settings.fileToken ?? "" },
           }),
       );
+    if (settings.pluginInstall) {
+      const pluginConfigDir = path.join(
+        directory,
+        ".config/herdr/plugins/config/herdr-discord-bridge",
+      );
+      fs.mkdirSync(pluginConfigDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(pluginConfigDir, "config.json"),
+        JSON.stringify({ discord: { botToken: "fake-file-secret" } }),
+      );
+      if (settings.pluginInstall === "config+state")
+        fs.mkdirSync(
+          path.join(directory, ".local/state/herdr/plugins/herdr-discord-bridge"),
+          { recursive: true },
+        );
+    }
     const dump = path.join(directory, "environment.json");
     fs.writeFileSync(
       path.join(bin, "node"),
@@ -155,6 +172,8 @@ process.exit(99);
       stderr: result.stderr,
       calls,
       project: fs.realpathSync(directory),
+      // run.sh reads $HOME as given (not canonicalized; differs on macOS /var).
+      home: directory,
       configDir,
       stateDir,
       childEnv: fs.existsSync(dump)
@@ -315,9 +334,44 @@ for (const [args, customDirs] of [
       result.stderr,
     );
     assert.match(result.stderr, /HERDR_PLUGIN_CONFIG_DIR/);
+    assert.doesNotMatch(result.stderr, /Found Herdr plugin config/);
     assert.deepEqual(result.calls, []);
     assert.equal(result.childEnv, undefined);
     assert.doesNotMatch(result.stderr, /fake-env-secret/);
+  });
+for (const [pluginInstall, args] of [
+  ["config", ["--core"]],
+  ["config+state", ["--core", "-r"]],
+] as const)
+  test(`Core 設定檔不存在但 Herdr plugin 目錄有設定時印出該路徑與重跑指令 ${pluginInstall} ${args.join(" ")}`, () => {
+    const result = runFixture([...args], "running", true, {
+      noConfigFile: true,
+      pluginInstall,
+    });
+    assert.equal(result.status, 1);
+    const home = result.home;
+    const pluginConfigDir = `${home}/.config/herdr/plugins/config/herdr-discord-bridge`;
+    const pluginStateDir = `${home}/.local/state/herdr/plugins/herdr-discord-bridge`;
+    assert.match(result.stderr, /Core bridge config not found: /);
+    assert.ok(
+      result.stderr.includes(`Found Herdr plugin config: ${pluginConfigDir}/config.json`),
+      result.stderr,
+    );
+    const rerun = result.stderr
+      .split("\n")
+      .find((line) => line.startsWith("Rerun with: "));
+    assert.ok(rerun, result.stderr);
+    assert.ok(rerun.includes(`HERDR_PLUGIN_CONFIG_DIR=${pluginConfigDir} `), rerun);
+    assert.equal(
+      rerun.includes(`HERDR_PLUGIN_STATE_DIR=${pluginStateDir} `),
+      pluginInstall === "config+state",
+      rerun,
+    );
+    assert.ok(rerun.endsWith(` scripts/run.sh ${args.join(" ")}`), rerun);
+    // Only a hint: the plugin config is not read, no CLI runs, no token leaks.
+    assert.deepEqual(result.calls, []);
+    assert.equal(result.childEnv, undefined);
+    assert.doesNotMatch(result.stderr, /fake-file-secret/);
   });
 test("Core 未 build 時提示 -r 且零 CLI 呼叫", () => {
   const result = runFixture(["--core"], "running", false);
