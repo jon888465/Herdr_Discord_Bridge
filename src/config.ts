@@ -1,3 +1,5 @@
+import type { RuntimeKind } from "./runtime/types.js";
+import { resolveRuntimeKind } from "./runtime/select.js";
 import fs from "node:fs";
 import { validateProfiles, type AgentProfile } from "./agent-pool.js";
 import os from "node:os";
@@ -25,6 +27,10 @@ export interface DiscordConfig {
 }
 
 export interface Config {
+  /** HERDR_BRIDGE_RUNTIME 優先；未指定維持 Herdr。 */
+  runtime?: RuntimeKind;
+  /** Core 輸入操作的 terminal address 白名單；空清單僅允許讀取。 */
+  coreAllowedTerminals: string[];
   agentProfiles?: AgentProfile[];
   /** 使用者明列的本機目錄（絕對路徑）：agy 在這些目錄啟動時，bridge 確保它在 agy 的信任清單內（ISSUE-113）。 */
   agyTrustedDirectories: string[];
@@ -50,6 +56,7 @@ export interface Config {
 }
 
 const DEFAULTS: Config = {
+  coreAllowedTerminals: [],
   agyTrustedDirectories: [],
   machines: [],
   hookTransport: { ...DEFAULT_HOOK_TRANSPORT },
@@ -220,6 +227,8 @@ export function loadConfig(): Config {
   const cfg: Config = {
     ...DEFAULTS,
     ...source,
+    runtime: resolveRuntimeKind({ env, config: source }),
+    coreAllowedTerminals: stringArray(source.coreAllowedTerminals, []),
     agentProfiles: validateProfiles(source.agentProfiles),
     agyTrustedDirectories: stringArray(source.agyTrustedDirectories, []),
     machines: validateMachines(source.machines),
