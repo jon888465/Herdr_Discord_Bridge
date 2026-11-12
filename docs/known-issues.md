@@ -1,5 +1,15 @@
 # Known Issues
 
+## ISSUE-155：`hook sessions are ignored for local panes, other panes, stale events…` 在 macOS CI 偶發失敗（測試間 hook 事件殘留）
+
+更新日期：2026-11-12。狀態：已修正、待驗收（CI 觀察）。
+
+**使用者可見症狀：**PR #237（ISSUE-148，與該測試無關）的 CI `Full tests (macos-latest, Node 22)` 失敗：`test/team-turn.test.ts` 的 ISSUE-154 測試「別的 pane」斷言預期 `session` 為 `undefined`、實際 `{kind: "id", value: "hook-s1"}`；ubuntu 通過。同日本機全套有一次沒抓到名稱的 1 個失敗，同一份程式重跑通過，推測為同一個。
+
+**根因（由程式與 CI 輸出推得，未在本機重現）：**該斷言沿用 `remote`（`pod:w8:p1`），前一個測試已在這個 pane 記下 `hook-s1`；`HookEventStore.stopForPane` 以 `found.at >= since` 判斷「本回合」，兩個測試落在同一毫秒時前一個事件被當成本回合。非 bridge 程式的錯誤（實際環境 `since` 在送 prompt 之前取得，事件在之後才到）。
+
+**修正：**該斷言改用沒被前面測試記過 hook 的 pane（`pod:w8:p4`）。CI 是否不再偶發待觀察。
+
 ## ISSUE-154：task 內 remote review 在 pod 上被判 inconclusive（reviewer session 身分未知）；取消後 task 卡在 cancelling
 
 更新日期：2026-11-12。狀態：已驗收（閘門通過路徑，2026-11-12，本機 macOS，bridge 為 main `cd54dc4`（含 #233）重啟後的程序；其餘子問題未解，見「未驗證」與「下一步」）。先前：待調查（現象重現兩次、根因為推論）。
@@ -270,7 +280,7 @@ r7-f2：Core terminal 不繼承 caller shell。現 run 的 env 前綴傳 HERDR_B
 
 ## ISSUE-148：卡片通知在收件 Agent 忙碌時排隊，事件過了數小時才一則一則送達，收件 Agent 被已處理完的舊事件佔住
 
-更新日期：2026-11-11。狀態：待調查（現象與機制已確認；沒有修正，尚未決定要不要改設計）。
+更新日期：2026-11-12。狀態：已修正、待驗收（原始碼與自動化檢查完成，**未實機驗收**）。先前：待調查（機制已確認）。
 
 **使用者可見症狀：**卡片 `REQ-20261111-agent-first-run-prompts`（`notify: agent:w5D:p1:…:claude`，PR #212 已於 09:40:28Z 合併）與 `REQ-20261111-pretrust-live`（PR #214 已合併）的事件，在合併後數小時才一則一則送進 `w5D:p1`：`review_verdict`、`ci_result`、`autopick_picked`、`merged` 等。bridge console 顯示該 pane 每次回合結束（`hook Stop`）後約 5 到 10 秒就有下一則 `agent.prompt`（`chars=129`／`144`）。例：`pretrust-live` 12:56:49Z 排隊的 `autopick_picked`，到 15:25:08Z 才「通知已送出」。
 
@@ -283,6 +293,8 @@ r7-f2：Core terminal 不繼承 caller shell。現 run 的 env 前綴傳 HERDR_B
 **影響：**每則過期通知讓收件 Agent 多跑一回合（花額度），也可能誤導 Agent 以為有新事件；不造成實際動作。
 
 **處理：**Agent 逐則簡短回覆「舊事件、不需處理」（每回一則，下一則才會送進來）；沒有修正。使用者側可行的緩解：卡片的 `notify` 不指向長時間工作中的互動 Agent pane。
+
+**修正（2026-11-12，已修正、待驗收）：**`src/card-notify.ts`：Agent 來源的通知，**進度類事件**（`autopick_picked`、`pr_opened`、`review_verdict`、`ci_result`）從事件時間算起超過 30 分鐘還沒送出就放棄，卡片紀錄寫 `放棄通知：進度事件已過期`，不再叫醒收件 Agent。需要人看的事件（`failed`、`autopick_stopped`、`merge_blocked`、`loop_stopped`、`merged`）不過期，照舊排隊到送出。Discord 來源不受影響。測試：`test/card-notify.test.ts` 新增 2 項（超過 30 分鐘的進度事件放棄、failed 照送；29 分鐘仍送）。本機 `npm run check`（2026-11-12）tests 1933、pass 1932、fail 0、skipped 1；lint 通過。**限制：**30 分鐘是固定值、不可設定；沒有合併多則通知，過期前排隊的進度事件仍會一則一則送；bridge 重啟後尚未送出的舊進度事件也會被判過期而放棄。**未驗證：**實機。
 
 **未驗證／下一步：**排隊中的通知有沒有上限、過期或合併機制（目前看起來沒有）；是否要在 PR 已合併或卡片已 `done` 後丟掉尚未送出的舊通知，或把同一張卡排隊的多則通知合併成一則；是否要做成需求卡。
 

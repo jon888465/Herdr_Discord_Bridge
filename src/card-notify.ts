@@ -84,6 +84,11 @@ const EVENTS = new Set([
   "loop_stopped",
 ]);
 
+/** 只告知進度、過期就沒有行動價值的事件；failed、autopick_stopped、merge_blocked、loop_stopped、merged 需要人看，不在此列（ISSUE-148）。 */
+const PROGRESS_EVENTS = new Set(["autopick_picked", "pr_opened", "review_verdict", "ci_result"]);
+/** Agent 通知超過這個時間還沒送出（收件 Agent 一直忙碌），進度類事件就放棄，不佔用收件 Agent 的回合。 */
+const AGENT_PROGRESS_STALE_MS = 30 * 60 * 1000;
+
 const MAX_WRITE_FAILURES = 3;
 const MAX_DISCORD_ATTEMPTS = 3;
 
@@ -325,6 +330,14 @@ export function createCardNotifier(deps: NotifyDeps) {
             continue;
           }
 
+          // 進度類事件排隊太久就過期：舊事件不再叫醒收件 Agent（ISSUE-148）。
+          if (
+            PROGRESS_EVENTS.has(event.event) &&
+            Date.parse(deps.now()) - Date.parse(event.time) > AGENT_PROGRESS_STALE_MS
+          ) {
+            finish("放棄通知：進度事件已過期");
+            continue;
+          }
           if (usedPanes.has(target.pane)) continue;
           try {
             // 送出前讀兩次，確認 pane 仍在、身分一致、Agent 閒置；工作中或等待提示就排隊，不打斷。

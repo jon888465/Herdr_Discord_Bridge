@@ -342,12 +342,14 @@ test("hook sessions are ignored for local panes, other panes, stale events, or w
     undefined,
   );
   // 事件屬於別的 pane。
+  // 用沒被前面測試記過 hook 的 pane：同一毫秒內 `found.at >= since` 會把前一個測試的事件當成本回合（macOS CI 偶發，ISSUE-155）。
+  const otherPane = { ...remote, pane_id: "pod:w8:p4" } as AgentRecord;
   assert.equal(
     (
       await runTeamTurn(
-        remote,
+        otherPane,
         "work",
-        stopFor("pod:w8:p9", "hook-other", fakePort([{ ...remote }])),
+        stopFor("pod:w8:p9", "hook-other", fakePort([{ ...otherPane }])),
         2_000,
         20,
         observing,

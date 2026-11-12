@@ -122,6 +122,29 @@ test("Agent queue and restart", async (t) => {
   assert.equal(s.discord.length, 0);
 });
 
+test("ISSUE-148 排隊超過 30 分鐘的進度事件放棄；需要人看的事件照送", async (t) => {
+  const s = setup(t, "agent:w4:p2:term:codex");
+  s.store.appendLog(id, [{ event: "failed", time: "2026-11-07T00:00:02Z", eventId: "fail-1", text: "x" }]);
+  s.setPane({ ...identity, agent_status: "working" });
+  await s.notifier.tick();
+  assert.equal(s.agent.length, 0);
+  s.setPane(identity);
+  const later = createCardNotifier({ ...s.deps, now: () => "2026-11-07T01:00:00Z" });
+  await later.tick();
+  assert.equal(s.agent.length, 1);
+  assert.match(s.agent[0][1], /failed/);
+  assert.match(s.logs.join(" "), /進度事件已過期/);
+  await later.tick();
+  assert.equal(s.agent.length, 1);
+});
+
+test("ISSUE-148 未超過 30 分鐘的進度事件照送", async (t) => {
+  const s = setup(t, "agent:w4:p2:term:codex");
+  await createCardNotifier({ ...s.deps, now: () => "2026-11-07T00:29:00Z" }).tick();
+  assert.equal(s.agent.length, 1);
+  assert.match(s.agent[0][1], /pr_opened/);
+});
+
 test("identity mismatch abandons", async (t) => {
   for (const pane of [
     undefined,
