@@ -205,7 +205,7 @@ r7-f2：Core terminal 不繼承 caller shell。現 run 的 env 前綴傳 HERDR_B
 
 ## ISSUE-145：單一指派的 30 分鐘等待上限，讓已完成的 Worker 成果被 bridge 判逾時丟掉
 
-更新日期：2026-11-11。狀態：待調查（現象已重現一次、根因為讀碼與時間序推論；沒有修正）。
+更新日期：2026-11-12。狀態：已修正、待驗收（部分）：`teamTurnTimeoutMs` 預設由 30 分鐘改為 1 小時（`src/config.ts`、`config.example.jsonc`、SPEC、README.zh-TW、team-orchestration-spec、`test/config-team-turn-timeout.test.ts`）。**仍未處理：**逾時之後才到達的回報沒有被採用的路徑（第 1 次的主因），逾時仍會讓 task 標成 `blocked`；上限放寬只降低再發生的機率。使用者本機 config 已在 2026-11-12 設為 3600000 並重啟載入，但 1 小時上限尚未在實機驗證。
 
 **使用者可見症狀：**`REQ-20261111-remote-agy-role` 的 implement Worker（claude opus，`implement-remote-reviewer`）從 02:15:30Z 開始實作，**02:45:32Z bridge 判定等待逾時**（task 事件 `Assignment implement-remote-reviewer 等待逾時（已等待 30 分 2 秒，上限 30 分鐘）`，task 標成 `blocked`，Lead 的彙整、task 內 review、verify 都沒有進行）；但 Worker 的 pane 顯示它在 **02:46（31 分 14 秒）完成並送出完整回報**（`BRIDGE_BEGIN`／`BRIDGE_END` 區塊，含 `codingResult` 與 18 個檔案清單）。bridge 已不收這份回報，成果只留在卡片 worktree（未 commit 的 18 個檔案），由人工接手驗證與提交。
 

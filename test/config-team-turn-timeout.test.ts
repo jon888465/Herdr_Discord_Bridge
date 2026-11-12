@@ -20,16 +20,16 @@ function withConfig(json: string): ReturnType<typeof loadConfig> {
   }
 }
 
-test("ISSUE-124 teamTurnTimeoutMs 預設 30 分鐘，approvalTimeoutMs 維持 15 分鐘", () => {
+test("ISSUE-124 teamTurnTimeoutMs 預設 1 小時，approvalTimeoutMs 維持 15 分鐘", () => {
   const config = withConfig("{}");
-  assert.equal(config.teamTurnTimeoutMs, 1800000);
+  assert.equal(config.teamTurnTimeoutMs, 3600000);
   assert.equal(config.approvalTimeoutMs, 900000);
 });
 
 test("ISSUE-124 teamTurnTimeoutMs 無效值回到預設且不拋出", () => {
   for (const value of ["-5", "0", '"abc"', "null", '"-1"', "{}"]) {
     const config = withConfig(`{"teamTurnTimeoutMs": ${value}}`);
-    assert.equal(config.teamTurnTimeoutMs, 1800000, value);
+    assert.equal(config.teamTurnTimeoutMs, 3600000, value);
   }
 });
 
@@ -39,7 +39,7 @@ test("ISSUE-124 物件值（toString 不是函式）回到預設，不會讓 loa
     const config = withConfig(
       `{"teamTurnTimeoutMs": ${value}, "approvalTimeoutMs": ${value}}`,
     );
-    assert.equal(config.teamTurnTimeoutMs, 1800000, value);
+    assert.equal(config.teamTurnTimeoutMs, 3600000, value);
     assert.equal(config.approvalTimeoutMs, 900000, value);
   }
 });
@@ -51,7 +51,7 @@ test("ISSUE-124 Team 回合上限取自 teamTurnTimeoutMs，與 approvalTimeoutM
   assert.equal(teamTaskTimeoutMs(a), 4000);
   assert.equal(a.approvalTimeoutMs, 9000);
   const b = withConfig('{"approvalTimeoutMs": 5000}');
-  assert.equal(teamTaskTimeoutMs(b), 1800000);
+  assert.equal(teamTaskTimeoutMs(b), 3600000);
   assert.equal(b.approvalTimeoutMs, 5000);
   const c = withConfig('{"teamTurnTimeoutMs": 6000}');
   assert.equal(teamTaskTimeoutMs(c), 6000);

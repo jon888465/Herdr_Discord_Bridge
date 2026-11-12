@@ -66,7 +66,7 @@ const DEFAULTS: Config = {
   reconnectBaseMs: 250,
   // 批准提示的有效期：15 分鐘（ISSUE-124 之前也被 Team 回合共用，現已改用 teamTurnTimeoutMs）。
   approvalTimeoutMs: 900000,
-  teamTurnTimeoutMs: 1800000,
+  teamTurnTimeoutMs: 3600000, // 1 小時（ISSUE-145：原 30 分鐘會讓稍晚完成的 Worker 被判逾時）
   outputLines: 500,
   handoffLines: 40,
   handoffMaxChars: 6000,

@@ -28,7 +28,7 @@ herdr plugin config-dir herdr-discord-bridge
 cp config.example.jsonc <confiig-dr>/config.json
 ```
 
-在 `config.json` 填入 Discord bot token，以及明確的 guild/channel/user allowlist。也可以使用 `HERDR_DISCORD_BOT_TOKEN` 或 `DISCORD_BOT_TOKEN` 環境變數。不要把真實設定檔或 token commit 進 Git。等待上限有兩個獨立設定（ISSUE-124）：`approvalTimeoutMs`（預設 900000 毫秒）只管批准提示的有效期；`teamTurnTimeoutMs`（預設 1800000 毫秒）是 Team 任務每個回合的等待上限，大卡跑不完請調它。必須在 Discord Developer Portal 開啟 Message Content Intent。若要讓沒有其他 bot 在線的已綁定 thread 免 mention，另需開啟 Server Members Intent 與 Presence Intent，並設定 `discord.soloThreadNoMention: true`。
+在 `config.json` 填入 Discord bot token，以及明確的 guild/channel/user allowlist。也可以使用 `HERDR_DISCORD_BOT_TOKEN` 或 `DISCORD_BOT_TOKEN` 環境變數。不要把真實設定檔或 token commit 進 Git。等待上限有兩個獨立設定（ISSUE-124）：`approvalTimeoutMs`（預設 900000 毫秒）只管批准提示的有效期；`teamTurnTimeoutMs`（預設 3600000 毫秒（1 小時））是 Team 任務每個回合的等待上限，大卡跑不完請調它。必須在 Discord Developer Portal 開啟 Message Content Intent。若要讓沒有其他 bot 在線的已綁定 thread 免 mention，另需開啟 Server Members Intent 與 Presence Intent，並設定 `discord.soloThreadNoMention: true`。
 
 啟動 bridge：
 
