@@ -2,7 +2,7 @@
 
 ## ISSUE-152：Herdr Desktop（Linux X11＋ibus）輸入中文變成亂碼
 
-更新日期：2026-11-12。狀態：已修正、待驗收（專用 XIM 手動 workaround 已由使用者驗收；新增 launcher 已通過隔離測試，真實由 launcher 開窗後的中文輸入待驗收；上游原生轉碼缺口仍存在）。
+更新日期：2026-11-12。狀態：已驗收（2026-11-12，本機 Linux X11＋ibus／Herdr Desktop 0.1.15，使用者確認修正後 launcher 可輸入注音；範圍為專用 XIM workaround 與失效 owner 修正，非上游原生解碼或 macOS 實機驗收）。
 
 **使用者可見症狀／預期行為：**在 Herdr Desktop 的 terminal pane（Claude Code 輸入列）用 ibus 輸入中文，畫面出現 `herdr core%/2◆◆big5-◆Ұ◆%/2◆◆bi` 之類的亂碼（使用者截圖 `/media/sf_tmp/3.png`，2026-11-12）。預期輸入的中文原樣進入 terminal。
 
@@ -37,6 +37,12 @@
 **提交前驗證（2026-11-12）：**本輪 `npm run check` 的 typecheck／build 通過；預設並行全套曾在本機高負載下出現既有 `card-fix-flow`／`card-review-flow` 啟動等待測試逾時失敗，跑至約 test 1198 後停止本輪 runner，沒有全套最終總結，不視為全套通過。未改動這兩個測試或其實作；`node --test --test-concurrency=1 dist/test/herdr-app-launcher.test.js dist/test/card-fix-flow.test.js dist/test/card-review-flow.test.js` 重跑 **43/43 pass、0 fail、0 cancelled**。`npm run lint`、shell syntax、diff check 通過。之後使用者授權 commit／push／PR；runtime 重啟／部署未授權，原生解碼缺口仍在，launcher 實機開窗驗收仍待完成。
 
 **README 補正與 CI（2026-11-12）：**使用者指出少了 `env LC_ALL=en_US.UTF-8 /usr/libexec/ibus-x11 --server-name=ibus-herdr`。核對確認 launcher 已有 `nohup env LC_ALL=en_US.UTF-8 "$ibus_x11" --server-name=ibus-herdr`（路徑自動尋找），缺的是 README 的完整手動對照指令。中英文 README 補上先啟動專用 XIM、另個終端機以 XMODIFIERS 啟動 Desktop 的兩步，說明腳本自動完成、已存在則重用；未改執行行為或啟動第二個服務。PR #223 原程式提交 `c7223dc` 的 run `43148578834` 已在 Ubuntu／macOS Node 22 全部通過；不將 CI 等同 launcher 實機中文輸入驗收。本輪純文件補正，檢查命令、內容與 `git diff --check`，不重跑程式測試。
+
+**launcher 實機驗收失敗、重新開啟（2026-11-12 03:43:22Z）：**使用者執行 `./scripts/run-herdr-app.sh` 後回報「打不出中文注音」，伴隨 portal Settings 介面不存在及 EGL DRI3 警告；不得沿用待驗收的修正成功假設。唯讀確認：Desktop PID 84094 的 XMODIFIERS 為 @im=ibus-herdr、XDG_SESSION_TYPE=x11；只有系統 ibus-x11 --kill-daemon，專用 ibus-herdr 程序不在，ibus engine 為 chewing。root XIM_SERVERS 仍列 @server=ibus-herdr，但 Xlib XGetSelectionOwner 對該 atom 回 0x0；runtime 下 launcher log 不存在。已確認根因：launcher 只讀 root 的宣告清單，未核對實際 selection owner，誤把已消失的專用 XIM 當成就緒並啟動 Desktop。專用程序先前為何退出尚未確認；portal／DRI3 警告與此輸入失敗的因果未確認。修正將用 live selection owner 作 readiness，讀取失敗仍 fail closed；新增 stale registration 回歸測試。未送按鍵、未重啟／關閉 Desktop、Core、bridge 或全域 ibus，未改私人設定。上方手動方案成功與 CI 歷史保留，不代表這次 launcher 實機驗收通過。
+
+**stale XIM 修正與回歸（2026-11-12）：**先在假 CLI fixture 加入「root XIM_SERVERS 還有名字、實際服務已不存在」，`npm run build && node --test dist/test/herdr-app-launcher.test.js` 為 4 pass／1 fail；改用 Python 3 ctypes 的 XOpenDisplay／XInternAtom／XGetSelectionOwner，owner 非零才重用、零則建立、查詢失敗拒絕後，同命令為 **5/5 pass、0 fail**。`bash -n scripts/run-herdr-app.sh`、build、lint（222 TypeScript files）、`git diff --check` 通過。README／SPEC／CONTEXT 同步 Python 3／libX11 依賴與真實 owner 契約。未執行新 launcher 開窗或啟動新的真實 XIM，以免影響目前視窗；使用者須先關閉失效輸入連線的 Desktop，再用修正腳本啟動並測注音。先前成功方案與 CI 不當成本次新實機驗收證據。全套未在本次重跑，未 commit／push／部署。
+
+**launcher 第二次實機驗收（2026-11-12）：**使用者在收到關閉原 Desktop 視窗、再執行修正後 `./scripts/run-herdr-app.sh` 的步驟後回覆「ok了, commit push」，確認本機注音輸入恢復。此證據取代前一段「實機重驗待完成」，保留 03:43:22Z 首次驗收失敗與 red→green 歷史。5/5 回歸測試、build、lint、shell syntax／diff check 證據見上；本次未重跑全套，macOS／Wayland 中文輸入與上游原生 decoder 尚未驗收或修正。使用者授權提交與推送；未自動重啟／部署 bridge、Core 或全域 ibus。
 
 ## ISSUE-151：Herdr Core runtime 支援
 
@@ -805,7 +811,7 @@ Review3 文件修正（2026-11-09，f4）：SPEC 的 PR merge 自動清理段落
 
 | ID        | 問題                                                                            | 狀態             | 下一步                                                                                                                                    |
 | --------- | ------------------------------------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| ISSUE-152 | Herdr Desktop（Linux X11＋ibus）輸入中文變成亂碼 | 已修正、待驗收 | 使用者確認專用 en_US.UTF-8 ibus-herdr 手動方案有效；新增 run-herdr-app.sh，launcher 中文開窗待驗收；macOS 不走此 X11 路徑、未實測 |
+| ISSUE-152 | Herdr Desktop（Linux X11＋ibus）輸入中文變成亂碼 | 已驗收 | 手動方案有效；launcher 實機失敗後改查 live XIM selection owner（殘留名字不算就緒），5/5 回歸通過，使用者確認 launcher 注音恢復（2026-11-12）；macOS 未實測 |
 | ISSUE-151 | Herdr Core runtime 支援 | 已修正、待驗收 | 2026-11-12 09:57 本機 Linux 真實 `run.sh --core` 啟動成功（t6 live、持鎖、連上 Discord gateway），舊 Herdr bridge 已停；待使用者在 Discord 送 `/herdr status`／`agents`／`read` 驗證往返，coreAllowedTerminals 仍空；完整測試套件在高負載下有逾時失敗，待閒置重跑 |
 | ISSUE-001 | Discord reply 未觸發 bridge                                                     | 重新開啟、待驗收 | 重啟後在 mapped thread 回覆 bot                                                                                                           |
 | ISSUE-002 | Discord 圖片未交付 Agent                                                        | 已修正、待驗收   | 重啟後以副檔名與內容不符（如 PNG/JPEG 互換）之圖片驗收本機交付                                                                            |

@@ -131,7 +131,7 @@ Herdr Desktop 0.1.15 在 Linux X11＋ibus、zh_TW.UTF-8 環境，直接輸入中
 ./scripts/run-herdr-app.sh
 ```
 
-若 Desktop 已用原本的 ibus 開啟，先關閉該視窗再執行。腳本重用已登記的 `ibus-herdr`，沒有才以 `LC_ALL=en_US.UTF-8` 啟動；須有該 locale、ibus-x11、xprop、flock 與正常的 XDG_RUNTIME_DIR。啟動有界等待並序列化，log 在 `$XDG_RUNTIME_DIR/herdr-ibus-x11.log`；專用 XIM 保留供後續開窗使用，不停止原 ibus、不改全域語系或私人設定。若外部同名 XIM 使用不同 locale，腳本不能驗證其編碼環境；請勿用同名啟動其他服務。
+若 Desktop 已用原本的 ibus 開啟，先關閉該視窗再執行。腳本查核 X11 selection owner，重用仍存活的 `ibus-herdr`，沒有才以 `LC_ALL=en_US.UTF-8` 啟動；須有該 locale、ibus-x11、Python 3／libX11、flock 與正常的 XDG_RUNTIME_DIR。啟動有界等待並序列化，log 在 `$XDG_RUNTIME_DIR/herdr-ibus-x11.log`；專用 XIM 保留供後續開窗使用，不停止原 ibus、不改全域語系或私人設定。若外部同名 XIM 使用不同 locale，腳本不能驗證其編碼環境；請勿用同名啟動其他服務。
 
 腳本會自動完成以下兩步，不需要事先手動啟動 ibus-x11。若要手動對照，先關閉原 Desktop 視窗，在一個終端機執行並保持它開著：
 
@@ -146,6 +146,8 @@ env XMODIFIERS=@im=ibus-herdr herdr-app
 ```
 
 上面是本機 Ubuntu 已驗證的路徑；腳本另會尋找 PATH 或 `/usr/lib/ibus/ibus-x11`。已有 `ibus-herdr` 時腳本會重用，避免重複啟動。
+
+2026-11-12 launcher 首次實機驗收發現：專用 XIM 退出後 root 的 `XIM_SERVERS` 可能仍留有名字，舊腳本會誤判可重用，導致完全無法輸入注音。現改查實際 selection owner，owner 為 0 時重新啟動。2026-11-12 使用者已確認修正後 launcher 可輸入注音；若看見 portal Settings／DRI3 警告，不能僅憑這些訊息認定是輸入法根因。
 
 `./scripts/run.sh --core` 仍負責啟動 Discord bridge；它無法修正已開啟 Desktop 的輸入法環境。兩支腳本按需求分別執行，launcher 不啟動／重啟 bridge。
 
