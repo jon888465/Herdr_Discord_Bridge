@@ -228,7 +228,7 @@ r7-f2：Core terminal 不繼承 caller shell。現 run 的 env 前綴傳 HERDR_B
 
 ## ISSUE-147：task 內本機 agy Worker 沒有收到第一個 prompt，Herdr 回 ok 但 pane 是空的，task 一直等到逾時
 
-更新日期：2026-11-11。狀態：待調查（現象已觀察一次；根因未確認）。
+更新日期：2026-11-12。狀態：待調查（現象已觀察；根因未確認；2026-11-12 兩種重現嘗試共 30 次都沒有重現，見「重現嘗試」）。
 
 **使用者可見症狀：**`REQ-20261111-remote-reviewer-live` 的 task 內 review（`team-review-card-file`，本機 agy Worker，pane `w6B:p4`）：07:03:37Z `role_assigned`、07:03:38.080Z `turn_dispatched`，bridge console 印出 `agent.prompt prompt+wait target=w6B:p4 chars=7266 ts=1794380618480`，**沒有任何錯誤**。之後 agy 的 pane 一直是剛啟動的歡迎畫面、輸入框是空的，Herdr 的 `agent explain` 說 `state: idle`，沒有 `hook Stop`；task 的最後一個事件就是那次 `turn_dispatched`，到 07:14:48Z 仍沒有變化（約 11 分鐘）。bridge 會等到單一回合上限（30 分鐘）才會判逾時。
 
@@ -241,6 +241,26 @@ r7-f2：Core terminal 不繼承 caller shell。現 run 的 env 前綴傳 HERDR_B
 **處理：**Agent 以 `wk use w6B` 切到卡片 workspace，用 `team cancel` 取消該 task（07:15:54Z），接手 commit、開 PR #210；task 內的 review 與 verify 沒有走完。
 
 **未驗證／下一步：**重跑能否重現；agy 啟動後多久才能收 prompt；bridge 對 `prompt+wait` 沒有任何「pane 內容沒有變化」的偵測。
+
+**重現嘗試（2026-11-12，本機 macOS，bridge 為 main `edbcb49`，agy 1.5.x，Gemini 3.8 Flash）：**
+- **herdr 命令列單獨重現（腳本 `repro147.py`：開臨時 workspace、`herdr agent start` agy、立刻 `herdr agent prompt --wait`、看畫面是否出現回覆）：**基本 6 次、8561 字元多行 prompt 4 次（H1）、全新目錄且啟動前一刻才寫入 agy 信任設定 4 次（H2）、agy 放在多次分割的小 pane 3 次（H4），共 17 次**全部收到**。
+- **用 bridge 本身（腳本 `bridge147b.py`：每輪新 workspace＋agy Lead，console `team ask` 讓 bridge 第一次啟動本機 agy Worker 並送第一個 prompt，以 task 事件判定）：**8 輪**全部收到**（Worker 回合約 40 到 85 秒完成）。限制：cwd 是主 repo（已在信任清單），沒有走卡片 worktree 與 bridge 的 `agy_worktree_trust` 預先信任寫入。
+- **被推翻的假設：**H1 大型多行 prompt 被吞、H2 新目錄加剛寫入的信任、H4 小 pane。**未測：**卡片流程的 linked worktree＋bridge 預先信任（兩次事故都在這條路徑）、多個 Worker／agent 同時啟動、task 在 Lead 與 Worker 並行時的負載。
+- **試驗中的誤判（已更正）：**第一版 `bridge147.py` 以「前次 console 內容」切出新增輸出，console 捲動後會把舊的 `hook Stop` 當成本輪的，6 輪『收到』不算數；那些 task 其實都在 Worker 派出前以 `assignment_failed` 結束（見 ISSUE-156）。
+
+## ISSUE-156：直接關閉 bridge 開的 Worker pane 後，該 workspace 的 agent 池卡在「startup uncertain」，無法用 select／add 清除
+
+更新日期：2026-11-12。狀態：待調查（現象已觀察一次；是否為設計取捨未確認）。
+
+**使用者可見症狀：**ISSUE-147 重現時，我以 `herdr pane close` 關掉 bridge 在 `w5D` 開的 agy Worker（`w5D:p4`）後再 `team ask`：assignment 立刻 `failed`，原因「previous startup delivery is uncertain; inspect and explicitly bind a live Agent before retrying」，Team Task 失敗（synthesis is partial）；`team pool` 顯示 `[x] agy · agy · startup uncertain; bind after inspection`，`team select agy off`／`on`、`team remove profile:agy`／`team add profile:agy` 都清不掉。
+
+**預期行為：**Worker pane 已不存在時，池應該能重新啟動一個新的 Worker（或至少有明確指令清除）。
+
+**根因：**未確認。推測：綁定記錄仍指向已關閉的 pane，被判為「啟動結果不明」，設計上要求人工 `team bind` 一個存活的 pane。
+
+**處理：**2026-11-12 繞過：每輪改用全新 workspace。`w5D` 的池仍是卡住狀態（`agent-pool.json`）；未驗證重啟 bridge 是否會清掉。
+
+**未驗證／下一步：**確認是否設計取捨；至少提供清除指令（例如 `team unbind`）或在 pane 已不存在時自動視為未啟動。
 
 ## ISSUE-146：task 沒有完成、PR 由人工接手 merge 後，卡片永遠停在 in_progress，autopick Lead 的 workspace 不會被收尾
 
