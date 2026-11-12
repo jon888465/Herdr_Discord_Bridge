@@ -1,5 +1,15 @@
 # Known Issues
 
+## ISSUE-155：`hook sessions are ignored for local panes, other panes, stale events…` 在 macOS CI 偶發失敗（測試間 hook 事件殘留）
+
+更新日期：2026-11-12。狀態：已修正、待驗收（CI 觀察）。
+
+**使用者可見症狀：**PR #237（ISSUE-148，與該測試無關）的 CI `Full tests (macos-latest, Node 22)` 失敗：`test/team-turn.test.ts` 的 ISSUE-154 測試「別的 pane」斷言預期 `session` 為 `undefined`、實際 `{kind: "id", value: "hook-s1"}`；ubuntu 通過。同日本機全套有一次沒抓到名稱的 1 個失敗，同一份程式重跑通過，推測為同一個。
+
+**根因（由程式與 CI 輸出推得，未在本機重現）：**該斷言沿用 `remote`（`pod:w8:p1`），前一個測試已在這個 pane 記下 `hook-s1`；`HookEventStore.stopForPane` 以 `found.at >= since` 判斷「本回合」，兩個測試落在同一毫秒時前一個事件被當成本回合。非 bridge 程式的錯誤（實際環境 `since` 在送 prompt 之前取得，事件在之後才到）。
+
+**修正：**該斷言改用沒被前面測試記過 hook 的 pane（`pod:w8:p4`）。CI 是否不再偶發待觀察。
+
 ## ISSUE-154：task 內 remote review 在 pod 上被判 inconclusive（reviewer session 身分未知）；取消後 task 卡在 cancelling
 
 更新日期：2026-11-12。狀態：已驗收（閘門通過路徑，2026-11-12，本機 macOS，bridge 為 main `cd54dc4`（含 #233）重啟後的程序；其餘子問題未解，見「未驗證」與「下一步」）。先前：待調查（現象重現兩次、根因為推論）。
