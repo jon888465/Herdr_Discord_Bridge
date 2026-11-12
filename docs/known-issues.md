@@ -1,5 +1,23 @@
 # Known Issues
 
+## ISSUE-154：task 內 remote review 在 pod 上被判 inconclusive（reviewer session 身分未知）；取消後 task 卡在 cancelling
+
+更新日期：2026-11-12。狀態：待調查（現象已重現兩次；根因為推論；沒有修正）。
+
+**使用者可見症狀：**實機驗收 `REQ-20261112-remote-in-task-live`／`live2`（`lead: agy`，`roles: {implement: local:claude:opus, verify: local:claude:opus, reviewer: agy-pod:agy}`，bridge 為 main `3d8b07f`，含 #230、#231）。(1) **路由成功：**task 內 `review-1` 的 `role_assigned` 是 `agy；machine=agy-pod`，快照送到 pod、pod 上 agy 實際執行 review，沒有派給本機。(2) **第一輪（09:09 至 09:16Z）：**pod 的 agy 停在工具權限提示「Run this command?」（blocked），因為 pod 上的 agy 沒有自動批准權限旗標。使用者要求 pod 給最大權限；Agent 在 pod 放了包裝腳本 `/usr/local/sbin/agy`（`/usr/local/sbin` 在 PATH 排在 `/usr/local/bin` 前；非子指令時加 `--dangerously-skip-permissions`，刪除該檔即停用）。(3) **第二輪（09:21 至 09:31Z）：**沒有再卡權限，pod 的 agy 回報 `pass`，但 bridge 把 artifact 判成 `inconclusive`，`independenceFailure: "unknown reviewer identity is not an independent review"`、`reviewerSession: null`，驗收閘門回「no passing review for the current version」，task 無法完成。
+
+**預期行為：**task 內 remote review 的 `pass` 在身分可驗證時被採用，閘門通過。
+
+**根因（推論，未確認）：**pod 的 Herdr 是 0.9.1，本機是 0.9.5；pod 上 agy pane 的 `pane list` 沒有 `agent_session` 欄位（本機同一種 agy 有），所以 `sessionIdentity(worker)` 為空，入帳時獨立審查檢查 fail closed。pod 的 `antigravity-cli` hook 已是 `current (v4)`（`herdr integration status`），bridge console 也看得到該 pane 的 `hook Stop session=…`，所以 session 資訊存在於 hook，但 bridge 沒有把它用在 remote pane 的身分。是否升級 pod 的 Herdr 就能解決、或需要 bridge 改用 hook 觀察到的 session，**沒有驗證**。
+
+**第二個問題：取消後 task 卡在 `cancelling`：**第一輪的 task 在 `team cancel` 後事件為 `cancel_requested`、`questions_expired`、`cancel_unconfirmed`（「agy-pod:w7:p1: session identity unknown; no signal sent」），狀態一直是 `cancelling`；`card cleanup` 被擋，且自動撿卡一次一張，新卡不會被撿，要重啟 bridge 才放得掉。pod 的 workspace、快照目錄與信任項目需要人工清理（Agent 已手動處理，目錄 marker 相符且工作樹乾淨才刪）。第二輪的 `team cancel` 乾淨完成（pod 目錄、workspace、本次信任項目都已清除）。
+
+**Lead 越權觀察：**第二輪 Lead（本機 agy）在規劃階段自行嘗試 `ssh agy-pod herdr integration install antigravity-cli`（修改 pod），被 Agent 以 Escape 中斷；pod 的 integration 本來就是最新。Lead 的 prompt 寫「Do not modify files while planning」，沒有禁止修改遠端機器。
+
+**已驗證：**remote 角色路由與快照送到 pod（review 實際在 agy-pod 執行）；第二輪取消後的清理（pod `/root/herdr-card-review` 為空、本次 `trustedWorkspaces` 項目移除、GitHub 沒有出現半成品分支）。**未驗證：**閘門通過路徑、`cancelling` 的收尾、升級 pod Herdr 後的身分。
+
+**下一步：**決定升級 pod 的 Herdr（k3s pod 映像）或讓 bridge 用 hook 的 session；修 `cancel_unconfirmed` 對無身分 remote pane 的收尾；Lead prompt 禁止修改遠端機器。
+
 ## ISSUE-153：`Core send json 為送達不明且零重送` 在 macOS CI 偶發失敗（測試逾時過短）
 
 更新日期：2026-11-12。狀態：已修正、待驗收（CI 觀察）。
@@ -164,7 +182,7 @@ r7-f2：Core terminal 不繼承 caller shell。現 run 的 env 前綴傳 HERDR_B
 
 ## ISSUE-150：task 內本機 agy 的 review（`review-card-acceptance`）回報「no passing review for the current version」，task 失敗
 
-更新日期：2026-11-12。狀態：修正中（根因 2026-11-12 讀 task artifact 確認；修正在 REQ-20261111-remote-in-task-roles 的卡片分支，尚未 merge、未做實機驗收）。
+更新日期：2026-11-12。狀態：已修正、待驗收（根因 2026-11-12 讀 task artifact 確認；修正 #230、#231 已 merge）。**實機驗收部分通過、尚未通過閘門：**task 內 review 已實際派到 agy-pod（路由與快照成功），但 pod 的 reviewer 身分未知被判 inconclusive，task 仍因「no passing review」失敗，見 ISSUE-154。
 
 **使用者可見症狀：**`REQ-20261111-pretrust-live`（一行檔案卡，`lead: codex`）：implement、verify 都完成，13:01:21Z 本機 agy 的 `review-card-acceptance` 之後 task 以「no passing review for the current version」失敗，卡片 worktree 有未 commit 的檔案（內容 `ok`，正確）。Agent 接手 commit、開 PR #214、`card attach-pr`，後續 remote reviewer 正常。
 
