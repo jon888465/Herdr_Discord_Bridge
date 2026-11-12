@@ -1,3 +1,6 @@
+import { assertCoreConfig, startCoreBridge } from "./runtime/core-bridge.js";
+import { resolveRuntimeKind } from "./runtime/select.js";
+import { CoreAdapter, resolveCoreSocketPath } from "./runtime/core-adapter.js";
 import { parseNotifyTarget } from "./card.js";
 import {
   malformedCardAutopickEligible,
@@ -199,6 +202,32 @@ import { agentLabel, workspacePath } from "./types.js";
 
 export async function run(): Promise<void> {
   const config = loadConfig();
+  const runtimeKind = resolveRuntimeKind({ env: process.env, config });
+  if (runtimeKind === "core") {
+    assertCoreConfig(config);
+    const core = new CoreAdapter(resolveCoreSocketPath());
+    console.log(`bridge runtime=core socket=${core.socketPath}`);
+    await core.health();
+    const targets = await core.listTargets();
+    if (process.argv.includes("--dry-run")) {
+      console.log(
+        `bridge core generation=${core.generation} terminals=${targets.length} allowed=${config.coreAllowedTerminals.length}`,
+      );
+      return;
+    }
+    if (!config.discord.enabled || !config.discord.botToken)
+      throw new Error(
+        "Discord is disabled or its bot token is missing in plugin config/env",
+      );
+    const release = await acquireInstanceLock(config.discord.botToken);
+    try {
+      await startCoreBridge(config, core);
+    } catch (error) {
+      await release();
+      throw error;
+    }
+    return;
+  }
   const dryRun = process.argv.includes("--dry-run");
   if (dryRun) return startBridge(config, true);
   if (!config.discord.enabled || !config.discord.botToken)
