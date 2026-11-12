@@ -13,6 +13,9 @@ import {
   roleProfileEnabled,
   roleTargets,
   remoteReviewerCandidates,
+  remoteRoleCandidates,
+  remoteRoleTargets,
+  parseRemoteTarget,
   machineOfActor,
   type CardRole,
   type CardRoles,
@@ -102,6 +105,7 @@ import { attachCardPullRequest } from "./card-attach-pr.js";
 import { fetchReviewMaterial } from "./card-review-fetch.js";
 import { reviewCardPullRequest } from "./card-review-wiring.js";
 import { remoteReviewDeps, type RemoteReviewDeps } from "./remote-checkout.js";
+import { startRemoteRole } from "./remote-snapshot.js";
 import { fixCardWorktree } from "./card-fix-wiring.js";
 import {
   changedFilesBetween,
@@ -129,7 +133,7 @@ import {
   sameAgentSession,
   sessionCreatedSince,
 } from "./response-stream.js";
-import { AgentPool } from "./agent-pool.js";
+import { AgentPool, type AgentProfile } from "./agent-pool.js";
 import { runTeamTurn } from "./team-turn.js";
 import { createTurnHookFinal } from "./turn-hook-final.js";
 import {
@@ -2036,7 +2040,7 @@ export function liveAgentList(herdr: HerdrClient, agent: AgentRecord): Promise<A
  */
 export function cardRoleContext(runtime: {
   config: {
-    machines: readonly { id: string; cardReview?: { kinds: readonly string[] } }[];
+    machines: readonly { id: string; cardReview?: { kinds: readonly string[]; toolchain?: boolean } }[];
     agentProfiles?: Runtime["config"]["agentProfiles"];
   };
   pool?: { profiles: Runtime["config"]["agentProfiles"] };
@@ -2047,7 +2051,11 @@ export function cardRoleContext(runtime: {
     profiles,
     // 只有設定了 cardReview 的遠端才帶；沒有時與以前完全相同。
     ...(runtime.config.machines.some((m) => m.cardReview)
-      ? { remoteMachines: runtime.config.machines.flatMap((m) => (m.cardReview ? [{ id: m.id, kinds: [...m.cardReview.kinds] }] : [])) }
+      ? {
+          remoteMachines: runtime.config.machines.flatMap((m) =>
+            m.cardReview ? [{ id: m.id, kinds: [...m.cardReview.kinds], ...(m.cardReview.toolchain ? { toolchain: true } : {}) }] : [],
+          ),
+        }
       : {}),
     enabledProfileIds: profiles
       .filter((p) => CARD_ROLES.some((role) => roleProfileEnabled(role, p)))
@@ -2123,6 +2131,8 @@ async function startTeamTask(
     workers,
   );
   const remoteReviewers = runtime.config.machines?.some((m) => m.cardReview) ? remoteReviewerCandidates(cardRoleContext(runtime)) : [];
+  const remoteRoles = coding && runtime.herdr instanceof HerdrHub && remoteReviewers.length ? remoteRoleCandidates(cardRoleContext(runtime)) : [];
+  if (remoteRoles.length) workers.push(...remoteRoleTargets(cardRoleContext(runtime), workspaceId));
   assertCodingRoster(coding, workers.length);
   assertAgentAvailable(lead, runtime);
 
@@ -2144,15 +2154,15 @@ async function startTeamTask(
       replan: true,
       ...(coding ? { coding: true } : {}),
       ...(coding && remoteReviewers.length ? { remoteReviewers } : {}),
+      ...(remoteRoles.length ? { remoteRoles } : {}),
       ...(roleSnapshot
         ? {
             roleSnapshot,
             validateRoleActor: async (actor: AgentRecord) => {
-              const live = (
-                await runtime.herdr.listAgentsWithWorkspaceNames()
-              ).find((a) => a.pane_id === actor.pane_id);
+              const machine = machineOfActor(actor);
+              const live = (await liveAgentList(runtime.herdr, actor)).find((a) => a.pane_id === actor.pane_id);
               if (!live) throw new Error("卡片角色送出前 pane 已不存在");
-              assertReadyIdentity(actor, live, actor.agent!, workspaceId);
+              assertReadyIdentity(actor, live, actor.agent!, machine === "local" ? workspaceId : actor.workspace_id, machine);
               if (actor.model && live.model && actor.model !== live.model)
                 throw new Error("卡片角色送出前 model 已改變");
             },
@@ -2205,7 +2215,26 @@ async function startTeamTask(
             ),
           );
         }),
-      acquireWorker: async (target, assignment) => {
+      acquireWorker: async (target, assignment, signal) => {
+        const remote = parseRemoteTarget(target.pane_id);
+        if (remote) {
+          // 用凍結的 profile，但目前配置仍要開放這台機器、這個角色與 kind。
+          const frozen = target.profile as AgentProfile | undefined;
+          const current = remoteRoleTargets(cardRoleContext(runtime), workspaceId).find((t) => t.pane_id === target.pane_id);
+          if (assignment?.coding?.role !== remote.role || !frozen || !current || (current.profile as AgentProfile).kind !== frozen.kind || !(runtime.herdr instanceof HerdrHub))
+            throw new Error("遠端角色失敗：machine 目前未開放這個角色或 agent 種類");
+          const cwd = lead.foreground_cwd || lead.cwd;
+          if (typeof cwd !== "string") throw new Error("遠端角色失敗：Lead 沒有本機工作目錄");
+          return startRemoteRole(remoteReviewDeps(runtime.herdr), {
+            machineId: remote.machine,
+            role: remote.role,
+            key: `${taskId}/${assignment.id}`,
+            cwd,
+            profile: frozen,
+            name: `hdb-${remote.role}-${randomUUID().slice(0, 8)}`,
+            ...(signal ? { signal } : {}),
+          });
+        }
         if (roleSnapshot && target.roleTarget) {
           const role = assignment?.coding?.role;
           if (!role || role !== target.roleTarget)

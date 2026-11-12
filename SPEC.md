@@ -853,13 +853,22 @@ PR #189（`88e1ce6`）已於 2026-11-09 merge，並重啟 bridge 載入（`card 
 
 ### 遠端卡片 reviewer（2026-11-11，ISSUE-143，未實機驗收）
 
-`machines[].cardReview {root, kinds}` 選填，未設定時行為完全不變（基礎層 PR #207，角色接線 PR #206，B 依賴 A）。只有 reviewer 可指定開放的 remote（implement／fixer 拒絕「remote 寫入尚未支援」，其他「remote 目前只支援 reviewer」），快照凍結 remoteMachines，啟動前重驗目前配置的 machine 與 kinds；沒有 roles 的卡不支援 Lead 自選 remote reviewer（後續卡片 REQ-20261111-remote-in-task-roles）。目錄 `<root>/<owner>__<repo>__<卡片雜湊>`；路徑須是遠端 canonical（符號連結拒絕）；clone 後寫 `.git/hdb-card-review` marker，沿用與清理要求 marker 相符、沿用還要工作樹乾淨；第一個遠端指令檢查 GNU `timeout`；create 逾時有界重查；HEAD 須等於 PR head；斷線不 fallback 本機；結果文字只放行固定標籤。見 docs/remote-card-reviewer.md。
+`machines[].cardReview {root, kinds}` 選填，未設定時行為完全不變（基礎層 PR #207，角色接線 PR #206，B 依賴 A）。reviewer 可指定開放的 remote（implement／fixer 拒絕「remote 寫入尚未支援」；task 內 diagnose／review／verify 見下一節），快照凍結 remoteMachines，啟動前重驗目前配置的 machine 與 kinds；沒有 roles 的卡仍不支援 Lead 自選 PR 後的 remote reviewer（Lead 可選的是 task 內角色，見下一節）。目錄 `<root>/<owner>__<repo>__<卡片雜湊>`；路徑須是遠端 canonical（符號連結拒絕）；clone 後寫 `.git/hdb-card-review` marker，沿用與清理要求 marker 相符、沿用還要工作樹乾淨；第一個遠端指令檢查 GNU `timeout`；create 逾時有界重查；HEAD 須等於 PR head；斷線不 fallback 本機；結果文字只放行固定標籤。見 docs/remote-card-reviewer.md。
+
+### task 內 remote 唯讀角色（2026-11-12，REQ-20261111-remote-in-task-roles，未做實機驗收）
+
+- **開放：**`cardReview` 機器在 `--coding` task 內可做 diagnose、review；verify 要 `cardReview.toolchain: true`，否則候選標 `available:false`。remote implement／fixer 撿卡前拒絕；remote verify 沒工具鏈拒絕「remote verify 不可用」。
+- **選擇：**target `remote:<machine>:<role>:<profile>` 只能用於同名 `coding.role`，隨 roster 存進任務快照（沒有 roles 的卡也可）；取得時用凍結 profile（resume 類 args 拒絕），重驗目前配置與 kind，身分讀該機器當下清單；每個 assignment 新 session、新目錄。卡片 `roles.reviewer` 在 remote 而沒宣告 `review` 時，task 內 review 必須用同一台的 target（ISSUE-150）；閘門不變。
+- **快照：**暫時 `GIT_INDEX_FILE` 上 `read-tree HEAD`、`add -A`（含未追蹤、不含 ignored）、`write-tree`、`commit-tree`（固定身分與時間），分支、HEAD、index 不動；前後指紋不同作廢。暫時 ref 打 bundle（`--not --remotes=origin`）後即刪，上限 50 MiB。不推送到 origin。
+- **pod：**目錄須不存在；同一指令建目錄與 marker，再 `init`、fetch origin、ssh stdin 收 bundle（`head -c` 上限）、`bundle verify`、`fetch`（只此步開 `protocol.file.allow`）、`checkout --detach`；HEAD 與 tree 須等於快照。
+- **版本與清理：**入帳前 pod 工作樹或本機工作樹與快照不同就不採用。本機暫存一律刪；完成與派工前失敗（含取消）關 workspace（建立逾時依 label 重查 3 次）、撤信任、刪目錄；**blocked、timeout、uncertain 保留 workspace、信任項目與 pod 目錄**（與 `card-role-session` 對同一 `RoleCleanupReason` 一致，避免丟掉現場），記 `cleanup_pending`；workspace 沒關成或狀態不明不刪目錄。唯讀基準指紋在 Agent 啟動前取。task 內快照目錄與 PR 階段 remote reviewer 目錄用不同的雜湊與 marker（key 前綴 `task-snapshot:`）。不 fallback 本機；對外只有固定標籤「遠端角色失敗：…」。
+- **限制：**取消等進行中的 ssh 步驟結束；ignored 檔案不送；Lead 仍不能自選 PR 後的 remote reviewer。快照 bundle 以本機 `refs/remotes/origin/*` 為前置物件，本機過期的 remote-tracking ref 會讓 pod 端驗證失敗（標籤只顯示 bundle 驗證失敗）；建立快照與 `afterTurn` 的本機讀取是同步的，大工作樹會卡住事件迴圈；超過檔案數／大小上限只回泛用失敗；pod 端 `head -c` 截斷超大 bundle 時錯誤以 bundle 驗證失敗出現；工作樹內未追蹤的巢狀 git repo 會變成空目錄；pod 沒有 agy settings 檔時 agy 角色派不出去（agy 信任寫入確定失敗即中止，與 PR 階段 reviewer 只記錄後繼續不同）；pod 目錄只以 key 區分、不含角色，同一 task 前一個 remote 角色被保留後，後續 remote 角色會因「快照目錄已存在」失敗，需人工清理。只有單元測試，**未做實機驗收**。
 
 ### 卡片角色 machine／agent／model（2026-11-10，ISSUE-138，已修正、待驗收）
 
 `roles: {implement: "local:claude:sonnet", reviewer: "local:agy"}` 為一層 inline map；只接受 implement、diagnose、review、verify、reviewer、fixer。每個值是 machine:agent:model，只拆前兩個冒號；省略段落不約束該維度，model 可含冒號。空／重複／未知角色、非字串拒絕；未宣告 roles 時既有行為完全不變。有 roles 的 card assign 必須 --coding；每個已派出的角色都受約束，不能用非 coding assignment／Lead synthesis 繞過。
 
-本卡 machine 範圍由 Lead 決定為「宣告＋驗證＋local 強制執行」。未知 machine 報不存在；已配置 remote 報「卡片流程尚未支援 machine X」，在撿卡前拒絕，不 fallback 到 local；不代表跨機器實際執行已完成。agent／model 必須有同 kind 已開放配置 profile；model 是管理者允許清單，不保證供應商可用。沿用選中 profile 的 modelFlag／args，不猜參數；新流程禁止 resume／session 綁定及 model 覆寫。agy、pi 均需 implementation／review opt-in；符合條件的 profile 可供六種卡片角色使用，無宣告卡的 roster 不變。
+本卡 machine 範圍由 Lead 決定為「宣告＋驗證＋local 強制執行」。未知 machine 報不存在；remote 只開放 reviewer 與 task 內 diagnose／review／verify（見「遠端卡片 reviewer」與「task 內 remote 唯讀角色」），其餘在撿卡前拒絕，不 fallback 到 local。agent／model 必須有同 kind 已開放配置 profile；model 是管理者允許清單，不保證供應商可用。沿用選中 profile 的 modelFlag／args，不猜參數；新流程禁止 resume／session 綁定及 model 覆寫。agy、pi 均需 implementation／review opt-in；符合條件的 profile 可供六種卡片角色使用，無宣告卡的 roster 不變。
 
 完整語法、預設、快照與拒絕契約見 docs/card-role-assignment.md。autopick／manual assign 開 workspace／worktree 前驗證所有角色，task 開始凍結約束與候選；review／fix／loop 每輪重新驗證。Lead prompt 帶指定；整份計畫先以 coding.role 核對，不符即 plan_rejected、零 acquire。每個指定 assignment 新 session、不重用不同 model 的 binding，readiness 後及送 prompt 前核對實際身分；未知 model 的既有 session 不能滿足指定。保留 Team codex／agy 既有延後 session 驗證。
 

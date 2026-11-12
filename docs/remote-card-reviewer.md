@@ -10,7 +10,7 @@ agy reviewer 預先信任 checkout：契約（範圍、生命週期、`cleanup_p
 
 ## 範圍與限制
 
-只有 card reviewer（PR 後的 review／loop，唯讀）可在 remote：卡片 `roles: {implement: "local:claude:opus", reviewer: "agy-pod:agy"}`。implement／fixer 拒絕「remote 寫入尚未支援」，其他角色拒絕「remote 目前只支援 reviewer」。**沒有 `roles` 的卡不支援由 Lead 自己選 remote reviewer**，只有卡片宣告 `reviewer: <machine>:<agent>` 才會派到 pod；「Lead 自行選擇 remote 角色」屬後續卡片 REQ-20261111-remote-in-task-roles。卡片內容與 PR diff 會送到該機器，只對信任的機器開 `cardReview`。
+card reviewer（PR 後的 review／loop，唯讀）可在 remote：卡片 `roles: {implement: "local:claude:opus", reviewer: "agy-pod:agy"}`。implement／fixer 拒絕「remote 寫入尚未支援」。**沒有 `roles` 的卡不支援由 Lead 自己選 PR 後的 remote reviewer**，只有卡片宣告 `reviewer: <machine>:<agent>` 才會派到 pod。task 內 diagnose／review／verify 見 SPEC.md「task 內 remote 唯讀角色」（`toolchain` 才可 verify）。卡片內容與 PR diff 會送到該機器，只對信任的機器開 `cardReview`。
 
 ## 設定
 

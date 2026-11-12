@@ -1,4 +1,5 @@
 import {
+  teamMember,
   validateRoleSnapshot,
   type RoleSnapshot,
 } from "./card-role-assignment.js";
@@ -403,14 +404,14 @@ function validateTask(t: DurableTeamTask): void {
       throw new Error("coding assignment is missing role and access");
     if (a.agent) {
       validateAgent(a.agent);
-      if (a.agent.workspace_id !== t.workspaceId)
+      if (!teamMember(a.agent, t.workspaceId, t.roster))
         throw new Error("assignment workspace mismatch");
     }
   }
   for (const turn of t.turns) {
     validateAgent(turn.agent);
     if (
-      turn.agent.workspace_id !== t.workspaceId ||
+      !teamMember(turn.agent, t.workspaceId, t.roster) ||
       !["planning", "assignment", "synthesis"].includes(turn.phase) ||
       !["dispatched", "blocked", "uncertain"].includes(turn.state) ||
       (turn.phase === "assignment" && !ids.has(turn.assignmentId!))
@@ -425,7 +426,7 @@ function validateTask(t: DurableTeamTask): void {
     if (
       !q.id ||
       questions.has(q.id) ||
-      q.agent.workspace_id !== t.workspaceId ||
+      !teamMember(q.agent, t.workspaceId, t.roster) ||
       !["planning", "assignment", "synthesis"].includes(q.phase) ||
       (q.phase === "assignment" && !ids.has(q.assignmentId!)) ||
       typeof q.snapshot !== "string" ||

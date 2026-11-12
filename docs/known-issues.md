@@ -153,11 +153,18 @@ r7-f2：Core terminal 不繼承 caller shell。現 run 的 env 前綴傳 HERDR_B
 
 **A 測試（2026-11-11，本機，fake exec／fake ssh）：**`npm run check` exit 0：1739 項／1738 pass／0 fail／1 既有 skipped；`npm run lint`、`git diff --check` 通過；既有測試檔未修改。單元測試不是 Herdr／pod 實機驗收。
 
+**2026-11-12 後續（REQ-20261111-remote-in-task-roles，A 傳輸層已 merge＝#230 `1445eb6`，B 角色接線為本 PR，未做實機驗收）：**task 內 diagnose／review 可派到 remote，工作副本以快照 bundle 送 pod，見 SPEC.md「task 內 remote 唯讀角色」。本條失敗路徑的實機驗收與該卡一起補做。該卡整體 diff 超過 60,000，依下方規格拆成兩個 PR。**A 的 `card review` 兩輪皆 `changes_requested`（第 1 輪 10 項、第 2 輪 12 項，reviewer 為 claude）：已修 cleanup 保留規則（blocked／timeout／uncertain 保留，與 card-role-session 一致，因此卡片原驗收條件 3「逾時也清理」改以此為準）、快照目錄與 reviewer 目錄分開、唯讀基準提前、fsmonitor、錯誤外流、trust 待處理標示、toolchain 測試；其餘 low（見 SPEC 該節「限制」）列為已知限制。#230 由使用者手動 merge（沒有 review pass），CI 兩平台綠。**
+
+**PR 拆分規格（2026-11-12，比照 #207／#206）：**大小以卡片 worktree 對 HEAD `fcf66c6` 的 `git diff -- <檔案>` 計算（`wc -m` 字元／`wc -c` bytes），兩份都 ≤ 20 檔、≤ 60,000 字元。
+- **A 傳輸層（行為中立，先 merge）**，5 檔，32,645 字元／34,253 bytes：`src/remote-snapshot.ts`、`src/remote-checkout.ts`、`src/machines.ts`、`test/remote-snapshot.test.ts`、`test/remote-checkout.test.ts`。只用到 base 已有的函式；沒有任何程式呼叫 `startRemoteRole`，`toolchain` 未設定時行為不變。
+- **B 角色接線（依賴 A）**，13 檔，46,817 字元／54,635 bytes：`src/card-events.ts`、`src/card-notify.ts`、`src/card-role-assignment.ts`、`src/main.ts`、`src/team-orchestration.ts`、`src/team-task-engine.ts`、`src/team-task-store.ts`、`test/card-role-remote.test.ts`、`SPEC.md`、`docs/agent-role-matrix.md`、`docs/card-role-assignment.md`、`docs/known-issues.md`、`docs/remote-card-reviewer.md`。
+- **步驟：**(1) 本卡 worktree 先整體驗收，確保兩層合起來可用：2026-11-12 `npm run check` 1924 項、1923 pass、0 fail、1 skipped，`npm run lint`、`git diff --check` 通過。(2) 從 `main` 開 A 分支，只放 A 的 5 檔，在 A 分支單獨跑 `npm run check` 確認可獨立建置，開 PR、card review、CI 綠後 merge。(3) B 分支 rebase 到含 A 的 `main`，只放 B 的 13 檔，重算大小、跑 `npm run check`，開 PR、review、merge。(4) 兩個都 merge 後重啟 bridge，在 agy-pod 做實機驗收。A、B 各自 PR 的大小要在開 PR 時重算確認。
+
 **未驗證：**實機（pod 的 git 與 repo 權限、GNU `timeout`、`realpath`、`refs/pull` fetch、marker 寫入）；cleanup_pending 不重試；clone 中斷留下的半成品沒有 marker，不會被清理（記 pending，需人工）；需使用者加 `cardReview` 並重啟。A 單獨 merge 不會啟用任何 remote 功能。
 
 ## ISSUE-150：task 內本機 agy 的 review（`review-card-acceptance`）回報「no passing review for the current version」，task 失敗
 
-更新日期：2026-11-12。狀態：待調查→根因已確認、尚未修正（2026-11-12 讀 task artifact 確認）。
+更新日期：2026-11-12。狀態：修正中（根因 2026-11-12 讀 task artifact 確認；修正在 REQ-20261111-remote-in-task-roles 的卡片分支，尚未 merge、未做實機驗收）。
 
 **使用者可見症狀：**`REQ-20261111-pretrust-live`（一行檔案卡，`lead: codex`）：implement、verify 都完成，13:01:21Z 本機 agy 的 `review-card-acceptance` 之後 task 以「no passing review for the current version」失敗，卡片 worktree 有未 commit 的檔案（內容 `ok`，正確）。Agent 接手 commit、開 PR #214、`card attach-pr`，後續 remote reviewer 正常。
 
@@ -167,7 +174,9 @@ r7-f2：Core terminal 不繼承 caller shell。現 run 的 env 前綴傳 HERDR_B
 
 **修正方向（待決定，尚未實作）：**remote reviewer 的卡，task 內驗收閘門不要求 in-task review（PR 後的 remote card review 才是獨立審查），並且 Lead prompt 不要規劃 reviewer assignment；或維持閘門、讓 in-task review 不帶 machine 約束。前者放寬閘門，需使用者決定。
 
-**未驗證／下一步：**讀 task 的 review artifact；判斷是 agy 的回報格式、版本指紋，還是 review 沒有真正執行。
+**修正（2026-11-12，未 merge）：**閘門不放寬；task 內 review 必須派給同一台的 `remote:<machine>:review:<profile>`，本機 target 計畫驗證拒絕。測試在 `test/card-role-remote.test.ts`。
+
+**未驗證／下一步：**實機跑一張 `reviewer: agy-pod:agy` 的卡，確認 task 內 review 在 pod 執行並 pass。
 
 ## ISSUE-149：pod 上 agy 設定備份只增不減，且卡片流程紀錄沒有 pod 端信任寫入／移除事件
 

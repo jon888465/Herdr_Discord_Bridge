@@ -19,6 +19,7 @@ import {
   writeCodingArtifact,
 } from "./coding-version.js";
 import { stripAnsi } from "./format.js";
+import { parseRemoteTarget, teamMember } from "./card-role-assignment.js";
 import { sameAgentSession } from "./response-stream.js";
 import {
   runTeamTask,
@@ -273,13 +274,14 @@ export class TeamTaskEngine {
             acquireWorker: async (worker, assignment) => {
               controller.signal.throwIfAborted();
               const acquired = input.acquireWorker
-                ? await input.acquireWorker(worker, assignment)
+                ? await input.acquireWorker(worker, assignment, controller.signal)
                 : { agent: worker, continuity: "unknown", cleanup: undefined };
               try {
                 controller.signal.throwIfAborted();
                 const agent = acquired.agent;
                 if (
-                  agent.workspace_id !== input.lead.workspace_id ||
+                  (agent.workspace_id !== input.lead.workspace_id &&
+                    !(parseRemoteTarget(worker.pane_id) && teamMember(agent, input.lead.workspace_id, [worker]))) ||
                   agent.pane_id === input.lead.pane_id
                 )
                   throw new Error("invalid Worker identity");

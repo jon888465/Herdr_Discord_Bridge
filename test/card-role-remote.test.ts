@@ -4,14 +4,20 @@ import type { Card } from "../src/card.js";
 import type { AgentStartPort } from "../src/agent-start.js";
 import { validateProfiles } from "../src/agent-pool.js";
 import { preflightRoles, remoteReviewerCandidates, validateRoleSnapshot, type RoleContext } from "../src/card-role-assignment.js";
+import { parseRemoteTarget, remoteRoleCandidates, remoteRoleTargets, roleTargets, teamMember, type RoleSnapshot } from "../src/card-role-assignment.js";
+import { acceptanceReasons } from "../src/coding-workflow.js";
 import { buildLogEntry, roleEvent } from "../src/card-events.js";
 import { notificationReason } from "../src/card-notify.js";
 import { reviewCardPullRequest } from "../src/card-review-wiring.js";
 import type { ReviewFlowDeps } from "../src/card-review-flow.js";
 import { REMOVE_SCRIPT, RemoteFailure, cardHash, remoteReviewDeps, reviewOnRemote, type RemoteExec, type RemoteReviewDeps } from "../src/remote-checkout.js";
-import { planningInstruction } from "../src/team-orchestration.js";
+import { planningInstruction, runTeamTask, validateAssignmentPlan, type AssignmentPlan, type OrchestrationPort } from "../src/team-orchestration.js";
 import { cardRoleContext, liveAgentList, remoteReviewInjection } from "../src/main.js";
-import { HerdrHub } from "../src/machines.js";
+import { HerdrHub, validateMachines } from "../src/machines.js";
+import { TeamTaskStore } from "../src/team-task-store.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { AgentRecord } from "../src/types.js";
 
 const HEAD = "0123456789abcdef0123456789abcdef01234567";
@@ -23,12 +29,16 @@ const closed = { machineIds: ["pod"], profiles };
 const machine = { id: "pod", ssh: "pod", socket: "/s", cardReview: { root: ROOT, kinds: ["agy"] } };
 const reviewerRole = { reviewer: { machine: "pod", agent: "agy" } };
 
-test("preflight: remote reviewer allowed on an opened machine and frozen; other roles and closed machines rejected", () => {
+test("preflight: remote reviewer/diagnose/review allowed and frozen; writers, toolless verify, closed machines rejected", () => {
   const snapshot = preflightRoles({ implement: { machine: "local", agent: "claude", model: "opus" }, ...reviewerRole }, context);
   eq([snapshot.candidates.reviewer?.map((p) => p.id), snapshot.remoteMachines], [["agy"], remoteMachines]);
   eq(preflightRoles({ reviewer: { machine: "pod" } }, context).candidates.reviewer?.map((p) => p.kind), ["agy"]);
-  for (const role of ["implement", "fixer", "diagnose", "review", "verify"])
-    throws(() => preflightRoles({ [role]: { machine: "pod", agent: "agy" } }, context), /^(implement|fixer)$/.test(role) ? /remote 寫入尚未支援/ : /remote 目前只支援 reviewer/);
+  const read = preflightRoles({ diagnose: { machine: "pod", agent: "agy" }, review: { machine: "pod" }, ...reviewerRole }, context);
+  eq([read.candidates.diagnose?.map((p) => p.id), read.remoteMachines], [["agy"], remoteMachines]);
+  validateRoleSnapshot(structuredClone(read));
+  for (const role of ["implement", "fixer"]) throws(() => preflightRoles({ [role]: { machine: "pod", agent: "agy" } }, context), /remote 寫入尚未支援/);
+  throws(() => preflightRoles({ verify: { machine: "pod", agent: "agy" } }, context), /remote verify 不可用/);
+  validateRoleSnapshot(preflightRoles({ verify: { machine: "pod", agent: "agy" } }, { ...context, remoteMachines: [{ id: "pod", kinds: ["agy"], toolchain: true }] }));
   for (const [ctx, reviewer] of [[closed, reviewerRole.reviewer], [context, { machine: "pod", agent: "claude" }]] as const)
     throws(() => preflightRoles({ reviewer }, ctx), (e: unknown) => /machine 未開放卡片 review/.test(String(e)) && !/卡片流程尚未支援/.test(String(e)));
   throws(() => preflightRoles({ reviewer: { machine: "nope" } }, context), /不存在 machine nope/);
@@ -45,12 +55,15 @@ test("frozen snapshot re-validation: dropped or tampered remoteMachines rejected
 });
 
 test("notifications carry fixed labels; v2 record allows remote machine only for reviewer within 300", () => {
-  for (const label of ["implement：remote 寫入尚未支援", "diagnose：remote 目前只支援 reviewer", "reviewer：machine 未開放卡片 review"])
+  for (const label of ["implement：remote 寫入尚未支援", "verify：remote verify 不可用", "reviewer：machine 未開放卡片 review"])
     equal(notificationReason({ event: "failed", text: `失敗：autopick_stopped；原因：卡片角色指定無效：${label}：machine pod（x）；SECRET`, time: "", eventId: "x" }), `卡片角色指定無效：${label}`);
   const identity = { role: "reviewer", agent: "agy", machine: "a".repeat(32), model: "m".repeat(80), taskId: "t".repeat(64), round: 1_000_000, source: "card" as const, selectionSources: { machine: "card", agent: "card", model: "card" } as const, modelEvidence: "launch" as const };
   const built = buildLogEntry(roleEvent(identity, "2026-11-11T00:00:00Z"));
   ok(built.ok && Array.from(built.entry.text).length <= 300 && /machine=a{32}/.test(built.entry.text));
   equal(buildLogEntry(roleEvent({ ...identity, role: "implement" }, "2026-11-11T00:00:00Z")).ok, false);
+  const inTask = (codingRole: "review" | "implement") => buildLogEntry(roleEvent({ ...identity, role: "r".repeat(64), assignmentId: "r".repeat(64), codingRole }, "2026-11-11T00:00:00Z"));
+  const read = inTask("review");
+  ok(read.ok && Array.from(read.entry.text).length <= 300 && !inTask("implement").ok);
 });
 
 test("Lead roster lists remote reviewers with machine; without remote config context and prompt are unchanged", () => {
@@ -262,4 +275,82 @@ test("main wiring: remote interface only with a HerdrHub; remote reviewers read 
   await liveAgentList(plain, agent());
   await liveAgentList(plain, local);
   eq(seen, ["cached", "fresh:pod", "plain", "plain"]);
+});
+
+const lead = { ...agent(), pane_id: "w1:p1", terminal_id: "lead", workspace_id: "w1", agent: "codex", machine: undefined } as AgentRecord;
+const pod = remoteRoleTargets(context, "w1");
+const C = { prior: [], findingIds: [], artifactIds: [] };
+const plan = (workerPaneId: string, role = "review"): AssignmentPlan => ({ assignments: [{ id: "a1", workerPaneId, instruction: "x", coding: { role: role as "review", access: role === "implement" ? "write" : "read", writeScope: role === "implement" ? ["src/"] : [], artifactRefs: [], findingRefs: [] } }] });
+const ctx2: RoleContext = { ...context, remoteMachines: [{ id: "pod", kinds: ["agy"], toolchain: true }] };
+
+test("Lead candidates and targets: pod diagnose/review; verify unavailable without toolchain", () => {
+  const listed = remoteRoleCandidates(context);
+  eq(listed.map((c) => [c.machine, c.kind, c.profileId, c.role, c.available, c.reason]), [["pod", "agy", "agy", "diagnose", true, undefined], ["pod", "agy", "agy", "review", true, undefined], ["pod", "agy", "agy", "verify", false, "no toolchain on machine"]]);
+  eq(pod.map((t) => [t.pane_id, t.machine, t.roleTarget, t.workspace_id]), [["remote:pod:diagnose:agy", "pod", "diagnose", "w1"], ["remote:pod:review:agy", "pod", "review", "w1"]]);
+  eq([remoteRoleTargets(ctx2, "w1").map((t) => t.roleTarget), remoteRoleCandidates(closed)], [["diagnose", "review", "verify"], []]);
+  eq(parseRemoteTarget("remote:pod:review:agy"), { machine: "pod", role: "review", profileId: "agy" });
+  for (const bad of ["remote:pod:implement:agy", "remote:pod:review:../x", "remote:-pod:review:agy", "remote:pod:review:a b", "remote:pod:review:a\nb", "role:review:agy"]) equal(parseRemoteTarget(bad), undefined);
+  ok(!roleTargets(preflightRoles({ diagnose: { machine: "pod" }, implement: { agent: "claude" } }, context), "w1").some((t) => t.roleTarget === "diagnose"));
+  match(planningInstruction({ taskId: "t", prompt: "p", lead, workers: [], coding: true, remoteRoles: listed }), /Remote in-task role candidates.*never pushes.*"role":"verify".*"available":false/);
+});
+
+test("plan validation; ISSUE-150 forces in-task review to the remote reviewer machine; gate unchanged", () => {
+  const v = (target: string, role?: string, s?: RoleSnapshot) => () => validateAssignmentPlan(plan(target, role), lead, [{ ...lead, pane_id: "w1:p2", agent: "agy" }, ...pod], C, s);
+  v("remote:pod:review:agy")();
+  v("remote:pod:diagnose:agy", "diagnose")();
+  for (const role of ["diagnose", "implement"]) throws(v("remote:pod:review:agy", role), /只能用於 review/);
+  throws(v("remote:pod:verify:agy", "verify"), /not in the Team roster/);
+  const s = preflightRoles(reviewerRole, context);
+  v("remote:pod:review:agy", "review", s)();
+  v("w1:p2", "diagnose", s)();
+  throws(v("w1:p2", "review", s), /派工不符：machine 預期 pod，實際 local/);
+  match(planningInstruction({ taskId: "t", prompt: "p", lead, workers: pod, coding: true, roleSnapshot: s }), /In-task review must use a remote:pod:review/);
+  ok(acceptanceReasons({ baseline: {}, artifacts: [], findings: [] } as never, { fingerprint: "v", deliveryPaths: [] } as never, []).includes("no passing review for the current version"));
+});
+
+test("pod Worker is a Team member only via a same-machine remote target; store reloads it", () => {
+  const w = agent();
+  eq([teamMember(w, "w1", pod), teamMember(w, "w1", []), teamMember({ ...w, workspace_id: "w9" }, "w1", pod), teamMember({ ...lead, pane_id: "w1:p5" }, "w1", [])], [true, false, false, true]);
+  ok(!teamMember(agent({ machine: "other", pane_id: "other:w3:p2", workspace_id: "other:w3" }), "w1", pod));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "hdb-remote-store-"));
+  const now = new Date().toISOString();
+  const add = (id: string, pane: string) => store.update(id, "assigned", (t) => void t.assignments.push({ plan: { id: "a1", workerPaneId: pane, instruction: "x", dependsOn: [] }, state: "working", createdAt: now, updatedAt: now, agent: w }));
+  const store = new TeamTaskStore(root);
+  store.create({ taskId: "r", lead, prompt: "p", workers: pod });
+  add("r", "remote:pod:review:agy");
+  const loaded = new TeamTaskStore(root).get("r");
+  eq([loaded.roster.map((r) => r.pane_id), loaded.assignments[0]?.agent?.pane_id], [pod.map((t) => t.pane_id), "pod:w3:p2"]);
+  store.create({ taskId: "l", lead, prompt: "p", workers: [{ ...lead, pane_id: "w1:p2" }] });
+  throws(() => add("l", "w1:p2"), /workspace mismatch/);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("runTeamTask: pod Worker accepted; afterTurn failure fails without crediting; cleanup runs", async () => {
+  for (const broken of [false, true]) {
+    const marker = (p: string, k: string) => new RegExp(`${k} marker \\(\\w+ line\\): (BRIDGE_\\w+)`).exec(p)?.[1];
+    const prompts = new Map<string, string>();
+    const [done, cleanups]: string[][] = [[], []];
+    let planned = false;
+    const reply = (target: string, p: string) =>
+      target !== lead.pane_id ? '{"codingResult":{"kind":"review","verdict":"pass","findings":[]}}' : !p.includes("Do not modify files while planning") ? "s"
+        : JSON.stringify({ assignments: planned ? [] : ((planned = true), plan("remote:pod:review:agy").assignments.map(({ coding: c, ...a }) => ({ ...a, ...c }))) });
+    const port: OrchestrationPort = {
+      promptAgent: async (t, text) => void prompts.set(t, text),
+      waitAgent: async (t) => (t === lead.pane_id ? lead : agent()),
+      readAgent: async (t) => (prompts.has(t) ? `${marker(prompts.get(t)!, "Opening")}\n${reply(t, prompts.get(t)!)}\n${marker(prompts.get(t)!, "Closing")}` : "history"),
+    };
+    const hooks = { findingIds: () => [], artifactIds: () => [], evidenceSummary: () => ({}), onAssignmentStart: () => {}, onAssignmentDone: (a: { id: string }) => void done.push(a.id), assess: () => ({ reasons: [], fingerprint: "v" }) };
+    const fail = async () => { if (broken) throw new Error("遠端角色失敗：快照已作廢"); };
+    const result = await runTeamTask({ taskId: "t", prompt: "p", lead, workers: pod, coding: true, timeoutMs: 2000, codingHooks: hooks, acquireWorker: async () => ({ agent: agent(), continuity: "new-session", cleanup: async (r) => void cleanups.push(r!), afterTurn: fail }) }, port, () => {});
+    const report = result.reports.find((r) => r.assignmentId === "a1")!;
+    eq([report.state, done, cleanups, broken ? /^遠端角色失敗：快照已作廢/.test(report.blocker!) : true], [broken ? "failed" : "done", broken ? [] : ["a1"], ["completed"], true]);
+  }
+});
+
+test("machines config: cardReview.toolchain is an optional boolean", () => {
+  const base = { id: "pod", ssh: "pod", socket: "/s" };
+  const cr = (toolchain: unknown) => validateMachines([{ ...base, cardReview: { root: ROOT, kinds: ["agy"], toolchain } }])[0]?.cardReview;
+  eq([cr(true), cr(false)], [{ root: ROOT, kinds: ["agy"], toolchain: true }, { root: ROOT, kinds: ["agy"] }]);
+  throws(() => cr("yes"), /cardReview/);
+  eq(cardRoleContext({ config: { machines: [{ id: "pod", cardReview: { kinds: ["agy"], toolchain: true } }], agentProfiles: profiles } }).remoteMachines, ctx2.remoteMachines);
 });
