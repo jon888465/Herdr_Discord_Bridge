@@ -7,6 +7,7 @@ import {
   type RuntimeKeysResult,
   type RuntimeWaitResult,
 } from "./types.js";
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { ReadSource } from "../types.js";
@@ -19,31 +20,49 @@ import {
   type RuntimeRequestOptions,
 } from "./types.js";
 
-/** 本段僅採明確 HC_SOCKET 或已定義的 session 路徑，不讀舊 Herdr 變數。 */
+function absoluteEnvPath(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  if (!value || !path.isAbsolute(value) || value.includes("\0"))
+    throw new RuntimeError("RUNTIME_INCOMPATIBLE");
+  return value;
+}
+
+/**
+ * Core socket 選擇（ISSUE-151，2026-11-12 Linux 實機修正）：
+ * 1. HC_SOCKET（明確指定，必須是絕對路徑）。
+ * 2. 未設 HC_SESSION 且程序在 Core terminal 內時，Core 注入的 HC_TERMINAL_SOCKET
+ *    （就是啟動這個 terminal 的 Core）。
+ * 3. 依 session（HC_SESSION，預設 default）：Linux 的 Core 把 socket 放在
+ *    `$XDG_RUNTIME_DIR/herdr-core/<session>.sock`；macOS／未設 XDG_RUNTIME_DIR 時在
+ *    `$XDG_STATE_HOME|~/.local/state/herdr-core/<session>/<session>.sock`。
+ *    兩個候選都定義時取實際存在者；都不存在則取 XDG_RUNTIME_DIR 候選。
+ * 不讀舊 Herdr 的 HERDR_SOCKET_PATH。
+ */
 export function resolveCoreSocketPath(
   env: NodeJS.ProcessEnv = process.env,
   home = os.homedir(),
+  exists: (file: string) => boolean = (file) => fs.existsSync(file),
 ): string {
-  if (env.HC_SOCKET !== undefined) {
-    if (
-      !env.HC_SOCKET ||
-      !path.isAbsolute(env.HC_SOCKET) ||
-      env.HC_SOCKET.includes("\0")
-    )
-      throw new RuntimeError("RUNTIME_INCOMPATIBLE");
-    return env.HC_SOCKET;
+  const explicit = absoluteEnvPath(env.HC_SOCKET);
+  if (explicit !== undefined) return explicit;
+  if (env.HC_SESSION === undefined) {
+    const terminalSocket = absoluteEnvPath(env.HC_TERMINAL_SOCKET);
+    if (terminalSocket !== undefined) return terminalSocket;
   }
   const session = env.HC_SESSION ?? "default";
   if (!/^[A-Za-z0-9_.-]+$/.test(session) || session === "." || session === "..")
     throw new RuntimeError("RUNTIME_INCOMPATIBLE");
-  return path.join(
-    home,
-    ".local",
-    "state",
-    "herdr-core",
-    session,
-    `${session}.sock`,
-  );
+  const runtimeDir = absoluteEnvPath(env.XDG_RUNTIME_DIR || undefined);
+  const stateHome =
+    absoluteEnvPath(env.XDG_STATE_HOME || undefined) ??
+    path.join(home, ".local", "state");
+  const candidates = [
+    ...(runtimeDir === undefined
+      ? []
+      : [path.join(runtimeDir, "herdr-core", `${session}.sock`)]),
+    path.join(stateHome, "herdr-core", session, `${session}.sock`),
+  ];
+  return candidates.find((candidate) => exists(candidate)) ?? candidates[0];
 }
 
 export const CORE_REQUIRED_METHODS = [

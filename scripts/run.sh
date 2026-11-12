@@ -66,13 +66,25 @@ if [[ "$backend" == core ]]; then
   project_dir="$(pwd -P)"
   bridge_config_dir="${HERDR_PLUGIN_CONFIG_DIR:-$(node -e 'console.log(require("node:path").join(require("node:os").homedir(),".config","herdr-discord-bridge"))')}"
   bridge_state_dir="${HERDR_PLUGIN_STATE_DIR:-$(node -e 'console.log(require("node:path").resolve(process.argv[1],"state"))' "$bridge_config_dir")}"
+  # Herdr plugin installs keep config.json where Herdr injects HERDR_PLUGIN_CONFIG_DIR.
+  # Without explicit directories, fall back to that config (and Herdr's plugin state
+  # directory) when the standalone default has no config.json; say so on stdout.
+  # Filesystem checks only; no herdr call. Explicit directories are never overridden.
+  plugin_config_dir="$HOME/.config/herdr/plugins/config/herdr-discord-bridge"
+  plugin_state_dir="$HOME/.local/state/herdr/plugins/herdr-discord-bridge"
+  if [[ -z "${HERDR_PLUGIN_CONFIG_DIR:-}" && ! -f "$bridge_config_dir/config.json" && -f "$plugin_config_dir/config.json" ]]; then
+    bridge_config_dir="$plugin_config_dir"
+    [[ -n "${HERDR_PLUGIN_STATE_DIR:-}" ]] || bridge_state_dir="$plugin_state_dir"
+    echo "Using Herdr plugin config: $bridge_config_dir/config.json (state: $bridge_state_dir)"
+  fi
   # Match config.ts: config.json accepts JSONC comments and trailing commas.
   # Print only token presence; never copy a token into argv, stdout or stderr.
   file_has_token="$(node - "$bridge_config_dir" <<'NODE'
 const fs = require("node:fs"), path = require("node:path");
 try {
   const file = path.join(process.argv[2], "config.json");
-  let text = fs.existsSync(file) ? fs.readFileSync(file,"utf8") : "{}";
+  if (!fs.existsSync(file)) {console.log("missing");process.exit(0);}
+  let text = fs.readFileSync(file,"utf8");
   let out="", quoted=false, escaped=false, line=false, block=false;
   for(let i=0;i<text.length;i++) {
     const c=text[i], n=text[i+1];
@@ -86,6 +98,20 @@ try {
 } catch {console.error("Cannot read bridge config.json; Core was not started.");process.exit(1);}
 NODE
 )"
+  if [[ "$file_has_token" == missing ]]; then
+    # A missing file would otherwise launch a Core terminal that exits at once
+    # (ISSUE-151). Herdr plugin installs keep config.json in the plugin config dir.
+    echo "Core bridge config not found: $bridge_config_dir/config.json; set HERDR_PLUGIN_CONFIG_DIR (Herdr plugin installs: herdr plugin config-dir herdr-discord-bridge). Core was not started." >&2
+    # Explicit HERDR_PLUGIN_CONFIG_DIR pointing elsewhere is respected; only hint
+    # at the plugin config so the operator can choose it.
+    if [[ "$plugin_config_dir" != "$bridge_config_dir" && -f "$plugin_config_dir/config.json" ]]; then
+      echo "Found Herdr plugin config: $plugin_config_dir/config.json" >&2
+      rerun="HERDR_PLUGIN_CONFIG_DIR=$plugin_config_dir"
+      [[ -d "$plugin_state_dir" ]] && rerun+=" HERDR_PLUGIN_STATE_DIR=$plugin_state_dir"
+      echo "Rerun with: $rerun scripts/run.sh --core${mode:+ $mode}" >&2
+    fi
+    exit 1
+  fi
   if [[ "$file_has_token" != yes && ( -n "${HERDR_DISCORD_BOT_TOKEN:-}" || -n "${DISCORD_BOT_TOKEN:-}" ) ]]; then
     echo "Core 模式需把 token 放在 config 檔，不透過環境變數傳遞；未啟動" >&2
     exit 1
@@ -142,6 +168,15 @@ NODE
     fi
     printf '%s' "$terminal" | jq -e --arg address "$address" '.address == $address and .state == "live" and (.labels | type == "object")' >/dev/null || { echo "Could not verify Core terminal $address; no terminal was started." >&2; exit 1; }
     if printf '%s' "$terminal" | jq -e --arg project "$project_dir" '.labels["bridge.role"] == "discord-bridge" and .labels["bridge.project"] == $project' >/dev/null; then
+      # Desktop adoption turns on core keep: a bridge whose program exited may
+      # live on as a shell with the same labels. Read the foreground program
+      # (get is read-only); anything other than node is a stale terminal.
+      detail="$(herdr-core get "$address" --json)"
+      foreground="$(printf '%s' "$detail" | jq -r 'if (.foreground.name | type) == "string" then .foreground.name else "" end')"
+      if [[ -n "$foreground" && "$foreground" != node ]]; then
+        echo "Stale Core bridge terminal $address: the bridge exited and the terminal now runs $foreground. Run herdr-core kill $address, then retry. No terminals were changed." >&2
+        exit 1
+      fi
       existing="${existing}${address} "
     fi
   done < <(printf '%s' "$core_list" | jq -c '.terminals[] | select(.state == "live")')
@@ -150,9 +185,16 @@ NODE
     echo "Stop it explicitly before starting another bridge. No terminals were changed." >&2
     exit 1
   fi
+  # Herdr Desktop shows only terminals labelled herdr.space/herdr.tab; unknown ids
+  # become a new space (named after the folder) and tab. Derive both from the
+  # project path so every start of this project's bridge lands in the same place.
+  desktop_ids="$(node -e 'const c=require("node:crypto");const p=process.argv[1];const h=s=>c.createHash("sha256").update(s).digest("hex").slice(0,32);console.log("sp"+h("herdr-discord-bridge:space:"+p)+" tb"+h("herdr-discord-bridge:tab:"+p))' "$project_dir")"
+  desktop_space="${desktop_ids% *}"
+  desktop_tab="${desktop_ids#* }"
   run_result="$(herdr-core run --json --bg --no-parent --no-notify \
     --cwd "$project_dir" --label bridge.role=discord-bridge \
     --label bridge.backend=core --label "bridge.project=$project_dir" \
+    --label "herdr.space=$desktop_space" --label "herdr.tab=$desktop_tab" \
     -- "${core_env[@]}" node "$project_dir/dist/src/index.js")"
   address="$(printf '%s' "$run_result" | jq -er '.address | select(type == "string" and length > 0)')" || { echo "Could not identify the new Core terminal; inspect Core before retrying." >&2; exit 1; }
   echo "Core bridge terminal: $address"

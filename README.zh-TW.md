@@ -89,7 +89,7 @@ Backend defaults to --herdr. Options may appear in any order.
 --core -rg is unsupported; no changes are made.
 ```
 
-上面的既有命令維持 Herdr 行為；`--herdr` 可明確選擇。Core 需安裝 herdr-core（已測 hc 0.1.20）、Node.js、npm 與 jq。`./scripts/run.sh --core -r` 建置目前 checkout 並開 Core terminal；`./scripts/run.sh --core` 使用既有 build。旗標可任意排序；重複／互斥／未知參數及 Core -rg 都在 runtime/npm 呼叫前 exit 2；-h/--help 印 usage。
+上面的既有命令維持 Herdr 行為；`--herdr` 可明確選擇。Core 需安裝 herdr-core（已測 hc 0.1.20）、Node.js、npm 與 jq。`./scripts/run.sh --core -r` 建置目前 checkout 並開 Core terminal，terminal 帶由專案路徑推導的 `herdr.space`／`herdr.tab` 標籤，Herdr Desktop 會在以專案資料夾命名的 space 顯示 bridge pane（Desktop 會把該 terminal 設成 keep；bridge 結束後若留下 shell，run.sh 會判定 stale 並要求 `herdr-core kill`）；`./scripts/run.sh --core` 使用既有 build。旗標可任意排序；重複／互斥／未知參數及 Core -rg 都在 runtime/npm 呼叫前 exit 2；-h/--help 印 usage。
 
 直接用 Node 啟動時，選擇優先序為 `HERDR_BRIDGE_RUNTIME` > config `runtime` > `herdr`，未知值失敗且不 fallback。Core 沿用 bridge 設定目錄（預設 `~/.config/herdr-discord-bridge/config.json`，可由 HERDR_PLUGIN_CONFIG_DIR 覆蓋），填好 Discord token／allowlists，並設定：
 
@@ -97,7 +97,7 @@ Backend defaults to --herdr. Options may appear in any order.
 {"runtime":"core","coreAllowedTerminals":["t2"],"allowedWorkspaceIds":[],"machines":[]}
 ```
 
-地址應由 Core 查得，不要直接照抄 t2。coreAllowedTerminals 為空時仍可列出／讀取，但拒絕所有輸入；輸入也須重新查到 live terminal 且 Core identity 相符。非空 allowedWorkspaceIds 或舊 machines 會讓 Core 啟動失敗。Core socket 選擇為 `HC_SOCKET` > `HC_SESSION`（對應 `~/.local/state/herdr-core/<session>/<session>.sock`）> `~/.local/state/herdr-core/default/default.sock`；HERDR_SOCKET_PATH 僅屬 Herdr。Core 非標準 socket 位置須明確設 HC_SOCKET。
+地址應由 Core 查得，不要直接照抄 t2。coreAllowedTerminals 為空時仍可列出／讀取，但拒絕所有輸入；輸入也須重新查到 live terminal 且 Core identity 相符。非空 allowedWorkspaceIds 或舊 machines 會讓 Core 啟動失敗。Core socket 選擇為 `HC_SOCKET` > 未設 HC_SESSION 時 Core terminal 注入的 `HC_TERMINAL_SOCKET` > 依 session（`HC_SESSION`，預設 default）的 `$XDG_RUNTIME_DIR/herdr-core/<session>.sock`（Linux Core 的實際位置）與 `$XDG_STATE_HOME|~/.local/state/herdr-core/<session>/<session>.sock`（macOS）兩個候選，取實際存在者，都不存在取 XDG_RUNTIME_DIR 候選（例如 Linux 的 `/run/user/1000/herdr-core/default.sock`）；HERDR_SOCKET_PATH 僅屬 Herdr，Core config.toml 的 `socket` 不解析，該情況須明確設 HC_SOCKET。以 Herdr plugin 安裝時，config.json 在 `herdr plugin config-dir herdr-discord-bridge`，不是 standalone 預設目錄 `~/.config/herdr-discord-bridge`。沒有指定 HERDR_PLUGIN_CONFIG_DIR 時，`run.sh --core` 先用 standalone 的檔案，沒有就改用 `~/.config/herdr/plugins/config/herdr-discord-bridge/config.json` 與 Herdr 的 plugin state 目錄 `~/.local/state/herdr/plugins/herdr-discord-bridge`，並印 `Using Herdr plugin config: …`。兩邊都沒有時在任何 npm／herdr-core 呼叫前拒絕並印出路徑；明確指定的目錄缺檔時不會被覆寫，只會印提示（ISSUE-151）。
 
 Core 目前只支援列出、visible 畫面讀取、送出、按鍵與 runtime 狀態：`/herdr agents`、`read [terminal]`、`ask <terminal> <text>`、`status`、`agent keys <terminal> <keys...>`、`cancel [terminal]`。thread 內先以 `target <terminal>`、`use <terminal>` 或 `agent use <terminal>` 明確綁定授權目標，才能轉送自由文字。read 固定 lines:0，不完整時附註；未回報 status 保持 unknown。send 不強制回答 blocked，也不重送送達不明的輸入。workspace、Team/card、pool/start、worktree、handoff、approval、failover 等其他指令明確拒絕。此最小 Core 模式沒有自動 final 串流，請用 read 查看輸出；後文未特別註明的命令說明適用 Herdr。
 
