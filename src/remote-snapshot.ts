@@ -114,7 +114,7 @@ export type RemoteRoleDeps = Pick<RemoteReviewDeps, "machine" | "exec" | "origin
   treeDigest?(cwd: string): string;
 };
 
-/** 失敗不 fallback 本機。cleanup：blocked 保留；狀態不明或 workspace 沒關成不刪目錄，記 cleanup_pending。 */
+/** 失敗不 fallback 本機。cleanup：blocked／timeout／uncertain 保留（與 card-role-session 對同一 RoleCleanupReason 一致）；workspace 沒關成不刪目錄，記 cleanup_pending。 */
 export async function startRemoteRole(
   deps: RemoteRoleDeps,
   input: { machineId: string; role: string; key: string; cwd: string; profile: AgentProfile; name: string; signal?: AbortSignal },
@@ -137,16 +137,18 @@ export async function startRemoteRole(
   if (!origin) throw fail("origin 不是 GitHub repo，不在遠端 clone");
   const exec = deps.exec(machine);
   const { root } = open;
-  const dir = remoteCheckoutDir(root, origin.owner, origin.repo, input.key);
-  const hash = cardHash(input.key);
+  // task 內快照與 PR 階段 remote reviewer 用不同的目錄名與 marker（key 加前綴），任一邊留下的目錄不會擋住或被另一邊接管。
+  const scoped = `task-snapshot:${input.key}`;
+  const dir = remoteCheckoutDir(root, origin.owner, origin.repo, scoped);
+  const hash = cardHash(scoped);
   const label = `task-${hash}-${randomBytes(4).toString("hex")}`;
   const st = { owned: false, uncertain: false, attempted: false, workspace: "", trust: false, trustUnknown: false };
   const trust = { root, dir, cardHash: hash };
   let cleaned: Promise<string> | undefined;
   const cleanup = (reason: RoleCleanupReason = "completed") =>
     (cleaned ??= (async () => {
-      if (reason === "blocked") {
-        console.error(`remote role ${id}: cleanup_pending workspace ${st.workspace} directory ${dir}: blocked，保留給人處理`);
+      if (reason === "blocked" || reason === "timeout" || reason === "uncertain") {
+        console.error(`remote role ${id}: cleanup_pending workspace ${st.workspace} directory ${dir}: ${reason}，保留給人處理`);
         return "（cleanup_pending：workspace、directory）";
       }
       const pending: string[] = [];

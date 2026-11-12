@@ -114,12 +114,15 @@ export function sshRemoteExec(machine: MachineConfig, sshCommand = "ssh", graceM
       if (stdinFile && child.stdin) {
         // 遠端提早結束（例如超過 head -c 上限）時 EPIPE 不算錯，結果看 exit code。
         child.stdin.on("error", () => {});
-        createReadStream(stdinFile)
+        const source = createReadStream(stdinFile);
+        source
           .once("error", (error) => {
             child.kill("SIGKILL");
             reject(new RemoteFailure("傳送失敗", error.message));
           })
           .pipe(child.stdin);
+        // ssh 提早結束或被本機計時 kill 時，不讓來源串流的檔案描述子留到 GC。
+        child.once("close", () => source.destroy());
       }
       let stdout = "";
       let stderr = "";

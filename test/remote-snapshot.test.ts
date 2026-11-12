@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { validateProfiles } from "../src/agent-pool.js";
-import { REMOVE_SCRIPT, RemoteFailure, assertRemoteValue, type RemoteExec } from "../src/remote-checkout.js";
+import { REMOVE_SCRIPT, RemoteFailure, assertRemoteValue, remoteCheckoutDir, type RemoteExec } from "../src/remote-checkout.js";
 import { MAX_BUNDLE_BYTES as MAX, createLocalSnapshot, localGit, prepareRemoteSnapshot, startRemoteRole, type RemoteRoleDeps } from "../src/remote-snapshot.js";
 
 const git = (cwd: string, ...a: string[]) => execFileSync("git", ["-C", cwd, "-c", "user.name=t", "-c", "user.email=t@t", ...a], { encoding: "utf8" });
@@ -100,6 +100,7 @@ type Opts = { failOn?: string; cutOn?: string; status?: string[]; digests?: stri
 function harness(o: Opts = {}) {
   const ac = new AbortController();
   const [log, found, status, digests] = [[] as string[], [...(o.found ?? [1])], [...(o.status ?? ["", ""])], [...(o.digests ?? ["d0"])]];
+  const cwds: string[] = [];
   let exists = false;
   const exec: RemoteExec = async (argv, _ms, stdin) => {
     const j = argv.join(" ");
@@ -117,6 +118,7 @@ function harness(o: Opts = {}) {
     exec: () => exec,
     originUrl: async () => "git@github.com:acme/repo.git\n",
     createWorkspace: async (m, cwd, label) => {
+      cwds.push(cwd);
       log.push(`create:${m}:${cwd.startsWith(`${ROOT}/acme__repo__`)}:${/^task-[0-9a-f]{10}-[0-9a-f]{8}$/.test(label)}`);
       if (o.wsFails) throw new Error("SECRET");
       return { workspaceId: "pod:w3", paneId: "pod:w3:p1" };
@@ -129,12 +131,12 @@ function harness(o: Opts = {}) {
     snapshot: () => ({ sha: SHA, tree: TREE, ref: "refs/hdb-snapshot/0123456789abcdef", bundle: "/tmp/b", bytes: 1, digest: "d0", dispose: () => void log.push("dispose") }),
     treeDigest: () => digests.shift() ?? "d0",
   };
-  return { log, start: (role = "review", p = profile) => startRemoteRole(deps, { machineId: "pod", role, key: "t/a", cwd: "/local/w", profile: p, name: "n", signal: ac.signal }) };
+  return { log, cwds, start: (role = "review", p = profile) => startRemoteRole(deps, { machineId: "pod", role, key: "t/a", cwd: "/local/w", profile: p, name: "n", signal: ac.signal }) };
 }
 const fixed = (label: RegExp) => (e: unknown) => label.test(String(e)) && /^Error: 遠端角色失敗：/.test(String(e)) && !/SECRET|\/home|\/local|acme/.test(String(e));
 const OK_LOG = ["mkdir", "send", "dispose", "create:pod:true:true", "start:pod:w3:p1:--model opus", "close:pod:w3", "rm"];
 
-test("remote role: completion, cancellation, timeout and dispatch failure close and remove; blocked retains; verify needs toolchain", async () => {
+test("remote role: completion, cancellation, timeout and dispatch failure close and remove; blocked／timeout／uncertain retain; verify needs toolchain", async () => {
   for (const reason of ["completed", "uncertain", "timeout", "before_dispatch_failure", "blocked"] as const) {
     const h = harness();
     const s = await h.start();
@@ -142,7 +144,8 @@ test("remote role: completion, cancellation, timeout and dispatch failure close 
     await s.afterTurn();
     await s.cleanup(reason);
     await s.cleanup(reason);
-    eq(h.log, reason === "blocked" ? OK_LOG.slice(0, 5) : OK_LOG);
+    // blocked／timeout／uncertain 保留 workspace 與 pod 目錄（與 card-role-session 一致），其餘清理。
+    eq(h.log, ["blocked", "timeout", "uncertain"].includes(reason) ? OK_LOG.slice(0, 5) : OK_LOG);
   }
   await rejects(harness().start("verify"), fixed(/verify 不可用/));
   await (await harness({ toolchain: true }).start("verify")).cleanup();
@@ -170,4 +173,13 @@ test("remote role failures: fixed labels, snapshot disposed, no local start, pod
 test("remote role read-only and version binding: pod change or later local change invalidates the result", async () => {
   await rejects((await harness({ status: ["", " M a.txt\n"] }).start()).afterTurn(), fixed(/被改動/));
   await rejects((await harness({ digests: ["d1"] }).start()).afterTurn(), fixed(/快照已作廢/));
+});
+
+test("remote role: task snapshot dir differs from the PR-stage remote reviewer dir for the same key (ISSUE-143 F2)", async () => {
+  const h = harness();
+  await (await h.start()).cleanup();
+  const reviewerDir = remoteCheckoutDir(ROOT, "acme", "repo", "t/a");
+  eq(h.cwds.length, 1);
+  ok(h.cwds[0] !== reviewerDir);
+  equal(h.cwds[0], remoteCheckoutDir(ROOT, "acme", "repo", "task-snapshot:t/a"));
 });

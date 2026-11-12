@@ -41,7 +41,7 @@ function validateCardReview(id: string, value: unknown): MachineConfig["cardRevi
     unsafeRemoteValue(root) || root.split("/").filter(Boolean).length < 2 || !list.length || new Set(list).size !== list.length ||
     list.some((kind) => !["claude", "codex", "agy", "pi"].includes(kind)) || (toolchain !== undefined && typeof toolchain !== "boolean")
   )
-    throw new Error(`machines[${id}].cardReview needs an absolute root (2+ segments) and kinds from claude, codex, agy, pi`);
+    throw new Error(`machines[${id}].cardReview needs an absolute root (2+ segments) and kinds from claude, codex, agy, pi; toolchain, if set, must be a boolean`);
   return { root: root.replace(/\/+$/, ""), kinds: [...list], ...(toolchain ? { toolchain: true } : {}) };
 }
 
