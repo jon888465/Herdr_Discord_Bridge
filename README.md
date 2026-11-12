@@ -127,6 +127,20 @@ Herdr Desktop 0.1.15 can produce `%/2…big5…` garbage when typing Chinese thr
 
 Launch Desktop with `./scripts/run-herdr-app.sh`. Close an existing Desktop window first if it used the ordinary ibus server. The launcher reuses the registered `ibus-herdr` server, or starts it with `LC_ALL=en_US.UTF-8` and waits for registration. It needs that locale, ibus-x11, xprop, flock and a valid user-owned XDG_RUNTIME_DIR. Startup is serialized; its log is `$XDG_RUNTIME_DIR/herdr-ibus-x11.log`. The dedicated XIM stays available for later windows. It does not restart the ordinary ibus daemon or change global/private settings. An externally started server with the same name must use the intended locale; registration alone cannot verify that environment.
 
+The launcher performs both steps below automatically; no manual ibus-x11 startup is required. To reproduce the verified workaround manually, close the old Desktop window and keep this command running in one terminal:
+
+```bash
+env LC_ALL=en_US.UTF-8 /usr/libexec/ibus-x11 --server-name=ibus-herdr
+```
+
+Then launch Desktop from another terminal:
+
+```bash
+env XMODIFIERS=@im=ibus-herdr herdr-app
+```
+
+`/usr/libexec/ibus-x11` is the verified Ubuntu path. The launcher also searches PATH and `/usr/lib/ibus/ibus-x11`, and reuses an existing `ibus-herdr` server instead of starting a duplicate.
+
 `./scripts/run.sh --core` starts the Discord bridge and cannot change the input environment of an already running Desktop. Run the two scripts separately as needed. macOS and Wayland bypass the X11 workaround and launch herdr-app directly. This particular X11/ibus path does not apply to macOS; macOS Chinese input has not been tested in this session. The underlying decoder still needs an upstream fix.
 
 ## Commands

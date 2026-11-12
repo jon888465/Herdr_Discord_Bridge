@@ -36,6 +36,8 @@
 
 **提交前驗證（2026-11-12）：**本輪 `npm run check` 的 typecheck／build 通過；預設並行全套曾在本機高負載下出現既有 `card-fix-flow`／`card-review-flow` 啟動等待測試逾時失敗，跑至約 test 1198 後停止本輪 runner，沒有全套最終總結，不視為全套通過。未改動這兩個測試或其實作；`node --test --test-concurrency=1 dist/test/herdr-app-launcher.test.js dist/test/card-fix-flow.test.js dist/test/card-review-flow.test.js` 重跑 **43/43 pass、0 fail、0 cancelled**。`npm run lint`、shell syntax、diff check 通過。之後使用者授權 commit／push／PR；runtime 重啟／部署未授權，原生解碼缺口仍在，launcher 實機開窗驗收仍待完成。
 
+**README 補正與 CI（2026-11-12）：**使用者指出少了 `env LC_ALL=en_US.UTF-8 /usr/libexec/ibus-x11 --server-name=ibus-herdr`。核對確認 launcher 已有 `nohup env LC_ALL=en_US.UTF-8 "$ibus_x11" --server-name=ibus-herdr`（路徑自動尋找），缺的是 README 的完整手動對照指令。中英文 README 補上先啟動專用 XIM、另個終端機以 XMODIFIERS 啟動 Desktop 的兩步，說明腳本自動完成、已存在則重用；未改執行行為或啟動第二個服務。PR #223 原程式提交 `c7223dc` 的 run `43148578834` 已在 Ubuntu／macOS Node 22 全部通過；不將 CI 等同 launcher 實機中文輸入驗收。本輪純文件補正，檢查命令、內容與 `git diff --check`，不重跑程式測試。
+
 ## ISSUE-151：Herdr Core runtime 支援
 
 更新日期：2026-11-12。狀態：已修正、待驗收（2026-11-12 本機 Linux 實機 `--core` 啟動兩次失敗後，同日修正 run.sh 缺檔守門與 Core socket 解析；見本條「實機驗收」與「修正」段）。
