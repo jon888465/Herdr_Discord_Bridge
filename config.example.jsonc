@@ -1,17 +1,5 @@
 {
-  // Runtime: "herdr" (default) or "core"; HERDR_BRIDGE_RUNTIME overrides this.
-  // run.sh Herdr launcher explicitly sets runtime=herdr even if this field is core.
-  // Core run.sh requires file discord.botToken when caller uses an environment token;
-  // tokens are never forwarded through argv and inherited token variables are cleared.
-  // Core supports terminal commands; workspace/team/card operations are unsupported.
-  "runtime": "herdr",
-  // Canonical Core terminal addresses allowed to receive input; rechecked live per send/key.
-  // Empty: listing/visible reads allowed, all input denied. Bind threads with target/use.
-  // Core requires allowedWorkspaceIds and machines to be empty.
-  "coreAllowedTerminals": [],
-  // Core standalone default: ~/.config/herdr-discord-bridge/config.json.
-  // HERDR_PLUGIN_CONFIG_DIR overrides the bridge config directory for either backend.
-  // For Herdr plugins, copy this file to the directory printed by:
+  // Copy this file to the directory printed by:
   //   herdr plugin config-dir herdr-discord-bridge
   // The real config is gitignored. Environment variables override file values.
   "discord": {
