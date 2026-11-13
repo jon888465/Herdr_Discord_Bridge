@@ -23,7 +23,7 @@
 | 1 | NetworkPolicy 預設拒絕對私有網段、link-local、CGNAT、叢集 API 的出站，只放行叢集 DNS 與公網；Deployment 設 `automountServiceAccountToken: false` | 操作者已手動套用並實測（2026-11-13，連線層與 remote reviewer 成功路徑；規則檔不在本 repo） |
 | 2 | egress proxy pod：agent pod 只能連 proxy 與 DNS，proxy 以網域白名單過濾（先只記 log，觀察後再強制） | 規劃 |
 | 3 | token manager：以 GitHub App 發短效、限單一 repo 的 installation token | 規劃，等 remote 寫入角色才需要 |
-| 4 | remote implement／fixer、每個任務獨立短命 pod、非 root | 規劃 |
+| 4 | remote implement／fixer、非 root；pod 依風險分組長駐，一次性 pod 只用於高風險寫入（見「pod 要不要動態建立」） | 規劃 |
 | 5 | 雲端控制平面與 tailnet 存取控管（grants／tag） | 規劃 |
 
 ## 借鏡雲端平台的對應
@@ -59,6 +59,35 @@ tailnet 提供節點間網路連通，也能用 Taildrop、ssh、rsync 傳檔，
 - 若 pod 要加入 tailnet，要以 tag 與 grants 限縮到只能連 bridge 與必要服務；加入前 NetworkPolicy 需放行 CGNAT 網段，兩邊同時收緊。
 - Taildrop 對 tag 節點的支援與 ACL 行為需實測，本文不假設。
 
+## pod 要不要動態建立
+
+結論：**不需要**，預設用少數長駐 pod。
+
+- 效率：目前 pod 的啟動腳本每次重建都會安裝套件、sshd 與 herdr，實測要數分鐘。動態建 pod 若沒有預建映像，每個任務都要等這麼久。
+- 隔離不靠「一任務一 pod」：現行每個 assignment 都是新 session、新目錄、用完清理；真正的防線是出站管控、短效憑證與唯讀角色。
+- 建議分組：唯讀 reviewer 一組長駐 pod；之後有寫入權限的角色另一組（權限、憑證、白名單各自獨立）。
+- 一次性 pod 只用於「寫入角色加不可信 repo」，且必須先有預建映像（把套件、sshd、herdr 烤進映像，啟動不再安裝）。
+- 長駐 pod 要處理重啟後的恢復：herdr server 需能自動啟動，bridge 專用的 wrapper 等設定要寫進部署定義，不能只存在容器檔案系統。
+
+## skill 與 agent 設定
+
+- 現況：pod 上沒有任何 skill；唯讀 reviewer 的提示由 bridge 帶入卡片內容與驗收條件，不依賴 skill，目前沒有缺口。
+- 需要時的做法：**不要**把個人 skill 整個目錄複製進映像或公開 repo（可能含個人資訊與偏好）；只挑角色需要的，列成白名單。
+- 以**唯讀**方式提供（bridge 啟動 agent 前同步，或唯讀 volume／ConfigMap）。skill 是 agent 會照做的指令，agent 若能改自己的 skill 目錄，一次 prompt injection 就會污染之後所有 session。
+- 用內容雜湊固定版本，稽核時能知道某次 review 用的是哪一版指令。
+- 不同 agent 種類的 skill 位置與格式不同，不能共用一份目錄；實作前逐種確認。
+- 持久儲存上的 agent 設定備份會累積（ISSUE-149），沒有清理機制前不要在其中放需要保密的內容。
+
+## agent 登入憑證
+
+agent 自己的登入憑證（例如 agy 的 OAuth 憑證）存放在 pod 的持久儲存，agent 讀得到，是**長期憑證**。token manager 只處理 GitHub token 並不涵蓋這一項。待評估的緩解：
+
+- egress proxy 白名單只放該 agent 供應商所需網域，降低被外送的路徑。
+- 評估能否改為由外部注入、或使用範圍更小、可撤銷的憑證。
+- 一旦懷疑外洩，流程是撤銷後重新登入，不是清歷史。
+
+目前只確認風險存在，沒有解法；需要使用者決定是否接受或投入改造。
+
 ## 未驗證項目
 
 - 各 agent CLI（agy 等）是否支援經 proxy 出站。
@@ -66,6 +95,9 @@ tailnet 提供節點間網路連通，也能用 Taildrop、ssh、rsync 傳檔，
 - NetworkPolicy 對 proxy 的行為在目前叢集 CNI 的實測。
 - token manager 與 bridge 的認證方式與租約回收。
 - 私有 repo 的 PR 階段 reviewer 流程（目前只支援匿名 https 的公開 repo）。
+- 各種 agent 的 skill 位置與格式、是否有「信任子資料夾」之類的限制。
+- agent 登入憑證的外部注入或更小範圍憑證是否可行。
+- 預建映像與長駐 pod 自動恢復（herdr server 自動啟動）的做法。
 
 ## 後續
 
