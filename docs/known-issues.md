@@ -228,7 +228,7 @@ r7-f2：Core terminal 不繼承 caller shell。現 run 的 env 前綴傳 HERDR_B
 
 ## ISSUE-147：task 內本機 agy Worker 沒有收到第一個 prompt，Herdr 回 ok 但 pane 是空的，task 一直等到逾時
 
-更新日期：2026-11-12。狀態：待調查（現象已觀察；根因未確認；2026-11-12 兩種重現嘗試共 30 次都沒有重現，見「重現嘗試」）。
+更新日期：2026-11-13。狀態：待調查（現象已觀察；根因未確認；2026-11-12 與 2026-11-13 三種重現嘗試共 28 次有效嘗試都沒有重現，見「重現嘗試」）。
 
 **使用者可見症狀：**`REQ-20261111-remote-reviewer-live` 的 task 內 review（`team-review-card-file`，本機 agy Worker，pane `w6B:p4`）：07:03:37Z `role_assigned`、07:03:38.080Z `turn_dispatched`，bridge console 印出 `agent.prompt prompt+wait target=w6B:p4 chars=7266 ts=1794380618480`，**沒有任何錯誤**。之後 agy 的 pane 一直是剛啟動的歡迎畫面、輸入框是空的，Herdr 的 `agent explain` 說 `state: idle`，沒有 `hook Stop`；task 的最後一個事件就是那次 `turn_dispatched`，到 07:14:48Z 仍沒有變化（約 11 分鐘）。bridge 會等到單一回合上限（30 分鐘）才會判逾時。
 
@@ -245,7 +245,8 @@ r7-f2：Core terminal 不繼承 caller shell。現 run 的 env 前綴傳 HERDR_B
 **重現嘗試（2026-11-12，本機 macOS，bridge 為 main `edbcb49`，agy 1.5.x，Gemini 3.8 Flash）：**
 - **herdr 命令列單獨重現（腳本 `repro147.py`：開臨時 workspace、`herdr agent start` agy、立刻 `herdr agent prompt --wait`、看畫面是否出現回覆）：**基本 6 次、8561 字元多行 prompt 4 次（H1）、全新目錄且啟動前一刻才寫入 agy 信任設定 4 次（H2）、agy 放在多次分割的小 pane 3 次（H4），共 17 次**全部收到**。
 - **用 bridge 本身（腳本 `bridge147b.py`：每輪新 workspace＋agy Lead，console `team ask` 讓 bridge 第一次啟動本機 agy Worker 並送第一個 prompt，以 task 事件判定）：**8 輪**全部收到**（Worker 回合約 40 到 85 秒完成）。限制：cwd 是主 repo（已在信任清單），沒有走卡片 worktree 與 bridge 的 `agy_worktree_trust` 預先信任寫入。
-- **被推翻的假設：**H1 大型多行 prompt 被吞、H2 新目錄加剛寫入的信任、H4 小 pane。**未測：**卡片流程的 linked worktree＋bridge 預先信任（兩次事故都在這條路徑）、多個 Worker／agent 同時啟動、task 在 Lead 與 Worker 並行時的負載。
+- **卡片流程重現（2026-11-13，同一個 bridge `edbcb49`；3 張極簡卡 `REQ-20261113-agy-worker-repro-1`～`-3`，`lead: agy`、`roles: {implement: local:agy, verify: local:agy, reviewer: local:claude:opus}`，工作只是新增一行 `ok` 的檔案）：**3 輪**全部收到**。每輪都走完整路徑：autopick 撿卡、建 linked worktree、bridge 在啟動前寫入 `agy_worktree_trust`（`agy trust add added`）、Lead 規劃、本機 agy implement 與 verify、task `task_completed`、commit、開 PR（#239、#240、#241，已關閉並刪分支，不 merge）。沒有 `assignment_failed`。這補上了前一項「未測」的 linked worktree＋預先信任路徑。限制：autopick 一次只撿一張，3 張是依序執行，**沒有並行啟動**；卡片很小，Worker 回合都在約 1 分鐘內。
+- **被推翻的假設：**H1 大型多行 prompt 被吞、H2 新目錄加剛寫入的信任、H4 小 pane。**仍未測：**多個 Worker／agent 同時啟動、task 在 Lead 與 Worker 並行時的負載、較大的卡片（事故時的 prompt 約 7,266 字元）；linked worktree＋預先信任已於 2026-11-13 測過（見上一項）。
 - **試驗中的誤判（已更正）：**第一版 `bridge147.py` 以「前次 console 內容」切出新增輸出，console 捲動後會把舊的 `hook Stop` 當成本輪的，6 輪『收到』不算數；那些 task 其實都在 Worker 派出前以 `assignment_failed` 結束（見 ISSUE-156）。
 
 ## ISSUE-156：直接關閉 bridge 開的 Worker pane 後，該 workspace 的 agent 池卡在「startup uncertain」，無法用 select／add 清除
