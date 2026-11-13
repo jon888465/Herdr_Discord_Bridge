@@ -1,5 +1,21 @@
 # Known Issues
 
+## ISSUE-157：task 所屬的 workspace 已關閉後，`team cancel` 永遠回「task belongs to another workspace」，task 無法標成終態
+
+更新日期：2026-11-13。狀態：已修正、待驗收（原始碼與自動化檢查完成，**未實機驗收、未重啟 bridge**）。
+
+**使用者可見症狀：**`task-a8eaf87e-…`（workspace `w6W`，狀態 `cancelling`）與 `task-f3f8ecd5-…`（workspace `w5A`，狀態 `blocked`）是 2026-11-12 live 驗收卡殘留的 task。2026-11-13 在 bridge console 執行 `team cancel <task-id>` 回 `❌ task belongs to another workspace`；`wk use w6W`／`wk use w5A` 回 `workspace … was not found or is not authorized`（workspace 已關閉），無法切過去。兩個 task 因此永遠不是終態，每次 bridge 重啟都會對它們再跑一次 `restart_reconciled`（`task-a8eaf87e-…` 已累積 33 筆事件）。
+
+**預期行為：**workspace 已不存在時，仍有正式指令能取消 task；workspace 還存在時維持現行的跨 workspace 保護。
+
+**根因（已確認，讀 `src/main.ts` 的 `team` 指令）：**`team status`／`team cancel` 先比對 `task.workspaceId` 與目前 `wk use` 的 workspace，不符就拒絕；`wk use` 又只接受仍存在的 workspace，兩個條件合起來讓已關閉 workspace 內的 task 無路可走。
+
+**修正（2026-11-13）：**`src/team-cancel-scope.ts` 新增 `mayCancelFromWorkspace`：只有 `team cancel`，且 task 的 workspace **不在** Herdr 目前的 workspace 列表時才放行；列表讀取失敗一律拒絕（不把「查不到」當成「已關閉」）。`team status` 不變；引擎的 `allowedWorkspaceIds` 授權檢查不變。`test/team-cancel-scope.test.ts` 4 項：同 workspace 允許且不查列表、workspace 還存在時拒絕、已關閉時允許、列表失敗時拒絕。
+
+**測試（2026-11-13，本機 macOS）：**`npx tsc` 無錯誤；`node --test dist/test/team-cancel-scope.test.js` 4 項通過。完整 `npm test`（2026-11-13，本機 macOS）1937 項：1936 通過、0 失敗、1 略過。CI 結果見 PR。
+
+**未驗證／下一步：**重啟 bridge 後對上述兩個 task 實際執行 `team cancel`；取消流程在 pane 與 workspace 都不存在時能否收尾（`interruptUntilSettled` 等路徑只讀程式、沒有單元測試涵蓋）；`team status <task-id>` 對已關閉 workspace 的 task 仍會被拒絕（本次沒改）。
+
 ## ISSUE-155：`hook sessions are ignored for local panes, other panes, stale events…` 在 macOS CI 偶發失敗（測試間 hook 事件殘留）
 
 更新日期：2026-11-12。狀態：已修正、待驗收（CI 觀察）。
