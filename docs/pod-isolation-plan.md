@@ -88,6 +88,34 @@ agent 自己的登入憑證（例如 agy 的 OAuth 憑證）存放在 pod 的持
 
 目前只確認風險存在，沒有解法；需要使用者決定是否接受或投入改造。
 
+## 與 DeerFlow 的比較
+
+2026-11-13，依 bytedance/deer-flow 官方文件（`docs/guide/` 與 `backend/docs/CONFIGURATION.md`）整理；另有一篇第三方介紹文章，內容多為行銷說法，不作依據。**部分段落（CONFIGURATION.md 的沙箱 provider 與網路政策小節、skills 的導出限制）只讀到摘要而非逐字，下表標「摘要」者需再核對原文。**定位不同：DeerFlow 是自帶 Lead 與子代理的一體式引擎；本專案是 bridge 調度既有的 CLI agent，流程以卡片、PR、review、CI 為主。
+
+| 面向 | DeerFlow（官方文件） | 本規劃 |
+|---|---|---|
+| 沙箱模式 | 三種：local、Docker（AIO）、Docker＋Kubernetes provisioner；**預設是 local**，文件自稱 local「不是強邊界」，host bash 預設關閉 | agent 一律在 pod；沒有「本機直接執行」的隔離宣稱（本機 agent 的權限風險另列於 ISSUE-125） |
+| 出站管控 | AIO 預設 open（為相容）；可設 isolated／allowlist，allowlist 可經人工核准卡片臨時放行網域；私網、loopback、link-local、雲端 metadata 位址永不可核准；受限模式只支援本地 Docker，provisioner 模式 fail closed（摘要）；**文件未見 Kubernetes NetworkPolicy** | 第 1 階段 NetworkPolicy 已套用；第 2 階段 proxy 白名單 |
+| 憑證 | 沙箱指令刻意不繼承 gateway 的 API key，需明確注入；本機 bash 輸出會脫敏；但 Lark 憑證以唯讀掛載進沙箱、沙箱內程式讀得到，文件承認要等 sidecar broker 完成；**沒有通用 token manager 或短效憑證機制** | 第 3 階段 GitHub App 短效 token；agent 登入憑證缺口見上節 |
+| Kubernetes provisioner | 只有定性描述「最強隔離」；pod 的非 root、service account、資源限制、NetworkPolicy、清理細節**文件中沒找到**（指向另一份未讀的 Setup Guide） | 無法逐項比較 |
+| Skills | `SKILL.md`（`name`、`description` 必填，另有 `allowed-tools`、`required-secrets` 等）；漸進載入；可依 agent 設白名單（省略＝全部、空清單＝全部停用）；安裝 `.skill` 歸檔要過確定性掃描（私鑰、shell 執行）與 LLM 掃描；`allowed-tools` 文件明講**不是安全邊界** | 白名單、唯讀、雜湊固定版本；唯讀角色由 bridge 強制，不靠 skill 的中繼資料 |
+| 子代理驗證 | 「deterministic tool receipts」：回報要引用工具回執，主代理核對；沒引用的標 UNVERIFIED；`acceptance_criteria` 結果為成立／不成立／UNVERIFIED；文件明講回執驗證**不證明未引用敘述的真實性或完整性** | verify 角色回報必須 exit 0 的檢查指令；Lead 彙整是否逐項核對證據待檢視 |
+| 並行 | `max_concurrent_subagents`、`max_total_per_run` | 一次一張卡，task 內依賴排序 |
+| 安全定位 | 預設只綁 loopback；文件寫「Gateway admin 等同主機上的程式碼執行」；部分 IM 通道 `allowed_users` 留空代表允許所有人 | bridge 以 Discord 允許清單加提及規則限制入口 |
+
+**可借鏡：**
+
+- **網域核准流程：**新網域不是永久開放，而是由人核准並限時放行（對應 Discord 核准訊息）；私網、link-local、雲端 metadata 永不可核准；受限模式不支援時 fail closed。可納入第 2 階段 proxy 設計。
+- **沙箱不繼承父程序憑證、明確注入：**對應 token manager 的「只發給該任務需要的」。
+- **skill 宣告所需 secrets（`required-secrets`）：**bridge 只注入 skill 宣告的項目。
+- **skill 安裝前掃描：**同步白名單 skill 進 pod 之前先做確定性掃描。
+- **子代理回報引用回執、否則標未驗證：**可對照 Lead 彙整與 verify 的證據要求。
+- **容量控制：**pod 變多時需要並行上限與單任務委派上限。
+
+**驗證了本規劃的方向：**即使是這類產品，文件也承認沒有 token manager、沙箱內可讀憑證要等 broker、provisioner 的出站與 pod 安全設定沒有寫明；第 3 階段的短效、限 repo 的 GitHub App token 與第 1 階段的 NetworkPolicy 是目前沒看到同類做法的部分（僅依已讀文件，不代表它們沒做）。
+
+**要提防的：**local 模式（預設）等於沒有隔離；IM 通道使用者白名單留空的語意必須明確。本專案的 Discord 授權檢查（`src/discord.ts`）對 `allowedGuildIds`、`allowedChannelIds`、`allowedUserIds` 都是「留空＝不限制該維度」（fail-open），只有 bot 開關這類控制要求使用者 ID 在清單內；部署時三者都應填寫，是否改成留空即拒絕列為後續待決項目（尚未決定、未實作）。
+
 ## 未驗證項目
 
 - 各 agent CLI（agy 等）是否支援經 proxy 出站。
@@ -98,6 +126,7 @@ agent 自己的登入憑證（例如 agy 的 OAuth 憑證）存放在 pod 的持
 - 各種 agent 的 skill 位置與格式、是否有「信任子資料夾」之類的限制。
 - agent 登入憑證的外部注入或更小範圍憑證是否可行。
 - 預建映像與長駐 pod 自動恢復（herdr server 自動啟動）的做法。
+- DeerFlow 的 Provisioner Setup Guide、`SECURITY.md`、compose 檔與 `config.example.yaml` 尚未讀取；其文件對「CLI 憑證目錄是否預設掛載」前後自相矛盾，未核實。
 
 ## 後續
 
