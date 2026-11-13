@@ -1,5 +1,23 @@
 # Known Issues
 
+## ISSUE-159：Discord 白名單留空代表「不限制」（fail-open），任何人都能操作 bot
+
+更新日期：2026-11-13。狀態：已修正、待驗收（原始碼與自動化檢查完成；**尚未部署、未重啟，執行中的 bridge 仍是舊行為**；實機驗收待使用者在 config 填好三個白名單、重啟後進行）。
+
+**使用者可見症狀：**`discord.allowedGuildIds`、`allowedChannelIds`、`allowedUserIds` 留空時，該維度不限制：bot 所在任何伺服器、頻道的任何人都能下指令，而 bot 能驅動 agent（部分以最大權限執行）。2026-11-13 使用者檢視後指出「不應該留白就不限制」，並與同類產品文件的做法（部分通道留空允許所有人）對照過。
+
+**預期行為：**三個清單留空一律拒絕；要放行就明確列出 ID。
+
+**根因（已確認，讀 `src/discord.ts`、`src/console.ts`、`src/main.ts`）：**三處授權檢查都寫成「清單為空或包含該 ID」：`DiscordAdapter.isAllowed`（指令、select、按鈕）、`routeConsoleCommand` 的 guild／channel 篩選、`onApproval` 的使用者檢查。這是原本的設計（SPEC 寫「空清單表示該維度不限制」），不是意外。只有 bot 開關類控制（`main.ts` 的 enable／disable）本來就要求 `allowedUserIds` 非空。
+
+**修正（2026-11-13，已修正、待驗收）：**新增 `src/allowlist.ts` 的 `inAllowlist`（空清單回傳 false）與 `emptyDiscordAllowlists`，三處檢查改用它；啟動時對空的欄位印警告（不中止，本機 console、hook 通道與卡片流程照常）。`SPEC.md`、`config.example.jsonc`、README 同步。
+
+**測試（2026-11-13，本機）：**`npm run check`：1942 項，1941 pass、0 fail、1 skipped（含新增的 `test/allowlist.test.ts` 與 `test/inbound.test.ts` 三個「留空即拒絕」案例）；`npm run lint` 通過。反向驗證：把 `inAllowlist` 暫時改回舊語意，三個 inbound 案例變紅，改回後通過。
+
+**影響與遷移（重要）：**已部署的設定若有任何清單是空的，重啟新版後該維度全部拒絕，**包含使用者自己**，必須先在 config（或環境變數）填好三個清單再重啟。env 覆寫同樣適用。
+
+**未驗證項目／下一步：**①實機：填好三個清單、重啟後，允許的使用者仍可操作，其他使用者被拒；②拒絕時 Discord 端是否靜默（目前未改變既有的拒絕行為，沒有新增回覆）；③是否要在三個清單都空時乾脆中止 Discord 啟動，而非印警告（目前選擇不中止，避免把整個 bridge 一起停掉）；④`allowedWorkspaceIds` 空代表全部 workspace 的語意未變，是另一層授權，未列入本條。
+
 ## ISSUE-158：console 每分鐘為每張已完成的卡重複印「autopick Lead cleanup … workspace missing or label mismatch」
 
 更新日期：2026-11-13。狀態：已驗收（2026-11-13 實機，見「實機驗收」；label 不符的警告路徑仍只有單元測試）。

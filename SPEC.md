@@ -107,8 +107,10 @@ Handoff context 受 `handoffLines`（預設 `40`）與 `handoffMaxChars`（預�
 Discord adapter 需要 `messageContent`，因為 `/herdr ...` 指令、已映射 thread
 中的 prompt，以及純文字 approval 回覆都是文字訊息。它只使用 guild message
 與 message content 所需的 Gateway intents；沒有 inbound web server。Command、
-reply 或 button 處理前會檢查 guild、channel 與 user allowlist。空清單表示
-該維度不限制；敏感部署應改用明確 ID。非空的 `allowedWorkspaceIds` 會再增加
+reply 或 button 處理前會檢查 guild、channel 與 user allowlist。**空清單表示
+該維度全部拒絕（fail-closed，2026-11-13，ISSUE-159）**：三個清單都必須明確列出 ID，
+bridge 啟動時對空的欄位印警告，不會因此停止（本機 console 與 hook 通道不受影響）。
+舊版的「空清單＝不限制」已移除。非空的 `allowedWorkspaceIds` 會再增加
 一層 Herdr workspace 授權邊界。
 
 ## 3. Herdr protocol client（Herdr 後端）

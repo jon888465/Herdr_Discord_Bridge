@@ -204,6 +204,7 @@ import type {
   WorkspaceRecord,
 } from "./types.js";
 import { agentLabel, workspacePath } from "./types.js";
+import { emptyDiscordAllowlists, inAllowlist } from "./allowlist.js";
 
 export async function run(): Promise<void> {
   const config = loadConfig();
@@ -316,6 +317,11 @@ async function startBridge(
     throw new Error(
       "Discord is disabled or its bot token is missing in plugin config/env",
     );
+  const emptyAllowlists = emptyDiscordAllowlists(config.discord);
+  if (emptyAllowlists.length)
+    console.error(
+      `Discord 白名單是空的：${emptyAllowlists.join("、")}。留空代表該維度全部拒絕（ISSUE-159），請在 config 或環境變數明確列出 ID。`,
+    );
   if (!config.discord.messageContent) {
     throw new Error(
       "Discord messageContent must be enabled because /herdr commands and thread replies use Gateway message content",
@@ -393,10 +399,7 @@ async function startBridge(
     }
   });
   discord.onApproval(async (approval, text, userId) => {
-    if (
-      !config.discord.allowedUserIds.length ||
-      config.discord.allowedUserIds.includes(userId)
-    ) {
+    if (inAllowlist(config.discord.allowedUserIds, userId)) {
       const target = (await herdr.listAgentsWithWorkspaceNames()).find(
         (a) => a.terminal_id === approval.terminalId,
       );
