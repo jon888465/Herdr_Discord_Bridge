@@ -230,6 +230,8 @@ r7-f2：Core terminal 不繼承 caller shell。現 run 的 env 前綴傳 HERDR_B
 
 **未驗證：**實機（pod 的 git 與 repo 權限、GNU `timeout`、`realpath`、`refs/pull` fetch、marker 寫入）；cleanup_pending 不重試；clone 中斷留下的半成品沒有 marker，不會被清理（記 pending，需人工）；需使用者加 `cardReview` 並重啟。A 單獨 merge 不會啟用任何 remote 功能。
 
+**2026-11-13 pod 網段隔離後重驗（成功路徑再驗一次；仍非完整驗收）：**agy-pod 套用出站網段隔離（NetworkPolicy 預設拒絕對私有網段、link-local、CGNAT 與 k8s API 的出站，只放行叢集 DNS 與公網）、Deployment 加 `automountServiceAccountToken: false` 並重建 pod 之後，派測試卡 `REQ-20261113-remote-reviewer-isolation`（`roles: {implement: local:claude:opus, verify: local:claude:opus, reviewer: "agy-pod:agy:"}`，`lead: agy`；工作只新增一個內容為 `ok` 的檔案）。結果：①task 內 `review-1` 派到 `remote:agy-pod:review:agy`，約 1 分 20 秒 `pass`、無 findings，報告顯示 agy 看到未 push 的快照且只新增那一個檔案；implement、verify 由本機 claude 完成，verify 5 項檢查通過；②PR #249 的 reviewer 第 1 輪（agy-pod）約 30 秒 `pass`；CI ubuntu、macOS（Node 22）通過；squash merge `34861d2a6b18`；③pod 上 checkout 目錄清空、pod 與本機的 agy 信任項目都已移除；④pod 重建後 agy 登入設定仍在（持久儲存），不必重新登入。**證明的：**隔離、重建、不掛載 token 之後，卡片流程 remote reviewer 的 task 內與 PR 兩階段成功路徑仍正常，信任項目這次有正確清理。**沒有證明的：**失敗路徑（pod 不可達不 fallback、clone／fetch／timeout／realpath 失敗、`cleanup_pending`、marker 不符、工作樹不乾淨、逾時）；pod 內 agy 自行連 GitHub 的流程（這次的 review 是 bridge 送快照，沒有用到 pod 出站）；大型 PR；只有一張極簡卡、一次。本條狀態不變（已修正、待驗收）。pod 隔離方案本身的規劃與後續階段尚未入庫（部署細節不放公開 repo）。
+
 ## ISSUE-150：task 內本機 agy 的 review（`review-card-acceptance`）回報「no passing review for the current version」，task 失敗
 
 更新日期：2026-11-12。狀態：已驗收（task 內 remote review 閘門通過路徑，2026-11-12 見 ISSUE-154 實機驗收：`REQ-20261112-remote-in-task-live3`，task `task_completed`；範圍是 `lead: agy`＋remote reviewer 一張極簡卡一次；根因確認 2026-11-12，修正 #230、#231、#233）。先前：已修正、待驗收（部分通過，曾因 reviewer 身分未知失敗，ISSUE-154）。
