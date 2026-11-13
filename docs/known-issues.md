@@ -251,15 +251,17 @@ r7-f2：Core terminal 不繼承 caller shell。現 run 的 env 前綴傳 HERDR_B
 
 ## ISSUE-156：直接關閉 bridge 開的 Worker pane 後，該 workspace 的 agent 池卡在「startup uncertain」，無法用 select／add 清除
 
-更新日期：2026-11-12。狀態：待調查（現象已觀察一次；是否為設計取捨未確認）。
+更新日期：2026-11-13。狀態：待調查（現象已觀察一次；是否為設計取捨未確認）。已找到人工解除方式（`team bind` 綁新的存活 pane，2026-11-13 驗證），bridge 重啟**不會**清掉；沒有修正。
 
 **使用者可見症狀：**ISSUE-147 重現時，我以 `herdr pane close` 關掉 bridge 在 `w5D` 開的 agy Worker（`w5D:p4`）後再 `team ask`：assignment 立刻 `failed`，原因「previous startup delivery is uncertain; inspect and explicitly bind a live Agent before retrying」，Team Task 失敗（synthesis is partial）；`team pool` 顯示 `[x] agy · agy · startup uncertain; bind after inspection`，`team select agy off`／`on`、`team remove profile:agy`／`team add profile:agy` 都清不掉。
 
 **預期行為：**Worker pane 已不存在時，池應該能重新啟動一個新的 Worker（或至少有明確指令清除）。
 
-**根因：**未確認。推測：綁定記錄仍指向已關閉的 pane，被判為「啟動結果不明」，設計上要求人工 `team bind` 一個存活的 pane。
+**根因：**未確認。已確認的事實（2026-11-13 讀 `agent-pool.json`）：卡住的記錄是 `sessions["w5D/agy"] = {fingerprint, uncertain: true, paneId: "w5D:p5"}`，`paneId` 指向已不存在的 pane；`src/agent-pool.ts` 在 `binding.uncertain` 時直接拒絕派工，訊息要求人工 `team bind` 存活的 Agent。推測：關閉 pane 時沒有清掉這筆記錄，且「pane 已不存在」沒有被視為未啟動，設計上是否有意未確認。
 
-**處理：**2026-11-12 繞過：每輪改用全新 workspace。`w5D` 的池仍是卡住狀態（`agent-pool.json`）；未驗證重啟 bridge 是否會清掉。
+**處理：**2026-11-12 繞過：每輪改用全新 workspace。
+
+**解除方式（2026-11-13 驗證，本機 macOS，bridge main `d7cd3a9`）：**bridge 於 2026-11-13 重啟後 `w5D` 的 `team pool` 仍是 `[x] agy · agy · startup uncertain; bind after inspection`，所以**重啟不會清掉**。做法：在該 workspace 開新 pane（`herdr pane split <pane> --direction down --no-focus`）、`herdr agent start agy-worker --kind agy --pane <新 pane>`，再於 bridge console `team bind agy <新 pane>`；回「Bound agy to w5D:p6」，`team pool` 變成 `[x] agy · agy · idle · w5D:p6 · session unknown`。限制：只是換一個新的 Worker，不是清除；綁定後尚未派工驗證（session 識別要等第一個回合的 hook 才會補上）；不要綁該 workspace 的 Lead pane（會把 Lead 當 Worker）。
 
 **未驗證／下一步：**確認是否設計取捨；至少提供清除指令（例如 `team unbind`）或在 pane 已不存在時自動視為未啟動。
 
