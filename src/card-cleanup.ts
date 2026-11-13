@@ -87,8 +87,10 @@ export async function closeAutopickLead(
     const workspace = (await port.listWorkspaces()).find(
       (w) => w.workspace_id === workspaceId,
     );
-    if (!workspace || workspace.label !== label) {
-      log(`autopick Lead cleanup ${id}: workspace missing or label mismatch`);
+    // workspace 已不存在是清理完成後的正常終態（每分鐘掃描都會遇到），不記警告（ISSUE-158）。
+    if (!workspace) return;
+    if (workspace.label !== label) {
+      log(`autopick Lead cleanup ${id}: workspace label mismatch`);
       return;
     }
     await port.request(

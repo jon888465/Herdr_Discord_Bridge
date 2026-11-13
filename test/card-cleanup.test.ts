@@ -135,7 +135,7 @@ for (const scenario of [
   "lookup failure",
   "invalid record",
 ]) {
-  test(`Lead ${scenario} only logs and preserves cleanup result`, async () => {
+  test(`Lead ${scenario} only logs (missing workspace is silent) and preserves cleanup result`, async () => {
     const cards = store();
     assert.ok(
       cards.recordAutopickWorkspace(
@@ -174,7 +174,8 @@ for (const scenario of [
       true,
       (message) => logs.push(message),
     );
-    assert.equal(logs.length, 1);
+    // workspace 已不存在是正常終態，不記警告（ISSUE-158）；其他情境仍只記一筆。
+    assert.equal(logs.length, scenario === "missing" ? 0 : 1);
     assert.equal(closes, scenario === "close failure" ? 1 : 0);
     assert.deepEqual(recordCleanupOnCard(cards, ID, result, now), before);
   });
