@@ -31,10 +31,10 @@
 | 角色 | claude | codex | agy | pi |
 |---|---|---|---|---|
 | lead | 8 | 2 | 1 | 2（1 次失敗、1 次成功，見註 4） |
-| implement | 無 | 17 | 無（早期 1 次，見註 1） | 無 |
+| implement | 無 | 17 | 3（2026-11-13 實機，見註 6；另早期 1 次，見註 1） | 無 |
 | diagnose | 1 | 3 | 1 | 無 |
 | review（task 內） | 3 | 16 | 無 | 無 |
-| verify | 13 | 6 | 無 | 無 |
+| verify | 13 | 6 | 3（2026-11-13 實機，見註 6） | 無 |
 | reviewer（`card review`） | 3（見註 2） | 21 | 無 | 無 |
 | fixer（`card fix`） | 5 | 無 | 無 | 無 |
 
@@ -44,6 +44,7 @@
 3. agy 當 lead 只有 1 次極簡卡（`REQ-20261109-agy-lead-live`，PR #196 自動 merge）；codex 當 lead 2 次極簡卡；證據的限制見 `docs/multi-lead-plan.md`。
 4. **pi 當 lead 的 2 次：**第 1 次 `REQ-20261109-pi-lead-live`（2026-11-09 07:56 UTC）失敗：第一個 `agent.prompt` 在 Herdr 登記完成前被拒（`agent_not_ready`），pi 沒有收到規劃 prompt（ISSUE-137）。第 2 次 `REQ-20261109-pi-lead-retest`（PR #200，08:51 到 08:59 UTC，#198 的有上限重試部署後）**成功**：pi 規劃出 6 個派工（全由 codex 執行）、task 5.5 分鐘 `completed`、codex reviewer 第 1 輪 `pass`、bridge 自動 squash merge `20faaf7`。限制：只有一張極簡卡、一次；pi 只當 Lead，所有實作、審查、驗證都是 codex 做的，所以**不代表 pi 能擔任其他角色**。
 5. 表中 claude 的 implement 為「無」只代表角色紀錄裡沒有，早期文件（追蹤清單 E14，2026-11-05）曾記 claude profile 可當 Worker，沒有重驗。
+6. **agy 當 implement／verify（2026-11-13，本機 macOS，bridge main `edbcb49`）：**3 張極簡卡 `REQ-20261113-agy-worker-repro-1`～`-3`（`lead: agy`，`roles` 指定 implement／verify 為 `local:agy`，reviewer 為 `local:claude:opus`），Lead 規劃後 agy implement 3 次、agy verify 3 次（task 皆 `task_completed`），沒有 `assignment_failed`，ISSUE-147 沒有重現。證據限制：卡片只新增一行檔案、依序執行（無並行）、不含大型實作；PR #239～#241 為測試用，已關閉不 merge。
 
 ## 阻礙與缺口（要讓每格都可行必須處理）
 
