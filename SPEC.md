@@ -546,7 +546,7 @@ Lead 仍由已選取的 live Agent 擔任。可不委派而直接完成工作；
 
 完整契約、儲存格式、狀態轉移、取消限制及 live 驗收清單見 [Durable Task Engine](docs/durable-task-engine.md)。
 
-- `team ask` 先持久保存 task，再接受派送；`team status [task-id]`／`team cancel <task-id>` 只操作目前授權 workspace。
+- `team ask` 先持久保存 task，再接受派送；`team status [task-id]`／`team cancel <task-id>` 只操作目前授權 workspace。例外（ISSUE-157）：task 所屬的 workspace 已不存在於 Herdr 時，`team cancel` 允許從其他 workspace 執行；workspace 還存在，或無法列出 workspace 時仍拒絕。
 - Task：planning、running、blocked、synthesizing（包含直接工作／驗證）、cancelling、completed、failed、cancelled。Assignment 沿用 pending、assigned、working、blocked、done、failed、cancelled。
 - 原 prompt、Lead/session、frozen roster、plans、reports、timestamps 與 lifecycle journal 保存至 atomic journals（Phase 1 為 v1，Phase 2 寫入 v2 並相容讀取 v1，coding 任務寫入 v3 並相容讀取 v1/v2）；未知 schema／損毀 fail closed。v2 不可帶 coding mode。Coding baseline、stage、artifact metadata 與 findings 在 journal；artifact 檔放在 journal 目錄下、工作樹之外，讀取限制在該 task 目錄且單檔最多 256 KiB。版本指紋含 base／head SHA，以及 staged、unstaged 與未忽略 untracked 內容；任務開始前的 dirty baseline 不當成交付，也不會被清掉。
 - 重啟後 non-terminal task 不自動執行，標 blocked/recoverable 或 unknown；cancelling 保留。核對 live pane/session，但不將 same-session 或 idle/done 當成本次 turn 已完成。

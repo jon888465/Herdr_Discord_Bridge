@@ -177,6 +177,7 @@ import { defaultAgyWorktreeTrust } from "./agy-worktree-trust.js";
 import { HerdrHub } from "./machines.js";
 import type { OrchestrationEvent } from "./team-orchestration.js";
 import { TeamTaskEngine } from "./team-task-engine.js";
+import { mayCancelFromWorkspace } from "./team-cancel-scope.js";
 import { SessionHandoffRuntime } from "./session-handoff.js";
 import { HandoffStore, renderHandoff } from "./handoff-store.js";
 import {
@@ -1791,7 +1792,16 @@ async function teamCommand(
       if (args.length > 1 || (action === "cancel" && args.length !== 1))
         throw new Error("usage: team status [task-id] | team cancel <task-id>");
       const task = args[0] ? runtime.tasks.store.get(args[0]) : undefined;
-      if (task && task.workspaceId !== workspace)
+      if (
+        task &&
+        task.workspaceId !== workspace &&
+        !(
+          action === "cancel" &&
+          (await mayCancelFromWorkspace(task.workspaceId, workspace, async () =>
+            (await runtime.herdr.listWorkspaces()).map((w) => w.workspace_id),
+          ))
+        )
+      )
         throw new Error("task belongs to another workspace");
       const rows =
         action === "cancel"
