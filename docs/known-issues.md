@@ -1,5 +1,21 @@
 # Known Issues
 
+## ISSUE-158：console 每分鐘為每張已完成的卡重複印「autopick Lead cleanup … workspace missing or label mismatch」
+
+更新日期：2026-11-13。狀態：已修正、待驗收（原始碼與自動化檢查完成，**未實機驗收、未重啟 bridge**）。
+
+**使用者可見症狀：**bridge console 反覆印出 `autopick Lead cleanup REQ-…: workspace missing or label mismatch`，一次十幾行（所有 done／cancelled 且有 `autopick_workspace_id` 記錄的卡），蓋掉有用的訊息；2026-11-13 觀察到。
+
+**預期行為：**Lead workspace 已經關閉（清理完成後的正常結果）時不印警告；只有 label 不符這類真正異常才印。
+
+**根因（已確認，讀 `src/card-cleanup.ts`、`src/main.ts`）：**`closeAutopickLead` 對「找不到 workspace」與「label 不符」記同一則警告；每分鐘的 autopick 掃描（`AUTOPICK_INTERVAL_MS`）會對所有 done／cancelled 卡再呼叫一次，而 workspace 清理後就一直找不到，所以每分鐘為每張舊卡重複一次。功能沒有錯，只有 log 雜訊。
+
+**修正（2026-11-13）：**`src/card-cleanup.ts`：workspace 不存在時直接返回、不記警告；label 不符仍記 `autopick Lead cleanup <id>: workspace label mismatch`；查詢／關閉失敗、記錄 label 無效的警告不變。`test/card-cleanup.test.ts` 的 `missing` 情境改為斷言 0 則 log（原本斷言 1 則，這是刻意的行為變更），其他情境維持 1 則；`SPEC.md` 同步。
+
+**測試（2026-11-13，本機 macOS）：**`npx tsc` 無錯誤；`card-cleanup`、`autopick-wiring` 共 55 項通過；完整 `npm test`（2026-11-13，本機 macOS）1937 項：1936 通過、0 失敗、1 略過。CI 結果見 PR。
+
+**未驗證／下一步：**重啟後 console 是否不再重複；label 不符的警告是否仍會出現（只有單元測試）。順帶觀察：這個掃描每分鐘對所有舊卡讀卡片與列 workspace，量大時可考慮只掃有記錄且未清理的卡，這次沒改。
+
 ## ISSUE-157：task 所屬的 workspace 已關閉後，`team cancel` 永遠回「task belongs to another workspace」，task 無法標成終態
 
 更新日期：2026-11-13。狀態：已驗收（2026-11-13 實機，見「實機驗收」）。

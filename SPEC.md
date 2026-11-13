@@ -826,7 +826,7 @@ Autopick 建立 Lead workspace 後、啟動 Agent 前，把 id 與實際 label �
 
 `card cleanup` 與 merge 後 cleanup 共用 `src/card-cleanup.ts` 的 Lead 收尾：卡片為 done／cancelled，或 worktree cleanup 成功時，讀取持久化 id；但 in_progress 一律保留 Lead。每分鐘 autopick 掃描也會處理 done／cancelled 卡，包含重啟前的記錄；當本程序 autopick 尚在執行時延後掃描，避免卡片先同步 done 卻仍在 commit／PR／loop 時提前關 Lead。stopped／failed 且卡片未結束、不曾成功 cleanup 時仍保留現場；reached 仍呼叫 `lead.close()`；若 merge cleanup 已先關閉，close 失敗後查詢確認該 id 已不存在則只記警告、視為完成，不把成功 merge 改報 failed；仍存在、查詢失敗或回應不合法則保留原錯誤。
 
-關閉只使用記錄的 Lead id，先讀 workspace 現況，要求記錄的 label 符合本卡 `autopick-<claude|codex>-<卡片 id>`（沿用 60 字元上限），且現況 label 完全相等；不依名稱搜尋其他 workspace，不關 Worker／reviewer 的 card worktree workspace 或使用者 workspace。找不到、標籤不符、查詢／關閉失敗都只記 console warning，不改 cleanup 結果；close 不重試不確定送達。一般來源 repo workspace 保留規則不變，此處只例外關閉有記錄且通過標籤核對的 bridge 自建 Lead。
+關閉只使用記錄的 Lead id，先讀 workspace 現況，要求記錄的 label 符合本卡 `autopick-<claude|codex>-<卡片 id>`（沿用 60 字元上限），且現況 label 完全相等；不依名稱搜尋其他 workspace，不關 Worker／reviewer 的 card worktree workspace 或使用者 workspace。標籤不符、查詢／關閉失敗都只記 console warning，不改 cleanup 結果；workspace 已不存在是收尾後的正常終態，**不記 warning**（ISSUE-158，否則每分鐘掃描都會為每張舊卡重複印一次）；close 不重試不確定送達。一般來源 repo workspace 保留規則不變，此處只例外關閉有記錄且通過標籤核對的 bridge 自建 Lead。
 
 原始碼已實作並於 2026-11-09 實機驗收（取消、重啟續清、人工改名保留、其他 workspace 保留；證據與未驗證項見 ISSUE-129）。done 卡由 cleanup 關 Lead 與 merge cleanup 自己關 Lead 兩條路徑沒有單獨實機觸發；Discord 端到端未驗；沒有記錄的舊 Lead 不會自動補清。
 
