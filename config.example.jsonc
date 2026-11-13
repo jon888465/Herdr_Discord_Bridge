@@ -18,7 +18,7 @@
   "discord": {
     "enabled": true,
     "botToken": "",
-    // 三個白名單都必須填 ID；留空代表該維度全部拒絕（ISSUE-159）。
+    // 三個白名單都必須填 ID，且 ID 要寫成加引號的字串（數字寫法會失真並被忽略）；留空代表該維度全部拒絕（ISSUE-159）。
     "allowedGuildIds": [],
     "allowedChannelIds": [],
     "allowedUserIds": [],

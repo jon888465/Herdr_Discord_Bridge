@@ -5,6 +5,7 @@ import { validateProfiles, type AgentProfile } from "./agent-pool.js";
 import os from "node:os";
 import path from "node:path";
 import type { AgentStatus } from "./types.js";
+import { nonStringAllowlistKeys } from "./allowlist.js";
 import { validateMachines, type MachineConfig } from "./machines.js";
 import {
   DEFAULT_HOOK_TRANSPORT,
@@ -223,6 +224,13 @@ export function loadConfig(): Config {
   const fileDiscord =
     source.discord && typeof source.discord === "object" ? source.discord : {};
   const discordSource = fileDiscord as Partial<DiscordConfig>;
+  const nonString = nonStringAllowlistKeys(
+    fileDiscord as Record<string, unknown>,
+  );
+  if (nonString.length)
+    console.error(
+      `Discord 白名單 ${nonString.join("、")} 含有非字串項目，已被忽略（ID 要寫成加引號的字串，數字寫法會失真，ISSUE-159）。`,
+    );
   const env = process.env;
   const cfg: Config = {
     ...DEFAULTS,

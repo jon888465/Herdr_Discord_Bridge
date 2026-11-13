@@ -12,7 +12,9 @@
 
 **修正（2026-11-13，已修正、待驗收）：**新增 `src/allowlist.ts` 的 `inAllowlist`（空清單回傳 false）與 `emptyDiscordAllowlists`，三處檢查改用它；啟動時對空的欄位印警告（不中止，本機 console、hook 通道與卡片流程照常）。`SPEC.md`、`config.example.jsonc`、README 同步。
 
-**測試（2026-11-13，本機）：**`npm run check`：1942 項，1941 pass、0 fail、1 skipped（含新增的 `test/allowlist.test.ts` 與 `test/inbound.test.ts` 三個「留空即拒絕」案例）；`npm run lint` 通過。反向驗證：把 `inAllowlist` 暫時改回舊語意，三個 inbound 案例變紅，改回後通過。
+**測試（2026-11-13，本機）：**`npm run check`：1943 項，1942 pass、0 fail、1 skipped（含新增的 `test/allowlist.test.ts` 三項與 `test/inbound.test.ts` 三個「留空即拒絕」案例）；`npm run lint` 通過。反向驗證：把 `inAllowlist` 暫時改回舊語意，三個 inbound 案例變紅，改回後通過。
+
+**實機發現的相關問題（2026-11-13）：**使用者的 config 把 guild、channel ID 寫成不加引號的數字；`stringArray` 只收字串，所以這兩個清單載入後其實是空的，在舊語意（空＝不限制）下等於一直沒有生效。數字寫法也不可行：Discord ID 超過 JavaScript 安全整數，`JSON.parse` 會讓數字失真。修正：載入設定時對含非字串項目的欄位印警告（`nonStringAllowlistKeys`），文件註明 ID 必須是加引號的字串。使用者的 config 已改成字串並加入使用者 ID，載入後三個清單各 1 項（只驗項數，2026-11-13，尚未重啟）。
 
 **影響與遷移（重要）：**已部署的設定若有任何清單是空的，重啟新版後該維度全部拒絕，**包含使用者自己**，必須先在 config（或環境變數）填好三個清單再重啟。env 覆寫同樣適用。
 

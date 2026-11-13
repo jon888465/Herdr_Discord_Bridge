@@ -13,3 +13,18 @@ export function emptyDiscordAllowlists(discord: {
     ["allowedGuildIds", "allowedChannelIds", "allowedUserIds"] as const
   ).filter((key) => discord[key].length === 0);
 }
+
+// Discord ID 超過 JavaScript 安全整數，數字寫法在 JSON.parse 時就會失真；
+// stringArray 也只收字串，所以寫成數字的項目會被丟掉。回報哪些欄位有這種項目（ISSUE-159）。
+export function nonStringAllowlistKeys(
+  discord: Record<string, unknown>,
+): string[] {
+  return (
+    ["allowedGuildIds", "allowedChannelIds", "allowedUserIds"] as const
+  ).filter((key) => {
+    const value = discord[key];
+    return (
+      Array.isArray(value) && value.some((item) => typeof item !== "string")
+    );
+  });
+}

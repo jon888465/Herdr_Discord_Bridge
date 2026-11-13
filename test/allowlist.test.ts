@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { emptyDiscordAllowlists, inAllowlist } from "../src/allowlist.js";
+import {
+  emptyDiscordAllowlists,
+  inAllowlist,
+  nonStringAllowlistKeys,
+} from "../src/allowlist.js";
 
 test("白名單留空一律拒絕，非空只放行列出的 ID", () => {
   assert.equal(inAllowlist([], "u"), false);
@@ -25,4 +29,16 @@ test("emptyDiscordAllowlists 列出空的欄位", () => {
     }),
     [],
   );
+});
+
+test("nonStringAllowlistKeys 找出含數字項目的欄位（數字寫法會失真）", () => {
+  assert.deepEqual(
+    nonStringAllowlistKeys({
+      allowedGuildIds: [1506558362546995340],
+      allowedChannelIds: ["1"],
+      allowedUserIds: [],
+    }),
+    ["allowedGuildIds"],
+  );
+  assert.deepEqual(nonStringAllowlistKeys({}), []);
 });
