@@ -2,7 +2,7 @@
 
 ## ISSUE-157：task 所屬的 workspace 已關閉後，`team cancel` 永遠回「task belongs to another workspace」，task 無法標成終態
 
-更新日期：2026-11-13。狀態：已修正、待驗收（原始碼與自動化檢查完成，**未實機驗收、未重啟 bridge**）。
+更新日期：2026-11-13。狀態：已驗收（2026-11-13 實機，見「實機驗收」）。
 
 **使用者可見症狀：**`task-a8eaf87e-…`（workspace `w6W`，狀態 `cancelling`）與 `task-f3f8ecd5-…`（workspace `w5A`，狀態 `blocked`）是 2026-11-12 live 驗收卡殘留的 task。2026-11-13 在 bridge console 執行 `team cancel <task-id>` 回 `❌ task belongs to another workspace`；`wk use w6W`／`wk use w5A` 回 `workspace … was not found or is not authorized`（workspace 已關閉），無法切過去。兩個 task 因此永遠不是終態，每次 bridge 重啟都會對它們再跑一次 `restart_reconciled`（`task-a8eaf87e-…` 已累積 33 筆事件）。
 
@@ -14,7 +14,9 @@
 
 **測試（2026-11-13，本機 macOS）：**`npx tsc` 無錯誤；`node --test dist/test/team-cancel-scope.test.js` 4 項通過。完整 `npm test`（2026-11-13，本機 macOS）1937 項：1936 通過、0 失敗、1 略過。CI 結果見 PR。
 
-**未驗證／下一步：**重啟 bridge 後對上述兩個 task 實際執行 `team cancel`；取消流程在 pane 與 workspace 都不存在時能否收尾（`interruptUntilSettled` 等路徑只讀程式、沒有單元測試涵蓋）；`team status <task-id>` 對已關閉 workspace 的 task 仍會被拒絕（本次沒改）。
+**實機驗收（2026-11-13，本機 macOS，bridge 重啟後為 main `4dadf77`，PR #244 CI 通過）：**在 `w5D` 執行 `team cancel task-a8eaf87e-…`（workspace `w6W` 已關閉，原狀態 `cancelling`）與 `team cancel task-f3f8ecd5-…`（workspace `w5A` 已關閉，原狀態 `blocked`），兩者都成功，回覆狀態 `cancelled`、assignment 皆 `cancelled`；讀 `team-tasks/*.json`，事件結尾分別是 `cancel_requested`、`cancel_turn_settled`、`task_cancelled` 與 `restart_reconciled`、`cancel_requested`、`task_cancelled`。pane 與 workspace 都不存在時取消流程能正常收尾。
+
+**未驗證／限制：**workspace 仍存在時跨 workspace 取消維持拒絕的路徑只有單元測試，沒有實機；`team status <task-id>` 對已關閉 workspace 的 task 仍會被拒絕（本次沒改）。
 
 ## ISSUE-155：`hook sessions are ignored for local panes, other panes, stale events…` 在 macOS CI 偶發失敗（測試間 hook 事件殘留）
 
