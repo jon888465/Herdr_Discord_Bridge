@@ -7,7 +7,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Message } from "discord.js";
 
-function fixture() {
+function fixture(
+  allow: {
+    allowedGuildIds?: string[];
+    allowedChannelIds?: string[];
+    allowedUserIds?: string[];
+  } = {},
+) {
   const routing = new RoutingStore(
     join(mkdtempSync(join(tmpdir(), "bridge-inbound-")), "routing.json"),
   );
@@ -18,6 +24,7 @@ function fixture() {
       allowedGuildIds: ["g"],
       allowedChannelIds: ["c"],
       allowedUserIds: ["u"],
+      ...allow,
       messageContent: true,
       commandPrefix: "/herdr",
       requireMention: true,
@@ -56,6 +63,16 @@ test("reply to this bot in thread is accepted without another mention", async ()
   await f.adapter["handleMessage"](f.message);
   assert.deepEqual(f.prompts, ["follow up"]);
 });
+for (const key of [
+  "allowedGuildIds",
+  "allowedChannelIds",
+  "allowedUserIds",
+] as const)
+  test(`${key} 留空時一律拒絕，不會送進 prompt（ISSUE-159）`, async () => {
+    const f = fixture({ [key]: [] });
+    await f.adapter["handleMessage"](f.message);
+    assert.deepEqual(f.prompts, []);
+  });
 test("image-only reply reaches prompt handler", async () => {
   const f = fixture();
   f.message.content = "";

@@ -16,7 +16,7 @@ herdr plugin enable herdr-discord-bridge
 ```
 
 Create the configuration file. The command prints the directory used by the
-plugin; copy the example there and fill in the bot token and allowlists:
+plugin; copy the example there and fill in the bot token and allowlists (an empty allowlist denies everything; list explicit IDs, ISSUE-159):
 
 ```text
 herdr plugin config-dir herdr-discord-bridge

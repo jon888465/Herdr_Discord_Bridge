@@ -30,6 +30,7 @@ import type {
 } from "./types.js";
 import { agentLabel } from "./types.js";
 import { RoutingStore } from "./routing.js";
+import { inAllowlist } from "./allowlist.js";
 
 const BUTTON_PREFIX = "hdb.approve.";
 const MODEL_SELECT_PREFIX = "hdb.model.";
@@ -732,12 +733,9 @@ export class DiscordAdapter {
     userId: string,
   ): boolean {
     return (
-      (this.config.allowedGuildIds.length === 0 ||
-        this.config.allowedGuildIds.includes(guildId)) &&
-      (this.config.allowedChannelIds.length === 0 ||
-        this.config.allowedChannelIds.includes(channelId)) &&
-      (this.config.allowedUserIds.length === 0 ||
-        this.config.allowedUserIds.includes(userId))
+      inAllowlist(this.config.allowedGuildIds, guildId) &&
+      inAllowlist(this.config.allowedChannelIds, channelId) &&
+      inAllowlist(this.config.allowedUserIds, userId)
     );
   }
 }

@@ -4,6 +4,7 @@ import readline from "node:readline";
 import type { Message } from "discord.js";
 import type { CommandContext } from "./discord.js";
 import { SHORT_COMMANDS } from "./discord.js";
+import { inAllowlist } from "./allowlist.js";
 
 type ConsoleCommand = {
   command: string;
@@ -212,10 +213,8 @@ export async function routeConsoleCommand(
   config: Config,
 ): Promise<CommandContext | null> {
   const allowed = (guild: string, channel: string, workspace: string) =>
-    (!config.discord.allowedGuildIds.length ||
-      config.discord.allowedGuildIds.includes(guild)) &&
-    (!config.discord.allowedChannelIds.length ||
-      config.discord.allowedChannelIds.includes(channel)) &&
+    inAllowlist(config.discord.allowedGuildIds, guild) &&
+    inAllowlist(config.discord.allowedChannelIds, channel) &&
     (!config.allowedWorkspaceIds.length ||
       config.allowedWorkspaceIds.includes(workspace));
   const routes = store
