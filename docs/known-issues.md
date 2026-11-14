@@ -1,5 +1,28 @@
 # Known Issues
 
+## ISSUE-160：Herdr 桌面介面沒有 card 清單；新增 Card 看板 pane
+
+更新日期：2026-11-14。狀態：已修正、待驗收（程式與單元測試完成；**尚未在 Herdr 實機開 pane 操作，也尚未部署／重啟**）。
+
+**需求（使用者 2026-11-14）：** 像 Herdr 桌面 Todo 側欄那樣顯示 card，並能編輯；只有 draft 類（以及失敗／停止後等人處理的）卡可編輯，其餘唯讀。
+
+**已確認的限制：** Herdr plugin 介面（0.9.x 官方文件）只有 actions、event hooks、link handler 與跑終端機指令的 pane，沒有查到讓 plugin 擴充原生 Todo 側欄的 API。因此做成 plugin pane（終端機看板），不是原生側欄；是否有 Todo 同步介面尚未查證。
+
+**行為（`src/card-board.ts`、`src/card-board-cli.ts`，pane id `card-board`）：**
+
+- 可編輯：status 為 `draft`、`discussing`、`refined`、`recorded`；以及 `ready`／`in_progress` 且最後一筆流程紀錄是 `failed`、`autopick_stopped`、`loop_stopped`（bridge 已停手）。停手的卡只開放改標題、`notify`、流程紀錄之前的正文，不能由看板改 status。
+- 唯讀：其餘 `ready`、`in_progress`、`done`、`cancelled`。bridge 會寫同一個檔，且執行中的任務不會讀到改過的描述。
+- 只改 `title`、`notify` 與「## 流程紀錄」之前的正文，流程紀錄以後原封不動；寫入走 `CardStore.update` 的雜湊比對，檔案在讀取後被改過就放棄；寫入前重讀並重新檢查可編輯性。
+- 設成 `ready` 只限 draft 類，沒有 `notify` 一律拒絕（ISSUE-121）。
+- 可新增 draft 卡（id `REQ-<日期>-<slug>`，不覆蓋既有檔案）。
+- 鍵：`j`／`k` 移動、`e` 編輯（開 `$EDITOR`）、`n` 新增、`r` 設為 ready、`q` 離開；每 3 秒重讀。
+
+**未確認／限制：** 「失敗次數超過」目前以「最後一筆事件是失敗／停止」判斷，沒有失敗次數門檻（程式裡只有 loop 3 輪、plan 重排 2 次這類各自的上限）；停手的卡在 bridge 仍有執行中任務時是否安全，未實測。看板沒有拖曳或勾選框。
+
+**測試：** `test/card-board.test.ts` 9 項（2026-11-14，`node --test dist/test/card-board.test.js`）通過；`npm run typecheck`、`npm run lint` 通過；全套 `npm test`（2026-11-14）1952 項，1951 pass、0 fail（其餘 1 項為略過，未逐項確認原因）。
+
+**下一步：** 實機開 pane 試編輯、放行、新增；驗收後改為已驗收。是否能同步到 Herdr 原生 Todo 另案調查。
+
 ## ISSUE-159：Discord 白名單留空代表「不限制」（fail-open），任何人都能操作 bot
 
 更新日期：2026-11-13。狀態：已修正、待驗收（**允許路徑已實機驗收**，見「實機驗收」；**拒絕路徑尚未直接驗證**，補測後才改為已驗收）。
