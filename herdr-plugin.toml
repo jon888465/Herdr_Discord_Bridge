@@ -16,3 +16,9 @@ id = "bridge"
 title = "Discord bridge"
 placement = "split"
 command = ["node", "dist/src/index.js"]
+
+[[panes]]
+id = "card-board"
+title = "Card board"
+placement = "split"
+command = ["node", "dist/src/card-board-cli.js"]
