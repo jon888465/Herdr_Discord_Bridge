@@ -205,6 +205,7 @@ import type {
 } from "./types.js";
 import { agentLabel, workspacePath } from "./types.js";
 import { emptyDiscordAllowlists, inAllowlist } from "./allowlist.js";
+import { ensureCardBoardPane, runHerdrCli } from "./card-board-open.js";
 
 export async function run(): Promise<void> {
   const config = loadConfig();
@@ -622,6 +623,12 @@ async function startBridge(
   console.log(
     "herdr-discord-bridge: Discord Gateway connected, Herdr watcher started, pane console ready (type help)",
   );
+  if (config.autoOpenCardBoard)
+    void ensureCardBoardPane(runHerdrCli, process.env)
+      .then((result) => console.log(`Card 看板：${result}`))
+      .catch((error) =>
+        console.error(`Card 看板自動開啟失敗：${safeError(error)}`),
+      );
 }
 
 interface Runtime {

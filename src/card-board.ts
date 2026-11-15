@@ -227,3 +227,39 @@ export function createDraft(
   const result = store.create(card);
   return result.ok ? { ok: true, id } : { ok: false, error: result.error };
 }
+
+function charWidth(codePoint: number): number {
+  if (
+    (codePoint >= 0x1100 && codePoint <= 0x115f) ||
+    (codePoint >= 0x2e80 && codePoint <= 0xa4cf) ||
+    (codePoint >= 0xac00 && codePoint <= 0xd7a3) ||
+    (codePoint >= 0xf900 && codePoint <= 0xfaff) ||
+    (codePoint >= 0xfe30 && codePoint <= 0xfe6f) ||
+    (codePoint >= 0xff00 && codePoint <= 0xff60) ||
+    (codePoint >= 0xffe0 && codePoint <= 0xffe6) ||
+    (codePoint >= 0x1f300 && codePoint <= 0x1faff)
+  )
+    return 2;
+  return 1;
+}
+
+/** 終端機顯示寬度（CJK、全形與 emoji 算 2 格）。 */
+export function displayWidth(text: string): number {
+  let width = 0;
+  for (const char of text) width += charWidth(char.codePointAt(0) ?? 0);
+  return width;
+}
+
+/** 依顯示寬度截斷，不切斷字元；超過上限時結尾補「…」。 */
+export function truncateToWidth(text: string, max: number): string {
+  if (displayWidth(text) <= max) return text;
+  let out = "";
+  let width = 0;
+  for (const char of text) {
+    const next = charWidth(char.codePointAt(0) ?? 0);
+    if (width + next > max - 1) break;
+    out += char;
+    width += next;
+  }
+  return `${out}…`;
+}

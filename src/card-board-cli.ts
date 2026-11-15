@@ -15,6 +15,7 @@ import {
   newCardTemplate,
   parseEditorText,
   toEditorText,
+  truncateToWidth,
   type BoardRow,
 } from "./card-board.js";
 
@@ -60,17 +61,16 @@ function render(): void {
   );
   for (let i = first; i < Math.min(rows.length, first + room); i++) {
     const row = rows[i]!;
-    const line =
-      `${i === cursor ? ">" : " "} ${mark(row)} ${row.status.padEnd(11)} ${row.title}`.slice(
-        0,
-        width - 1,
-      );
+    const line = truncateToWidth(
+      `${i === cursor ? ">" : " "} ${mark(row)} ${row.status.padEnd(11)} ${row.title}`,
+      width - 1,
+    );
     out.push(i === cursor ? `\x1b[7m${line}\x1b[0m` : line);
   }
   const selected = rows[cursor];
   if (selected)
     out.push(
-      `\x1b[2m${selected.id}${selected.editability.editable ? "" : `：${selected.editability.reason}`}\x1b[0m`,
+      `\x1b[2m${truncateToWidth(`${selected.id}${selected.editability.editable ? "" : `：${selected.editability.reason}`}`, width - 1)}\x1b[0m`,
     );
   out.push(
     message || "\x1b[2mj/k 移動  e 編輯  n 新增  r 設為 ready  q 離開\x1b[0m",

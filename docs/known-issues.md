@@ -2,7 +2,13 @@
 
 ## ISSUE-160：Herdr 桌面介面沒有 card 清單；新增 Card 看板 pane
 
-更新日期：2026-11-14。狀態：已修正、待驗收（程式與單元測試完成；**尚未在 Herdr 實機開 pane 操作，也尚未部署／重啟**）。
+更新日期：2026-11-15。狀態：已修正、待驗收（程式與單元測試完成；**編輯、放行、新增尚未實機操作**）。
+
+**2026-11-15 實機發現與後續：**
+- 使用者在 Herdr 開的是一般終端機 pane，看到的是 zsh 而不是看板；先前把「pane 開起來了」當驗收證據是錯的，**該證據作廢**。用 `herdr plugin pane open --plugin herdr-discord-bridge --entrypoint card-board` 開入口，畫面確實是看板（2026-11-15 讀 pane 確認）。
+- 讀該 pane 發現長標題（尤其中文）折行、排版錯位，原因是用字元數而非顯示寬度截斷。修正：新增 `displayWidth`／`truncateToWidth`（CJK 與 emoji 算 2 格），看板每列、選取列都依顯示寬度截斷。
+- 使用者要求 bridge 啟動後自動確認看板：bridge 啟動後檢查所在 workspace 有沒有 label 為 `Card board` 的 pane，沒有就用 `herdr plugin pane open … --placement tab --workspace <bridge 的 workspace> --no-focus` 另開一個 tab（`src/card-board-open.ts`，config `autoOpenCardBoard`，預設 true，設 false 關閉）。bridge 不在 Herdr pane 內（沒有 `HERDR_WORKSPACE_ID`／`HERDR_PANE_ID`）時略過；失敗只記錄，不影響啟動。已驗證「已有看板就不重複開」（對真實 Herdr 唯讀檢查）；**自動另開 tab 這一步尚未實機驗證**（需重啟 bridge 並在沒有看板的 workspace 觀察）。
+- 測試（2026-11-15）：新增 `test/card-board-open.test.ts` 6 項；全套 `npm test` 1958 項，1957 pass、0 fail、1 skipped（原因未逐項確認）；`npm run lint` 通過。
 
 **需求（使用者 2026-11-14）：** 像 Herdr 桌面 Todo 側欄那樣顯示 card，並能編輯；只有 draft 類（以及失敗／停止後等人處理的）卡可編輯，其餘唯讀。
 
