@@ -35,6 +35,8 @@ export interface Config {
   agentProfiles?: AgentProfile[];
   /** 使用者明列的本機目錄（絕對路徑）：agy 在這些目錄啟動時，bridge 確保它在 agy 的信任清單內（ISSUE-113）。 */
   agyTrustedDirectories: string[];
+  /** 啟動後確認 bridge 所在 workspace 有 Card 看板 pane，沒有就在另一個 tab 開一個；預設開啟。 */
+  autoOpenCardBoard: boolean;
   /** 遠端 Herdr 機器；未列出的 ID 一律是本機。 */
   machines: MachineConfig[];
   /** 各 CLI 的完成／權限通道：auto＝hook 優先、缺事件退回 parser；parser＝只用畫面 parser。 */
@@ -59,6 +61,7 @@ export interface Config {
 const DEFAULTS: Config = {
   coreAllowedTerminals: [],
   agyTrustedDirectories: [],
+  autoOpenCardBoard: true,
   machines: [],
   hookTransport: { ...DEFAULT_HOOK_TRANSPORT },
   notifyOn: ["blocked"],
@@ -239,6 +242,7 @@ export function loadConfig(): Config {
     coreAllowedTerminals: stringArray(source.coreAllowedTerminals, []),
     agentProfiles: validateProfiles(source.agentProfiles),
     agyTrustedDirectories: stringArray(source.agyTrustedDirectories, []),
+    autoOpenCardBoard: source.autoOpenCardBoard !== false,
     machines: validateMachines(source.machines),
     hookTransport: validateHookTransport(source.hookTransport),
     notifyOn: stringArray(source.notifyOn, DEFAULTS.notifyOn),

@@ -701,7 +701,7 @@ Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*
 
 `scripts/herdr-card-check [--ledger] FILE...`（需先 `npm run build`）逐檔檢查 Markdown 卡片是否符合 [ADR-0001](docs/adr/0001-portable-md-cards.md) 的格式（`parseCard` 規則：受限 frontmatter 子集、必填欄位、id 與檔名、`type`／`status` 列舉、日期、`version`、標題長度、`links`／`external` 結構、8 KiB frontmatter，以及整檔上限：預設 512 KiB，加 `--ledger` 為 1 MiB）。每檔輸出 `OK`（stdout）或 `FAIL`（stderr，附原因）；任何檔案不合格或讀不到則結束碼 1，用法錯誤 2，全部合格 0；失敗不中斷後續檔案；超過所選上限的檔案不讀取。只檢查格式，不判斷內容正確性或敏感資訊。待使用者驗收。bridge 端的 `card` 指令見下一段。
 
-Card 看板 pane（ISSUE-160，`card-board`，已實作、待實機驗收）：終端機看板，列出卡片並依狀態排序。只有 status 為 `draft`、`discussing`、`refined`、`recorded`，或 `ready`／`in_progress` 且最後一筆流程紀錄為 `failed`／`autopick_stopped`／`loop_stopped` 的卡可編輯；其餘唯讀。只改 `title`、`notify` 與「## 流程紀錄」之前的正文，經 `CardStore.update` 雜湊比對寫入；停手的卡不能由看板改 status；設成 `ready` 僅限 draft 類且必須有 `notify`。不是 Herdr 原生 Todo 側欄（plugin 介面未提供）。
+Card 看板 pane（ISSUE-160，`card-board`，已實作、待實機驗收）：終端機看板，列出卡片並依狀態排序。只有 status 為 `draft`、`discussing`、`refined`、`recorded`，或 `ready`／`in_progress` 且最後一筆流程紀錄為 `failed`／`autopick_stopped`／`loop_stopped` 的卡可編輯；其餘唯讀。只改 `title`、`notify` 與「## 流程紀錄」之前的正文，經 `CardStore.update` 雜湊比對寫入；停手的卡不能由看板改 status；設成 `ready` 僅限 draft 類且必須有 `notify`。不是 Herdr 原生 Todo 側欄（plugin 介面未提供）。每列依終端顯示寬度截斷（CJK 與 emoji 算 2 格）。`autoOpenCardBoard`（預設 true）：bridge 啟動後若所在 workspace 沒有 label 為 `Card board` 的 pane，就以 `herdr plugin pane open --placement tab --no-focus` 在同 workspace 另開一個 tab；不在 Herdr pane 內則略過，失敗只記錄、不影響啟動。
 
 ## 機敏內容遮蔽（2026-11-02，ISSUE-056）
 
