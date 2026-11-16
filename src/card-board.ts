@@ -344,3 +344,12 @@ export function moveCursor(
   }[action];
   return Math.min(count - 1, Math.max(0, next));
 }
+
+/** 讓選取列保持在視窗內，盡可能置中。 */
+export function firstVisible(
+  cursor: number,
+  total: number,
+  room: number,
+): number {
+  return Math.max(0, Math.min(cursor - Math.floor(room / 2), total - room));
+}

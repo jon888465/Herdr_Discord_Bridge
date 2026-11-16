@@ -703,6 +703,10 @@ Discord 傳入的附件目錄 `<cwd>/.herdr-discord-bridge/attachments/message-*
 
 Card 看板 pane（ISSUE-160，`card-board`，已實作，2026-11-16 實機驗收）：終端機看板，列出卡片並依狀態排序。只有 status 為 `draft`、`discussing`、`refined`、`recorded`，或 `ready`／`in_progress` 且最後一筆流程紀錄為 `failed`／`autopick_stopped`／`loop_stopped` 的卡可編輯；其餘唯讀。只改 `title`、`notify` 與「## 流程紀錄」之前的正文，經 `CardStore.update` 雜湊比對寫入；停手的卡不能由看板改 status；設成 `ready` 僅限 draft 類且必須有 `notify`。不是 Herdr 原生 Todo 側欄（plugin 介面未提供）。每列依終端顯示寬度截斷（CJK 與 emoji 算 2 格）。按鍵：`j`／`k` 與上下鍵逐列移動；PageUp（`\x1b[5~`）／PageDown（`\x1b[6~`）一次移一頁，一頁 = 目前可見列數（終端機高度減 5，至少 3），且至少 1 列；Home（`\x1b[H`、`\x1b[1~`、`\x1b[7~`、`\x1bOH`）跳第一張、End（`\x1b[F`、`\x1b[4~`、`\x1b[8~`、`\x1bOF`）跳最後一張；移動到頭到底停住，清單為空時游標停在 0；捲動視窗由游標推導，跳頁後選取列仍在畫面內；`$EDITOR` 開啟中不處理任何移動鍵；`e`／Enter 編輯、`n` 新增、`r` 設為 ready、`q`／Ctrl-C 離開。`autoOpenCardBoard`（預設 true）：bridge 啟動後若所在 workspace 沒有 label 為 `Card board` 的 pane，就以 `herdr plugin pane open --placement tab --no-focus` 在同 workspace 另開一個 tab；不在 Herdr pane 內則略過，失敗只記錄、不影響啟動。
 
+檢視切換與 Machine 檢視（第一階段，唯讀；ISSUE-163，已實作，待實機驗收）：標題顯示 `[Card]`／`[Machine]` 與目前清單筆數。Tab 互切，`m` 指定 Machine、`c` 指定 Card；提示列顯示切換鍵與目前可用操作。兩個檢視游標獨立，切換不重載 Card rows 或改變 Card 游標；每 3 秒仍依既有行為重讀卡片，並重讀 machines。Machine 每列顯示 `id  ssh  socket` 與 `>` 游標，依顯示寬度截斷，沿用 Card 的逐列、翻頁、Home／End 與捲動視窗；空清單顯示「沒有設定任何 machine（config.json 的 machines 為空）」。Machine 下 `e`／Enter／`n`／`r` 只提示「Machine 檢視唯讀，第一階段不支援編輯」；Card 既有操作不變。`q`／Ctrl-C 離開。**版面保證（review 第 5 輪）：**Card 與 Machine 兩個檢視的每一列（標題、錯誤、訊息、選取 id、提示）都依寬度截斷成一列，總列數不超過終端機高度；清單列數是 `visibleRows` 與「高度減固定列」的較小值，翻頁一頁的列數與畫面實際顯示的列數共用同一個計算（`listRoom`／`cardRoom`／`machineRoom`）；高度夠大時行為與原本相同。實機以各種終端尺寸確認畫面尚未做。
+
+看板只取 `config.json` 的 `machines` 區塊交給 `validateMachines`，不呼叫 `loadConfig()`，不印整份設定、其他欄位或原始錯誤；讀不到／JSON 壞掉／machines 格式不對只顯示固定簡短原因，檔案不存在視為空清單。JSONC 註解處理共用設定模組匯出的 `stripJsonComments`。本階段不做連線狀態、連線／斷線、編輯或寫入 config.json。Herdr pane 的切換鍵（Tab 是否被攔截）、備用螢幕切換後還原、Machine 捲動均未實機驗證，等待使用者驗收。
+
 Card 看板的 `project`（ISSUE-161，已實作，2026-11-16 實機驗收）：編輯／新增範本含 `project:` 行（`<機器>:<repo 目錄名>`，格式不合拒絕，留空＝不設）；新增預設 `local:<看板工作目錄名>`。bridge 只自動撿宣告 `project`／`projects` 且政策選用的卡，所以放行沒有 `project` 的卡仍允許（可手動 `card assign`），但看板必須提醒「bridge 不會自動撿卡」。看板只寫 `project`，不改 `projects`。
 
 ## 機敏內容遮蔽（2026-11-02，ISSUE-056）

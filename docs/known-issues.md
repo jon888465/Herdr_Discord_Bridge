@@ -1,5 +1,29 @@
 # Known Issues
 
+## ISSUE-163：Card 看板需要 Machine 檢視（第一階段：切換與唯讀列表）
+
+更新日期：2026-11-16。狀態：已修正、待驗收。
+
+**症狀與重現環境：** 本機原始碼的 `card-board` pane 原先只有卡片清單，無法切換並查看設定中的 machines。
+
+**預期行為：** Tab 切換 Card／Machine，m／c 指定檢視，游標獨立；Machine 唯讀顯示 id、ssh、socket，可移動、翻頁與捲動；空清單有明確提示，錯誤不洩漏整份設定或敏感欄位。
+
+**根因（已確認）：** 既有 CLI 只有 Card rows 與單一 cursor，沒有檢視狀態或 machines 讀取與呈現。
+
+**修正範圍：** `src/card-board-machines.ts` 提供切換、固定短句錯誤的設定讀取與列呈現；共用 `src/config.ts` 匯出的 `stripJsonComments`，不呼叫 loadConfig。`src/card-board.ts` 共用 firstVisible；`src/card-board-cli.ts` 新增獨立 machineCursor、唯讀鍵提示、每 3 秒及切換時更新 machines。m／c 與既有鍵無衝突。SPEC 與 CONTEXT 同步。本階段不做連線狀態、連線、編輯或設定寫入。
+
+**測試（2026-11-16）：** 新增 `test/card-board-machines.test.ts` 6 項，獨立執行 6 pass、0 fail，涵蓋切換、移動邊界、視窗捲動、空狀態、JSONC、缺檔與讀取／解析／驗證失敗，以及畫面與錯誤不含測試 token。`npm run typecheck`、`npm run lint` 通過。全套 `npm test`（含 tsc build）1985 項：1984 pass、0 fail、1 skipped（既有略過項目，未另行驗證原因）。初次檢查因尚未安裝依賴而缺少 tsc／prettier，`npm ci` 後重新執行通過；實作期間 JSONC 副本遺漏造成 typecheck 失敗，補回後重新檢查通過。
+
+**格式檢查限制（2026-11-16）：** `npm run format:check` 在 HEAD 本來就有 77 個與本卡無關的檔案不符，本卡新增／修改的 TS 檔皆通過 prettier；.md 檔只手動編輯、不重排。第一輪曾執行全庫 format 並留下 SPEC／CONTEXT 的無關格式變更；第二輪已還原這些變更，SPEC 只保留看板段落新增，CONTEXT 只保留看板索引修改。
+
+**第二輪修正（2026-11-16）：** f1 還原無關文件 hunk；s1 清除 ISSUE-163 後多餘空行並釐清既有格式問題；s2 兩個檢視提示均顯示 `Tab/m/c`；s3 改共用 JSONC 函式。s4 留給後續階段，未改 `src/machines.ts`。本輪 `npm run typecheck`、`npm run lint`、`npx prettier --check src/card-board.ts src/card-board-cli.ts src/card-board-machines.ts src/config.ts test/card-board-machines.test.ts`、`git diff --check` 全數通過；`npm test`（含 build，2026-11-16）1985 項：1984 pass、0 fail、1 skipped。SPEC diff 為 1 個純新增 hunk（4 行新增、0 行刪除），CONTEXT diff 為 1 個 hunk。本輪未對 Markdown 執行 prettier。
+
+**第三、四輪修正（2026-11-16）：** F1 設定根節點不是物件、`machines` 含非物件項目時回報簡短原因，不再當成「沒有 machine」；F2 呈現前把 `ssh`／`socket` 內的 C0／DEL／C1 控制字元換成 U+FFFD，避免畫面被清除或游標被移動；F3 標題、錯誤、訊息與提示都依寬度截斷成一列；F4 Machine 檢視的清單列數取 `visibleRows` 與「高度減標題、訊息、提示」的較小值，並加總列數保底（高度 5、五台、有訊息剛好 5 列，游標那台仍可見）；F5 共用的 `stripJsonComments` 原本在去除註解後對整份文字套 `/,\s*([}\]])/g`，會連字串內的 `,}`、`,]` 一起吃掉（例如 socket `/tmp/a,}.sock` 被讀成 `/tmp/a}.sock`），改為只處理字串外面的尾逗號。**F5 是既有 bug**：這個函式 bridge 自己讀 `config.json` 也用，所以此修正同時改變 bridge 實際讀設定的行為（只影響字串內含 `,}` 或 `,]` 的值，其他輸入結果不變）。測試：`test/card-board-machines.test.ts` 現有 12 項（含低高度所有高度組合、字串內 `,}`／`,]` 保留與字串外尾逗號仍接受）。全套 `npm test`（2026-11-16，F5 修正後）1991 項，1990 pass、0 fail、1 skipped；`npm run lint` 通過；以上為各輪自動化結果，**每次 review 前後的數字不同，不能互相替代**。第 4 輪 review 的 F4 發現狀態在卡片檔仍是 open（修正是人工推送，bridge 沒有重新標記）。
+
+**第五輪修正（2026-11-16）：** reviewer 第 5 輪指出 F7（Card 提示加長到約 95 格卻沒截斷，30 欄、24 列、至少 19 張卡且有讀檔錯誤時總畫面多 1 列）與 F8（Machine 翻頁仍用 `visibleRows`，高度 4 時畫面顯示 2 台，PageDown 卻移動 3 台）。**根因（已確認）：**看板各處各自計算「畫面能放幾列」，Card 檢視、Machine 檢視與翻頁沒有共用同一個容量計算，第 3 輪的 F4、第 5 輪的 F7／F8 都是這個根因在不同位置的表現。**修正：**`src/card-board-machines.ts` 新增 `listRoom`（取 `visibleRows` 與「高度減固定列」的較小值，不為負）、`machineRoom`、`cardRoom`、`cardViewLines`、`clampToHeight`；Card 與 Machine 兩個檢視的每一列（含加長後的切換提示、錯誤、訊息、選取 id）都依寬度截斷，總列數保證不超過高度；`src/card-board-cli.ts` 的 Card 畫面改用 `cardViewLines`，兩個檢視的翻頁一頁列數都改用同一個 `cardRoom`／`machineRoom`（與畫面實際顯示列數一致）。**這一輪動到 Card 檢視（ISSUE-160 已驗收的畫面）**：高度夠大時（例如 24 列）清單列數仍是 `visibleRows`，行為不變，測試有一項專門檢查這點；只有高度很小或有多個固定列同時出現時清單才縮小。測試：新增 `test/card-board-layout.test.ts` 6 項，以「高度 × 寬度 × 有無錯誤 × 有無訊息 × 卡片／machine 數」的組合驗證兩個檢視列數與每列寬度都不超出、提示列在最後、翻頁一頁等於畫面實際顯示列數，並含 F7、F8 的重現案例；把共用容量計算暫時改回舊行為時其中 3 項變紅（確認測試抓得到問題），已還原。全套 `npm test`（2026-11-16，此輪修正後）1997 項，1996 pass、0 fail、1 skipped；`npm run lint` 通過；變更的程式與測試檔 `prettier --check` 通過。**未驗證：**以上都是自動化結果，沒有在真實 Herdr pane 以各種終端尺寸實機確認畫面，Card 檢視在正常尺寸下行為不變也只靠測試。
+
+**未驗證與下一步：** Herdr pane 內實機行為：切換鍵（Tab 是否被 Herdr 攔截）、備用螢幕下切換後畫面還原、Machine 檢視捲動，等待使用者實機驗收。只有原始碼與自動化驗證；未部署、未重啟執行中的 bridge／看板，不代表實機驗收通過。
+
 ## ISSUE-162：只讀的 coding 任務在 review 階段必定失敗（沒有 implementation artifact）
 
 更新日期：2026-11-16。狀態：已驗收（2026-11-16，實機；使用者選擇「卡片標示只讀就改走非 coding 流程」，見「實機驗收」）。
