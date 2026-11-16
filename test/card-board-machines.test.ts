@@ -120,6 +120,34 @@ test("machineViewLines never exceeds terminal height on a narrow screen (F3)", (
   assert.equal(wide[wide.length - 2], "hi");
 });
 
+test("machineViewLines never exceeds a very short terminal and keeps the hint last (F4)", () => {
+  const many = Array.from({ length: 5 }, (_, i) => ({
+    ...machine,
+    id: `remote${i}`,
+  }));
+  for (let height = 1; height <= 12; height++)
+    for (const message of ["", "Machine 檢視唯讀，第一階段不支援編輯"])
+      for (const machines of [many, []]) {
+        const lines = machineViewLines(
+          { machines, cursor: 2, error: "", message },
+          80,
+          height,
+        );
+        const label = `height ${height} message ${JSON.stringify(message)} machines ${machines.length}`;
+        assert.ok(lines.length <= height, `${label}: ${lines.length} 列`);
+        assert.ok(lines.length >= 1, label);
+        assert.ok(lines[lines.length - 1]!.startsWith("Tab/m/c"), label);
+      }
+  // 高度 5、三台以上、有訊息（review 的重現案例）：標題 + 列表 + 訊息 + 提示剛好 5 列，游標那台仍可見。
+  const repro = machineViewLines(
+    { machines: many, cursor: 2, error: "", message: "msg" },
+    80,
+    5,
+  );
+  assert.equal(repro.length, 5);
+  assert.ok(repro.some((line) => line.startsWith("> remote2")));
+});
+
 test("machine cursor uses shared navigation and clamps boundaries", () => {
   for (const key of [
     "j",

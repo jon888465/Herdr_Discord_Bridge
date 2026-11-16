@@ -94,14 +94,21 @@ export function machineViewLines(
   height: number,
 ): string[] {
   const max = width - 1;
+  const hint = truncateToWidth(MACHINE_HINT, max);
   const lines = [boardHeader("machines", state.machines.length, width)];
   if (state.error) lines.push(truncateToWidth(state.error, max));
-  else
-    lines.push(
-      ...machineLines(state.machines, state.cursor, width, visibleRows(height)),
-    );
+  else {
+    // 列表只能用掉標題、訊息與提示之外的列；visibleRows 最少 3，高度很小時會超出（review round 3，F4）。
+    const fixed = 2 + (state.message ? 1 : 0);
+    const room = Math.max(0, Math.min(visibleRows(height), height - fixed));
+    if (room > 0)
+      lines.push(...machineLines(state.machines, state.cursor, width, room));
+  }
   if (state.message) lines.push(truncateToWidth(state.message, max));
-  lines.push(truncateToWidth(MACHINE_HINT, max));
+  lines.push(hint);
+  // 高度小到連固定列都放不下時，保留最上面幾列與提示，總列數不超過高度。
+  if (lines.length > height)
+    return height > 1 ? [...lines.slice(0, height - 1), hint] : [hint];
   return lines;
 }
 
