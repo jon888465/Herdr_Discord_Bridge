@@ -18,6 +18,8 @@
 
 **第二輪修正（2026-11-16）：** f1 還原無關文件 hunk；s1 清除 ISSUE-163 後多餘空行並釐清既有格式問題；s2 兩個檢視提示均顯示 `Tab/m/c`；s3 改共用 JSONC 函式。s4 留給後續階段，未改 `src/machines.ts`。本輪 `npm run typecheck`、`npm run lint`、`npx prettier --check src/card-board.ts src/card-board-cli.ts src/card-board-machines.ts src/config.ts test/card-board-machines.test.ts`、`git diff --check` 全數通過；`npm test`（含 build，2026-11-16）1985 項：1984 pass、0 fail、1 skipped。SPEC diff 為 1 個純新增 hunk（4 行新增、0 行刪除），CONTEXT diff 為 1 個 hunk。本輪未對 Markdown 執行 prettier。
 
+**第三、四輪修正（2026-11-16）：** F1 設定根節點不是物件、`machines` 含非物件項目時回報簡短原因，不再當成「沒有 machine」；F2 呈現前把 `ssh`／`socket` 內的 C0／DEL／C1 控制字元換成 U+FFFD，避免畫面被清除或游標被移動；F3 標題、錯誤、訊息與提示都依寬度截斷成一列；F4 Machine 檢視的清單列數取 `visibleRows` 與「高度減標題、訊息、提示」的較小值，並加總列數保底（高度 5、五台、有訊息剛好 5 列，游標那台仍可見）；F5 共用的 `stripJsonComments` 原本在去除註解後對整份文字套 `/,\s*([}\]])/g`，會連字串內的 `,}`、`,]` 一起吃掉（例如 socket `/tmp/a,}.sock` 被讀成 `/tmp/a}.sock`），改為只處理字串外面的尾逗號。**F5 是既有 bug**：這個函式 bridge 自己讀 `config.json` 也用，所以此修正同時改變 bridge 實際讀設定的行為（只影響字串內含 `,}` 或 `,]` 的值，其他輸入結果不變）。測試：`test/card-board-machines.test.ts` 現有 12 項（含低高度所有高度組合、字串內 `,}`／`,]` 保留與字串外尾逗號仍接受）。全套 `npm test`（2026-11-16，F5 修正後）1991 項，1990 pass、0 fail、1 skipped；`npm run lint` 通過；以上為各輪自動化結果，**每次 review 前後的數字不同，不能互相替代**。第 4 輪 review 的 F4 發現狀態在卡片檔仍是 open（修正是人工推送，bridge 沒有重新標記）。
+
 **未驗證與下一步：** Herdr pane 內實機行為：切換鍵（Tab 是否被 Herdr 攔截）、備用螢幕下切換後畫面還原、Machine 檢視捲動，等待使用者實機驗收。只有原始碼與自動化驗證；未部署、未重啟執行中的 bridge／看板，不代表實機驗收通過。
 
 ## ISSUE-162：只讀的 coding 任務在 review 階段必定失敗（沒有 implementation artifact）

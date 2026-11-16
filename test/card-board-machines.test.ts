@@ -148,6 +148,29 @@ test("machineViewLines never exceeds a very short terminal and keeps the hint la
   assert.ok(repro.some((line) => line.startsWith("> remote2")));
 });
 
+test("readMachinesSection keeps ,} and ,] inside strings and still accepts trailing commas outside (F5)", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "board-machines-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "config.json");
+  const tricky = { id: "tricky", ssh: "user@host", socket: "/tmp/a,}.sock" };
+  const bracket = { id: "bracket", ssh: "user@host", socket: "/tmp/b,].sock" };
+  // 字串內的 `,}`、`,]` 原樣保留。
+  fs.writeFileSync(file, JSON.stringify({ machines: [tricky, bracket] }));
+  assert.deepEqual(readMachinesSection(file), {
+    ok: true,
+    machines: [tricky, bracket],
+  });
+  // 字串外的尾逗號（含換行與註解之間）仍被接受。
+  fs.writeFileSync(
+    file,
+    `{\n  "machines": [\n    { "id": "tricky", "ssh": "user@host", "socket": "/tmp/a,}.sock", },\n    // c\n  ],\n}\n`,
+  );
+  assert.deepEqual(readMachinesSection(file), {
+    ok: true,
+    machines: [tricky],
+  });
+});
+
 test("machine cursor uses shared navigation and clamps boundaries", () => {
   for (const key of [
     "j",

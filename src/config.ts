@@ -153,7 +153,36 @@ export function stripJsonComments(input: string): string {
       output += char;
     }
   }
-  return output.replace(/,\s*([}\]])/g, "$1");
+  return stripTrailingCommas(output);
+}
+
+/** 移除 `}`／`]` 前的尾逗號，只處理字串外面的；字串內的 `,}` 要原樣保留（review round 4，F5）。 */
+function stripTrailingCommas(input: string): string {
+  let output = "";
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < input.length; index += 1) {
+    const char = input[index]!;
+    if (inString) {
+      output += char;
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      output += char;
+      continue;
+    }
+    if (char === ",") {
+      let ahead = index + 1;
+      while (ahead < input.length && /\s/.test(input[ahead]!)) ahead += 1;
+      if (input[ahead] === "}" || input[ahead] === "]") continue;
+    }
+    output += char;
+  }
+  return output;
 }
 
 /** Team 任務 Lead 規劃、每個 Worker、Lead 彙整的單一回合等待上限（不是批准提示的有效期）。 */
