@@ -392,7 +392,7 @@ r7-f2：Core terminal 不繼承 caller shell。現 run 的 env 前綴傳 HERDR_B
 
 ## ISSUE-146：task 沒有完成、PR 由人工接手 merge 後，卡片永遠停在 in_progress，autopick Lead 的 workspace 不會被收尾
 
-更新日期：2026-11-11。狀態：待調查（現象已重現一次、根因為觀察與推論；沒有修正）。
+更新日期：2026-11-16。狀態：待調查（舊卡殘留再次確認；本輪只檢查，沒有修正程式或清理執行態）。
 
 **使用者可見症狀：**`REQ-20261111-remote-agy-role` 的 task 因 ISSUE-145 標成 `blocked`，我接手 worktree、開 PR、用 `card attach-pr` 登記；PR #206 於 2026-11-11 06:45:07Z merge，bridge 在 06:45:44Z 記錄 `merged`、06:45:47Z 記錄 `cleanup_done`（worktree 與卡片 workspace 已移除）。**但卡片檔 `status` 一直是 `in_progress`**（至少到 07:0x，重啟 bridge 之後仍是），autopick 為 codex Lead 開的 workspace `autopick-codex-REQ-20261111-remote-agy-role` 也一直開著。我手動把卡片改成 `done` 後，約一分鐘內 bridge 的收尾掃描就關掉了那個 workspace。
 
@@ -407,6 +407,20 @@ r7-f2：Core terminal 不繼承 caller shell。現 run 的 env 前綴傳 HERDR_B
 **修正方向（尚未實作）：**`merged` 與 `cleanup_done` 都已記錄、且卡片有關聯 PR 時，把卡片設成 `done`；要補測試涵蓋 task 未完成的路徑。
 
 **暫時做法：**人工確認 PR 確實已 merge 後，手動把卡片 `status` 改成 `done`（2026-11-11 對 `REQ-20261111-remote-agy-role` 這樣做了）。
+
+**2026-11-16 清理前盤點（本機 macOS，原始碼 main `d6873d8`）：**狀態目錄共有 5 張 `in_progress` 卡。唯讀讀取卡片、team task journal 最後一筆快照、worktree 索引與實體路徑；GitHub connector `get_pr_info` 核對 #166／#172／#185；`herdr workspace list` 確認只剩 w2／w3／w5D／w5，五張卡的 task workspace w54／w4T／w56／w5F／w5V 皆不存在。`git worktree list --porcelain` 只有主 checkout，沒有卡片 worktree。首次 Herdr 查詢受 sandbox EPERM 阻擋，經核准在沙箱外唯讀重查成功。
+
+- `REQ-20261106-usage-query`：PR #172 已 merge，卡片有 merged／cleanup_done；task 仍 blocked。可收尾為 done，保留未完成的實機驗收項。
+- `REQ-20261108-role-agents`：PR #166 已 merge，卡片有 merged／cleanup_done；task 仍 blocked。可收尾為 done，不等於全部驗收通過。
+- `REQ-20261109-autopick-lead-cleanup`：task failed；功能已有 ISSUE-129 的後續修正與驗收證據，但原失敗卡本身沒有完成證據，宜取消／封存。worktree 索引仍無 removedAt、卡片稱作用中，但路徑與 workspace 均已不存在；需另行對帳，不能據此宣稱仍在執行。
+- `REQ-20261109-codex-lead-agy`：task blocked；PR #185 已關閉且未 merge，worktree 已清理。後續需求由 ISSUE-130／132 接續，宜取消／封存原卡，不能把 #185 標成已合併。
+- `REQ-20261109-pi-lead-live`：task blocked；首次驗收失敗，worktree 已清理。後續 retest 成功見 ISSUE-137／130，宜取消／封存原失敗卡，不覆寫第一次失敗紀錄。
+
+**讀碼確認／限制：**`src/card-pr-sync.ts` 的 mergedReport 記 merged 並呼叫 onMerged；`src/card-sync.ts` 只在 task 完成時設 done，失敗／取消保留 in_progress。此與兩張已合併卡的殘留一致；尚未新增回歸測試或修改行為。其餘三張沒有 merge 完成證據，不能全部歸為同一根因。journal 中四個 blocked task 最近事件是 2026-11-15 restart_reconciled，卡片改終態不會自動使它們成為終態；真正收尾時還需透過正式取消流程處理，保留帳本。本輪未改卡片／task／索引，未刪分支或檔案，未停止程序或重啟部署。文件檢查：`git diff --check`；不涉及程式測試或端到端驗收。下一步：依上述清單收尾狀態並核對孤兒索引；自動同步缺口仍待修正。
+
+**2026-11-16 使用者授權收尾結果：**備份存於 bridge state `backups/card-closeout-20261116-095741/`，包含五張卡、五份 task journal 與 worktree 索引。透過執行中的 bridge console（w2:p6P）正式 `team cancel`，usage-query／role-agents／codex-lead-agy／pi-lead-live 四個 task 均新增 task_cancelled，快照為 cancelled；cleanup 卡原 task 維持 failed。沒有關閉任何 CLI session。再使用 CardStore.update 的 hash 比對，把 usage-query／role-agents 改 done，其餘三張改 cancelled，更新日期並追加人工收尾理由；所有原始流程歷史保留，未刪卡／分支。開發結案不代表補齊實機驗收。
+
+**清理失敗與剩餘阻擋：**正式執行 `card cleanup REQ-20261109-autopick-lead-cleanup` 回 `herdr worktree.remove: workspace_not_found workspace w56 not found`；重查索引仍沒有 removedAt。確認 `cleanupCardWorktree` 先呼叫 Herdr removeWorktree，成功後才 markRemoved；而 CardWorktreeStore 建構時載入整份索引並快取，save 會重寫整份。因此沒有直接改磁碟索引，以免被執行中 bridge 的舊快取覆寫；未授權重啟，也未為對帳擅自停止 bridge。這筆索引與卡片「作用中」欄位仍待修正／對帳，不影響五張卡已退出 in_progress 的結果。下一步：修正正式 cleanup 對已不存在 workspace 的對帳路徑（需同時證明 worktree 已不存在），或在使用者授權停止／重啟 bridge 的維護時段備份後離線對帳，再載入新索引。本輪沒有修改程式、build、部署或重啟；本 issue 維持待調查。
 
 ## ISSUE-145：單一指派的 30 分鐘等待上限，讓已完成的 Worker 成果被 bridge 判逾時丟掉
 
