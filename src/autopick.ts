@@ -3,6 +3,7 @@
 //   L0：assign（worktree＋coding）→ 等 task 完成 → commit            （不 push）
 //   L1：…→ pr                                                        （由人 review 與 merge）
 //   L2：…→ loop --merge（獨立 review → 等 CI → 全綠才 merge）           （仍受 card merge 的全部守門）
+// 卡片 `mode: readonly`（ISSUE-162）：不建 worktree、不走 coding，任務完成、卡片 done 就結束，不 commit／PR／merge（不分等級）。
 // 一次只做一張卡；任何一步失敗或需要人就停下，不重試、不繞過；失敗時保留 Lead 的 workspace 與 worktree 供檢查。
 //
 // 這個模組只放邏輯（選卡、依序執行、停止條件），所有外部動作都經注入的 `AutopickSteps`，
@@ -237,7 +238,11 @@ export async function runAutopick(
   let step: AutopickStep = "assign";
   try {
     // ISSUE-142：回覆含本機路徑，只回報固定摘要。
-    const assigned = await run("assign", `card assign ${id} --worktree --coding`);
+    const readonly = job.card.mode === "readonly";
+    const assigned = await run(
+      "assign",
+      readonly ? `card assign ${id}` : `card assign ${id} --worktree --coding`,
+    );
     if (/任務沒有啟動/.test(assigned)) return report("stopped", "assign", NOT_STARTED);
 
     step = "task";
@@ -250,6 +255,10 @@ export async function runAutopick(
     if (!(await steps.waitCardDone(id)))
       return report("stopped", "card_done", "卡片狀態沒有在時限內同步成 done");
     log.push("card_done");
+    if (readonly) {
+      await lead.close();
+      return report("reached", "card_done");
+    }
 
     step = "commit";
     await run("commit", `card commit ${id}`);

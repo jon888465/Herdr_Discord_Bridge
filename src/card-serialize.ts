@@ -82,6 +82,7 @@ export function serializeCard(
         .join(", ")}}`,
     );
   if (card.lead !== undefined) lines.push(`lead: ${formatString(card.lead)}`);
+  if (card.mode !== undefined) lines.push(`mode: ${formatString(card.mode)}`);
   if (card.notify !== undefined)
     lines.push(`notify: ${formatString(card.notify)}`);
   for (const key of [

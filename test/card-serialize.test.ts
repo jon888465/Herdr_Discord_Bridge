@@ -32,6 +32,25 @@ updated: 2026-10-30
 內容
 `;
 
+test("mode: readonly round-trips, and a different mode value is rejected (ISSUE-162)", () => {
+  const written = serializeCard({ ...minimal, mode: "readonly" });
+  assert.equal(written.ok, true);
+  if (!written.ok) return;
+  assert.ok(written.text.includes("mode: readonly\n"));
+  const reread = parseCard(written.text, "REQ-20261030-example.md");
+  assert.equal(reread.ok, true);
+  if (reread.ok) assert.equal(reread.card.mode, "readonly");
+
+  const bad = parseCard(
+    minimalText.replace(
+      "updated: 2026-10-30\n",
+      "updated: 2026-10-30\nmode: write\n",
+    ),
+    "REQ-20261030-example.md",
+  );
+  assert.equal(bad.ok, false);
+});
+
 test("a minimal card serializes to the canonical text and reads back equal", () => {
   const result = serializeCard(minimal);
   assert.equal(result.ok, true);
