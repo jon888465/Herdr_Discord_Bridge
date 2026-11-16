@@ -1,8 +1,24 @@
 # Known Issues
 
+## ISSUE-162：只讀的 coding 任務在 review 階段必定失敗（沒有 implementation artifact）
+
+更新日期：2026-11-16。狀態：待調查（現象與直接原因已確認；是否要改行為尚未決定，沒有修正）。
+
+**使用者可見症狀：** 一張只要求「讀檔、回報，不改任何檔案、不開 PR」的卡被自動撿起後，Worker（codex `helper`）與 verify（claude）都完成，review（codex `reviewer`）卻在開始後約 250 毫秒失敗，task 以「one or more Assignments failed; synthesis is partial; no passing review for the current version」失敗；卡片記 `failed`／`autopick_stopped`，狀態停在 `in_progress`，並通知「review 條件未滿足」。
+
+**重現（2026-11-16，本機）：** 驗證 ISSUE-161 時建立的卡 `REQ-20261116-verify-issue-161-autopick-readonly`，說明限定只讀（`head -n 1 README.md`）；放行後被撿起，走 `--coding` 流程。
+
+**直接原因（已確認，讀 task journal 的 assignment 快照）：** review assignment 的 `blocker` 為 `coding review has no implementation artifact`。Worker 沒有改動任何檔案，所以沒有可審的 implementation artifact，review 依規則失敗。codex reviewer 本身沒有壞。尚未確認的是：這是否應視為正常（只讀任務不該走 coding 流程），還是應讓 bridge 在沒有改動時跳過 review 或以非 coding 模式處理。
+
+**預期行為：** 尚待決定。至少要讓人在說明裡看得出「純只讀任務不適合自動撿卡的 coding 流程」，或讓 bridge 對沒有改動的 coding 任務給出明確結論而不是 `failed`。
+
+**修正：** 無。
+
+**未驗證／下一步：** 決定只讀任務的正確處理方式（文件提醒、跳過 review、或改走非 coding 的 Team 任務）；若要改行為再補測試與 SPEC。
+
 ## ISSUE-161：Card 看板新增的卡沒有 `project`，放行後 bridge 不會自動撿
 
-更新日期：2026-11-16。狀態：已修正、待驗收（程式與單元測試完成；**已隨 2026-11-16 重啟部署（main `06825ca`），但尚未實機驗證「新增卡預設帶出 `project` 並被自動撿起」**）。
+更新日期：2026-11-16。狀態：已驗收（2026-11-16，實機；見「實機驗收」）。
 
 **使用者可見症狀：** 在看板新增卡片並按 `r` 放行後，bridge 一直沒有自動撿卡。
 
@@ -20,7 +36,8 @@
 
 **測試：** `test/card-board-project.test.ts` 5 項（含「有 project 才符合 `eligibleAutopickProject`、沒有就不符合」），既有 `test/card-board.test.ts` 的放行測試改為接受附警告的成功。全套 `npm test`（2026-11-16）1963 項，1962 pass、0 fail、1 skipped（原因未逐項確認）；`npm run lint` 通過。
 
-**未驗證：** 實機：重啟後在看板新增卡，確認預設帶出 `project`，放行後被 bridge 自動撿起；預設值取自看板 pane 的工作目錄，若 pane 不在 repo 目錄會帶出錯誤名稱（可在編輯畫面修改）。
+**實機驗收（2026-11-16，本機 macOS、Herdr 0.9.1，main `8efc3c2`，bridge 已用含此修正的版本重啟）：** 在看板（`w2:p60`）按 `n`，編輯器範本自動帶出 `project: local:<看板工作目錄名>`（未手動輸入）；填標題、`notify`、說明後存檔，顯示「已新增 REQ-20261116-verify-issue-161-autopick-readonly（draft）」；按 `r` 顯示「已設為 ready」且沒有缺 project 警告；05:42:15 放行、05:42:38 卡片出現 `autopick_picked`（約 23 秒，未超過一輪 60 秒掃描），之後 `notification` 事件送到 `notify` 指定的 pane。這就是修正前壞掉的情境（沒有 `project` → 永遠不被撿）。
+**驗收範圍與限制：** 只驗證「預設值帶出」與「被自動撿起」。該驗證卡之後在 review 階段失敗，原因與 ISSUE-161 無關，見 ISSUE-162；驗證卡已清 worktree 與分支，並改為 cancelled（人工收尾，流程歷史保留）。預設值取自看板 pane 的工作目錄，若 pane 不在 repo 目錄會帶出錯誤名稱（可在編輯畫面修改），這點未另外測試。
 
 ## ISSUE-160：Herdr 桌面介面沒有 card 清單；新增 Card 看板 pane
 
