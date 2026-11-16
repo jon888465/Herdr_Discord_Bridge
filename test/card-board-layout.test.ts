@@ -89,7 +89,16 @@ test("Machine 檢視在各種寬高、錯誤與訊息組合下列數與寬度都
           for (const machines of [[], [machine], many])
             for (const cursor of [0, machines.length - 1]) {
               const lines = machineViewLines(
-                { machines, cursor: Math.max(0, cursor), error, message },
+                {
+                  machines,
+                  statuses: new Map([
+                    ["remote", "connected"],
+                    ["remote0", "unreachable"],
+                  ]),
+                  cursor: Math.max(0, cursor),
+                  error,
+                  message,
+                },
                 width,
                 height,
               );

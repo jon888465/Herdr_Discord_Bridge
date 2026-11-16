@@ -30,6 +30,11 @@ import {
   viewKeyAction,
   type BoardView,
 } from "./card-board-machines.js";
+import {
+  readMachineStatus,
+  MACHINE_STATUS_MAX_AGE_MS,
+  type MachineStatus,
+} from "./machine-status-file.js";
 import type { MachineConfig } from "./machines.js";
 
 // Herdr plugin pane：卡片看板。只編輯 draft 類與已停手的卡，其餘唯讀。
@@ -50,9 +55,15 @@ let editing = false;
 let view: BoardView = "cards";
 let machines: MachineConfig[] = [];
 let machineCursor = 0;
+let statuses = new Map<string, MachineStatus>();
 let machineError = "";
 
 function reloadMachines(): void {
+  statuses = readMachineStatus(
+    path.join(stateDirectory(), "machine-status.json"),
+    new Date(),
+    MACHINE_STATUS_MAX_AGE_MS,
+  );
   const result = readMachinesSection(
     path.join(configDirectory(), "config.json"),
   );
@@ -77,7 +88,13 @@ function render(): void {
     // 標題、錯誤、訊息與提示都截斷成一列，加上列表不超過終端機高度（review round 2，F3）。
     process.stdout.write(
       `\x1b[2J\x1b[H${machineViewLines(
-        { machines, cursor: machineCursor, error: machineError, message },
+        {
+          machines,
+          statuses,
+          cursor: machineCursor,
+          error: machineError,
+          message,
+        },
         width,
         height,
       ).join("\n")}`,
@@ -223,7 +240,7 @@ process.stdin.on("data", (key: string) => {
         ),
       );
     else if (["e", "\r", "\n", "n", "r"].includes(key))
-      message = "Machine 檢視唯讀，第一階段不支援編輯";
+      message = "Machine 檢視唯讀，本階段不支援編輯";
     reloadMachines();
     render();
     return;

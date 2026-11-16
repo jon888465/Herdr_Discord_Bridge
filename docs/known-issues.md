@@ -1,5 +1,23 @@
 # Known Issues
 
+## ISSUE-164：Card 看板 Machine 檢視第二階段：連線狀態
+
+更新日期：2026-11-16。狀態：已修正、待驗收。
+
+**症狀／重現環境：** 獨立 card-board plugin pane 的 Machine 列表只有設定資料，無法查看 bridge 觀察到的連線狀態；本輪以隔離 worktree 原始碼與 node:test 驗證。
+
+**預期行為：** 每列顯示 id、ssh、connected／unreachable，數秒更新；來源缺失、無效或過舊顯示「未知」，通道不帶設定或機密。
+
+**已確認根因：** 看板與 bridge 沒有狀態通道。
+
+**修正範圍：** 新增 machine-status-file 模組，0600 暫存檔原子 rename，頂層 version／updatedAt／machines，項目僅 id／status；啟動立即與每 5 秒寫入（含空陣列）、shutdown 停 timer、失敗固定短句。看板每 3 秒與切換時重讀，拒絕超過正負 15 秒的時間，只查 config 內 id，保留寬高限制。補通道、顯示與版面測試，SPEC／CONTEXT 同步；README 未描述 Machine 看板、pending-features 無本卡，均不變。
+
+**測試命令與結果（2026-11-16）：** `npm ci`、`npm run typecheck`、`npm run lint` 全數 exit 0；`npm test`（含 build）2010 項：2009 pass、0 fail、1 skipped，exit 0。新增 13 項測試；相關三個測試檔另以 `node --test dist/test/machine-status-file.test.js dist/test/card-board-machines.test.js dist/test/card-board-layout.test.js` 執行，31 pass、0 fail。`npx prettier --check src/machine-status-file.ts src/card-board-cli.ts src/card-board-machines.ts test/machine-status-file.test.ts test/card-board-machines.test.ts test/card-board-layout.test.ts` 與 `git diff --check` 均通過。未對 Markdown 執行 prettier。
+
+**人工接手（2026-11-16）：** Worker 完成實作與 task 內 review／verify 後，bridge 的 Lead（claude）pane 被 Claude Code 的「Teach auto mode about your environment?」互動對話框擋住，規劃回合沒有被處理，task 停在 planning；使用者要求讓 task 自行逾時並由人接手，對話框以 Esc 取消（沒有選擇掃描 shell 歷史）。接手時我（Claude Code）讀完 Worker 在 worktree 留下的程式，發現 `src/main.ts` 被 prettier 重排了大量無關程式（+76／-16，實質改動只有約 12 行），已把 `main.ts` 還原到 HEAD 後只套回真正的 5 處（import、啟動 writer、三處 shutdown 的 `stopMachineStatus()`），最終 `main.ts` 為 12 行新增、0 行刪除。因此 `src/main.ts` 沿用 HEAD 的既有格式，**`prettier --check` 對它仍會失敗，這是既有狀況，不是本次造成**。我重跑：`npm run lint` 通過；全套 `npm test`（2026-11-16）2010 項，2009 pass、0 fail、1 skipped；`test/machine-status-file.test.ts` 12 項全過。task 內 review／verify 的 verdict 沒有留在卡片紀錄中，上述驗證是我另跑的，且尚未經過獨立 review。
+
+**未驗證與下一步：** 未在真實 Herdr pane 與真實遠端機器實機確認，未部署或重啟執行中的 bridge。Lead 後續安排部署／重啟，驗收 connected、斷線後 unreachable、停止 bridge 超過 15 秒後未知與不同終端尺寸。連線／斷線操作、編輯 SSH、寫入 config.json 不在本階段。
+
 ## ISSUE-163：Card 看板需要 Machine 檢視（第一階段：切換與唯讀列表）
 
 更新日期：2026-11-16。狀態：已驗收（2026-11-16，使用者實機；範圍與未涵蓋項目見「實機驗收」）。

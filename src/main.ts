@@ -1,3 +1,7 @@
+import {
+  startMachineStatusWriter,
+  MACHINE_STATUS_WRITE_INTERVAL_MS,
+} from "./machine-status-file.js";
 import { assertCoreConfig, startCoreBridge } from "./runtime/core-bridge.js";
 import { resolveRuntimeKind } from "./runtime/select.js";
 import { CoreAdapter, resolveCoreSocketPath } from "./runtime/core-adapter.js";
@@ -265,6 +269,11 @@ async function startBridge(
   herdr.setAgyTrust(agyTrust);
   agyTrust.sweep();
   herdr.startTunnels();
+  const stopMachineStatus = startMachineStatusWriter(
+    herdr,
+    join(stateDirectory(), "machine-status.json"),
+    MACHINE_STATUS_WRITE_INTERVAL_MS,
+  );
   const routing = new RoutingStore(
     statePath(config),
     config.maxTrackedApprovals,
@@ -287,6 +296,7 @@ async function startBridge(
   );
 
   if (!(await herdr.ping())) {
+    stopMachineStatus();
     herdr.stopTunnels();
     throw new Error(
       "Herdr socket is not reachable; the bridge cannot control agents. Herdr itself is left untouched.",
@@ -306,6 +316,7 @@ async function startBridge(
     );
     watcher.start();
     installShutdown(() => {
+      stopMachineStatus();
       herdr.stopTunnels();
       watcher.stop();
     }, routing);
@@ -612,6 +623,7 @@ async function startBridge(
     stopCardNotifications();
     stopAutopick();
     stopPullRequestSync();
+    stopMachineStatus();
     herdr.stopTunnels();
     stopSend();
     stopHooks();

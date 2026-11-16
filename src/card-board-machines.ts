@@ -8,6 +8,8 @@ import {
   type BoardRow,
 } from "./card-board.js";
 
+import type { MachineStatus } from "./machine-status-file.js";
+
 export type BoardView = "cards" | "machines";
 
 export function toggleView(view: BoardView): BoardView {
@@ -83,6 +85,7 @@ export const MACHINE_HINT =
 
 export interface MachineViewState {
   machines: MachineConfig[];
+  statuses?: Map<string, MachineStatus>;
   cursor: number;
   /** readMachinesSection 的失敗原因；有值時不顯示列表。 */
   error: string;
@@ -104,7 +107,15 @@ export function machineViewLines(
   else {
     const room = machineRoom(state, height);
     if (room > 0)
-      lines.push(...machineLines(state.machines, state.cursor, width, room));
+      lines.push(
+        ...machineLines(
+          state.machines,
+          state.cursor,
+          width,
+          room,
+          state.statuses,
+        ),
+      );
   }
   if (state.message) lines.push(truncateToWidth(state.message, max));
   lines.push(truncateToWidth(MACHINE_HINT, max));
@@ -202,6 +213,7 @@ export function machineLines(
   cursor: number,
   width: number,
   room: number,
+  statuses: Map<string, MachineStatus> = new Map(),
 ): string[] {
   if (!machines.length)
     return [
@@ -216,7 +228,7 @@ export function machineLines(
     .map((machine, offset) =>
       truncateToWidth(
         sanitizeForTerminal(
-          `${first + offset === cursor ? ">" : " "} ${machine.id}  ${machine.ssh}  ${machine.socket}`,
+          `${first + offset === cursor ? ">" : " "} ${machine.id}  ${machine.ssh}  ${statuses.get(machine.id) ?? "未知"}  ${machine.socket}`,
         ),
         width - 1,
       ),
