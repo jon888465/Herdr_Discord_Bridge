@@ -32,7 +32,7 @@ updated: 2026-10-30
 內容
 `;
 
-test("mode: readonly round-trips, and any other mode value is rejected (ISSUE-162)", () => {
+test("mode: readonly round-trips, and a different mode value is rejected (ISSUE-162)", () => {
   const written = serializeCard({ ...minimal, mode: "readonly" });
   assert.equal(written.ok, true);
   if (!written.ok) return;
