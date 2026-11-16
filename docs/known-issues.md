@@ -58,7 +58,7 @@
 **測試（2026-11-16，翻頁）：** `test/card-board.test.ts` 新增 9 項（按鍵序列對應含未知鍵回 undefined、`visibleRows`、空清單、逐列頭尾、少於一頁、剛好一頁、多頁、pageSize 0／負數仍移 1 列、Home／End），`npm run build && node --test dist/test/card-board.test.js` 18 項 18 pass、0 fail；`npm run typecheck`、`npm run lint` 通過；全套 `npm test` 1967 項，1966 pass、0 fail、1 skipped（原因未逐項確認）。`npm run format:check` 失敗，但是既有狀況：乾淨的基準樹（本次改動前）就有 79 個檔不符 Prettier 3.9.6（`npm ci` 依 lockfile 安裝的版本）；本次改到的三個程式／測試檔個別 `prettier --check` 通過。
 
 **實機發現（2026-11-16，翻頁）：** 使用者在 Herdr pane 以實體鍵盤測試：Home／End 有效，PageUp／PageDown 無效。以 `cat -v` 抓取，PageUp／PageDown 一個位元組都沒送到程式（Home／End 有到）；改以最小腳本進入備用螢幕（`\x1b[?1049h`）後，`\x1b[5~`、`\x1b[6~`、`\x1b[H`、`\x1b[F` 四個序列全收到。**根因（以上述實驗確認）：** Herdr 把主螢幕程式的 PageUp／PageDown 拿去捲 pane 歷史，只有備用螢幕的程式才收得到；看板原本畫在主螢幕。先前「看起來有用」是 Herdr 在捲歷史，不是看板翻頁。
-**修正：** `src/card-board-cli.ts` 啟動時進備用螢幕、離開時還原（`exit` 事件）、開 `$EDITOR` 前後離開／重進。此為終端機行為，沒有單元測試。使用者實機：改版後 PageUp／PageDown 可翻頁（2026-11-16）。
+**修正：** `src/card-board-cli.ts` 啟動時進備用螢幕、離開時還原（`exit` 事件）、開 `$EDITOR` 前後離開／重進。此為終端機行為，沒有單元測試；全套 `npm test` 1972 項，1971 pass、0 fail、1 skipped（2026-11-16）。使用者實機：改版後 PageUp／PageDown 可翻頁（2026-11-16）。
 
 **未驗證（翻頁，2026-11-16）：** 開 `$EDITOR` 後回到看板、`q` 離開後 shell 畫面是否正常還原，尚未逐項確認；其他終端機實際送出的序列是否都在已認得的清單內，未逐一確認。
 
