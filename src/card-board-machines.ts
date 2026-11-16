@@ -1,7 +1,12 @@
 import fs from "node:fs";
 import { stripJsonComments } from "./config.js";
 import { validateMachines, type MachineConfig } from "./machines.js";
-import { firstVisible, truncateToWidth, visibleRows } from "./card-board.js";
+import {
+  firstVisible,
+  truncateToWidth,
+  visibleRows,
+  type BoardRow,
+} from "./card-board.js";
 
 export type BoardView = "cards" | "machines";
 
@@ -94,22 +99,102 @@ export function machineViewLines(
   height: number,
 ): string[] {
   const max = width - 1;
-  const hint = truncateToWidth(MACHINE_HINT, max);
   const lines = [boardHeader("machines", state.machines.length, width)];
   if (state.error) lines.push(truncateToWidth(state.error, max));
   else {
-    // 列表只能用掉標題、訊息與提示之外的列；visibleRows 最少 3，高度很小時會超出（review round 3，F4）。
-    const fixed = 2 + (state.message ? 1 : 0);
-    const room = Math.max(0, Math.min(visibleRows(height), height - fixed));
+    const room = machineRoom(state, height);
     if (room > 0)
       lines.push(...machineLines(state.machines, state.cursor, width, room));
   }
   if (state.message) lines.push(truncateToWidth(state.message, max));
-  lines.push(hint);
-  // 高度小到連固定列都放不下時，保留最上面幾列與提示，總列數不超過高度。
-  if (lines.length > height)
-    return height > 1 ? [...lines.slice(0, height - 1), hint] : [hint];
-  return lines;
+  lines.push(truncateToWidth(MACHINE_HINT, max));
+  return clampToHeight(lines, height);
+}
+
+/**
+ * 清單最多能用的列數：不超過 visibleRows，也不超過「高度減固定列」。Card、Machine 兩個檢視與翻頁共用這一個
+ * 計算，畫面容量與翻頁一頁的列數才不會各算各的（review round 3／5，F4、F7、F8）。
+ */
+export function listRoom(height: number, fixedRows: number): number {
+  return Math.max(0, Math.min(visibleRows(height), height - fixedRows));
+}
+
+/** Machine 檢視清單的列數：標題＋提示＋（有訊息時）訊息為固定列；有錯誤時不列機器。 */
+export function machineRoom(
+  state: { error: string; message: string },
+  height: number,
+): number {
+  return state.error ? 0 : listRoom(height, 2 + (state.message ? 1 : 0));
+}
+
+/** 總列數超過高度時，保留最上面幾列與最後一列（提示），確保不超出畫面。 */
+function clampToHeight(lines: string[], height: number): string[] {
+  if (lines.length <= height) return lines;
+  const last = lines[lines.length - 1]!;
+  return height > 1 ? [...lines.slice(0, height - 1), last] : [last];
+}
+
+export const CARD_HINT =
+  "Tab/m/c 切換檢視  j/k 移動  PgUp/PgDn 翻頁  Home/End 頭尾  e 編輯  n 新增  r 設為 ready  q 離開";
+
+export interface CardViewState {
+  rows: BoardRow[];
+  cursor: number;
+  /** 讀不到的卡片檔數。 */
+  errors: number;
+  message: string;
+}
+
+/** Card 檢視清單的列數：標題＋提示為固定列，另有「讀檔錯誤」與「選取卡片 id」兩列視情況出現。 */
+export function cardRoom(
+  state: Pick<CardViewState, "rows" | "cursor" | "errors">,
+  height: number,
+): number {
+  const fixed = 2 + (state.errors ? 1 : 0) + (state.rows[state.cursor] ? 1 : 0);
+  return listRoom(height, fixed);
+}
+
+function cardMark(row: BoardRow): string {
+  if (!row.editability.editable) return "🔒";
+  return row.editability.kind === "draft" ? "✎ " : "↺ ";
+}
+
+/**
+ * Card 檢視整個畫面的各列（不含清屏控制碼）。每一列都依寬度截斷成一列（包含加長後的切換提示），
+ * 清單列數與 Machine 檢視共用 listRoom，總列數不超過終端機高度。
+ */
+export function cardViewLines(
+  state: CardViewState,
+  width: number,
+  height: number,
+): string[] {
+  const max = width - 1;
+  const lines = [boardHeader("cards", state.rows.length, width)];
+  if (state.errors)
+    lines.push(
+      `\x1b[33m${truncateToWidth(`${state.errors} 個檔案讀不到，請用 herdr-card-check`, max)}\x1b[0m`,
+    );
+  const room = cardRoom(state, height);
+  const first = firstVisible(state.cursor, state.rows.length, room);
+  for (let i = first; i < Math.min(state.rows.length, first + room); i++) {
+    const row = state.rows[i]!;
+    const line = truncateToWidth(
+      `${i === state.cursor ? ">" : " "} ${cardMark(row)} ${row.status.padEnd(11)} ${row.title}`,
+      max,
+    );
+    lines.push(i === state.cursor ? `\x1b[7m${line}\x1b[0m` : line);
+  }
+  const selected = state.rows[state.cursor];
+  if (selected)
+    lines.push(
+      `\x1b[2m${truncateToWidth(`${selected.id}${selected.editability.editable ? "" : `：${selected.editability.reason}`}`, max)}\x1b[0m`,
+    );
+  lines.push(
+    state.message
+      ? truncateToWidth(state.message, max)
+      : `\x1b[2m${truncateToWidth(CARD_HINT, max)}\x1b[0m`,
+  );
+  return clampToHeight(lines, height);
 }
 
 export function machineLines(

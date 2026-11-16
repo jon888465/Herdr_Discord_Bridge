@@ -12,19 +12,18 @@ import {
   boardKeyAction,
   boardRows,
   createDraft,
-  firstVisible,
   markReady,
   moveCursor,
   newCardTemplate,
   parseEditorText,
   toEditorText,
-  truncateToWidth,
-  visibleRows,
   type BoardRow,
 } from "./card-board.js";
 
 import {
-  boardHeader,
+  cardRoom,
+  cardViewLines,
+  machineRoom,
   machineViewLines,
   readMachinesSection,
   toggleView,
@@ -70,11 +69,6 @@ function reload(): void {
   cursor = Math.min(cursor, Math.max(0, rows.length - 1));
 }
 
-function mark(row: BoardRow): string {
-  if (!row.editability.editable) return "🔒";
-  return row.editability.kind === "draft" ? "✎ " : "↺ ";
-}
-
 function render(): void {
   if (editing) return;
   const height = process.stdout.rows || 24;
@@ -90,29 +84,9 @@ function render(): void {
     );
     return;
   }
-  const out = [`\x1b[2J\x1b[H${boardHeader("cards", rows.length, width)}`];
-  if (errors)
-    out.push(`\x1b[33m${errors} 個檔案讀不到，請用 herdr-card-check\x1b[0m`);
-  const room = visibleRows(height);
-  const first = firstVisible(cursor, rows.length, room);
-  for (let i = first; i < Math.min(rows.length, first + room); i++) {
-    const row = rows[i]!;
-    const line = truncateToWidth(
-      `${i === cursor ? ">" : " "} ${mark(row)} ${row.status.padEnd(11)} ${row.title}`,
-      width - 1,
-    );
-    out.push(i === cursor ? `\x1b[7m${line}\x1b[0m` : line);
-  }
-  const selected = rows[cursor];
-  if (selected)
-    out.push(
-      `\x1b[2m${truncateToWidth(`${selected.id}${selected.editability.editable ? "" : `：${selected.editability.reason}`}`, width - 1)}\x1b[0m`,
-    );
-  out.push(
-    message ||
-      "\x1b[2mTab/m/c 切換檢視  j/k 移動  PgUp/PgDn 翻頁  Home/End 頭尾  e 編輯  n 新增  r 設為 ready  q 離開\x1b[0m",
+  process.stdout.write(
+    `\x1b[2J\x1b[H${cardViewLines({ rows, cursor, errors, message }, width, height).join("\n")}`,
   );
-  process.stdout.write(out.join("\n"));
 }
 
 const ENTER_ALT_SCREEN = "\x1b[?1049h";
@@ -239,7 +213,14 @@ process.stdin.on("data", (key: string) => {
         action,
         machineCursor,
         machines.length,
-        visibleRows(process.stdout.rows || 24),
+        // 翻頁一頁的列數與畫面實際能顯示的列數共用同一個計算（review round 5，F8）。
+        Math.max(
+          1,
+          machineRoom(
+            { error: machineError, message: "" },
+            process.stdout.rows || 24,
+          ),
+        ),
       );
     else if (["e", "\r", "\n", "n", "r"].includes(key))
       message = "Machine 檢視唯讀，第一階段不支援編輯";
@@ -252,7 +233,10 @@ process.stdin.on("data", (key: string) => {
       action,
       cursor,
       rows.length,
-      visibleRows(process.stdout.rows || 24),
+      Math.max(
+        1,
+        cardRoom({ rows, cursor, errors }, process.stdout.rows || 24),
+      ),
     );
   else if (key === "e" || key === "\r") editSelected();
   else if (key === "n") newCard();
