@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   machineLines,
   readMachinesSection,
+  sanitizeForTerminal,
   toggleView,
   viewKeyAction,
 } from "../src/card-board-machines.js";
@@ -105,6 +106,16 @@ test("readMachinesSection absent, unreadable, invalid JSON and invalid machines 
       machines: [{ ...machine, id: "test-secret-token-xyz!" }],
     }),
     JSON.stringify({ machines: {} }),
+    // 根節點不是物件：null、陣列、純量都要回報格式錯誤，不可當成未設定。
+    "null",
+    "[]",
+    '"test-secret-token-xyz"',
+    "42",
+    // machines 含非物件項目：不可被靜默略過。
+    JSON.stringify({ machines: [null] }),
+    JSON.stringify({ machines: [machine, 1] }),
+    JSON.stringify({ machines: ["test-secret-token-xyz"] }),
+    JSON.stringify({ machines: [[machine]] }),
   ]) {
     fs.writeFileSync(file, content);
     const result = readMachinesSection(file);
@@ -115,4 +126,30 @@ test("readMachinesSection absent, unreadable, invalid JSON and invalid machines 
       assert.ok(!result.reason.includes("\n"));
     }
   }
+});
+
+test("readMachinesSection: object root without machines is empty, not an error", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "board-machines-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "config.json");
+  fs.writeFileSync(file, JSON.stringify({ discord: { botToken: "test-secret-token-xyz" } }));
+  assert.deepEqual(readMachinesSection(file), { ok: true, machines: [] });
+});
+
+test("machineLines neutralises control characters in ssh and socket", () => {
+  // JSON 跳脫的 ESC／CSI、C1、DEL、BEL 都不可原樣寫到終端。
+  const hostile = {
+    id: "remote",
+    ssh: "user@host\u001b[2J\u001b[H\u0007",
+    socket: "/tmp/\u009b2Jherdr\u007f.sock",
+  };
+  const [line] = machineLines([hostile], 0, 200, 3);
+  assert.ok(line);
+  assert.ok(!/[\u0000-\u001f\u007f-\u009f]/.test(line));
+  assert.equal(
+    line,
+    "> remote  user@host\uFFFD[2J\uFFFD[H\uFFFD  /tmp/\uFFFD2Jherdr\uFFFD.sock",
+  );
+  assert.equal(sanitizeForTerminal("plain user@host /a/b"), "plain user@host /a/b");
+  assert.equal(sanitizeForTerminal("中文\t\n"), "中文\uFFFD\uFFFD");
 });

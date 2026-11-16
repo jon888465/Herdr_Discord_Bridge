@@ -30,18 +30,34 @@ export function readMachinesSection(
   } catch {
     return { ok: false, reason: "config.json 不是合法 JSON" };
   }
+  if (!isPlainObject(parsed))
+    return { ok: false, reason: "config.json 根節點不是物件" };
+  const value = parsed.machines;
+  if (value === undefined) return { ok: true, machines: [] };
+  if (!Array.isArray(value))
+    return { ok: false, reason: "machines 設定格式不對" };
+  // validateMachines 會靜默略過 null、數字等非物件項目；看板要把它們當格式錯誤回報。
+  if (!value.every(isPlainObject))
+    return { ok: false, reason: "machines 內有不是物件的項目" };
   try {
-    const value =
-      parsed && typeof parsed === "object" && "machines" in parsed
-        ? parsed.machines
-        : undefined;
-    if (value !== undefined && !Array.isArray(value))
-      return { ok: false, reason: "machines 設定格式不對" };
     return { ok: true, machines: validateMachines(value) };
   } catch {
     // 驗證錯誤可能含使用者輸入；只傳回固定短句。
     return { ok: false, reason: "machines 設定格式不對" };
   }
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * 合法 JSON 可含 ESC 等跳脫控制字元，validateMachines 不會拒絕，直接寫到終端會改變畫面或終端狀態；
+ * 呈現前把 C0／DEL／C1 控制字元換成 U+FFFD。
+ */
+export function sanitizeForTerminal(text: string): string {
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/[\u0000-\u001f\u007f-\u009f]/g, "\uFFFD");
 }
 
 export function machineLines(
@@ -62,7 +78,9 @@ export function machineLines(
     .slice(first, first + room)
     .map((machine, offset) =>
       truncateToWidth(
-        `${first + offset === cursor ? ">" : " "} ${machine.id}  ${machine.ssh}  ${machine.socket}`,
+        sanitizeForTerminal(
+          `${first + offset === cursor ? ">" : " "} ${machine.id}  ${machine.ssh}  ${machine.socket}`,
+        ),
         width - 1,
       ),
     );
