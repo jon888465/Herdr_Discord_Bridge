@@ -181,6 +181,40 @@ test("an unreachable machine keeps its last known agents and never breaks local"
   }
 });
 
+test("machineObservations records when a remote was last probed, and a failing local request does not refresh it (ISSUE-164)", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "bm-"));
+  const local = await fake(join(dir, "l.sock"), () => ({ agents: [] }));
+  const remote = await fake(join(dir, "r.sock"), () => ({ agents: [] }));
+  const hub = new HerdrHub(
+    [{ id: "agy", ssh: "agy", socket: "/r.sock" }],
+    join(dir, "l.sock"),
+    2000,
+    10,
+    () => {},
+    () => join(dir, "r.sock"),
+  );
+  try {
+    // 還沒請求過：沒有觀測時間。
+    assert.deepEqual(hub.machineObservations(), [
+      { id: "agy", reachable: false },
+    ]);
+    const before = Date.now();
+    await hub.listAgents();
+    const [seen] = hub.machineObservations();
+    assert.equal(seen?.reachable, true);
+    assert.ok(seen?.observedAt !== undefined && seen.observedAt >= before);
+    // 本機 socket 掛了：聚合請求在探測遠端之前就失敗，遠端的旗標與觀測時間都不會更新。
+    local.close();
+    await rm(join(dir, "l.sock"), { force: true });
+    await assert.rejects(() => hub.listAgents());
+    assert.deepEqual(hub.machineObservations(), [seen]);
+  } finally {
+    remote.close();
+    local.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("uploadFiles streams bytes to the remote path and rejects unsafe names", async () => {
   const { shellQuote, uploadFiles } = await import("../src/machines.js");
   const { writeFile, readFile, chmod } = await import("node:fs/promises");

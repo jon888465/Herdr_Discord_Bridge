@@ -7,6 +7,27 @@ export const MACHINE_STATUS_WRITE_INTERVAL_MS = 5000;
 export const MACHINE_STATUS_MAX_AGE_MS = 15000;
 export type MachineStatus = "connected" | "unreachable";
 type Entry = { id: string; reachable: boolean };
+type Observation = Entry & { observedAt?: number };
+
+/**
+ * 只留下觀測夠新的機器。hub 的 `reachable` 只在請求遠端時更新，沒人探測時會一直停在舊值；
+ * 如果照寫、再蓋上現在的時間，過期的 connected 就永遠不會過期（review 第 1 輪，F1）。
+ * 從沒觀測過或太舊的機器不寫進檔案，看板就顯示「未知」。
+ */
+export function freshObservations(
+  observations: Observation[],
+  nowMs: number,
+  maxAgeMs: number,
+): Entry[] {
+  return observations
+    .filter(
+      (o) =>
+        o.observedAt !== undefined &&
+        nowMs - o.observedAt >= -maxAgeMs &&
+        nowMs - o.observedAt <= maxAgeMs,
+    )
+    .map(({ id, reachable }) => ({ id, reachable }));
+}
 
 export function serializeMachineStatus(entries: Entry[], now: Date): string {
   return JSON.stringify({
@@ -77,14 +98,23 @@ export function readMachineStatus(
 }
 
 export function startMachineStatusWriter(
-  hub: Pick<HerdrHub, "usageMachineStatus">,
+  hub: Pick<HerdrHub, "machineObservations">,
   file: string,
   intervalMs: number,
   now = () => new Date(),
 ): () => void {
   const write = (): void => {
     try {
-      writeMachineStatus(file, hub.usageMachineStatus(), now());
+      const at = now();
+      writeMachineStatus(
+        file,
+        freshObservations(
+          hub.machineObservations(),
+          at.getTime(),
+          MACHINE_STATUS_MAX_AGE_MS,
+        ),
+        at,
+      );
     } catch {
       console.error("Machine status write failed");
     }

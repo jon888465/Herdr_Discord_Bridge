@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  freshObservations,
   readMachineStatus,
   serializeMachineStatus,
   startMachineStatusWriter,
@@ -122,7 +123,7 @@ test("writer periodically snapshots fake hub and stops", (t) => {
   let calls = 0;
   const stop = startMachineStatusWriter(
     {
-      usageMachineStatus: () => {
+      machineObservations: () => {
         calls++;
         return [];
       },
@@ -147,6 +148,55 @@ test("writer periodically snapshots fake hub and stops", (t) => {
   assert.ok(!fs.existsSync(file));
 });
 
+test("freshObservations drops never-observed and stale machines (F1)", () => {
+  const nowMs = now.getTime();
+  const max = MACHINE_STATUS_MAX_AGE_MS;
+  const result = freshObservations(
+    [
+      { id: "fresh", reachable: true, observedAt: nowMs - 1000 },
+      { id: "edge", reachable: false, observedAt: nowMs - max },
+      { id: "stale", reachable: true, observedAt: nowMs - max - 1 },
+      { id: "never", reachable: true },
+      { id: "future", reachable: true, observedAt: nowMs + max + 1 },
+    ],
+    nowMs,
+    max,
+  );
+  assert.deepEqual(result, [
+    { id: "fresh", reachable: true },
+    { id: "edge", reachable: false },
+  ]);
+});
+
+test("writer does not keep a stale connected alive by rewriting the timestamp (F1)", (t) => {
+  const file = fixture(t);
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const observedAt = now.getTime();
+  let current = now;
+  const stop = startMachineStatusWriter(
+    {
+      // 觀測時間固定在 observedAt：之後沒有人再探測這台機器。
+      machineObservations: () => [
+        { id: "remote", reachable: true, observedAt },
+      ],
+    },
+    file,
+    5000,
+    () => current,
+  );
+  t.after(stop);
+  // 剛觀測完：寫入 connected，看板讀得到。
+  assert.deepEqual(
+    [...readMachineStatus(file, current, 15000)],
+    [["remote", "connected"]],
+  );
+  // 超過 15 秒都沒有新觀測：每 5 秒的重寫不能再把它當成最新。
+  current = new Date(observedAt + 20000);
+  t.mock.timers.tick(5000);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")).machines, []);
+  assert.deepEqual([...readMachineStatus(file, current, 15000)], []);
+});
+
 test("writer logs only a fixed message and survives write failures", (t) => {
   const file = fixture(t);
   fs.mkdirSync(file);
@@ -154,7 +204,7 @@ test("writer logs only a fixed message and survives write failures", (t) => {
   const messages: unknown[][] = [];
   t.mock.method(console, "error", (...args: unknown[]) => messages.push(args));
   const stop = startMachineStatusWriter(
-    { usageMachineStatus: () => [] },
+    { machineObservations: () => [] },
     file,
     5000,
     () => now,
