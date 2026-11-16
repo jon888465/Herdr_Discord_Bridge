@@ -24,7 +24,7 @@
 
 ## ISSUE-160：Herdr 桌面介面沒有 card 清單；新增 Card 看板 pane
 
-更新日期：2026-11-16。狀態：已修正、待驗收（程式與單元測試完成；**自動開看板已實機驗證；編輯、放行、新增尚未實機操作**）。
+更新日期：2026-11-16。狀態：已修正、待驗收（程式與單元測試完成；**自動開看板已實機驗證；編輯、放行、新增與翻頁按鍵尚未實機操作**）。
 
 **2026-11-15 實機驗證（PR #255 merge 後，main `1fa67a6`，本機 macOS、Herdr 0.9.1，bridge 以 `scripts/run.sh -r` 重建重啟）：**
 - **自動另開 tab（通過）：** 重啟前 bridge 所在 workspace 沒有看板；重啟後 bridge 日誌出現「Card 看板：已在 workspace … 另開 tab」，該 workspace 多了一個 label 為 `Card board` 的 pane（在新 tab），讀 pane 畫面確認是看板，未搶焦點。
@@ -49,13 +49,17 @@
 - 只改 `title`、`notify` 與「## 流程紀錄」之前的正文，流程紀錄以後原封不動；寫入走 `CardStore.update` 的雜湊比對，檔案在讀取後被改過就放棄；寫入前重讀並重新檢查可編輯性。
 - 設成 `ready` 只限 draft 類，沒有 `notify` 一律拒絕（ISSUE-121）。
 - 可新增 draft 卡（id `REQ-<日期>-<slug>`，不覆蓋既有檔案）。
-- 鍵：`j`／`k` 移動、`e` 編輯（開 `$EDITOR`）、`n` 新增、`r` 設為 ready、`q` 離開；每 3 秒重讀。
+- 鍵：`j`／`k`／上下鍵逐列移動；PageUp／PageDown 一次移一頁（一頁 = 目前可見列數 `visibleRows(高度)` = 高度減 5、至少 3，且至少 1 列），到頭到底停住；Home 跳第一張、End 跳最後一張，認得 `\x1b[H`、`\x1b[1~`、`\x1b[7~`、`\x1bOH`（Home）與 `\x1b[F`、`\x1b[4~`、`\x1b[8~`、`\x1bOF`（End）、`\x1b[5~`／`\x1b[6~`（PgUp／PgDn）；清單為空時游標停在 0；`$EDITOR` 開啟中不處理移動鍵；`e`／Enter 編輯（開 `$EDITOR`）、`n` 新增、`r` 設為 ready、`q`／Ctrl-C 離開；每 3 秒重讀。移動邏輯是純函式 `boardKeyAction`／`moveCursor`／`visibleRows`（2026-11-16 新增，卡片 REQ-20261116-card-board-paging）；render 的捲動視窗與翻頁共用 `visibleRows`，視窗由游標推導，跳頁後選取列仍在畫面內。
 
 **未確認／限制：** 「失敗次數超過」目前以「最後一筆事件是失敗／停止」判斷，沒有失敗次數門檻（程式裡只有 loop 3 輪、plan 重排 2 次這類各自的上限）；停手的卡在 bridge 仍有執行中任務時是否安全，未實測。看板沒有拖曳或勾選框。
 
 **測試：** `test/card-board.test.ts` 9 項（2026-11-14，`node --test dist/test/card-board.test.js`）通過；`npm run typecheck`、`npm run lint` 通過；全套 `npm test`（2026-11-14）1952 項，1951 pass、0 fail（其餘 1 項為略過，未逐項確認原因）。
 
-**下一步：** 實機開 pane 試編輯、放行、新增；驗收後改為已驗收。是否能同步到 Herdr 原生 Todo 另案調查。
+**測試（2026-11-16，翻頁）：** `test/card-board.test.ts` 新增 9 項（按鍵序列對應含未知鍵回 undefined、`visibleRows`、空清單、逐列頭尾、少於一頁、剛好一頁、多頁、pageSize 0／負數仍移 1 列、Home／End），`npm run build && node --test dist/test/card-board.test.js` 18 項 18 pass、0 fail；`npm run typecheck`、`npm run lint` 通過；全套 `npm test` 1967 項，1966 pass、0 fail、1 skipped（原因未逐項確認）。`npm run format:check` 失敗，但是既有狀況：乾淨的基準樹（本次改動前）就有 79 個檔不符 Prettier 3.9.6（`npm ci` 依 lockfile 安裝的版本）；本次改到的三個程式／測試檔個別 `prettier --check` 通過。
+
+**未驗證（翻頁，2026-11-16）：** PageUp／PageDown／Home／End 尚未在 Herdr pane 實機按過；不同終端機實際送出的序列是否都在已認得的清單內，未逐一確認。
+
+**下一步：** 實機開 pane 試編輯、放行、新增與翻頁按鍵；驗收後改為已驗收。是否能同步到 Herdr 原生 Todo 另案調查。
 
 ## ISSUE-159：Discord 白名單留空代表「不限制」（fail-open），任何人都能操作 bot
 

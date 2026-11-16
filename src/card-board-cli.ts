@@ -9,13 +9,16 @@ import { CardStore } from "./card-store.js";
 import { ensureCardsDirectory } from "./card-directory.js";
 import {
   applyEdit,
+  boardKeyAction,
   boardRows,
   createDraft,
   markReady,
+  moveCursor,
   newCardTemplate,
   parseEditorText,
   toEditorText,
   truncateToWidth,
+  visibleRows,
   type BoardRow,
 } from "./card-board.js";
 
@@ -54,7 +57,7 @@ function render(): void {
   const out = [`\x1b[2J\x1b[H\x1b[1mCard 看板\x1b[0m  (${rows.length})`];
   if (errors)
     out.push(`\x1b[33m${errors} 個檔案讀不到，請用 herdr-card-check\x1b[0m`);
-  const room = Math.max(3, height - 5);
+  const room = visibleRows(height);
   const first = Math.max(
     0,
     Math.min(cursor - Math.floor(room / 2), rows.length - room),
@@ -73,7 +76,8 @@ function render(): void {
       `\x1b[2m${truncateToWidth(`${selected.id}${selected.editability.editable ? "" : `：${selected.editability.reason}`}`, width - 1)}\x1b[0m`,
     );
   out.push(
-    message || "\x1b[2mj/k 移動  e 編輯  n 新增  r 設為 ready  q 離開\x1b[0m",
+    message ||
+      "\x1b[2mj/k 移動  PgUp/PgDn 翻頁  Home/End 頭尾  e 編輯  n 新增  r 設為 ready  q 離開\x1b[0m",
   );
   process.stdout.write(out.join("\n"));
 }
@@ -181,9 +185,15 @@ process.stdin.on("data", (key: string) => {
     clearInterval(timer);
     process.stdout.write("\x1b[2J\x1b[H");
     process.exit(0);
-  } else if (key === "j" || key === "\x1b[B")
-    cursor = Math.min(rows.length - 1, cursor + 1);
-  else if (key === "k" || key === "\x1b[A") cursor = Math.max(0, cursor - 1);
+  }
+  const action = boardKeyAction(key);
+  if (action)
+    cursor = moveCursor(
+      action,
+      cursor,
+      rows.length,
+      visibleRows(process.stdout.rows || 24),
+    );
   else if (key === "e" || key === "\r") editSelected();
   else if (key === "n") newCard();
   else if (key === "r") readySelected();
