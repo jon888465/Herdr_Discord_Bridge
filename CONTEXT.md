@@ -195,7 +195,7 @@ ISSUE-127（2026-11-08，待實機驗收）：新增 role_assigned 固定模板�
 ## Card role assignments
 
 - [遠端卡片 reviewer](docs/remote-card-reviewer.md)：ISSUE-143，基礎層 PR #207＋角色接線 PR #206，未實機驗收。
-- Card 看板 pane（ISSUE-160，2026-11-14）：`herdr-plugin.toml` 的 `card-board` pane，`src/card-board.ts`＋`src/card-board-cli.ts`＋`src/card-board-machines.ts`；支援 Card／Machine 檢視切換與唯讀 Machine 列表（ISSUE-163，已實作、待實機驗收）；只編輯 draft 類與已停手的卡，其餘唯讀；支援 PageUp／PageDown 翻頁與 Home／End 跳頭尾（2026-11-16）；待實機驗收。
+- Card 看板 pane（ISSUE-160，2026-11-14）：`herdr-plugin.toml` 的 `card-board` pane，`src/card-board.ts`＋`src/card-board-cli.ts`＋`src/card-board-machines.ts`；支援 Card／Machine 檢視切換與唯讀 Machine 列表（ISSUE-163，2026-11-16 已實機驗收）；`src/machine-status-file.ts` 提供最小狀態檔通道，5 秒寫入、15 秒過期，看板每 3 秒重讀 connected／unreachable／未知（ISSUE-164，已實作、待實機驗收）；只編輯 draft 類與已停手的卡，其餘唯讀；支援 PageUp／PageDown 翻頁與 Home／End 跳頭尾（2026-11-16）；待實機驗收。
 - [Pod 隔離執行 agent：規劃](docs/pod-isolation-plan.md)：2026-11-13，egress proxy、token manager、tailnet 取捨的分階段規劃，**尚未實作**（第 1 階段由操作者手動套用）。
 
 - [卡片角色指定](docs/card-role-assignment.md)：REQ-20261110-card-role-assignment，2026-11-10 原始碼實作、待驗收（ISSUE-138）。六角色 machine／agent／model 宣告、preflight、Lead 計畫／實際身分守門、fresh session、strict 角色紀錄及獨立壞卡診斷。Lead 決定本卡 machine 只交付 local 強制執行；已配置 remote 明確拒絕，跨機器尚未支援。無宣告卡維持舊行為；merge／重啟後三張實機驗收卡尚未執行。

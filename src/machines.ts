@@ -401,6 +401,8 @@ interface Remote {
   hookTunnel?: HookReverseTunnel;
   client: HerdrClient;
   up: boolean;
+  /** 最後一次實際請求遠端（不論成功失敗）的時間；從沒請求過是 undefined。 */
+  observedAt?: number;
   cache: Map<string, Record<string, unknown>>;
 }
 
@@ -481,6 +483,22 @@ export class HerdrHub extends HerdrClient {
     return [...this.remotes.values()].map((r) => ({
       id: r.config.id,
       reachable: r.up,
+    }));
+  }
+
+  /**
+   * 每台遠端的連線旗標與最後一次觀測時間。`up` 只在請求遠端時更新，本機請求先失敗或沒人探測時不會變，
+   * 所以讀取者要依 `observedAt` 判斷這個旗標還算不算新（ISSUE-164）。
+   */
+  machineObservations(): Array<{
+    id: string;
+    reachable: boolean;
+    observedAt?: number;
+  }> {
+    return [...this.remotes.values()].map((r) => ({
+      id: r.config.id,
+      reachable: r.up,
+      ...(r.observedAt === undefined ? {} : { observedAt: r.observedAt }),
     }));
   }
 
@@ -618,6 +636,7 @@ export class HerdrHub extends HerdrClient {
   }
 
   private markUp(remote: Remote, up: boolean): void {
+    remote.observedAt = Date.now();
     if (remote.up === up) return;
     remote.up = up;
     this.log(

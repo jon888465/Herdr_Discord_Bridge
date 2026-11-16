@@ -1,5 +1,27 @@
 # Known Issues
 
+## ISSUE-164：Card 看板 Machine 檢視第二階段：連線狀態
+
+更新日期：2026-11-16。狀態：已修正、待驗收。
+
+**症狀／重現環境：** 獨立 card-board plugin pane 的 Machine 列表只有設定資料，無法查看 bridge 觀察到的連線狀態；本輪以隔離 worktree 原始碼與 node:test 驗證。
+
+**預期行為：** 每列顯示 id、ssh、connected／unreachable，數秒更新；來源缺失、無效或過舊顯示「未知」，通道不帶設定或機密。
+
+**已確認根因：** 看板與 bridge 沒有狀態通道。
+
+**修正範圍：** 新增 machine-status-file 模組，0600 暫存檔原子 rename，頂層 version／updatedAt／machines，項目僅 id／status；啟動立即與每 5 秒寫入（含空陣列）、shutdown 停 timer、失敗固定短句。看板每 3 秒與切換時重讀，拒絕超過正負 15 秒的時間，只查 config 內 id，保留寬高限制。補通道、顯示與版面測試，SPEC／CONTEXT 同步；README 未描述 Machine 看板、pending-features 無本卡，均不變。
+
+**測試命令與結果（2026-11-16）：** `npm ci`、`npm run typecheck`、`npm run lint` 全數 exit 0；`npm test`（含 build）2010 項：2009 pass、0 fail、1 skipped，exit 0。新增 13 項測試；相關三個測試檔另以 `node --test dist/test/machine-status-file.test.js dist/test/card-board-machines.test.js dist/test/card-board-layout.test.js` 執行，31 pass、0 fail。`npx prettier --check src/machine-status-file.ts src/card-board-cli.ts src/card-board-machines.ts test/machine-status-file.test.ts test/card-board-machines.test.ts test/card-board-layout.test.ts` 與 `git diff --check` 均通過。未對 Markdown 執行 prettier。
+
+**人工接手（2026-11-16）：** Worker 完成實作與 task 內 review／verify 後，bridge 的 Lead（claude）pane 被 Claude Code 的「Teach auto mode about your environment?」互動對話框擋住，規劃回合沒有被處理，task 停在 planning；使用者要求讓 task 自行逾時並由人接手，對話框以 Esc 取消（沒有選擇掃描 shell 歷史）。接手時我（Claude Code）讀完 Worker 在 worktree 留下的程式，發現 `src/main.ts` 被 prettier 重排了大量無關程式（+76／-16，實質改動只有約 12 行），已把 `main.ts` 還原到 HEAD 後只套回真正的 5 處（import、啟動 writer、三處 shutdown 的 `stopMachineStatus()`），最終 `main.ts` 為 12 行新增、0 行刪除。因此 `src/main.ts` 沿用 HEAD 的既有格式，**`prettier --check` 對它仍會失敗，這是既有狀況，不是本次造成**。我重跑：`npm run lint` 通過；全套 `npm test`（2026-11-16）2010 項，2009 pass、0 fail、1 skipped；`test/machine-status-file.test.ts` 12 項全過。task 內 review／verify 的 verdict 沒有留在卡片紀錄中，上述驗證是我另跑的，且尚未經過獨立 review。
+
+**獨立 review 第 1 輪（2026-11-16，head `b62901926158`，changes_requested）：** F1（medium）：writer 每 5 秒把 hub 快取重新蓋上目前時間，過期的觀測永遠不會過期。**根因（已確認，讀 `src/machines.ts`）：** `HerdrHub` 的 `up` 只在請求遠端時由 `markUp` 更新，且 `markUp` 在狀態沒變時直接 return，連觀測時間都沒記；`aggregate` 又先 `await` 本機請求，本機失敗就直接丟出，不會探測遠端。所以遠端曾 connected 後，只要沒人再探測它（例如本機 socket 持續失效），旗標停在 connected，writer 仍每 5 秒寫「connected」並標成最新，看板就永遠顯示 connected。這正是「假的 connected」。**修正：**`Remote` 新增 `observedAt`，`markUp` 每次都記（含狀態沒變時）；新增 `HerdrHub.machineObservations()` 回傳旗標加觀測時間（既有的 `usageMachineStatus()` 不變，usage 查詢仍用它）；`freshObservations` 只留下觀測距現在不超過 15 秒的機器，writer 改用它，從沒觀測過或太舊的機器不寫進檔案，看板顯示「未知」。測試：`machine-status-file.test.ts` 新增 2 項（`freshObservations` 的邊界、writer 不會用重寫時間戳讓過期 connected 續命），`machines.test.ts` 新增 1 項（從沒請求過沒有觀測時間；請求後有；本機 socket 掛掉後遠端的觀測不會被刷新）；把 writer 暫時改回舊行為時「writer 不會讓過期 connected 續命」那項變紅，確認測試抓得到問題，已還原。全套 `npm test`（2026-11-16，此輪修正後）2013 項，2012 pass、0 fail、1 skipped；`npm run lint` 通過。`src/machines.ts`、`test/machines.test.ts` 在 HEAD 本來就不符 prettier，這次沒有整檔重排；新增的 `test/machine-status-file.test.ts` 已格式化。**未驗證：**沒有在真實遠端機器上實機確認（例如把本機 socket 弄壞後看板是否在約 15 秒後轉成「未知」）。
+
+**獨立 review 第 2 輪（2026-11-16，head `756e9d73f533`，changes_requested）：** F2（medium）：觀測在 t=0 成功後，t=10 秒 writer 仍把它連同 `updatedAt=10` 寫進檔案；若 writer 隨後停止或持續寫入失敗，看板會接受它到 t=25 秒，超過觀測自己的 15 秒期限（reviewer 的算例是 t=15 寫入、t=30 才過期）。**根因（已確認）：**檔案只有一個全域 `updatedAt`，讀取端只能檢查「writer 最後寫入的時間」，不知道每筆觀測有多舊。reviewer 建議用最舊觀測時間當整份快照的時間，我沒有採用：最舊觀測最多 15 秒前，看板每 3 秒才讀一次，正常運作時也可能剛好被判過期，狀態會在「未知」與有效值之間忽閃。**修正：**每筆多一個 `observedAt`（ISO），`freshObservations` 保留觀測時間，`readMachineStatus` 除了檢查 `updatedAt`，還逐筆檢查 `observedAt` 與目前相差不超過 15 秒，缺失、無效或過舊的那一筆顯示「未知」；`updatedAt` 仍要檢查，代表 writer 還活著。檔案格式只有這一階段使用，尚未部署，所以不需要版本遷移（`version` 仍是 1）。測試：`machine-status-file.test.ts` 新增 1 項（t=10 秒寫入、writer 停止後，t=14 秒仍接受、t=16 秒不接受），並擴充既有項目：序列化的鍵變成 `id`／`status`／`observedAt`、讀取端拒絕缺少／無效／過舊的 `observedAt`；把讀取端暫時改成不逐筆檢查時 2 項變紅，確認抓得到問題，已還原。全套 `npm test`（2026-11-16，此輪修正後）2014 項，2013 pass、0 fail、1 skipped；`npm run lint` 通過；`machine-status-file.ts` 與其測試 `prettier --check` 通過。**未驗證：**同上，沒有在真實遠端機器上實機確認。
+
+**未驗證與下一步：** 未在真實 Herdr pane 與真實遠端機器實機確認，未部署或重啟執行中的 bridge。Lead 後續安排部署／重啟，驗收 connected、斷線後 unreachable、停止 bridge 超過 15 秒後未知與不同終端尺寸。連線／斷線操作、編輯 SSH、寫入 config.json 不在本階段。
+
 ## ISSUE-163：Card 看板需要 Machine 檢視（第一階段：切換與唯讀列表）
 
 更新日期：2026-11-16。狀態：已驗收（2026-11-16，使用者實機；範圍與未涵蓋項目見「實機驗收」）。

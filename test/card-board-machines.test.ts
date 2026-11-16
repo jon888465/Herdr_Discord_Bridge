@@ -35,7 +35,7 @@ test("machineLines empty and single machine, display width", () => {
     "沒有設定任何 machine（config.json 的 machines 為空）",
   ]);
   assert.deepEqual(machineLines([machine], 0, 100, 3), [
-    "> remote  user@host  /tmp/herdr.sock",
+    "> remote  user@host  未知  /tmp/herdr.sock",
   ]);
   assert.ok(displayWidth(machineLines([machine], 0, 15, 3)[0]!) <= 14);
 });
@@ -48,7 +48,9 @@ test("machineLines scrolls around cursor and at both ends", () => {
   for (const cursor of [0, 6, 11]) {
     const lines = machineLines(machines, cursor, 100, 5);
     assert.equal(lines.length, 5);
-    assert.ok(lines.includes(`> remote${cursor}  user@host  /tmp/herdr.sock`));
+    assert.ok(
+      lines.includes(`> remote${cursor}  user@host  未知  /tmp/herdr.sock`),
+    );
   }
   assert.equal(firstVisible(0, 12, 5), 0);
   assert.equal(firstVisible(6, 12, 5), 4);
@@ -116,7 +118,7 @@ test("machineViewLines never exceeds terminal height on a narrow screen (F3)", (
     24,
   );
   assert.equal(wide.length, 1 + 19 + 1 + 1);
-  assert.equal(wide[1], "> remote0  user@host  /tmp/herdr.sock");
+  assert.equal(wide[1], "> remote0  user@host  未知  /tmp/herdr.sock");
   assert.equal(wide[wide.length - 2], "hi");
 });
 
@@ -269,11 +271,32 @@ test("machineLines neutralises control characters in ssh and socket", () => {
   assert.ok(!/[\u0000-\u001f\u007f-\u009f]/.test(line));
   assert.equal(
     line,
-    "> remote  user@host\uFFFD[2J\uFFFD[H\uFFFD  /tmp/\uFFFD2Jherdr\uFFFD.sock",
+    "> remote  user@host\uFFFD[2J\uFFFD[H\uFFFD  未知  /tmp/\uFFFD2Jherdr\uFFFD.sock",
   );
   assert.equal(
     sanitizeForTerminal("plain user@host /a/b"),
     "plain user@host /a/b",
   );
   assert.equal(sanitizeForTerminal("中文\t\n"), "中文\uFFFD\uFFFD");
+});
+
+test("machineLines shows only configured machine statuses within width", () => {
+  const statuses = new Map<string, "connected" | "unreachable">([
+    ["remote", "connected"],
+    ["down", "unreachable"],
+    ["SECRET-TOKEN-xyz", "connected"],
+  ]);
+  const machines = [
+    machine,
+    { ...machine, id: "down" },
+    { ...machine, id: "unknown" },
+  ];
+  const lines = machineLines(machines, 0, 120, 3, statuses);
+  assert.ok(lines[0]!.includes("connected"));
+  assert.ok(lines[1]!.includes("unreachable"));
+  assert.ok(lines[2]!.includes("未知"));
+  assert.ok(!lines.join("").includes("SECRET-TOKEN"));
+  for (const width of [10, 20, 40])
+    for (const line of machineLines(machines, 0, width, 3, statuses))
+      assert.ok(displayWidth(line) < width);
 });
