@@ -130,9 +130,8 @@ test("放行：沒有 notify 拒絕，有 notify 才變 ready", () => {
   assert.equal(refused.ok, false);
   assert.match(refused.ok ? "" : refused.error, /notify/);
   put(dir, "REQ-20261101-noted", "refined", "notify: discord:123\n");
-  assert.deepEqual(markReady(store, "REQ-20261101-noted", "2026-11-14"), {
-    ok: true,
-  });
+  // 這張卡沒有 project：仍可放行，只是附警告（ISSUE-161）。
+  assert.equal(markReady(store, "REQ-20261101-noted", "2026-11-14").ok, true);
   const read = store.read("REQ-20261101-noted");
   assert.ok(read.ok);
   assert.equal(read.card.status, "ready");
