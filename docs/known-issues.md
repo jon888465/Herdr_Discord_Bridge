@@ -16,12 +16,13 @@
 
 - 卡片選填 frontmatter `mode: readonly`，只接受這個值，其他值視為無效卡片；parser 與 serializer 都支援，寫回不會掉欄位。
 - 自動撿卡看到 `mode: readonly`：只下 `card assign <id>`（不帶 `--worktree`、`--coding`），等 task 完成、卡片同步成 done 就以 `reached`／`card_done` 結束並關 Lead；不 commit、不 PR、不 merge，不分 L0／L1／L2，也沒有 review。task 沒完成照原樣停在 task 並保留現場。
-- **限制：** 沒有 worktree，Worker 直接在 repo 路徑執行，「不改檔案」只靠卡片說明約束，bridge 不強制、不偵測；看板的編輯範本尚未提供 `mode` 欄位，要手動寫在卡片檔。
+- **限制：** 沒有 worktree，Worker 直接在 repo 路徑執行，「不改檔案」只靠卡片說明約束，bridge 不強制、不偵測。看板的編輯範本原本沒有 `mode`（2026-11-16 起補上，見下「看板補 mode 欄位」）。
 
 **測試（2026-11-16）：** `test/autopick.test.ts` 新增 2 項（只讀卡在 L0／L1／L2 都只呼叫 `startLead` 與 `card assign <id>`、結果 `reached`／`card_done`、關閉 Lead 一次；task 沒完成時停在 task、不關 Lead），`test/card-serialize.test.ts` 新增 1 項（`mode: readonly` 往返、其他值拒絕）；`npm run build`，三個相關測試檔 151 項 151 pass、0 fail。全套結果見 PR。
 
 **實機驗收（2026-11-16，本機 macOS、Herdr 0.9.1，main `ec2968e`，bridge 於使用者要求下重啟，重啟前 active-streams 為 0）：** 建立卡 `REQ-20261116-readonly-mode-live`（`mode: readonly`、`project` 為政策選用專案、`notify` 指向本 pane），以 `markReady` 放行；06:13:44 放行、06:14:14 `autopick_picked`；之後卡片流程紀錄依序為 `role_assigned`（lead：claude）、`assigned`、`started`，06:14:40 `completed`（task 約 26 秒完成）；卡片狀態變 `done`；bridge console 輸出「自動撿卡 …（L2）：完成到 card_done」，**沒有** `failed`／`autopick_stopped`，也沒有 commit、PR、review 事件。主目錄 `git status` 為空（沒有檔案被改動）；`herdr workspace list` 沒有這張卡的 Lead workspace（已關閉）。這是修正前會失敗的同類情境。
-**驗收範圍與限制：** 只驗證一張只讀卡（讀 `README.md` 第一行）；task 回報內容我沒有逐字核對。只讀約束仍只靠卡片說明，bridge 不強制；這次主目錄沒有變動只代表這次沒改，不代表 bridge 能阻止。看板的編輯範本仍沒有 `mode:` 欄位，驗證卡是用腳本建立的。另外 workspace 清單中仍有 `autopick-claude-REQ-20261116-card-board-paging`，是先前那張卡（paging）留下的 Lead workspace，與本次無關，未處理。
+**看板補 mode 欄位（2026-11-16，已修正、待驗收）：** 編輯／新增範本多一行 `mode:`（留空＝一般任務，只接受 `readonly`，其他值拒絕）；新增卡預設留空；`applyEdit`、`createDraft` 寫入或清除 `mode`，沒填的卡不會多出欄位。`test/card-board-mode.test.ts` 4 項（範本有 `mode:` 行、留空／`readonly`／其他值的解析、新增帶 readonly 並可清除再補回、沒填不多欄位），與既有看板兩個測試檔共 27 項 27 pass、0 fail（2026-11-16）；`npm run lint`、`tsc` 通過。**未驗證：** 未部署，未在看板實機新增或編輯 `mode`；看板畫面本身沒有顯示 `mode`（只在編輯文字裡）。
+**驗收範圍與限制（先前實機驗證那張卡）：** 只驗證一張只讀卡（讀 `README.md` 第一行）；task 回報內容我沒有逐字核對。只讀約束仍只靠卡片說明，bridge 不強制；這次主目錄沒有變動只代表這次沒改，不代表 bridge 能阻止。驗證卡是用腳本建立的（當時看板範本沒有 `mode:`，之後補上，見上）。另外 workspace 清單中仍有 `autopick-claude-REQ-20261116-card-board-paging`，是先前那張卡（paging）留下的 Lead workspace，與本次無關，未處理。
 
 ## ISSUE-161：Card 看板新增的卡沒有 `project`，放行後 bridge 不會自動撿
 

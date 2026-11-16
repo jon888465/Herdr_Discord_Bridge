@@ -59,14 +59,16 @@ export interface HumanEdit {
   notify?: string;
   /** `<機器>:<repo 目錄名>`；bridge 只自動撿宣告了 project 且政策選用的卡（ISSUE-161）。 */
   project?: string;
+  /** `readonly`＝只讀任務，自動撿卡不建 worktree、不走 coding（ISSUE-162）；留空＝一般任務。 */
+  mode?: "readonly";
   /** 人寫的正文（不含流程紀錄）。 */
   human: string;
 }
 
-/** 編輯器裡看到的文字：前三行是欄位，`---` 之後是正文。 */
+/** 編輯器裡看到的文字：前四行是欄位，`---` 之後是正文。 */
 export function toEditorText(card: Card): string {
   const { human } = splitBody(card.body);
-  return `title: ${card.title}\nnotify: ${card.notify ?? ""}\nproject: ${card.project ?? ""}\n---\n${human.replace(/^\n+/, "")}`;
+  return `title: ${card.title}\nnotify: ${card.notify ?? ""}\nproject: ${card.project ?? ""}\nmode: ${card.mode ?? ""}\n---\n${human.replace(/^\n+/, "")}`;
 }
 
 export type ParsedEdit =
@@ -81,7 +83,7 @@ export function parseEditorText(text: string): ParsedEdit {
   const header = text.slice(0, separator).split("\n");
   const fields = new Map<string, string>();
   for (const line of header) {
-    const match = /^(title|notify|project):[ \t]*(.*)$/.exec(line);
+    const match = /^(title|notify|project|mode):[ \t]*(.*)$/.exec(line);
     if (match) fields.set(match[1]!, match[2]!.trim());
   }
   const title = fields.get("title");
@@ -93,12 +95,16 @@ export function parseEditorText(text: string): ParsedEdit {
       ok: false,
       error: "project 要寫成 <機器>:<repo 目錄名>，例如 local:my-repo",
     };
+  const mode = fields.get("mode");
+  if (mode && mode !== "readonly")
+    return { ok: false, error: "mode 只能留空或寫 readonly" };
   return {
     ok: true,
     edit: {
       title,
       ...(notify ? { notify } : {}),
       ...(project ? { project } : {}),
+      ...(mode ? { mode: "readonly" as const } : {}),
       human: `\n${text.slice(separator + 5).replace(/\s+$/, "")}\n\n`,
     },
   };
@@ -137,6 +143,8 @@ export function applyEdit(
     else delete next.notify;
     if (edit.project) next.project = edit.project;
     else delete next.project;
+    if (edit.mode) next.mode = edit.mode;
+    else delete next.mode;
     return next;
   });
   return result.ok ? { ok: true } : { ok: false, error: result.error };
@@ -218,7 +226,7 @@ export function boardRows(store: CardStore): {
 }
 
 export function newCardTemplate(defaultProject = ""): string {
-  return `title: \nnotify: \nproject: ${defaultProject}\n---\n\n## 描述\n\n\n## 驗收條件\n\n- \n`;
+  return `title: \nnotify: \nproject: ${defaultProject}\nmode: \n---\n\n## 描述\n\n\n## 驗收條件\n\n- \n`;
 }
 
 const SLUG = /^[a-z0-9][a-z0-9-]{1,40}$/;
@@ -244,6 +252,7 @@ export function createDraft(
     updated: today,
     ...(edit.notify ? { notify: edit.notify } : {}),
     ...(edit.project ? { project: edit.project } : {}),
+    ...(edit.mode ? { mode: edit.mode } : {}),
     body: `\n# ${edit.title}\n${edit.human}`,
   };
   const result = store.create(card);
