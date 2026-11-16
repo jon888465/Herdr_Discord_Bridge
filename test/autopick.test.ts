@@ -152,6 +152,34 @@ test("L2 runs the whole chain in order and closes its Lead workspace at the end"
   assert.equal(closed(), 1);
 });
 
+test("a readonly card uses a plain assign and ends at card_done at every level (ISSUE-162)", async () => {
+  for (const level of ["L0", "L1", "L2"] as const) {
+    const { steps, calls, closed } = fakeSteps();
+    const readonly: AutopickJob = {
+      ...job(level),
+      card: card("REQ-20261105-x", { mode: "readonly" }),
+    };
+    const report = await runAutopick(readonly, steps);
+    assert.deepEqual(calls, ["startLead", "card assign REQ-20261105-x"], level);
+    assert.equal(report.outcome, "reached", level);
+    assert.equal(report.lastStep, "card_done", level);
+    assert.equal(closed(), 1, level);
+  }
+});
+
+test("a readonly card whose task does not complete stops at task and keeps the Lead", async () => {
+  const { steps, closed } = fakeSteps({
+    waitTask: async () => ({ completed: false, detail: "failed：x" }),
+  });
+  const report = await runAutopick(
+    { ...job("L2"), card: card("REQ-20261105-x", { mode: "readonly" }) },
+    steps,
+  );
+  assert.equal(report.outcome, "stopped");
+  assert.equal(report.lastStep, "task");
+  assert.equal(closed(), 0);
+});
+
 test("the reviewer is the other kind when the Lead is codex", async () => {
   const { steps, calls } = fakeSteps();
   await runAutopick(job("L2", "codex"), steps);

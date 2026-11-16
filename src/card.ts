@@ -27,6 +27,8 @@ export interface Card {
   source?: string;
   notify?: string;
   lead?: AutopickLead;
+  /** `readonly`：只讀任務，自動撿卡不建 worktree、不走 coding／commit／PR 流程（ISSUE-162）。 */
+  mode?: "readonly";
   roles?: CardRoles;
   autopick_workspace_id?: string;
   autopick_workspace_label?: string;
@@ -58,6 +60,7 @@ const KNOWN_KEYS = new Set<string>([
   "source",
   "notify",
   "lead",
+  "mode",
   "roles",
   "autopick_workspace_id",
   "autopick_workspace_label",
@@ -489,6 +492,11 @@ export function buildCard(
       if (!["claude", "codex", "agy", "pi"].includes(value))
         reject("invalid lead; use claude, codex, agy or pi");
       card.lead = value as AutopickLead;
+    }
+    if (fields.has("mode")) {
+      if (asString("mode", fields.get("mode")) !== "readonly")
+        reject("invalid mode; use readonly");
+      card.mode = "readonly";
     }
     if (fields.has("notify")) {
       const value = asString("notify", fields.get("notify"));

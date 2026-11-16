@@ -2,7 +2,7 @@
 
 ## ISSUE-162：只讀的 coding 任務在 review 階段必定失敗（沒有 implementation artifact）
 
-更新日期：2026-11-16。狀態：待調查（現象與直接原因已確認；是否要改行為尚未決定，沒有修正）。
+更新日期：2026-11-16。狀態：已修正、待驗收（使用者 2026-11-16 選擇「卡片標示只讀就改走非 coding 流程」；程式與單元測試完成，**尚未部署，也尚未實機驗證**）。
 
 **使用者可見症狀：** 一張只要求「讀檔、回報，不改任何檔案、不開 PR」的卡被自動撿起後，Worker（codex `helper`）與 verify（claude）都完成，review（codex `reviewer`）卻在開始後約 250 毫秒失敗，task 以「one or more Assignments failed; synthesis is partial; no passing review for the current version」失敗；卡片記 `failed`／`autopick_stopped`，狀態停在 `in_progress`，並通知「review 條件未滿足」。
 
@@ -10,11 +10,17 @@
 
 **直接原因（已確認，讀 task journal 的 assignment 快照）：** review assignment 的 `blocker` 為 `coding review has no implementation artifact`。Worker 沒有改動任何檔案，所以沒有可審的 implementation artifact，review 依規則失敗。codex reviewer 本身沒有壞。尚未確認的是：這是否應視為正常（只讀任務不該走 coding 流程），還是應讓 bridge 在沒有改動時跳過 review 或以非 coding 模式處理。
 
-**預期行為：** 尚待決定。至少要讓人在說明裡看得出「純只讀任務不適合自動撿卡的 coding 流程」，或讓 bridge 對沒有改動的 coding 任務給出明確結論而不是 `failed`。
+**預期行為（使用者 2026-11-16 決定）：** 卡片能標示為只讀，自動撿卡對只讀卡改走非 coding 流程，不再因沒有 implementation artifact 而失敗。
 
-**修正：** 無。
+**修正（`src/card.ts`、`src/card-serialize.ts`、`src/autopick.ts`）：**
 
-**未驗證／下一步：** 決定只讀任務的正確處理方式（文件提醒、跳過 review、或改走非 coding 的 Team 任務）；若要改行為再補測試與 SPEC。
+- 卡片選填 frontmatter `mode: readonly`，只接受這個值，其他值視為無效卡片；parser 與 serializer 都支援，寫回不會掉欄位。
+- 自動撿卡看到 `mode: readonly`：只下 `card assign <id>`（不帶 `--worktree`、`--coding`），等 task 完成、卡片同步成 done 就以 `reached`／`card_done` 結束並關 Lead；不 commit、不 PR、不 merge，不分 L0／L1／L2，也沒有 review。task 沒完成照原樣停在 task 並保留現場。
+- **限制：** 沒有 worktree，Worker 直接在 repo 路徑執行，「不改檔案」只靠卡片說明約束，bridge 不強制、不偵測；看板的編輯範本尚未提供 `mode` 欄位，要手動寫在卡片檔。
+
+**測試（2026-11-16）：** `test/autopick.test.ts` 新增 2 項（只讀卡在 L0／L1／L2 都只呼叫 `startLead` 與 `card assign <id>`、結果 `reached`／`card_done`、關閉 Lead 一次；task 沒完成時停在 task、不關 Lead），`test/card-serialize.test.ts` 新增 1 項（`mode: readonly` 往返、其他值拒絕）；`npm run build`，三個相關測試檔 151 項 151 pass、0 fail。全套結果見 PR。
+
+**未驗證：** 實機：自動撿一張 `mode: readonly` 的卡，確認不帶 `--worktree`／`--coding` 的 `card assign` 在 Lead 的 workspace 內能跑完 Team 任務（沒有 coding Worker 時 Team 如何選成員尚未確認）、卡片同步成 done、Lead 被關閉；也未驗證只讀任務是否真的沒改到 repo。尚未部署。
 
 ## ISSUE-161：Card 看板新增的卡沒有 `project`，放行後 bridge 不會自動撿
 
