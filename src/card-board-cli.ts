@@ -82,6 +82,9 @@ function render(): void {
   process.stdout.write(out.join("\n"));
 }
 
+const ENTER_ALT_SCREEN = "\x1b[?1049h";
+const LEAVE_ALT_SCREEN = "\x1b[?1049l";
+
 /** 離開 raw mode 開 $EDITOR，結束後回來；沒改或編輯器失敗回傳 undefined。 */
 function editText(initial: string): string | undefined {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "herdr-card-board-"));
@@ -89,6 +92,7 @@ function editText(initial: string): string | undefined {
   fs.writeFileSync(file, initial, { mode: 0o600 });
   editing = true;
   process.stdin.setRawMode(false);
+  process.stdout.write(LEAVE_ALT_SCREEN);
   try {
     const editor = process.env.EDITOR || "vi";
     const run = spawnSync(`${editor} "${file}"`, {
@@ -100,6 +104,7 @@ function editText(initial: string): string | undefined {
     return text === initial ? undefined : text;
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+    process.stdout.write(ENTER_ALT_SCREEN);
     process.stdin.setRawMode(true);
     editing = false;
   }
@@ -170,6 +175,9 @@ function readySelected(): void {
 }
 
 reload();
+// 備用螢幕：Herdr 只把 PageUp／PageDown 轉給備用螢幕的程式，否則拿去捲 pane 歷史（ISSUE-160）。
+process.stdout.write(ENTER_ALT_SCREEN);
+process.on("exit", () => process.stdout.write(LEAVE_ALT_SCREEN));
 process.stdin.setRawMode(true);
 process.stdin.resume();
 process.stdin.setEncoding("utf8");
@@ -183,7 +191,6 @@ process.stdin.on("data", (key: string) => {
   message = "";
   if (key === "q" || key === "\x03") {
     clearInterval(timer);
-    process.stdout.write("\x1b[2J\x1b[H");
     process.exit(0);
   }
   const action = boardKeyAction(key);
