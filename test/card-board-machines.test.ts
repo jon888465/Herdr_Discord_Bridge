@@ -4,7 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  boardHeader,
   machineLines,
+  machineViewLines,
   readMachinesSection,
   sanitizeForTerminal,
   toggleView,
@@ -51,6 +53,71 @@ test("machineLines scrolls around cursor and at both ends", () => {
   assert.equal(firstVisible(0, 12, 5), 0);
   assert.equal(firstVisible(6, 12, 5), 4);
   assert.equal(firstVisible(11, 12, 5), 7);
+});
+
+// 去掉 SGR 控制碼後的顯示寬度。
+const visibleWidth = (line: string): number =>
+  // eslint-disable-next-line no-control-regex
+  displayWidth(line.replace(/\x1b\[[0-9;]*m/g, ""));
+
+test("boardHeader keeps bold title and truncates to width", () => {
+  assert.equal(
+    boardHeader("machines", 3, 80),
+    "\x1b[1mCard 看板 [Machine]\x1b[0m  (3)",
+  );
+  assert.equal(
+    boardHeader("cards", 12, 80),
+    "\x1b[1mCard 看板 [Card]\x1b[0m  (12)",
+  );
+  for (const width of [20, 12, 6]) {
+    const line = boardHeader("machines", 19, width);
+    assert.ok(visibleWidth(line) <= width - 1, `${width}: ${line}`);
+    assert.ok(line.startsWith("\x1b[1m") && line.includes("\x1b[0m"));
+  }
+});
+
+test("machineViewLines never exceeds terminal height on a narrow screen (F3)", () => {
+  const many = Array.from({ length: 30 }, (_, i) => ({
+    ...machine,
+    id: `remote${i}`,
+  }));
+  const width = 20;
+  const height = 24;
+  for (const state of [
+    { machines: many, cursor: 0, error: "", message: "" },
+    {
+      machines: many,
+      cursor: 29,
+      error: "",
+      message: "Machine 檢視唯讀，第一階段不支援編輯",
+    },
+    { machines: [], cursor: 0, error: "", message: "" },
+    { machines: [], cursor: 0, error: "machines 設定格式不對", message: "x" },
+  ]) {
+    const lines = machineViewLines(state, width, height);
+    assert.ok(lines.length <= height, `${lines.length} 列`);
+    for (const line of lines)
+      assert.ok(visibleWidth(line) <= width - 1, JSON.stringify(line));
+    assert.ok(!lines.some((line) => line.includes("\n")));
+  }
+  // 錯誤時不列機器；訊息與提示都在最後。
+  const errored = machineViewLines(
+    { machines: many, cursor: 3, error: "config.json 讀不到", message: "" },
+    100,
+    24,
+  );
+  assert.deepEqual(errored.slice(1), [
+    "config.json 讀不到",
+    "Tab/m/c 切換檢視  j/k 移動  PgUp/PgDn 翻頁  Home/End 頭尾  q 離開",
+  ]);
+  const wide = machineViewLines(
+    { machines: many, cursor: 0, error: "", message: "hi" },
+    100,
+    24,
+  );
+  assert.equal(wide.length, 1 + 19 + 1 + 1);
+  assert.equal(wide[1], "> remote0  user@host  /tmp/herdr.sock");
+  assert.equal(wide[wide.length - 2], "hi");
 });
 
 test("machine cursor uses shared navigation and clamps boundaries", () => {
@@ -132,7 +199,10 @@ test("readMachinesSection: object root without machines is empty, not an error",
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "board-machines-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, "config.json");
-  fs.writeFileSync(file, JSON.stringify({ discord: { botToken: "test-secret-token-xyz" } }));
+  fs.writeFileSync(
+    file,
+    JSON.stringify({ discord: { botToken: "test-secret-token-xyz" } }),
+  );
   assert.deepEqual(readMachinesSection(file), { ok: true, machines: [] });
 });
 
@@ -150,6 +220,9 @@ test("machineLines neutralises control characters in ssh and socket", () => {
     line,
     "> remote  user@host\uFFFD[2J\uFFFD[H\uFFFD  /tmp/\uFFFD2Jherdr\uFFFD.sock",
   );
-  assert.equal(sanitizeForTerminal("plain user@host /a/b"), "plain user@host /a/b");
+  assert.equal(
+    sanitizeForTerminal("plain user@host /a/b"),
+    "plain user@host /a/b",
+  );
   assert.equal(sanitizeForTerminal("中文\t\n"), "中文\uFFFD\uFFFD");
 });

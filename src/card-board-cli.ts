@@ -24,7 +24,8 @@ import {
 } from "./card-board.js";
 
 import {
-  machineLines,
+  boardHeader,
+  machineViewLines,
   readMachinesSection,
   toggleView,
   viewKeyAction,
@@ -78,22 +79,18 @@ function render(): void {
   if (editing) return;
   const height = process.stdout.rows || 24;
   const width = process.stdout.columns || 80;
-  const out = [
-    `\x1b[2J\x1b[H\x1b[1mCard 看板 [${view === "cards" ? "Card" : "Machine"}]\x1b[0m  (${view === "cards" ? rows.length : machines.length})`,
-  ];
   if (view === "machines") {
-    out.push(
-      ...(machineError
-        ? [machineError]
-        : machineLines(machines, machineCursor, width, visibleRows(height))),
+    // 標題、錯誤、訊息與提示都截斷成一列，加上列表不超過終端機高度（review round 2，F3）。
+    process.stdout.write(
+      `\x1b[2J\x1b[H${machineViewLines(
+        { machines, cursor: machineCursor, error: machineError, message },
+        width,
+        height,
+      ).join("\n")}`,
     );
-    if (message) out.push(message);
-    out.push(
-      "Tab/m/c 切換檢視  j/k 移動  PgUp/PgDn 翻頁  Home/End 頭尾  q 離開",
-    );
-    process.stdout.write(out.join("\n"));
     return;
   }
+  const out = [`\x1b[2J\x1b[H${boardHeader("cards", rows.length, width)}`];
   if (errors)
     out.push(`\x1b[33m${errors} 個檔案讀不到，請用 herdr-card-check\x1b[0m`);
   const room = visibleRows(height);

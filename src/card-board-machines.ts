@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import { stripJsonComments } from "./config.js";
 import { validateMachines, type MachineConfig } from "./machines.js";
-import { firstVisible, truncateToWidth } from "./card-board.js";
+import { firstVisible, truncateToWidth, visibleRows } from "./card-board.js";
 
 export type BoardView = "cards" | "machines";
 
@@ -58,6 +58,51 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 export function sanitizeForTerminal(text: string): string {
   // eslint-disable-next-line no-control-regex
   return text.replace(/[\u0000-\u001f\u007f-\u009f]/g, "\uFFFD");
+}
+
+/** 看板標題列：標題粗體、後接筆數；整列依寬度截斷，確保只佔一列。 */
+export function boardHeader(
+  view: BoardView,
+  count: number,
+  width: number,
+): string {
+  const title = `Card 看板 [${view === "cards" ? "Card" : "Machine"}]`;
+  const line = truncateToWidth(`${title}  (${count})`, width - 1);
+  return line.startsWith(title)
+    ? `\x1b[1m${title}\x1b[0m${line.slice(title.length)}`
+    : `\x1b[1m${line}\x1b[0m`;
+}
+
+export const MACHINE_HINT =
+  "Tab/m/c 切換檢視  j/k 移動  PgUp/PgDn 翻頁  Home/End 頭尾  q 離開";
+
+export interface MachineViewState {
+  machines: MachineConfig[];
+  cursor: number;
+  /** readMachinesSection 的失敗原因；有值時不顯示列表。 */
+  error: string;
+  message: string;
+}
+
+/**
+ * Machine 檢視整個畫面的各列（不含清屏控制碼）。標題、錯誤、訊息與提示都依寬度截斷成一列，
+ * 列表列數沿用 visibleRows，所以總列數不會超過終端機高度（視窗很窄時也不會換行把頂部捲掉）。
+ */
+export function machineViewLines(
+  state: MachineViewState,
+  width: number,
+  height: number,
+): string[] {
+  const max = width - 1;
+  const lines = [boardHeader("machines", state.machines.length, width)];
+  if (state.error) lines.push(truncateToWidth(state.error, max));
+  else
+    lines.push(
+      ...machineLines(state.machines, state.cursor, width, visibleRows(height)),
+    );
+  if (state.message) lines.push(truncateToWidth(state.message, max));
+  lines.push(truncateToWidth(MACHINE_HINT, max));
+  return lines;
 }
 
 export function machineLines(
