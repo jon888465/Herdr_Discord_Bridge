@@ -57,18 +57,22 @@ export function splitBody(body: string): { human: string; bridge: string } {
 export interface HumanEdit {
   title: string;
   notify?: string;
+  /** `<機器>:<repo 目錄名>`；bridge 只自動撿宣告了 project 且政策選用的卡（ISSUE-161）。 */
+  project?: string;
   /** 人寫的正文（不含流程紀錄）。 */
   human: string;
 }
 
-/** 編輯器裡看到的文字：前兩行是欄位，`---` 之後是正文。 */
+/** 編輯器裡看到的文字：前三行是欄位，`---` 之後是正文。 */
 export function toEditorText(card: Card): string {
   const { human } = splitBody(card.body);
-  return `title: ${card.title}\nnotify: ${card.notify ?? ""}\n---\n${human.replace(/^\n+/, "")}`;
+  return `title: ${card.title}\nnotify: ${card.notify ?? ""}\nproject: ${card.project ?? ""}\n---\n${human.replace(/^\n+/, "")}`;
 }
 
 export type ParsedEdit =
   { ok: true; edit: HumanEdit } | { ok: false; error: string };
+
+const PROJECT_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,31}:[A-Za-z0-9._-]{1,80}$/;
 
 export function parseEditorText(text: string): ParsedEdit {
   const separator = text.indexOf("\n---\n");
@@ -77,23 +81,31 @@ export function parseEditorText(text: string): ParsedEdit {
   const header = text.slice(0, separator).split("\n");
   const fields = new Map<string, string>();
   for (const line of header) {
-    const match = /^(title|notify):[ \t]*(.*)$/.exec(line);
+    const match = /^(title|notify|project):[ \t]*(.*)$/.exec(line);
     if (match) fields.set(match[1]!, match[2]!.trim());
   }
   const title = fields.get("title");
   if (!title) return { ok: false, error: "title 不能是空的" };
   const notify = fields.get("notify");
+  const project = fields.get("project");
+  if (project && !PROJECT_PATTERN.test(project))
+    return {
+      ok: false,
+      error: "project 要寫成 <機器>:<repo 目錄名>，例如 local:my-repo",
+    };
   return {
     ok: true,
     edit: {
       title,
       ...(notify ? { notify } : {}),
+      ...(project ? { project } : {}),
       human: `\n${text.slice(separator + 5).replace(/\s+$/, "")}\n\n`,
     },
   };
 }
 
-export type BoardResult = { ok: true } | { ok: false; error: string };
+export type BoardResult =
+  { ok: true; warning?: string } | { ok: false; error: string };
 
 function lastEventOf(store: CardStore, id: string): string | undefined {
   const log = store.readLog(id);
@@ -123,6 +135,8 @@ export function applyEdit(
     };
     if (edit.notify) next.notify = edit.notify;
     else delete next.notify;
+    if (edit.project) next.project = edit.project;
+    else delete next.project;
     return next;
   });
   return result.ok ? { ok: true } : { ok: false, error: result.error };
@@ -155,7 +169,14 @@ export function markReady(
     status: "ready",
     updated: today > card.updated ? today : card.updated,
   }));
-  return result.ok ? { ok: true } : { ok: false, error: result.error };
+  if (!result.ok) return { ok: false, error: result.error };
+  return current.card.project || current.card.projects?.length
+    ? { ok: true }
+    : {
+        ok: true,
+        warning:
+          "這張卡沒有 project，bridge 不會自動撿卡（要自動撿請先填 project）",
+      };
 }
 
 const STATUS_ORDER = [
@@ -196,8 +217,8 @@ export function boardRows(store: CardStore): {
   return { rows, errors: listed.errors.length };
 }
 
-export function newCardTemplate(): string {
-  return `title: \nnotify: \n---\n\n## 描述\n\n\n## 驗收條件\n\n- \n`;
+export function newCardTemplate(defaultProject = ""): string {
+  return `title: \nnotify: \nproject: ${defaultProject}\n---\n\n## 描述\n\n\n## 驗收條件\n\n- \n`;
 }
 
 const SLUG = /^[a-z0-9][a-z0-9-]{1,40}$/;
@@ -222,6 +243,7 @@ export function createDraft(
     created: today,
     updated: today,
     ...(edit.notify ? { notify: edit.notify } : {}),
+    ...(edit.project ? { project: edit.project } : {}),
     body: `\n# ${edit.title}\n${edit.human}`,
   };
   const result = store.create(card);

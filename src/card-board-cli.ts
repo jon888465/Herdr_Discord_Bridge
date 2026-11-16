@@ -128,7 +128,9 @@ function editSelected(): void {
 }
 
 function newCard(): void {
-  const text = editText(newCardTemplate());
+  const text = editText(
+    newCardTemplate(`local:${path.basename(process.cwd())}`),
+  );
   if (text === undefined) {
     message = "沒有新增";
     return;
@@ -158,7 +160,9 @@ function readySelected(): void {
   const row = rows[cursor];
   if (!row) return;
   const result = markReady(store, row.id, today());
-  message = result.ok ? `${row.id} 已設為 ready` : `未放行：${result.error}`;
+  message = result.ok
+    ? `${row.id} 已設為 ready${result.warning ? `。⚠ ${result.warning}` : ""}`
+    : `未放行：${result.error}`;
 }
 
 reload();

@@ -1,5 +1,27 @@
 # Known Issues
 
+## ISSUE-161：Card 看板新增的卡沒有 `project`，放行後 bridge 不會自動撿
+
+更新日期：2026-11-16。狀態：已修正、待驗收（程式與單元測試完成；**尚未部署／重啟，也尚未實機操作**）。
+
+**使用者可見症狀：** 在看板新增卡片並按 `r` 放行後，bridge 一直沒有自動撿卡。
+
+**重現（2026-11-16，本機）：** 用看板新增的卡（含 `notify`）設成 `ready`，等超過一輪掃描（每 60 秒）仍沒有 `autopick_picked`；政策檔已對該專案開啟自動撿卡。
+
+**根因（已確認，讀 `src/autopick.ts`）：** 自動撿卡只考慮宣告了 `project`／`projects` 且被政策選用的卡（`declaredProjects` 為空即不符合）。看板新增與編輯都沒有 `project` 欄位，所以卡永遠不符合條件。人工補上 `project` 後，下一輪掃描就撿起（同日實機觀察，該卡出現 `autopick_picked`）。
+
+**預期行為：** 看板新增的卡預設帶 `project`；編輯畫面能看到與修改；放行時若沒有 `project` 要明確提醒。
+
+**修正（`src/card-board.ts`、`src/card-board-cli.ts`）：**
+
+- 編輯／新增範本多一行 `project:`；新增時預設 `local:<目前工作目錄名>`；格式須為 `<機器>:<repo 目錄名>`，不合格式拒絕，留空表示不設。
+- `applyEdit`、`createDraft` 寫入 `project`；留空則移除。只動這一個欄位，不碰 `projects`。
+- `markReady` 對沒有 `project`（也沒有 `projects`）的卡仍可放行（也許要用 `card assign` 手動處理），但回傳警告，看板顯示「這張卡沒有 project，bridge 不會自動撿卡」。`notify` 的拒絕規則不變（ISSUE-121）。
+
+**測試：** `test/card-board-project.test.ts` 5 項（含「有 project 才符合 `eligibleAutopickProject`、沒有就不符合」），既有 `test/card-board.test.ts` 的放行測試改為接受附警告的成功。全套 `npm test`（2026-11-16）1963 項，1962 pass、0 fail、1 skipped（原因未逐項確認）；`npm run lint` 通過。
+
+**未驗證：** 實機：重啟後在看板新增卡，確認預設帶出 `project`，放行後被 bridge 自動撿起；預設值取自看板 pane 的工作目錄，若 pane 不在 repo 目錄會帶出錯誤名稱（可在編輯畫面修改）。
+
 ## ISSUE-160：Herdr 桌面介面沒有 card 清單；新增 Card 看板 pane
 
 更新日期：2026-11-16。狀態：已修正、待驗收（程式與單元測試完成；**自動開看板已實機驗證；編輯、放行、新增尚未實機操作**）。
