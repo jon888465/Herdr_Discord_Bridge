@@ -2,7 +2,7 @@
 
 ## ISSUE-163：Card 看板需要 Machine 檢視（第一階段：切換與唯讀列表）
 
-更新日期：2026-11-16。狀態：已修正、待驗收。
+更新日期：2026-11-16。狀態：已驗收（2026-11-16，使用者實機；範圍與未涵蓋項目見「實機驗收」）。
 
 **症狀與重現環境：** 本機原始碼的 `card-board` pane 原先只有卡片清單，無法切換並查看設定中的 machines。
 
@@ -22,7 +22,8 @@
 
 **第五輪修正（2026-11-16）：** reviewer 第 5 輪指出 F7（Card 提示加長到約 95 格卻沒截斷，30 欄、24 列、至少 19 張卡且有讀檔錯誤時總畫面多 1 列）與 F8（Machine 翻頁仍用 `visibleRows`，高度 4 時畫面顯示 2 台，PageDown 卻移動 3 台）。**根因（已確認）：**看板各處各自計算「畫面能放幾列」，Card 檢視、Machine 檢視與翻頁沒有共用同一個容量計算，第 3 輪的 F4、第 5 輪的 F7／F8 都是這個根因在不同位置的表現。**修正：**`src/card-board-machines.ts` 新增 `listRoom`（取 `visibleRows` 與「高度減固定列」的較小值，不為負）、`machineRoom`、`cardRoom`、`cardViewLines`、`clampToHeight`；Card 與 Machine 兩個檢視的每一列（含加長後的切換提示、錯誤、訊息、選取 id）都依寬度截斷，總列數保證不超過高度；`src/card-board-cli.ts` 的 Card 畫面改用 `cardViewLines`，兩個檢視的翻頁一頁列數都改用同一個 `cardRoom`／`machineRoom`（與畫面實際顯示列數一致）。**這一輪動到 Card 檢視（ISSUE-160 已驗收的畫面）**：高度夠大時（例如 24 列）清單列數仍是 `visibleRows`，行為不變，測試有一項專門檢查這點；只有高度很小或有多個固定列同時出現時清單才縮小。測試：新增 `test/card-board-layout.test.ts` 6 項，以「高度 × 寬度 × 有無錯誤 × 有無訊息 × 卡片／machine 數」的組合驗證兩個檢視列數與每列寬度都不超出、提示列在最後、翻頁一頁等於畫面實際顯示列數，並含 F7、F8 的重現案例；把共用容量計算暫時改回舊行為時其中 3 項變紅（確認測試抓得到問題），已還原。全套 `npm test`（2026-11-16，此輪修正後）1997 項，1996 pass、0 fail、1 skipped；`npm run lint` 通過；變更的程式與測試檔 `prettier --check` 通過。**未驗證：**以上都是自動化結果，沒有在真實 Herdr pane 以各種終端尺寸實機確認畫面，Card 檢視在正常尺寸下行為不變也只靠測試。
 
-**未驗證與下一步：** Herdr pane 內實機行為：切換鍵（Tab 是否被 Herdr 攔截）、備用螢幕下切換後畫面還原、Machine 檢視捲動，等待使用者實機驗收。只有原始碼與自動化驗證；未部署、未重啟執行中的 bridge／看板，不代表實機驗收通過。
+**實機驗收（2026-11-16，本機 macOS、Herdr 0.9.1，main `4e9b1ff`，其中看板程式為 PR #267 的 `3d33e73`）：** PR #267 經 bridge 自動流程與人工接手共 6 輪獨立 review（第 6 輪 pass，head `3f396511fce1`）、CI 在 macOS 與 ubuntu 全綠後 squash merge；主目錄 pull、重建，依使用者要求重啟 bridge（重啟前 active-streams 為 0），舊看板 pane 關閉後自動開出新看板；我讀 pane 畫面確認標題顯示 `Card 看板 [Card]  (71)`，提示列含「Tab/m/c 切換檢視」。使用者依我列的四點（Tab／`m` 切到 Machine、`c`／Tab 切回並保留 Card 游標、Machine 下 `e` 只提示唯讀、Tab 是否被 Herdr 攔截與切換後畫面還原）在新看板實機操作後回報「測試都 ok」。
+**驗收範圍與未涵蓋：** 使用者的回報是整體結論，沒有逐項列出每個操作的結果，本紀錄沒有逐項畫面證據；Machine 檢視的捲動（machine 很多台時）、極小終端尺寸下的畫面、Card 檢視在各種尺寸下與原本相同（只靠第五輪的自動化測試）沒有另外實機確認。後續階段（連線狀態、連線／斷線、編輯 SSH，卡片 `REQ-20261116-board-machine-status`／`-connect`／`-ssh-edit`）尚未開始，仍是 draft。ISSUE-160 的 Card 檢視畫面因本 PR 的版面重構而被改動，這次使用者實機操作時也用過，沒有回報異常，但未針對 ISSUE-160 的項目逐項重測。
 
 ## ISSUE-162：只讀的 coding 任務在 review 階段必定失敗（沒有 implementation artifact）
 
