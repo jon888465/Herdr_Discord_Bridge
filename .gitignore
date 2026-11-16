@@ -10,3 +10,4 @@ config.jsonc
 state/
 coverage/
 .herdr-discord-bridge/
+.claude/
