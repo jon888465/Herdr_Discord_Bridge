@@ -6,36 +6,39 @@ import type { HerdrHub } from "./machines.js";
 export const MACHINE_STATUS_WRITE_INTERVAL_MS = 5000;
 export const MACHINE_STATUS_MAX_AGE_MS = 15000;
 export type MachineStatus = "connected" | "unreachable";
-type Entry = { id: string; reachable: boolean };
-type Observation = Entry & { observedAt?: number };
+/** `observedAt` 是 hub 最後一次實際請求這台機器的時間（毫秒）。 */
+type Entry = { id: string; reachable: boolean; observedAt: number };
+type Observation = Omit<Entry, "observedAt"> & { observedAt?: number };
 
 /**
  * 只留下觀測夠新的機器。hub 的 `reachable` 只在請求遠端時更新，沒人探測時會一直停在舊值；
  * 如果照寫、再蓋上現在的時間，過期的 connected 就永遠不會過期（review 第 1 輪，F1）。
- * 從沒觀測過或太舊的機器不寫進檔案，看板就顯示「未知」。
+ * 從沒觀測過或太舊的機器不寫進檔案，看板就顯示「未知」。每筆保留自己的觀測時間，
+ * 讀取端才能逐筆判斷，不會因為整份檔案的 `updatedAt` 較新就多接受 15 秒（review 第 2 輪，F2）。
  */
 export function freshObservations(
   observations: Observation[],
   nowMs: number,
   maxAgeMs: number,
 ): Entry[] {
-  return observations
-    .filter(
-      (o) =>
-        o.observedAt !== undefined &&
-        nowMs - o.observedAt >= -maxAgeMs &&
-        nowMs - o.observedAt <= maxAgeMs,
-    )
-    .map(({ id, reachable }) => ({ id, reachable }));
+  const fresh: Entry[] = [];
+  for (const { id, reachable, observedAt } of observations) {
+    if (observedAt === undefined) continue;
+    const age = nowMs - observedAt;
+    if (age < -maxAgeMs || age > maxAgeMs) continue;
+    fresh.push({ id, reachable, observedAt });
+  }
+  return fresh;
 }
 
 export function serializeMachineStatus(entries: Entry[], now: Date): string {
   return JSON.stringify({
     version: 1,
     updatedAt: now.toISOString(),
-    machines: entries.map(({ id, reachable }) => ({
+    machines: entries.map(({ id, reachable, observedAt }) => ({
       id,
       status: reachable ? "connected" : "unreachable",
+      observedAt: new Date(observedAt).toISOString(),
     })),
   });
 }
@@ -85,9 +88,17 @@ export function readMachineStatus(
       return statuses;
     for (const entry of parsed.machines) {
       if (
-        isObject(entry) &&
-        typeof entry.id === "string" &&
-        (entry.status === "connected" || entry.status === "unreachable")
+        !isObject(entry) ||
+        typeof entry.id !== "string" ||
+        (entry.status !== "connected" && entry.status !== "unreachable") ||
+        typeof entry.observedAt !== "string"
+      )
+        continue;
+      // 逐筆檢查觀測時間：整份檔案的 updatedAt 只代表 writer 還活著，不代表這筆觀測有多新。
+      const observedAt = Date.parse(entry.observedAt);
+      if (
+        Number.isFinite(observedAt) &&
+        Math.abs(now.getTime() - observedAt) <= maxAgeMs
       )
         statuses.set(entry.id, entry.status);
     }

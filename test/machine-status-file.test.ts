@@ -25,19 +25,20 @@ test("serialize and write project only id/status without config secrets", (t) =>
     {
       id: "remote",
       reachable: true,
+      observedAt: now.getTime(),
       ssh: "SECRET-TOKEN-xyz",
       socket: "SECRET-TOKEN-xyz",
       hookSocket: "SECRET-TOKEN-xyz",
       cardReview: { root: "SECRET-TOKEN-xyz", kinds: ["agy"] },
       token: "SECRET-TOKEN-xyz",
     },
-    { id: "down", reachable: false },
+    { id: "down", reachable: false, observedAt: now.getTime() },
   ];
   const parsed = JSON.parse(serializeMachineStatus(entries, now));
   assert.equal(parsed.version, 1);
   assert.equal(parsed.updatedAt, now.toISOString());
   for (const entry of parsed.machines)
-    assert.deepEqual(Object.keys(entry), ["id", "status"]);
+    assert.deepEqual(Object.keys(entry), ["id", "status", "observedAt"]);
   writeMachineStatus(file, entries, now);
   const text = fs.readFileSync(file, "utf8");
   for (const secret of [
@@ -76,11 +77,11 @@ for (const [label, content] of Object.entries({
     machines: [],
   }),
   old: serializeMachineStatus(
-    [{ id: "r", reachable: true }],
+    [{ id: "r", reachable: true, observedAt: now.getTime() }],
     new Date(now.getTime() - 15001),
   ),
   future: serializeMachineStatus(
-    [{ id: "r", reachable: true }],
+    [{ id: "r", reachable: true, observedAt: now.getTime() }],
     new Date(now.getTime() + 15001),
   ),
 })) {
@@ -105,9 +106,20 @@ test("readMachineStatus missing/unreadable files and invalid entries", (t) => {
       updatedAt: now.toISOString(),
       machines: [
         null,
-        { id: 1, status: "connected" },
-        { id: "bad", status: "other" },
-        { id: "good", status: "connected" },
+        { id: 1, status: "connected", observedAt: now.toISOString() },
+        { id: "bad", status: "other", observedAt: now.toISOString() },
+        { id: "noTime", status: "connected" },
+        { id: "badTime", status: "connected", observedAt: "invalid" },
+        {
+          id: "stale",
+          status: "connected",
+          observedAt: new Date(now.getTime() - 15001).toISOString(),
+        },
+        {
+          id: "good",
+          status: "connected",
+          observedAt: now.toISOString(),
+        },
       ],
     }),
   );
@@ -163,9 +175,46 @@ test("freshObservations drops never-observed and stale machines (F1)", () => {
     max,
   );
   assert.deepEqual(result, [
-    { id: "fresh", reachable: true },
-    { id: "edge", reachable: false },
+    { id: "fresh", reachable: true, observedAt: nowMs - 1000 },
+    { id: "edge", reachable: false, observedAt: nowMs - max },
   ]);
+});
+
+test("a status is accepted for at most 15s after its own observation, even while the writer keeps writing (F2)", (t) => {
+  const file = fixture(t);
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const observedAt = now.getTime();
+  let current = new Date(observedAt + 10000);
+  const stop = startMachineStatusWriter(
+    {
+      // t=0 觀測一次之後沒有新觀測。
+      machineObservations: () => [
+        { id: "remote", reachable: true, observedAt },
+      ],
+    },
+    file,
+    5000,
+    () => current,
+  );
+  t.after(stop);
+  // t=10 秒寫入：觀測還在 15 秒內，寫進檔案，updatedAt 是 t=10。
+  const written = JSON.parse(fs.readFileSync(file, "utf8"));
+  assert.equal(written.updatedAt, current.toISOString());
+  assert.equal(
+    written.machines[0].observedAt,
+    new Date(observedAt).toISOString(),
+  );
+  // 之後 writer 停了（或一直寫不進去）。t=16 秒：檔案的 updatedAt 才 6 秒前，
+  // 但這筆觀測已經 16 秒前，不能再接受。
+  stop();
+  assert.deepEqual(
+    [...readMachineStatus(file, new Date(observedAt + 14000), 15000)],
+    [["remote", "connected"]],
+  );
+  assert.deepEqual(
+    [...readMachineStatus(file, new Date(observedAt + 16000), 15000)],
+    [],
+  );
 });
 
 test("writer does not keep a stale connected alive by rewriting the timestamp (F1)", (t) => {
