@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { stateDirectory } from "./config.js";
+import { configDirectory, stateDirectory } from "./config.js";
 import { LEDGER_MAX_FILE_BYTES } from "./card.js";
 import { CardStore } from "./card-store.js";
 import { ensureCardsDirectory } from "./card-directory.js";
@@ -12,6 +12,7 @@ import {
   boardKeyAction,
   boardRows,
   createDraft,
+  firstVisible,
   markReady,
   moveCursor,
   newCardTemplate,
@@ -21,6 +22,15 @@ import {
   visibleRows,
   type BoardRow,
 } from "./card-board.js";
+
+import {
+  machineLines,
+  readMachinesSection,
+  toggleView,
+  viewKeyAction,
+  type BoardView,
+} from "./card-board-machines.js";
+import type { MachineConfig } from "./machines.js";
 
 // Herdr plugin pane：卡片看板。只編輯 draft 類與已停手的卡，其餘唯讀。
 const rootDir = path.join(stateDirectory(), "cards");
@@ -37,8 +47,22 @@ let errors = 0;
 let cursor = 0;
 let message = "";
 let editing = false;
+let view: BoardView = "cards";
+let machines: MachineConfig[] = [];
+let machineCursor = 0;
+let machineError = "";
+
+function reloadMachines(): void {
+  const result = readMachinesSection(
+    path.join(configDirectory(), "config.json"),
+  );
+  machines = result.ok ? result.machines : [];
+  machineError = result.ok ? "" : result.reason;
+  machineCursor = Math.min(machineCursor, Math.max(0, machines.length - 1));
+}
 
 function reload(): void {
+  reloadMachines();
   const board = boardRows(store);
   rows = board.rows;
   errors = board.errors;
@@ -54,14 +78,26 @@ function render(): void {
   if (editing) return;
   const height = process.stdout.rows || 24;
   const width = process.stdout.columns || 80;
-  const out = [`\x1b[2J\x1b[H\x1b[1mCard 看板\x1b[0m  (${rows.length})`];
+  const out = [
+    `\x1b[2J\x1b[H\x1b[1mCard 看板 [${view === "cards" ? "Card" : "Machine"}]\x1b[0m  (${view === "cards" ? rows.length : machines.length})`,
+  ];
+  if (view === "machines") {
+    out.push(
+      ...(machineError
+        ? [machineError]
+        : machineLines(machines, machineCursor, width, visibleRows(height))),
+    );
+    if (message) out.push(message);
+    out.push(
+      "Tab/m/c 切換檢視  j/k 移動  PgUp/PgDn 翻頁  Home/End 頭尾  q 離開",
+    );
+    process.stdout.write(out.join("\n"));
+    return;
+  }
   if (errors)
     out.push(`\x1b[33m${errors} 個檔案讀不到，請用 herdr-card-check\x1b[0m`);
   const room = visibleRows(height);
-  const first = Math.max(
-    0,
-    Math.min(cursor - Math.floor(room / 2), rows.length - room),
-  );
+  const first = firstVisible(cursor, rows.length, room);
   for (let i = first; i < Math.min(rows.length, first + room); i++) {
     const row = rows[i]!;
     const line = truncateToWidth(
@@ -77,7 +113,7 @@ function render(): void {
     );
   out.push(
     message ||
-      "\x1b[2mj/k 移動  PgUp/PgDn 翻頁  Home/End 頭尾  e 編輯  n 新增  r 設為 ready  q 離開\x1b[0m",
+      "\x1b[2mTab/m/c 切換檢視  j/k 移動  PgUp/PgDn 翻頁  Home/End 頭尾  e 編輯  n 新增  r 設為 ready  q 離開\x1b[0m",
   );
   process.stdout.write(out.join("\n"));
 }
@@ -193,7 +229,27 @@ process.stdin.on("data", (key: string) => {
     clearInterval(timer);
     process.exit(0);
   }
+  if (viewKeyAction(key)) {
+    view = key === "m" ? "machines" : key === "c" ? "cards" : toggleView(view);
+    reloadMachines();
+    render();
+    return;
+  }
   const action = boardKeyAction(key);
+  if (view === "machines") {
+    if (action)
+      machineCursor = moveCursor(
+        action,
+        machineCursor,
+        machines.length,
+        visibleRows(process.stdout.rows || 24),
+      );
+    else if (["e", "\r", "\n", "n", "r"].includes(key))
+      message = "Machine 檢視唯讀，第一階段不支援編輯";
+    reloadMachines();
+    render();
+    return;
+  }
   if (action)
     cursor = moveCursor(
       action,

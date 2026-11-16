@@ -1,5 +1,25 @@
 # Known Issues
 
+## ISSUE-163：Card 看板需要 Machine 檢視（第一階段：切換與唯讀列表）
+
+更新日期：2026-11-16。狀態：已修正、待驗收。
+
+**症狀與重現環境：** 本機原始碼的 `card-board` pane 原先只有卡片清單，無法切換並查看設定中的 machines。
+
+**預期行為：** Tab 切換 Card／Machine，m／c 指定檢視，游標獨立；Machine 唯讀顯示 id、ssh、socket，可移動、翻頁與捲動；空清單有明確提示，錯誤不洩漏整份設定或敏感欄位。
+
+**根因（已確認）：** 既有 CLI 只有 Card rows 與單一 cursor，沒有檢視狀態或 machines 讀取與呈現。
+
+**修正範圍：** `src/card-board-machines.ts` 提供切換、固定短句錯誤的設定讀取與列呈現；共用 `src/config.ts` 匯出的 `stripJsonComments`，不呼叫 loadConfig。`src/card-board.ts` 共用 firstVisible；`src/card-board-cli.ts` 新增獨立 machineCursor、唯讀鍵提示、每 3 秒及切換時更新 machines。m／c 與既有鍵無衝突。SPEC 與 CONTEXT 同步。本階段不做連線狀態、連線、編輯或設定寫入。
+
+**測試（2026-11-16）：** 新增 `test/card-board-machines.test.ts` 6 項，獨立執行 6 pass、0 fail，涵蓋切換、移動邊界、視窗捲動、空狀態、JSONC、缺檔與讀取／解析／驗證失敗，以及畫面與錯誤不含測試 token。`npm run typecheck`、`npm run lint` 通過。全套 `npm test`（含 tsc build）1985 項：1984 pass、0 fail、1 skipped（既有略過項目，未另行驗證原因）。初次檢查因尚未安裝依賴而缺少 tsc／prettier，`npm ci` 後重新執行通過；實作期間 JSONC 副本遺漏造成 typecheck 失敗，補回後重新檢查通過。
+
+**格式檢查限制（2026-11-16）：** `npm run format:check` 在 HEAD 本來就有 77 個與本卡無關的檔案不符，本卡新增／修改的 TS 檔皆通過 prettier；.md 檔只手動編輯、不重排。第一輪曾執行全庫 format 並留下 SPEC／CONTEXT 的無關格式變更；第二輪已還原這些變更，SPEC 只保留看板段落新增，CONTEXT 只保留看板索引修改。
+
+**第二輪修正（2026-11-16）：** f1 還原無關文件 hunk；s1 清除 ISSUE-163 後多餘空行並釐清既有格式問題；s2 兩個檢視提示均顯示 `Tab/m/c`；s3 改共用 JSONC 函式。s4 留給後續階段，未改 `src/machines.ts`。本輪 `npm run typecheck`、`npm run lint`、`npx prettier --check src/card-board.ts src/card-board-cli.ts src/card-board-machines.ts src/config.ts test/card-board-machines.test.ts`、`git diff --check` 全數通過；`npm test`（含 build，2026-11-16）1985 項：1984 pass、0 fail、1 skipped。SPEC diff 為 1 個純新增 hunk（4 行新增、0 行刪除），CONTEXT diff 為 1 個 hunk。本輪未對 Markdown 執行 prettier。
+
+**未驗證與下一步：** Herdr pane 內實機行為：切換鍵（Tab 是否被 Herdr 攔截）、備用螢幕下切換後畫面還原、Machine 檢視捲動，等待使用者實機驗收。只有原始碼與自動化驗證；未部署、未重啟執行中的 bridge／看板，不代表實機驗收通過。
+
 ## ISSUE-162：只讀的 coding 任務在 review 階段必定失敗（沒有 implementation artifact）
 
 更新日期：2026-11-16。狀態：已驗收（2026-11-16，實機；使用者選擇「卡片標示只讀就改走非 coding 流程」，見「實機驗收」）。

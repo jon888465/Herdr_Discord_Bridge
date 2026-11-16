@@ -108,7 +108,7 @@ function parseBoolean(value: string | undefined): boolean | undefined {
 }
 
 /** Remove JSONC comments without corrupting // inside a quoted string. */
-function stripJsonComments(input: string): string {
+export function stripJsonComments(input: string): string {
   let output = "";
   let inString = false;
   let escaped = false;
