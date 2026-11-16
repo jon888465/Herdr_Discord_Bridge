@@ -263,3 +263,53 @@ export function truncateToWidth(text: string, max: number): string {
   }
   return `${out}…`;
 }
+
+export type BoardKeyAction =
+  "up" | "down" | "pageUp" | "pageDown" | "home" | "end";
+
+const KEY_ACTIONS: Readonly<Record<string, BoardKeyAction>> = {
+  k: "up",
+  "\x1b[A": "up",
+  j: "down",
+  "\x1b[B": "down",
+  "\x1b[5~": "pageUp",
+  "\x1b[6~": "pageDown",
+  "\x1b[H": "home",
+  "\x1b[1~": "home",
+  "\x1b[7~": "home",
+  "\x1bOH": "home",
+  "\x1b[F": "end",
+  "\x1b[4~": "end",
+  "\x1b[8~": "end",
+  "\x1bOF": "end",
+};
+
+/** 看板移動鍵對應的動作；終端機送的 Home／End 序列不只一種，都要認得。 */
+export function boardKeyAction(key: string): BoardKeyAction | undefined {
+  return Object.hasOwn(KEY_ACTIONS, key) ? KEY_ACTIONS[key] : undefined;
+}
+
+/** 終端機高度扣掉標題、錯誤、選取 id 與提示列後，能顯示的卡片列數。 */
+export function visibleRows(height: number): number {
+  return Math.max(3, height - 5);
+}
+
+/** 移動後的游標；一頁至少 1 列，結果夾在清單範圍內，空清單一律回 0。 */
+export function moveCursor(
+  action: BoardKeyAction,
+  cursor: number,
+  count: number,
+  pageSize: number,
+): number {
+  if (count <= 0) return 0;
+  const page = Math.max(1, pageSize);
+  const next = {
+    up: cursor - 1,
+    down: cursor + 1,
+    pageUp: cursor - page,
+    pageDown: cursor + page,
+    home: 0,
+    end: count - 1,
+  }[action];
+  return Math.min(count - 1, Math.max(0, next));
+}

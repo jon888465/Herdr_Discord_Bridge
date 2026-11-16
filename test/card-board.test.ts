@@ -6,13 +6,17 @@ import path from "node:path";
 import { CardStore } from "../src/card-store.js";
 import {
   applyEdit,
+  boardKeyAction,
   boardRows,
   createDraft,
   editability,
   markReady,
+  moveCursor,
   parseEditorText,
   splitBody,
   toEditorText,
+  visibleRows,
+  type BoardKeyAction,
 } from "../src/card-board.js";
 
 function setup(): { store: CardStore; dir: string } {
@@ -153,4 +157,89 @@ test("新增 draft：id 帶日期與 slug，已存在不覆蓋", () => {
 test("parseEditorText：缺分隔線或空標題拒絕", () => {
   assert.equal(parseEditorText("title: x\nnotify: \n").ok, false);
   assert.equal(parseEditorText("title: \nnotify: \n---\nbody").ok, false);
+});
+
+const ACTIONS: BoardKeyAction[] = [
+  "up",
+  "down",
+  "pageUp",
+  "pageDown",
+  "home",
+  "end",
+];
+
+test("boardKeyAction：各種終端機按鍵序列對應到移動動作", () => {
+  const expected: [string, BoardKeyAction][] = [
+    ["k", "up"],
+    ["\x1b[A", "up"],
+    ["j", "down"],
+    ["\x1b[B", "down"],
+    ["\x1b[5~", "pageUp"],
+    ["\x1b[6~", "pageDown"],
+    ["\x1b[H", "home"],
+    ["\x1b[1~", "home"],
+    ["\x1b[7~", "home"],
+    ["\x1bOH", "home"],
+    ["\x1b[F", "end"],
+    ["\x1b[4~", "end"],
+    ["\x1b[8~", "end"],
+    ["\x1bOF", "end"],
+  ];
+  for (const [key, action] of expected)
+    assert.equal(boardKeyAction(key), action, JSON.stringify(key));
+  for (const key of ["e", "\r", "n", "r", "q", "\x03", "x", "", "toString"])
+    assert.equal(boardKeyAction(key), undefined, JSON.stringify(key));
+});
+
+test("visibleRows：扣掉固定列，至少 3 列", () => {
+  assert.equal(visibleRows(24), 19);
+  assert.equal(visibleRows(5), 3);
+  assert.equal(visibleRows(0), 3);
+});
+
+test("moveCursor：空清單任何動作都回 0", () => {
+  for (const action of ACTIONS) {
+    assert.equal(moveCursor(action, 0, 0, 10), 0);
+    assert.equal(moveCursor(action, 3, 0, 10), 0);
+  }
+});
+
+test("moveCursor：逐列移動到頭到底停住", () => {
+  assert.equal(moveCursor("down", 0, 5, 3), 1);
+  assert.equal(moveCursor("down", 4, 5, 3), 4);
+  assert.equal(moveCursor("up", 4, 5, 3), 3);
+  assert.equal(moveCursor("up", 0, 5, 3), 0);
+});
+
+test("moveCursor：少於一頁時翻頁直接到頭尾", () => {
+  assert.equal(moveCursor("pageDown", 0, 3, 10), 2);
+  assert.equal(moveCursor("pageUp", 2, 3, 10), 0);
+});
+
+test("moveCursor：剛好一頁時翻頁到頭尾", () => {
+  assert.equal(moveCursor("pageDown", 0, 10, 10), 9);
+  assert.equal(moveCursor("pageUp", 9, 10, 10), 0);
+  assert.equal(moveCursor("pageDown", 9, 10, 10), 9);
+});
+
+test("moveCursor：多頁時一次跳一頁，最後一頁停在尾端", () => {
+  assert.equal(moveCursor("pageDown", 0, 25, 10), 10);
+  assert.equal(moveCursor("pageDown", 10, 25, 10), 20);
+  assert.equal(moveCursor("pageDown", 20, 25, 10), 24);
+  assert.equal(moveCursor("pageUp", 24, 25, 10), 14);
+  assert.equal(moveCursor("pageUp", 14, 25, 10), 4);
+  assert.equal(moveCursor("pageUp", 4, 25, 10), 0);
+});
+
+test("moveCursor：pageSize 為 0 或負數時仍移 1 列", () => {
+  assert.equal(moveCursor("pageDown", 2, 5, 0), 3);
+  assert.equal(moveCursor("pageUp", 2, 5, 0), 1);
+  assert.equal(moveCursor("pageDown", 2, 5, -4), 3);
+});
+
+test("moveCursor：Home／End 跳到第一張與最後一張", () => {
+  assert.equal(moveCursor("home", 7, 12, 5), 0);
+  assert.equal(moveCursor("end", 0, 12, 5), 11);
+  assert.equal(moveCursor("end", 0, 1, 5), 0);
+  assert.equal(moveCursor("home", 0, 1, 5), 0);
 });
