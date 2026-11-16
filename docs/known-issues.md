@@ -2,7 +2,13 @@
 
 ## ISSUE-160：Herdr 桌面介面沒有 card 清單；新增 Card 看板 pane
 
-更新日期：2026-11-15。狀態：已修正、待驗收（程式與單元測試完成；**編輯、放行、新增尚未實機操作**）。
+更新日期：2026-11-16。狀態：已修正、待驗收（程式與單元測試完成；**自動開看板已實機驗證；編輯、放行、新增尚未實機操作**）。
+
+**2026-11-15 實機驗證（PR #255 merge 後，main `1fa67a6`，本機 macOS、Herdr 0.9.1，bridge 以 `scripts/run.sh -r` 重建重啟）：**
+- **自動另開 tab（通過）：** 重啟前 bridge 所在 workspace 沒有看板；重啟後 bridge 日誌出現「Card 看板：已在 workspace … 另開 tab」，該 workspace 多了一個 label 為 `Card board` 的 pane（在新 tab），讀 pane 畫面確認是看板，未搶焦點。
+- **折行修正（通過）：** 同一個 pane 的長中文標題已截斷成單行（以「…」結尾），沒有折行或錯位。
+- **未驗證：** ①「已有看板就不重複開」只在 #255 合併前用真實 Herdr 做過唯讀檢查，重啟後的實機重複開啟檢查尚未做（需再重啟一次）；②編輯（`e`）、放行（`r`，含沒有 `notify` 被拒）、新增（`n`）、唯讀卡拒絕編輯，使用者尚未實機操作；③停手的卡在 bridge 仍有執行中任務時是否安全，未實測。
+- 驗證前先確認 `active-streams.json` 為空再重啟；重啟後 bridge 已連線，另有本機 console 的 Agent 需重新 `agent use`，與本功能無關。
 
 **2026-11-15 實機發現與後續：**
 - 使用者在 Herdr 開的是一般終端機 pane，看到的是 zsh 而不是看板；先前把「pane 開起來了」當驗收證據是錯的，**該證據作廢**。用 `herdr plugin pane open --plugin herdr-discord-bridge --entrypoint card-board` 開入口，畫面確實是看板（2026-11-15 讀 pane 確認）。
