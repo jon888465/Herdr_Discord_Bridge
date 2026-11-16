@@ -2,7 +2,7 @@
 
 ## ISSUE-162：只讀的 coding 任務在 review 階段必定失敗（沒有 implementation artifact）
 
-更新日期：2026-11-16。狀態：已修正、待驗收（使用者 2026-11-16 選擇「卡片標示只讀就改走非 coding 流程」；程式與單元測試完成，**尚未部署，也尚未實機驗證**）。
+更新日期：2026-11-16。狀態：已驗收（2026-11-16，實機；使用者選擇「卡片標示只讀就改走非 coding 流程」，見「實機驗收」）。
 
 **使用者可見症狀：** 一張只要求「讀檔、回報，不改任何檔案、不開 PR」的卡被自動撿起後，Worker（codex `helper`）與 verify（claude）都完成，review（codex `reviewer`）卻在開始後約 250 毫秒失敗，task 以「one or more Assignments failed; synthesis is partial; no passing review for the current version」失敗；卡片記 `failed`／`autopick_stopped`，狀態停在 `in_progress`，並通知「review 條件未滿足」。
 
@@ -20,7 +20,8 @@
 
 **測試（2026-11-16）：** `test/autopick.test.ts` 新增 2 項（只讀卡在 L0／L1／L2 都只呼叫 `startLead` 與 `card assign <id>`、結果 `reached`／`card_done`、關閉 Lead 一次；task 沒完成時停在 task、不關 Lead），`test/card-serialize.test.ts` 新增 1 項（`mode: readonly` 往返、其他值拒絕）；`npm run build`，三個相關測試檔 151 項 151 pass、0 fail。全套結果見 PR。
 
-**未驗證：** 實機：自動撿一張 `mode: readonly` 的卡，確認不帶 `--worktree`／`--coding` 的 `card assign` 在 Lead 的 workspace 內能跑完 Team 任務（沒有 coding Worker 時 Team 如何選成員尚未確認）、卡片同步成 done、Lead 被關閉；也未驗證只讀任務是否真的沒改到 repo。尚未部署。
+**實機驗收（2026-11-16，本機 macOS、Herdr 0.9.1，main `ec2968e`，bridge 於使用者要求下重啟，重啟前 active-streams 為 0）：** 建立卡 `REQ-20261116-readonly-mode-live`（`mode: readonly`、`project` 為政策選用專案、`notify` 指向本 pane），以 `markReady` 放行；06:13:44 放行、06:14:14 `autopick_picked`；之後卡片流程紀錄依序為 `role_assigned`（lead：claude）、`assigned`、`started`，06:14:40 `completed`（task 約 26 秒完成）；卡片狀態變 `done`；bridge console 輸出「自動撿卡 …（L2）：完成到 card_done」，**沒有** `failed`／`autopick_stopped`，也沒有 commit、PR、review 事件。主目錄 `git status` 為空（沒有檔案被改動）；`herdr workspace list` 沒有這張卡的 Lead workspace（已關閉）。這是修正前會失敗的同類情境。
+**驗收範圍與限制：** 只驗證一張只讀卡（讀 `README.md` 第一行）；task 回報內容我沒有逐字核對。只讀約束仍只靠卡片說明，bridge 不強制；這次主目錄沒有變動只代表這次沒改，不代表 bridge 能阻止。看板的編輯範本仍沒有 `mode:` 欄位，驗證卡是用腳本建立的。另外 workspace 清單中仍有 `autopick-claude-REQ-20261116-card-board-paging`，是先前那張卡（paging）留下的 Lead workspace，與本次無關，未處理。
 
 ## ISSUE-161：Card 看板新增的卡沒有 `project`，放行後 bridge 不會自動撿
 
