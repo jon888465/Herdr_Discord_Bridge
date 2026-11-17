@@ -123,22 +123,26 @@ function sshProbeArgs(destination: string, configPath: string | undefined): stri
   return [...(configPath ? ["-F", configPath] : []), "-G", "--", destination];
 }
 
-/** 只在每行的「值」裡、以完整詞（前後不是英數或 `-`）把名字換成佔位，設定鍵與別的字串（如 `a` 出現在 `addressfamily`）不動（review F10）。 */
+/** 代表連線目的地名字的設定鍵：只有這些行的值會正規化（其餘如 User、IdentityFile 照原樣比，大小寫也保留；review F12／F13）。 */
+const SSH_PROBE_DESTINATION_KEYS = new Set(["host", "hostname", "hostkeyalias"]);
+
+/** 目的地欄位的值不分大小寫、並把完整詞的名字換成佔位。 */
 function sshProbeNormalize(output: string, name: string): string {
   const word = new RegExp(`(?<![A-Za-z0-9-])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9-])`, "gi");
   return output
     .split("\n")
     .map((line) => {
       const space = line.indexOf(" ");
-      return space < 0 ? line : line.slice(0, space) + line.slice(space).replace(word, "\0");
+      if (space < 0 || !SSH_PROBE_DESTINATION_KEYS.has(line.slice(0, space))) return line;
+      return line.slice(0, space) + line.slice(space).toLowerCase().replace(word, "\0");
     })
     .join("\n");
 }
 
-/** 名字相對於哨兵名字：`ssh -G` 輸出（名字正規化後）有任何差異，表示有 Host／Match 對這個名字（或 user@名字）生效。 */
+/** 名字相對於哨兵名字：`ssh -G` 輸出（目的地欄位正規化後）有任何差異，表示有 Host／Match 對這個名字（或 user@名字）生效。 */
 function sshProbeDiffers(alias: string, own: string, sentinel: string): boolean {
   const name = alias.includes("@") ? alias.slice(alias.lastIndexOf("@") + 1) : alias;
-  return sshProbeNormalize(own.toLowerCase(), name) !== sshProbeNormalize(sentinel.toLowerCase(), SSH_PROBE_SENTINEL);
+  return sshProbeNormalize(own, name) !== sshProbeNormalize(sentinel, SSH_PROBE_SENTINEL);
 }
 
 function sshProbeKeys(alias: string, configPath: string | undefined): { key: string; own: string[]; sentinel: string[] } | undefined {

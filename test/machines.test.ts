@@ -787,6 +787,13 @@ test("sshConfigHasHost 交給 ssh -G 判斷：hostname 與輸入不同才算已�
     assert.equal(sshConfigHasHost("pod", join(dir, "absent")), false, "設定檔讀不到當作沒有");
     assert.equal(sshConfigHasHost("-oProxyCommand=x", config), false, "以 - 開頭不傳給 ssh");
     assert.equal(sshConfigHasHost("", config), false);
+    // F12：alias 剛好等於預設 SSH 使用者時，User 欄位不能被當成目的地正規化。
+    const { userInfo } = await import("node:os");
+    assert.equal(sshConfigHasHost(userInfo().username, config), false, "alias 等於本機使用者不誤判（F12）");
+    // F13：與通用設定只差大小寫的值（User）也算差異。
+    const cased = join(dir, "cased");
+    await writeFile(cased, "Host caseuser\n  User Alice\nHost *\n  User alice\n");
+    assert.equal(sshConfigHasHost("caseuser", cased), true, "只差大小寫的設定值也算已設定（F13）");
     const { refreshSshConfigHost } = await import("../src/machines.js");
     assert.equal(await refreshSshConfigHost("pod", config), true, "非同步版本同一結果（F9）");
     assert.equal(await refreshSshConfigHost("unknown", config), false);
