@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { stripJsonComments } from "./config.js";
-import { validateMachines, type MachineConfig } from "./machines.js";
+import { sshConfigHasHost, sshTargetLabel, validateMachines, type MachineConfig } from "./machines.js";
 import {
   firstVisible,
   truncateToWidth,
@@ -214,6 +214,7 @@ export function machineLines(
   width: number,
   room: number,
   statuses: Map<string, MachineStatus> = new Map(),
+  hasConfiguredHost: (alias: string) => boolean = sshConfigHasHost,
 ): string[] {
   if (!machines.length)
     return [
@@ -228,7 +229,7 @@ export function machineLines(
     .map((machine, offset) =>
       truncateToWidth(
         sanitizeForTerminal(
-          `${first + offset === cursor ? ">" : " "} ${machine.id}  ${machine.host ? `${machine.user ? machine.user + "@" : ""}${machine.host}:${machine.port ?? 22}` : machine.ssh}  ${statuses.get(machine.id) ?? "未知"}  ${machine.socket}`,
+          `${first + offset === cursor ? ">" : " "} ${machine.id}  ${sshTargetLabel(machine, hasConfiguredHost)}  ${statuses.get(machine.id) ?? "未知"}  ${machine.socket}`,
         ),
         width - 1,
       ),

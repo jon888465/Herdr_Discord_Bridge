@@ -335,13 +335,12 @@ test("machine editor has explicit fields, alias fallback and fixed safe refusals
     assert.equal(result.ok, false);
     assert.ok(!JSON.stringify(result).includes("FAKE_TOKEN"));
   }
-  const line = machineLines(
-    [{ ...machine, host: "example.com", user: "alice", port: 2222 }],
-    0,
-    120,
-    3,
-  )[0]!;
+  const edited = [{ ...machine, host: "example.com", user: "alice", port: 2222 }];
+  const line = machineLines(edited, 0, 120, 3, new Map(), () => false)[0]!;
   assert.ok(line.includes("alice@example.com:2222"));
+  // ssh 是 config 已設定的 Host 時看板顯示 alias，和實際連線目標一致（review round 1 F1）。
+  const aliasLine = machineLines(edited, 0, 120, 3, new Map(), () => true)[0]!;
+  assert.ok(aliasLine.includes("  user@host  ") && !aliasLine.includes("example.com"));
 });
 
 test("restart explanation survives retained footer on short screens with message or error", () => {

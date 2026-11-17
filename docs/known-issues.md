@@ -8,7 +8,7 @@
 
 **已確認根因：** MachineConfig 僅有必填 ssh、各 SSH 入口直接使用 machine.ssh，看板沒有編輯／設定寫入流程。
 
-**修正範圍：** machines.ts 新增 user／host／port、嚴格驗證與 sshTargetArgs；host 優先、沒有 host 回退 ssh，所有 tunnel／hook 準備／上傳／清理／remote checkout／realpath 統一 argv。看板沿用 editor、PID marker 與 terminal 模式，固定短句拒絕格式／驗證／衝突／寫入失敗；顯示有效目標與常駐執行中狀態說明，狀態／重啟說明與按鍵合成唯一保留 footer，依兩個固定列同步翻頁容量。machines-config-write.ts 掃描 JSONC、只 splice 唯一頂層 machines array，保留其他 entry 未知欄位與區塊外 bytes；完整 hash 前後核對、唯一 `config.json.bak-<compact ISO timestamp>-<pid>-<random hex>` 備份以 openSync wx 建立，經 descriptor writeSync 迴圈、fchmodSync、fsyncSync、closeSync 保存原 bytes／mode，備份失敗只 unlink 本次建立檔；wx 暫存檔＋rename、失敗清理；rename 成功後 unlinkSync 最佳努力清除同前綴舊備份，只留本次備份，不跟隨 symlink，忽略清除失敗；目標 symlink 與備份路徑碰撞拒絕。SPEC／README 中英文／CONTEXT 同步。
+**修正範圍：** machines.ts 新增 user／host／port、嚴格驗證與 sshTargetArgs；只有其一就用它，兩者都有時 ssh 是 `~/.ssh/config` 已設定的 Host 就用 alias、否則用 user／host／port（review round 1 F1，`sshConfigHasHost`），所有 tunnel／hook 準備／上傳／清理／remote checkout／realpath 統一 argv。看板沿用 editor、PID marker 與 terminal 模式，固定短句拒絕格式／驗證／衝突／寫入失敗；顯示有效目標與常駐執行中狀態說明，狀態／重啟說明與按鍵合成唯一保留 footer，依兩個固定列同步翻頁容量。machines-config-write.ts 掃描 JSONC、只 splice 唯一頂層 machines array，保留其他 entry 未知欄位與區塊外 bytes；完整 hash 前後核對、唯一 `config.json.bak-<compact ISO timestamp>-<pid>-<random hex>` 備份以 openSync wx 建立，經 descriptor writeSync 迴圈、fchmodSync、fsyncSync、closeSync 保存原 bytes／mode，備份失敗只 unlink 本次建立檔；wx 暫存檔＋rename、失敗清理；rename 成功後 unlinkSync 最佳努力清除同前綴舊備份，只留本次備份，不跟隨 symlink，忽略清除失敗；目標 symlink 與備份路徑碰撞拒絕。SPEC／README 中英文／CONTEXT 同步。
 
 **測試歷史（2026-11-17）：** 首次 npm run build 因未安裝依賴找不到 tsc（exit 127），npm ci 後 build 通過。首次針對性測試抓到本輪縮排測試預期錯誤（JSON 屬性位於更深一層），第二輪抓到新增狀態說明後既有翻頁測試仍扣兩列；修正預期及固定列計算後，六檔針對性測試 115 pass、0 fail。這些均為本輪開發中失敗，非實機驗收結果。
 

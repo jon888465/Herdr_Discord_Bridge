@@ -114,10 +114,113 @@ function validHost(host: string): boolean {
     label.length <= 63 && /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(label));
 }
 
-export function sshTargetArgs(machine: MachineConfig): string[] {
-  if (machine.host) return ["-p", String(machine.port ?? 22), machine.user ? `${machine.user}@${machine.host}` : machine.host];
-  if (!machine.ssh) throw new Error("machine has no SSH target");
-  return [machine.ssh];
+/** 預設的 ssh 使用者設定檔；ssh 本身只看這個檔與它 Include 的檔。 */
+export function defaultSshConfigPath(): string {
+  return path.join(os.homedir(), ".ssh", "config");
+}
+
+/** ssh 的 Host pattern：`*` 任意長度、`?` 一個字元，比對不分大小寫（OpenSSH match_hostname）。 */
+function sshPatternMatches(pattern: string, name: string): boolean {
+  const regex = "^" + pattern.split("").map((ch) => (ch === "*" ? ".*" : ch === "?" ? "." : ch.replace(/[.+^${}()|[\]\\]/g, "\\$&"))).join("") + "$";
+  return new RegExp(regex, "i").test(name);
+}
+
+/** 只有 `*`／`?` 的 pattern（例如全域的 `Host *`）會配到任何名字，不算「config 已設定該 Host」。 */
+function wildcardOnly(pattern: string): boolean {
+  return /^[*?]+$/.test(pattern);
+}
+
+function sshConfigArgs(rest: string): string[] {
+  return (rest.match(/"[^"]*"|\S+/g) ?? []).map((arg) => arg.replace(/^"(.*)"$/, "$1")).filter(Boolean);
+}
+
+function expandSshPath(value: string, baseDir: string): string {
+  if (value.startsWith("~/")) return path.join(os.homedir(), value.slice(2));
+  if (value === "~") return os.homedir();
+  return path.isAbsolute(value) ? value : path.join(baseDir, value);
+}
+
+/** Include 允許最後一段路徑用 `*`／`?`；展開失敗（目錄不存在等）視為沒有檔案。 */
+function includeFiles(value: string, baseDir: string): string[] {
+  const full = expandSshPath(value, baseDir);
+  const dir = path.dirname(full);
+  const base = path.basename(full);
+  if (!/[*?]/.test(base)) return [full];
+  try {
+    return fs.readdirSync(dir).filter((name) => sshPatternMatches(base, name)).sort().map((name) => path.join(dir, name));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * `~/.ssh/config`（含 Include 的檔）是否有 `Host` 列配到這個名字：有的話 ssh 認得這個 alias，bridge 就直接用它。
+ * 只看 `Host` 列（含 `!` 否定），不解讀 `Match`；讀不到檔案一律當作沒有。alias 允許 `user@` 前綴，只比對 `@` 後面的名字。
+ */
+export function sshConfigHasHost(alias: string, configPath: string = defaultSshConfigPath()): boolean {
+  const name = alias.includes("@") ? alias.slice(alias.lastIndexOf("@") + 1) : alias;
+  if (!name) return false;
+  const visited = new Set<string>();
+  const scan = (file: string, depth: number): boolean => {
+    if (depth > 8 || visited.has(file)) return false;
+    visited.add(file);
+    let text: string;
+    try {
+      text = fs.readFileSync(file, "utf8");
+    } catch {
+      return false;
+    }
+    for (const raw of text.split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line || line.startsWith("#")) continue;
+      const parsed = /^([A-Za-z]+)\s*(?:=\s*|\s+)(.*)$/.exec(line);
+      if (!parsed) continue;
+      const keyword = parsed[1]!.toLowerCase();
+      const args = sshConfigArgs(parsed[2]!);
+      if (keyword === "host") {
+        let positive = false;
+        let negated = false;
+        for (const pattern of args) {
+          if (pattern.startsWith("!")) {
+            if (sshPatternMatches(pattern.slice(1), name)) negated = true;
+          } else if (!wildcardOnly(pattern) && sshPatternMatches(pattern, name)) positive = true;
+        }
+        if (positive && !negated) return true;
+      } else if (keyword === "include") {
+        for (const value of args)
+          for (const included of includeFiles(value, path.dirname(file))) if (scan(included, depth + 1)) return true;
+      }
+    }
+    return false;
+  };
+  return scan(configPath, 0);
+}
+
+/** 要用哪個 SSH 目標：alias（`ssh` 欄位原樣）或結構化的 user／host／port。 */
+export type SshTarget =
+  | { kind: "alias"; ssh: string }
+  | { kind: "host"; user?: string; host: string; port: number };
+
+/**
+ * 目標選擇規則（SPEC「Machine SSH 編輯」）：只有 `ssh` 就原樣用；只有 host 就用 user／host／port；
+ * 兩者都有時，`ssh` 是 `~/.ssh/config` 已設定的 Host 就直接用它，否則回退 user／host／port。
+ */
+export function sshTarget(machine: MachineConfig, hasConfiguredHost: (alias: string) => boolean = sshConfigHasHost): SshTarget {
+  if (machine.ssh && (!machine.host || hasConfiguredHost(machine.ssh))) return { kind: "alias", ssh: machine.ssh };
+  if (!machine.host) throw new Error("machine has no SSH target");
+  return { kind: "host", ...(machine.user ? { user: machine.user } : {}), host: machine.host, port: machine.port ?? 22 };
+}
+
+/** 給看板顯示的有效目標：alias 原樣，結構化則 `user@host:port`。 */
+export function sshTargetLabel(machine: MachineConfig, hasConfiguredHost: (alias: string) => boolean = sshConfigHasHost): string {
+  const target = sshTarget(machine, hasConfiguredHost);
+  return target.kind === "alias" ? target.ssh : `${target.user ? target.user + "@" : ""}${target.host}:${target.port}`;
+}
+
+export function sshTargetArgs(machine: MachineConfig, hasConfiguredHost: (alias: string) => boolean = sshConfigHasHost): string[] {
+  const target = sshTarget(machine, hasConfiguredHost);
+  if (target.kind === "alias") return [target.ssh];
+  return ["-p", String(target.port), target.user ? `${target.user}@${target.host}` : target.host];
 }
 
 export function tunnelSocketPath(id: string): string {

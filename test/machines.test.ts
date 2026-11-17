@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:net";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HerdrHub, validateMachines } from "../src/machines.js";
@@ -734,5 +734,53 @@ test("structured SSH validation and target precedence", async () => {
     assert.throws(() => validateMachines([{ ...base, ...extra }]));
   assert.deepEqual(sshTargetArgs({ ...base, ssh: "legacy@alias" }), ["legacy@alias"]);
   assert.deepEqual(sshTargetArgs({ ...base, host: "host" }), ["-p", "22", "host"]);
-  assert.deepEqual(sshTargetArgs(validateMachines([{ ...base, ssh: "alias", user: "alice", host: "host", port: 2222 }])[0]!), ["-p", "2222", "alice@host"]);
+  const both = validateMachines([{ ...base, ssh: "alias", user: "alice", host: "host", port: 2222 }])[0]!;
+  // 同時有 ssh 與 host：ssh 是 ~/.ssh/config 已設定的 Host 就直接用 alias，否則回退 user／host／port（review round 1 F1）。
+  assert.deepEqual(sshTargetArgs(both, () => true), ["alias"]);
+  assert.deepEqual(sshTargetArgs(both, () => false), ["-p", "2222", "alice@host"]);
+  assert.deepEqual(sshTargetArgs({ ...base, ssh: "legacy@alias" }, () => false), ["legacy@alias"], "只有 ssh 時不管 config 都原樣用");
+  assert.deepEqual(sshTargetArgs({ ...base, host: "host" }, () => true), ["-p", "22", "host"]);
+  const { sshTargetLabel } = await import("../src/machines.js");
+  assert.equal(sshTargetLabel(both, () => true), "alias");
+  assert.equal(sshTargetLabel(both, () => false), "alice@host:2222");
+  assert.throws(() => sshTargetArgs(base as never), /no SSH target/);
+});
+
+test("sshConfigHasHost recognises Host entries in ~/.ssh/config and Include files (review round 1 F1)", async () => {
+  const { sshConfigHasHost } = await import("../src/machines.js");
+  const dir = await mkdtemp(join(tmpdir(), "ssh-config-"));
+  try {
+    const config = join(dir, "config");
+    await mkdir(join(dir, "config.d"));
+    await writeFile(join(dir, "config.d", "work.conf"), "Host work-* !work-old\n  HostName work.example\n");
+    await writeFile(join(dir, "config.d", "loop.conf"), `Include ${config}\nHost=looped\n`);
+    await writeFile(
+      config,
+      [
+        "# comment",
+        "Host *",
+        "  ServerAliveInterval 15",
+        "host pod \"quoted name\" ?",
+        "  HostName 10.0.0.2",
+        "Match host matched",
+        "  User alice",
+        "Include config.d/*.conf missing-file",
+        "",
+      ].join("\n"),
+    );
+    assert.equal(sshConfigHasHost("pod", config), true);
+    assert.equal(sshConfigHasHost("POD", config), true, "Host 比對不分大小寫");
+    assert.equal(sshConfigHasHost("alice@pod", config), true, "user@alias 只比對 alias");
+    assert.equal(sshConfigHasHost("quoted name", config), true);
+    assert.equal(sshConfigHasHost("work-1", config), true, "Include 的檔與 pattern");
+    assert.equal(sshConfigHasHost("looped", config), true, "Include 循環不會無限遞迴");
+    assert.equal(sshConfigHasHost("work-old", config), false, "否定 pattern 排除");
+    assert.equal(sshConfigHasHost("other", config), false, "只有 Host * 不算已設定");
+    assert.equal(sshConfigHasHost("x", config), false, "只有 ? 的 pattern 不算已設定");
+    assert.equal(sshConfigHasHost("matched", config), false, "不解讀 Match");
+    assert.equal(sshConfigHasHost("pod", join(dir, "absent")), false, "沒有設定檔當作沒有");
+    assert.equal(sshConfigHasHost("", config), false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
