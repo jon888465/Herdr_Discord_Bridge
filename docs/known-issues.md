@@ -96,7 +96,7 @@
 
 ## ISSUE-160：Herdr 桌面介面沒有 card 清單；新增 Card 看板 pane
 
-更新日期：2026-11-16。狀態：已驗收（2026-11-16，使用者實機；範圍與未涵蓋項目見「實機驗收」）。
+更新日期：2026-11-17。狀態：已驗收（2026-11-16，使用者實機；範圍與未涵蓋項目見「實機驗收」）；**2026-11-17 發現「重啟後沿用舊看板」問題，已修正、待驗收，見該段**。
 
 **2026-11-15 實機驗證（PR #255 merge 後，main `1fa67a6`，本機 macOS、Herdr 0.9.1，bridge 以 `scripts/run.sh -r` 重建重啟）：**
 - **自動另開 tab（通過）：** 重啟前 bridge 所在 workspace 沒有看板；重啟後 bridge 日誌出現「Card 看板：已在 workspace … 另開 tab」，該 workspace 多了一個 label 為 `Card board` 的 pane（在新 tab），讀 pane 畫面確認是看板，未搶焦點。
@@ -134,6 +134,8 @@
 
 **實機驗收（2026-11-16）：** PR #259 merge 後，主目錄 pull 到 `06825ca` 並重建，使用者要求重啟 bridge（重啟前 active-streams 為 0）；bridge 日誌出現「Card 看板：已在 workspace … 另開 tab」，自動開的看板提示列含「PgUp/PgDn 翻頁  Home/End 頭尾」。使用者在該看板實機操作後回報「看板測好了」。結合此前使用者實機操作過的項目：新增卡（2026-11-15，「新增卡片試好了」）、r 設為 ready（2026-11-16）、Home／End／PageUp／PageDown（2026-11-16，PageUp／PageDown 在 #259 之後）。
 **驗收範圍與未涵蓋：** 使用者的回報是整體結論，沒有逐項列出每個按鍵與每個操作的結果；本紀錄沒有逐項畫面證據。未涵蓋：他人終端機實際送出的序列是否都在已認得的清單內；停手卡（failed／autopick_stopped／loop_stopped）編輯時 task 正在執行的安全性未測；是否能同步到 Herdr 原生 Todo 另案調查。
+
+**後續：重啟後沿用舊看板（2026-11-17，已修正、待驗收）：**使用者回報「我前面執行 `run.sh` 沒有把 card／machine 那 tui 也啟動，要有」。**根因（已確認，讀 `src/card-board-open.ts` 與先前重啟時 bridge 日誌的「Card 看板：已開啟（workspace w2），不重複開」）：**`ensureCardBoardPane` 看到所在 workspace 已有 label 為 `Card board` 的 pane 就直接回「不重複開」。重啟前的看板是舊程序，跑的是舊程式（例如沒有 Machine 檢視），不會載入新版，所以重跑 `run.sh` 後留在畫面上的仍是舊看板，等於沒有啟動新看板。我自己前幾次重啟都先手動 `herdr pane close` 舊看板，所以沒有踩到。**修正：**有舊看板時先 `herdr pane close`（多個全關）再開新的，永遠換成跑最新程式的看板；看板在 `$EDITOR` 編輯卡片時寫 `card-board-editing.json`（只有 pid，結束刪除），bridge 看到標記且該程序還活著就不關也不開，只記一行說明，避免丟掉沒存的內容；標記缺檔、壞檔、程序已死都視為沒有在編輯。**取捨：**每次 bridge 啟動都會重建看板，看板的游標位置與目前檢視（Card／Machine）會重置。測試（2026-11-17）：`test/card-board-open.test.ts` 由 6 項改為 10 項（有舊看板先關再開且順序正確、多個舊看板全關只開一個、編輯中不關也不開、沒有看板時照常開、`isBoardEditing` 對缺檔／壞檔／無效 pid／已死程序／自己的 pid 的判斷）；把程式暫時改回舊行為時 3 項變紅，確認抓得到問題，已還原。全套 `npm test` 2018 項，2017 pass、0 fail、1 skipped；`npm run lint` 通過；變更檔 `prettier --check` 通過。**未驗證：**沒有實機驗證「重啟後舊看板被換成新的」（需重啟 bridge 時**不**先手動關舊看板），也沒有實機驗證編輯中重啟會保留看板；`src/main.ts` 沿用既有格式，只動呼叫 `ensureCardBoardPane` 的幾行。使用者若是在 Herdr pane 之外執行 `run.sh`（沒有 workspace），仍會略過，不在這次修正範圍；若是這種情況請告訴我。
 
 ## ISSUE-159：Discord 白名單留空代表「不限制」（fail-open），任何人都能操作 bot
 
