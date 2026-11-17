@@ -4,6 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  MACHINE_HINT,
+  machineEditorText,
+  parseMachineEditorText,
   boardHeader,
   machineLines,
   machineViewLines,
@@ -15,6 +18,7 @@ import {
 import {
   boardKeyAction,
   displayWidth,
+  truncateToWidth,
   firstVisible,
   moveCursor,
 } from "../src/card-board.js";
@@ -110,7 +114,7 @@ test("machineViewLines never exceeds terminal height on a narrow screen (F3)", (
   );
   assert.deepEqual(errored.slice(1), [
     "config.json 讀不到",
-    "Tab/m/c 切換檢視  j/k 移動  PgUp/PgDn 翻頁  Home/End 頭尾  q 離開",
+    truncateToWidth(MACHINE_HINT, 99),
   ]);
   const wide = machineViewLines(
     { machines: many, cursor: 0, error: "", message: "hi" },
@@ -138,7 +142,10 @@ test("machineViewLines never exceeds a very short terminal and keeps the hint la
         const label = `height ${height} message ${JSON.stringify(message)} machines ${machines.length}`;
         assert.ok(lines.length <= height, `${label}: ${lines.length} 列`);
         assert.ok(lines.length >= 1, label);
-        assert.ok(lines[lines.length - 1]!.startsWith("Tab/m/c"), label);
+        assert.ok(
+          lines[lines.length - 1]!.startsWith("設定改動重啟 bridge 後生效"),
+          label,
+        );
       }
   // 高度 5、三台以上、有訊息（review 的重現案例）：標題 + 列表 + 訊息 + 提示剛好 5 列，游標那台仍可見。
   const repro = machineViewLines(
@@ -299,4 +306,59 @@ test("machineLines shows only configured machine statuses within width", () => {
   for (const width of [10, 20, 40])
     for (const line of machineLines(machines, 0, width, 3, statuses))
       assert.ok(displayWidth(line) < width);
+});
+
+test("machine editor has explicit fields, alias fallback and fixed safe refusals", () => {
+  assert.deepEqual(JSON.parse(machineEditorText(machine)), {
+    user: "",
+    host: "",
+    port: 22,
+  });
+  assert.deepEqual(parseMachineEditorText(machineEditorText(machine)), {
+    ok: true,
+    fields: {},
+  });
+  assert.deepEqual(
+    parseMachineEditorText('{"user":"alice","host":"host","port":2222}'),
+    { ok: true, fields: { user: "alice", host: "host", port: 2222 } },
+  );
+  for (const value of [
+    '{"user":"x","host":"","port":22}',
+    '{"user":"","host":"","port":23}',
+    '{"user":"","host":"-bad","port":22}',
+    '{"user":"","host":"host","port":0}',
+    '{"user":"","host":"host","port":"22"}',
+    '{"user":"","host":"host","port":22,"token":"FAKE_TOKEN"}',
+    "FAKE_TOKEN",
+  ]) {
+    const result = parseMachineEditorText(value);
+    assert.equal(result.ok, false);
+    assert.ok(!JSON.stringify(result).includes("FAKE_TOKEN"));
+  }
+  const line = machineLines(
+    [{ ...machine, host: "example.com", user: "alice", port: 2222 }],
+    0,
+    120,
+    3,
+  )[0]!;
+  assert.ok(line.includes("alice@example.com:2222"));
+});
+
+test("restart explanation survives retained footer on short screens with message or error", () => {
+  for (const state of [
+    { machines: [machine], cursor: 0, error: "", message: "沒有修改" },
+    {
+      machines: [machine],
+      cursor: 0,
+      error: "config.json 讀不到",
+      message: "",
+    },
+  ]) {
+    for (const height of [1, 2, 3]) {
+      const lines = machineViewLines(state, 120, height);
+      assert.ok(lines.length <= height);
+      assert.ok(lines.at(-1)!.includes("設定改動重啟 bridge 後生效"));
+      assert.ok(lines.at(-1)!.includes("狀態＝執行中 bridge 的觀測"));
+    }
+  }
 });

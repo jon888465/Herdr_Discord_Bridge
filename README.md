@@ -315,6 +315,8 @@ Inbound attachment folders (`<cwd>/.herdr-discord-bridge/attachments/message-*`)
 
 ## Remote Herdr machines
 
+Machine connections may also use `{"id":"server","host":"example.com","user":"alice","port":2222,"socket":"/run/user/1000/herdr.sock"}`. When `host` is present it takes precedence over retained `ssh`; omitted user uses the SSH default and omitted port uses 22. Without host the existing ssh alias works unchanged. The bridge never edits `~/.ssh/config`. In the Card board Machine view, press `e`/Enter to edit user/host/port; saving backs up config.json and replaces only its machines array. Restart the bridge to apply changes; displayed status describes the running bridge, not the newly saved connection. Real SSH/Herdr acceptance is pending (ISSUE-167).
+
 After `herdr machine add`, list the machine under `machines` in the plugin config (see [config.example.jsonc](config.example.jsonc)): `id`, `ssh` (a Host from `~/.ssh/config`) and `socket`, the absolute path of the remote Herdr API socket. The bridge forwards that socket with `ssh -L`; remote IDs carry an `<id>:` prefix (for example `agy-pod:w2:p1`) and unprefixed IDs are always local. Supported: text conversation and Discord → remote-agent attachments (uploaded over ssh into the remote cwd). Not supported: agent → Discord file return and `herdr-discord-send` for remote agents. Text conversation is accepted; remote attachments await acceptance (ISSUE-041).
 
 

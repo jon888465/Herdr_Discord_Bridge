@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import { spawn, type ChildProcess } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import fs from "node:fs";
@@ -12,7 +13,10 @@ export interface MachineConfig {
   /** 識別碼；ID 以 `<id>:` 當前綴區分，不帶前綴的一律是本機。 */
   id: string;
   /** `ssh` 的目標（~/.ssh/config 的 Host 或 user@host）。 */
-  ssh: string;
+  ssh?: string;
+  user?: string;
+  host?: string;
+  port?: number;
   /** 遠端 Herdr API socket 的絕對路徑。 */
   socket: string;
   /**
@@ -55,19 +59,26 @@ export function validateMachines(value: unknown): MachineConfig[] {
   const machines: MachineConfig[] = [];
   for (const item of value) {
     if (!item || typeof item !== "object") continue;
-    const { id, ssh, socket, hookSocket, cardReview } = item as Record<string, unknown>;
+    const { id, ssh, user, host, port, socket, hookSocket, cardReview } = item as Record<string, unknown>;
     if (
       typeof id !== "string" ||
-      typeof ssh !== "string" ||
       typeof socket !== "string"
     )
-      throw new Error("machines[] needs string id, ssh and socket");
+      throw new Error("machines[] needs string id and socket");
     if (!MACHINE_ID.test(id) || LOCAL_LOOKALIKE.test(id))
       throw new Error(`machines[].id "${id}" is not a valid machine id`);
     if (seen.has(id)) throw new Error(`machines[].id "${id}" is duplicated`);
     // ssh 目標不可被當成 ssh 選項，socket 必須是遠端絕對路徑。
-    if (!ssh || ssh.startsWith("-") || /\s/.test(ssh))
+    if (ssh !== undefined && (typeof ssh !== "string" || !ssh || ssh.startsWith("-") || /\s/.test(ssh)))
       throw new Error(`machines[${id}].ssh is not a valid ssh target`);
+    if (host !== undefined && (typeof host !== "string" || !validHost(host)))
+      throw new Error("machines host is invalid");
+    if (user !== undefined && (typeof user !== "string" || user.length > 200 || !/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(user)))
+      throw new Error("machines user is invalid");
+    if (port !== undefined && (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65535))
+      throw new Error("machines port is invalid");
+    if ((!host && !ssh) || (!host && (user !== undefined || port !== undefined)))
+      throw new Error("machines needs host or ssh; user and port need host");
     if (!socket.startsWith("/") || /[\s:]/.test(socket))
       throw new Error(`machines[${id}].socket must be an absolute path`);
     if (
@@ -84,13 +95,29 @@ export function validateMachines(value: unknown): MachineConfig[] {
     seen.add(id);
     machines.push({
       id,
-      ssh,
+      ...(typeof ssh === "string" ? { ssh } : {}),
+      ...(typeof user === "string" ? { user } : {}),
+      ...(typeof host === "string" ? { host } : {}),
+      ...(typeof port === "number" ? { port } : {}),
       socket,
       ...(typeof hookSocket === "string" ? { hookSocket } : {}),
       ...(review ? { cardReview: review } : {}),
     });
   }
   return machines;
+}
+
+function validHost(host: string): boolean {
+  if (!host || host.length > 253 || host.includes("%")) return false;
+  if (isIP(host)) return true;
+  return host.replace(/\.$/, "").split(".").every((label) =>
+    label.length <= 63 && /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(label));
+}
+
+export function sshTargetArgs(machine: MachineConfig): string[] {
+  if (machine.host) return ["-p", String(machine.port ?? 22), machine.user ? `${machine.user}@${machine.host}` : machine.host];
+  if (!machine.ssh) throw new Error("machine has no SSH target");
+  return [machine.ssh];
 }
 
 export function tunnelSocketPath(id: string): string {
@@ -171,7 +198,7 @@ export class MachineTunnel {
         "ServerAliveCountMax=3",
         "-L",
         `${this.socketPath}:${this.machine.socket}`,
-        this.machine.ssh,
+        ...sshTargetArgs(this.machine),
       ],
       { stdio: ["ignore", "ignore", "pipe"] },
     );
@@ -219,7 +246,7 @@ export function hookTunnelArgs(
     "ServerAliveCountMax=3",
     "-R",
     `${machine.hookSocket}:${localHookSocket}`,
-    machine.ssh,
+    ...sshTargetArgs(machine),
   ];
 }
 
@@ -266,7 +293,7 @@ export class HookReverseTunnel {
       [
         "-o",
         "BatchMode=yes",
-        this.machine.ssh,
+        ...sshTargetArgs(this.machine),
         `mkdir -p -m 700 ${shellQuote(dir)} && rm -f ${shellQuote(this.machine.hookSocket)}`,
       ],
       { stdio: "ignore" },
@@ -333,7 +360,7 @@ export async function cleanupRemoteAttachments(
   await new Promise<void>((resolve, reject) => {
     const child = spawn(
       sshCommand,
-      ["-o", "BatchMode=yes", machine.ssh, command],
+      ["-o", "BatchMode=yes", ...sshTargetArgs(machine), command],
       {
         stdio: ["ignore", "ignore", "pipe"],
       },
@@ -387,7 +414,7 @@ export async function uploadFiles(
     await new Promise<void>((resolve, reject) => {
       const child = spawn(
         sshCommand,
-        ["-o", "BatchMode=yes", machine.ssh, command],
+        ["-o", "BatchMode=yes", ...sshTargetArgs(machine), command],
         { stdio: ["pipe", "ignore", "pipe"] },
       );
       let stderr = "";

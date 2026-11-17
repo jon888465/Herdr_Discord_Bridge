@@ -1,5 +1,25 @@
 # Known Issues
 
+## ISSUE-167：Card 看板 Machine 第四階段：編輯 SSH user／host／port
+
+更新日期：2026-11-17。狀態：已修正、待驗收（程式與自動化檢查完成；尚未部署／重啟或實機驗收）。
+
+**症狀／預期／環境：** Machine 檢視目前只能讀 ssh alias，無法從看板修改 user／IP 或 hostname／port；本卡要求既有 alias 原樣可用，設定只動 machines 區塊、保留 token 等其他 bytes。本輪為 macOS 隔離 worktree 的原始碼與 node:test，沒有讀取真實 config 或連線遠端。
+
+**已確認根因：** MachineConfig 僅有必填 ssh、各 SSH 入口直接使用 machine.ssh，看板沒有編輯／設定寫入流程。
+
+**修正範圍：** machines.ts 新增 user／host／port、嚴格驗證與 sshTargetArgs；host 優先、沒有 host 回退 ssh，所有 tunnel／hook 準備／上傳／清理／remote checkout／realpath 統一 argv。看板沿用 editor、PID marker 與 terminal 模式，固定短句拒絕格式／驗證／衝突／寫入失敗；顯示有效目標與常駐執行中狀態說明，狀態／重啟說明與按鍵合成唯一保留 footer，依兩個固定列同步翻頁容量。machines-config-write.ts 掃描 JSONC、只 splice 唯一頂層 machines array，保留其他 entry 未知欄位與區塊外 bytes；完整 hash 前後核對、唯一 `config.json.bak-<compact ISO timestamp>-<pid>-<random hex>` 備份以 openSync wx 建立，經 descriptor writeSync 迴圈、fchmodSync、fsyncSync、closeSync 保存原 bytes／mode，備份失敗只 unlink 本次建立檔；wx 暫存檔＋rename、失敗清理；rename 成功後 unlinkSync 最佳努力清除同前綴舊備份，只留本次備份，不跟隨 symlink，忽略清除失敗；目標 symlink 與備份路徑碰撞拒絕。SPEC／README 中英文／CONTEXT 同步。
+
+**測試歷史（2026-11-17）：** 首次 npm run build 因未安裝依賴找不到 tsc（exit 127），npm ci 後 build 通過。首次針對性測試抓到本輪縮排測試預期錯誤（JSON 屬性位於更深一層），第二輪抓到新增狀態說明後既有翻頁測試仍扣兩列；修正預期及固定列計算後，六檔針對性測試 115 pass、0 fail。這些均為本輪開發中失敗，非實機驗收結果。
+
+**第一輪驗證（2026-11-17，review 修正前）：** `npm run build` exit 0；`npm test`（含 build）2048 項：2047 pass、0 fail、1 skipped，exit 0；`npm run lint` exit 0（245 TypeScript files）。`node --test dist/test/machines-config-write.test.js` 8 pass、0 fail。暫時把新備份 bytes 斷言改成錯誤值，writer 測試 7 pass／1 fail、exit 1；已還原並重跑上述全套通過。`npx prettier --check src/machines-config-write.ts test/machines-config-write.test.ts src/card-board-cli.ts src/card-board-machines.ts test/card-board-machines.test.ts test/card-board-layout.test.ts` 與 `git diff --check` exit 0。既有未格式化的大型 machines／remote-checkout 等檔只改必要 hunk，未全庫重排。未執行 commit／push／merge／GitHub 或部署。
+
+**Review 修正（2026-11-17）：** 已修正 `r1-backup-path-race`（P1：舊 predictable backup 的 lstat→truncate open 競態，改唯一 wx 備份與 descriptor 操作）與 `r1-persistent-restart-hint`（P2：高度 3、有訊息時獨立說明列被裁掉，改保留 footer 開頭）。新增即將 open 前注入 symlink／file 碰撞的拒絕、原檔 bytes／mode 與 symlink target 不變、無 temp、短寫入迴圈、備份權限／bytes／清除，以及高度 1–3 有訊息／錯誤仍保留重啟說明的回歸測試。開發中針對性檢查曾因舊 footer 完整字串與窄畫面前綴斷言未套寬度截斷而失敗，已修正測試預期，未降低版面限制。
+
+**Review 修正後驗證（2026-11-17）：** `npm run build` exit 0；`npm test`（含 build）2051 項：2050 pass、0 fail、1 skipped，exit 0；`npm run lint` exit 0（245 TypeScript files）。`node --test dist/test/machines-config-write.test.js dist/test/card-board-machines.test.js dist/test/card-board-layout.test.js` 31 pass、0 fail；writer 單獨重跑 10 pass、0 fail。暫改新 backup-race 拒絕斷言為成功，兩個碰撞案例如預期變紅（8 pass、2 fail，exit 1）；已還原並重跑完整套件通過。`npx prettier --check src/machines-config-write.ts src/card-board-machines.ts test/machines-config-write.test.ts test/card-board-machines.test.ts test/card-board-layout.test.ts`、`git diff --check` exit 0。沒有 commit／push／merge／GitHub／部署／重啟，狀態維持已修正、待驗收。
+
+**未驗證／下一步：** 真實 SSH／Herdr editor、編輯中重啟保護、儲存後重啟載入、小終端顯示與 Discord 端到端尚未驗收；未部署、未重啟執行中 bridge。hub 只啟動時載入 machines，存檔不重連，第三階段 B 控制通道／按鍵未合併。狀態按 id 對應執行中 bridge 的觀測，不代表新設定已連線。hash 核對與 rename 非 atomic CAS，無法排除不合作 writer 在最後核對後的極短競態。請 Lead 安排獨立 review／verify，再依授權部署與重啟驗收。
+
 ## ISSUE-166：Card 看板 Machine 第三階段：從看板連線／手動斷線（拆成 A、B）
 
 更新日期：2026-11-17。狀態：修正中（A＝hub 核心，本 PR，已修正、待驗收；B＝控制通道與看板按鍵，卡片 `REQ-20261117-board-machine-connect-b`，待 A merge 後做）。**尚未部署，沒有入口可以觸發，沒有實機驗證。**
@@ -61,6 +81,8 @@
 **未驗證與下一步：** 未在真實 Herdr pane 與真實遠端機器實機確認，未部署或重啟執行中的 bridge。Lead 後續安排部署／重啟，驗收 connected、斷線後 unreachable、停止 bridge 超過 15 秒後未知與不同終端尺寸。連線／斷線操作、編輯 SSH、寫入 config.json 不在本階段。
 
 ## ISSUE-163：Card 看板需要 Machine 檢視（第一階段：切換與唯讀列表）
+
+現況補充（2026-11-17）：第四階段 SSH 編輯見 ISSUE-167；以下保留第一階段驗收歷史。
 
 更新日期：2026-11-16。狀態：已驗收（2026-11-16，使用者實機；範圍與未涵蓋項目見「實機驗收」）。
 

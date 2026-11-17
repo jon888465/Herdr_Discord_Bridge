@@ -13,7 +13,7 @@ import {
   resolveLaunch,
   type ResolvedLaunch,
 } from "./agent-launch-spec.js";
-import { shellQuote, type MachineConfig } from "./machines.js";
+import { sshTargetArgs, shellQuote, type MachineConfig } from "./machines.js";
 import { closeReviewerPane, openReviewerPane } from "./review-pane.js";
 import type { AgentRecord } from "./types.js";
 
@@ -54,7 +54,7 @@ export async function sshRealpath(
 ): Promise<string> {
   const { stdout } = await promisify(execFile)(
     "ssh",
-    ["-o", "BatchMode=yes", machine.ssh, `realpath -- ${shellQuote(target)}`],
+    ["-o", "BatchMode=yes", ...sshTargetArgs(machine), `realpath -- ${shellQuote(target)}`],
     { timeout: 10_000 },
   );
   const real = stdout.replace(/\n$/, "");

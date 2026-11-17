@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  MACHINE_HINT,
   cardRoom,
   cardViewLines,
   listRoom,
@@ -9,6 +10,7 @@ import {
 } from "../src/card-board-machines.js";
 import {
   displayWidth,
+  truncateToWidth,
   moveCursor,
   visibleRows,
   type BoardRow,
@@ -110,7 +112,8 @@ test("Machine 檢視在各種寬高、錯誤與訊息組合下列數與寬度都
                   `${label}: ${JSON.stringify(line)}`,
                 );
               assert.ok(
-                lines[lines.length - 1]!.startsWith("Tab/m/c") || height < 2,
+                lines[lines.length - 1] ===
+                  truncateToWidth(MACHINE_HINT, width - 1),
                 label,
               );
             }
@@ -138,7 +141,7 @@ test("翻頁一頁的列數等於畫面實際顯示的列數（F8）", () => {
         `height ${height}`,
       );
   }
-  // review 的重現案例：高度 4 實際顯示 2 台，PageDown 也只移動 2 台。
+  // review 的重現案例：高度 4 顯示 2 台，PageDown 也只移動 2 台。
   assert.equal(machineRoom({ error: "", message: "" }, 4), 2);
   assert.equal(
     moveCursor(

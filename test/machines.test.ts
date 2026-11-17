@@ -225,14 +225,14 @@ test("uploadFiles streams bytes to the remote path and rejects unsafe names", as
     const stub = join(dir, "fakessh");
     await writeFile(
       stub,
-      '#!/bin/sh\nfor a; do last="$a"; done\nexec sh -c "$last"\n',
+      '#!/bin/sh\n[ "$1" = -o ] && [ "$2" = BatchMode=yes ] && [ "$3" = -p ] && [ "$4" = 2222 ] && [ "$5" = alice@host ] || exit 91\nfor a; do last="$a"; done\nexec sh -c "$last"\n',
     );
     await chmod(stub, 0o755);
     const src = join(dir, "src.txt");
     await writeFile(src, "hello remote");
     const remoteDir = join(dir, "remote", "message-1");
     const [path] = await uploadFiles(
-      { id: "agy", ssh: "x", socket: "/s" },
+      { id: "agy", ssh: "x", host: "host", user: "alice", port: 2222, socket: "/s" },
       remoteDir,
       [{ localPath: src, name: "1-note.txt" }],
       stub,
@@ -242,7 +242,7 @@ test("uploadFiles streams bytes to the remote path and rejects unsafe names", as
     assert.equal(await readFile(path, "utf8"), "hello remote");
     await assert.rejects(
       uploadFiles(
-        { id: "agy", ssh: "x", socket: "/s" },
+        { id: "agy", ssh: "x", host: "host", user: "alice", port: 2222, socket: "/s" },
         remoteDir,
         [{ localPath: src, name: "../evil" }],
         stub,
@@ -250,7 +250,7 @@ test("uploadFiles streams bytes to the remote path and rejects unsafe names", as
       /unsafe/,
     );
     await assert.rejects(
-      uploadFiles({ id: "agy", ssh: "x", socket: "/s" }, "relative", [], stub),
+      uploadFiles({ id: "agy", ssh: "x", host: "host", user: "alice", port: 2222, socket: "/s" }, "relative", [], stub),
       /absolute/,
     );
   } finally {
@@ -263,12 +263,12 @@ test("cleanupRemoteAttachments runs a scoped find and validates input", async ()
   const { writeFile, chmod, mkdir, utimes, stat } =
     await import("node:fs/promises");
   const dir = await mkdtemp(join(tmpdir(), "bq-"));
-  const machine = { id: "agy", ssh: "x", socket: "/s" };
+  const machine = { id: "agy", ssh: "x", host: "host", user: "alice", port: 2222, socket: "/s" };
   try {
     const stub = join(dir, "fakessh");
     await writeFile(
       stub,
-      '#!/bin/sh\nfor a; do last="$a"; done\nexec sh -c "$last"\n',
+      '#!/bin/sh\n[ "$1" = -o ] && [ "$2" = BatchMode=yes ] && [ "$3" = -p ] && [ "$4" = 2222 ] && [ "$5" = alice@host ] || exit 91\nfor a; do last="$a"; done\nexec sh -c "$last"\n',
     );
     await chmod(stub, 0o755);
     const root = join(dir, "attachments");
@@ -427,7 +427,9 @@ test("both tunnels restart after stop and ignore old process exit", async () => 
   const { EventEmitter } = await import("node:events");
   const { spawn } = await import("node:child_process");
   const children: import("node:child_process").ChildProcess[] = [];
-  const spawnProcess: typeof spawn = (() => {
+  const calls: string[][] = [];
+  const spawnProcess: typeof spawn = ((_cmd: string, args: string[]) => {
+    calls.push(args);
     const child =
       new EventEmitter() as import("node:child_process").ChildProcess;
     child.kill = () => true;
@@ -435,7 +437,7 @@ test("both tunnels restart after stop and ignore old process exit", async () => 
     return child;
   }) as typeof spawn;
   const dir = await mkdtemp(join(tmpdir(), "mt-"));
-  const config = { id: "agy", ssh: "unused", socket: "/r", hookSocket: "/h" };
+  const config = { id: "agy", ssh: "unused", user: "alice", host: "host", port: 2222, socket: "/r", hookSocket: "/h" };
   const tunnel = new MachineTunnel(
     config,
     () => {},
@@ -458,6 +460,12 @@ test("both tunnels restart after stop and ignore old process exit", async () => 
         assert.equal(children.length, count + 2);
       }
       t.stop();
+    }
+    for (const args of calls) {
+      const p = args.indexOf("-p");
+      assert.ok(p > args.indexOf("BatchMode=yes"));
+      assert.deepEqual(args.slice(p, p + 3), ["-p", "2222", "alice@host"]);
+      assert.ok(!args.includes("unused"));
     }
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -708,4 +716,23 @@ test("direct SSH operations are refused on a manually disconnected machine (revi
   hub.disconnectMachine("pod");
   await assert.rejects(hub.uploadTo("pod", "/d", []), /已斷線/);
   await assert.rejects(hub.cleanupAttachments("pod", "/d", 1), /已斷線/);
+});
+
+test("structured SSH validation and target precedence", async () => {
+  const { sshTargetArgs } = await import("../src/machines.js");
+  const base = { id: "remote", socket: "/r.sock" };
+  for (const host of ["example.com", "host", "example.com.", "127.0.0.1", "::1", "2001:db8::1"])
+    for (const port of [1, 22, 65535])
+      assert.equal(validateMachines([{ ...base, host, port, user: "alice_1.x-y" }])[0]!.host, host);
+  for (const host of ["", "-x", "a..b", "a/b", "a b", "a\n", "a\u0080", "a;cmd", "[::1]", "fe80::1%eth0", "x".repeat(64), "x.".repeat(128)])
+    assert.throws(() => validateMachines([{ ...base, host }]));
+  for (const user of ["", "-x", "x y", "a/b", "a;cmd", "x\n", "x".repeat(201), null, 2])
+    assert.throws(() => validateMachines([{ ...base, host: "host", user }]));
+  for (const port of ["22", "22abc", 0, -1, 65536, 1.5, null, NaN, Infinity])
+    assert.throws(() => validateMachines([{ ...base, host: "host", port }]));
+  for (const extra of [{}, { ssh: "alias", user: "alice" }, { ssh: "alias", port: 22 }])
+    assert.throws(() => validateMachines([{ ...base, ...extra }]));
+  assert.deepEqual(sshTargetArgs({ ...base, ssh: "legacy@alias" }), ["legacy@alias"]);
+  assert.deepEqual(sshTargetArgs({ ...base, host: "host" }), ["-p", "22", "host"]);
+  assert.deepEqual(sshTargetArgs(validateMachines([{ ...base, ssh: "alias", user: "alice", host: "host", port: 2222 }])[0]!), ["-p", "2222", "alice@host"]);
 });
