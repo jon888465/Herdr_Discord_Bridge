@@ -11,18 +11,13 @@ export interface MachinePoolSnapshot {
 }
 
 /**
- * 遠端角色（SSH clone／checkout 快照、建 workspace、啟動 agent）不經 AgentPool，準備期間也還沒有 stream，
- * 只靠 stream 與 pool 判定會讓「普通斷線」在準備到一半時被放行，直接中斷它（review 第 1 輪 F2）。
- * 從開始準備一直到 cleanup 結束，都登記在這裡。
+ * 遠端角色與遠端 review 不經 AgentPool，準備期間也沒有 stream；從開始到結束都登記在這裡，普通斷線才會被擋下（review F2、F5）。
  */
 export class RemoteRoleWork {
   private readonly work = new Map<string, string>();
   private sequence = 0;
 
-  /**
-   * 登記一份工作，回傳結束函式；重複呼叫結束函式沒有副作用。每一份都有自己的單元 id（key 只是說明），
-   * 同一個 key 重複登記（例如重試）不會互相覆蓋，先結束的那份也不會把另一份一起釋放。
-   */
+  /** 登記一份工作，回傳結束函式（可重複呼叫）。每份有自己的單元 id，同 key 重複登記不會互相覆蓋。 */
   begin(key: string, machineId: string): () => void {
     const unit = `${key}#${++this.sequence}`;
     this.work.set(unit, machineId);
@@ -39,10 +34,7 @@ export class RemoteRoleWork {
 /** 整個 bridge 共用的登記表：`main.ts` 的 hub busy 判定與遠端角色啟動都用它。 */
 export const remoteRoleWork = new RemoteRoleWork();
 
-/**
- * 包住「整段都在一次 await 裡」的遠端工作（例如 `card review` 的 `reviewOnRemote`：SSH checkout、啟動 reviewer、
- * review 回合與清理）：執行前登記，結束（成功或失敗）才釋放（review 第 2 輪 F5）。
- */
+/** 包住整段都在一次 await 裡的遠端工作（`card review` 的 `reviewOnRemote`）：執行前登記，結束才釋放。 */
 export async function trackRemoteWork<T>(
   registry: RemoteRoleWork,
   key: string,
@@ -57,10 +49,7 @@ export async function trackRemoteWork<T>(
   }
 }
 
-/**
- * 包住遠端角色的啟動：啟動前就登記，啟動失敗立刻釋放；成功後把 `cleanup` 換成「cleanup 結束（成功或失敗）才釋放」，
- * 所以整個角色生命週期都算進該機器的進行中工作。沒人呼叫 cleanup 時會一直算忙碌，那是偏安全的方向（要強制才能斷線）。
- */
+/** 包住遠端角色的啟動：啟動前登記、失敗立刻釋放；成功後 `cleanup` 結束才釋放。沒人呼叫 cleanup 會一直忙碌，偏安全（要強制才能斷線）。 */
 export async function trackRemoteRole<
   T extends { cleanup(reason?: never): Promise<unknown> },
 >(

@@ -137,8 +137,9 @@ export class MachineTunnel {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     const child = this.child;
-    this.child = null;
+    // 先 kill 再清參照：kill 丟錯時要保留，重試才找得到（review F8）。
     child?.kill("SIGTERM");
+    this.child = null;
     fs.rmSync(this.socketPath, { force: true });
   }
 
@@ -238,8 +239,9 @@ export class HookReverseTunnel {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     const child = this.child;
-    this.child = null;
+    // 同 MachineTunnel.stop（review F8）。
     child?.kill("SIGTERM");
+    this.child = null;
   }
 
   private spawnSsh(): void {
@@ -500,8 +502,18 @@ export class HerdrHub extends HerdrClient {
       remote.up = false;
       remote.observedAt = undefined;
       remote.generation++;
-      remote.tunnel.start();
-      remote.hookTunnel?.start();
+      // 兩條 tunnel 各自嘗試啟動；任何一條失敗才整體回復（review F7）。
+      let startFailed = false;
+      for (const start of [
+        () => remote.tunnel.start(),
+        () => remote.hookTunnel?.start(),
+      ])
+        try {
+          start();
+        } catch {
+          startFailed = true;
+        }
+      if (startFailed) throw new Error("tunnel start failed");
       const generation = remote.generation;
       this.scheduleProbe(() => {
         if (remote.disconnected || remote.generation !== generation) return;
@@ -509,8 +521,7 @@ export class HerdrHub extends HerdrClient {
       }, 2000);
       return { ok: true, status: "connected" };
     } catch {
-      // 啟動途中丟錯：回復成可重試的斷線狀態，並清掉可能已經啟動的 tunnel；否則旗標已清、
-      // 下次重按連線會直接回「已在連線中」，永遠不會重新啟動或探測（review 第 1 輪 F3）。
+      // 回復成可重試的斷線並停掉已啟動的 tunnel，否則重按會回「已在連線中」（review F3）。
       remote.stopPending = !this.stopRemoteTunnels(remote);
       remote.disconnected = true;
       remote.generation++;

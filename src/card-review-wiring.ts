@@ -23,6 +23,15 @@ import type { AgentRecord } from "./types.js";
 import { reviewOnRemote, type RemoteReviewDeps } from "./remote-checkout.js";
 import { remoteRoleWork, trackRemoteWork } from "./machine-busy.js";
 
+/** 啟動遠端 reviewer 前用即時狀態確認 machine 沒被手動斷線；`isDisconnected` 是即時查詢，不是建立 context 時的快照。 */
+export function assertRemoteNotDisconnected(
+  roleContext: { isDisconnected?: (id: string) => boolean } | undefined,
+  machine: string,
+): void {
+  if (roleContext?.isDisconnected?.(machine))
+    throw new Error("遠端 review 失敗：machine 已手動斷線");
+}
+
 export interface ReviewWiringDeps {
   roleContext?: RoleContext;
   remote?: RemoteReviewDeps;
@@ -152,7 +161,11 @@ export async function reviewCardPullRequest(
   if (remote && !deps.roleContext?.remoteMachines?.find((m) => m.id === remote)?.kinds.includes(flowInput.launch?.kind ?? ""))
     throw new Error("遠端 review 失敗：machine 目前未開放這個 agent 種類");
   const result = remote
-    ? await trackRemoteWork(remoteRoleWork, `card-review:${pr.repo}#${pr.number}`, remote, () => reviewOnRemote(deps.remote!, deps.flow, remote, { ...flowInput, prRepo: pr.repo, localWorktree: entry.path }))
+    ? await trackRemoteWork(remoteRoleWork, `card-review:${pr.repo}#${pr.number}`, remote, () => {
+        // 先登記再用即時狀態重驗：fetchMaterial 期間 machine 可能已被斷線（review F9）。
+        assertRemoteNotDisconnected(deps.roleContext, remote);
+        return reviewOnRemote(deps.remote!, deps.flow, remote, { ...flowInput, prRepo: pr.repo, localWorktree: entry.path });
+      })
     : await runCardReview(deps.flow, flowInput);
   return {
     pr: { number: pr.number, url: pr.url, headSha: material.headSha },
