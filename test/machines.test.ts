@@ -782,6 +782,7 @@ test("sshConfigHasHost 交給 ssh -G 判斷：hostname 與輸入不同才算已�
     assert.equal(sshConfigHasHost("bob@matched", config), true, "Match user 以完整 user@alias 解析（F8）");
     assert.equal(sshConfigHasHost("alice@matched", config), false, "Match user 不符時不算已設定（F8）");
     assert.equal(sshConfigHasHost("unknown", config), false);
+    assert.equal(sshConfigHasHost("a", config), false, "短名字不能因為輸出裡別處含有同樣字母而誤判（F10）");
     assert.equal(sshConfigHasHost("pod", join(dir, "absent")), false, "設定檔讀不到當作沒有");
     assert.equal(sshConfigHasHost("-oProxyCommand=x", config), false, "以 - 開頭不傳給 ssh");
     assert.equal(sshConfigHasHost("", config), false);

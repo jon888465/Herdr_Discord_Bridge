@@ -123,9 +123,16 @@ function sshProbeArgs(destination: string, configPath: string | undefined): stri
   return [...(configPath ? ["-F", configPath] : []), "-G", "--", destination];
 }
 
-/** 把輸出裡的名字換成佔位，讓「名字本身」造成的差異（hostname、host）不算設定。 */
+/** 只在每行的「值」裡、以完整詞（前後不是英數或 `-`）把名字換成佔位，設定鍵與別的字串（如 `a` 出現在 `addressfamily`）不動（review F10）。 */
 function sshProbeNormalize(output: string, name: string): string {
-  return output.split(name.toLowerCase()).join("\0");
+  const word = new RegExp(`(?<![A-Za-z0-9-])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9-])`, "g");
+  return output
+    .split("\n")
+    .map((line) => {
+      const space = line.indexOf(" ");
+      return space < 0 ? line : line.slice(0, space) + line.slice(space).replace(word, "\0");
+    })
+    .join("\n");
 }
 
 /** 名字相對於哨兵名字：`ssh -G` 輸出（名字正規化後）有任何差異，表示有 Host／Match 對這個名字（或 user@名字）生效。 */
