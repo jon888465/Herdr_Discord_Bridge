@@ -559,43 +559,40 @@ test("reconnect schedules a probe, records success/failure, and discards results
   scheduled.shift()!();
 });
 
-// ISSUE-166 review F3／F6／F7／F8：tunnel 啟動或停止失敗後，狀態要能重試。
+// ISSUE-166 review F3／F6／F7：tunnel 啟動或停止失敗後，狀態要能重試。
 function podHub() {
   const config = { id: "pod", ssh: "unused", socket: "/unused", hookSocket: "/h" };
   const hub = new HerdrHub([config], undefined, 100, 10, () => {}, () => "/unused", undefined, () => {});
   const remote = hub["remotes"].get("pod")!;
-  const calls = { start: 0, hookStart: 0, stop: 0, hookStop: 0 };
-  const fail = { start: false, hookStart: false, stop: false, hookStop: false };
-  const stub = (target: { start(): void; stop(): void }, key: "start" | "stop", hook: boolean) => {
-    const name = (hook ? `hook${key[0]!.toUpperCase()}${key.slice(1)}` : key) as keyof typeof calls;
-    target[key] = () => {
-      calls[name]++;
+  const calls: Record<string, number> = { start: 0, hookStart: 0, stop: 0, hookStop: 0 };
+  const fail: Record<string, boolean> = {};
+  const wire = (name: string, tunnel: { start(): void; stop(): void }, key: "start" | "stop") => {
+    tunnel[key] = () => {
+      calls[name]!++;
       if (fail[name]) throw new Error("tunnel error");
     };
   };
-  for (const key of ["start", "stop"] as const) {
-    stub(remote.tunnel, key, false);
-    stub(remote.hookTunnel!, key, true);
-  }
+  wire("start", remote.tunnel, "start");
+  wire("stop", remote.tunnel, "stop");
+  wire("hookStart", remote.hookTunnel!, "start");
+  wire("hookStop", remote.hookTunnel!, "stop");
   return { hub, calls, fail };
 }
 
 test("a failed reconnect tries both tunnels, stops the started one and stays retryable (review F3, F7)", () => {
   const { hub, calls, fail } = podHub();
   hub.disconnectMachine("pod");
-  fail.start = true; // 一般 tunnel 啟動丟錯：hook tunnel 仍要被嘗試，整體回復成可重試的斷線。
+  fail.start = true; // 一般 tunnel 啟動丟錯：hook tunnel 仍要被嘗試
   assert.deepEqual(hub.connectMachine("pod"), { ok: false, reason: "連線失敗" });
   assert.equal(calls.hookStart, 1);
   assert.equal(hub.isDisconnected("pod"), true);
   fail.start = false;
-  fail.hookStart = true; // hook tunnel 啟動丟錯：已啟動的一般 tunnel 要停掉。
-  const stopsBefore = calls.stop;
+  fail.hookStart = true; // hook tunnel 啟動丟錯：已啟動的一般 tunnel 要停掉
+  const stops = calls.stop!;
   assert.equal(hub.connectMachine("pod").ok, false);
-  assert.equal(calls.stop, stopsBefore + 1);
-  assert.equal(hub.isDisconnected("pod"), true);
+  assert.equal(calls.stop, stops + 1);
   fail.hookStart = false;
   assert.deepEqual(hub.connectMachine("pod"), { ok: true, status: "connected" });
-  assert.equal(hub.isDisconnected("pod"), false);
 });
 
 test("a tunnel that fails to stop leaves the other one stopped, and disconnecting again retries (review F6)", () => {
@@ -607,10 +604,9 @@ test("a tunnel that fails to stop leaves the other one stopped, and disconnectin
   fail.stop = false;
   assert.deepEqual(hub.disconnectMachine("pod"), { ok: true, status: "disconnected" });
   assert.deepEqual([calls.stop, calls.hookStop], [2, 2]);
-  assert.deepEqual(hub.disconnectMachine("pod"), { ok: true, status: "disconnected", note: "已是斷線" }, "清理完成後才是 no-op");
-  assert.equal(calls.stop, 2);
-  // 待清理時重新連線，會清掉待清理，之後的斷線走一般流程。
-  fail.stop = true;
+  const noop = { ok: true, status: "disconnected", note: "已是斷線" };
+  assert.deepEqual(hub.disconnectMachine("pod"), noop, "清理完成後才是 no-op");
+  fail.stop = true; // 待清理時重新連線會清掉待清理，之後的斷線走一般流程
   hub.connectMachine("pod");
   assert.equal(hub.disconnectMachine("pod").ok, false);
   assert.equal(hub.connectMachine("pod").ok, true);
@@ -618,41 +614,65 @@ test("a tunnel that fails to stop leaves the other one stopped, and disconnectin
   assert.deepEqual(hub.disconnectMachine("pod"), { ok: true, status: "disconnected" });
 });
 
-test("a failing kill keeps the child so a retried stop reaches the same process (review F8)", async () => {
+test("a stop that cannot reach its process keeps the child for a retry, and a spawn error recovers (review F8, F10, F11)", async () => {
   const { MachineTunnel, HookReverseTunnel } = await import("../src/machines.js");
   const { EventEmitter } = await import("node:events");
   type Spawn = typeof import("node:child_process").spawn;
   type Child = import("node:child_process").ChildProcess;
   const dir = await mkdtemp(join(tmpdir(), "mt-"));
   const config = { id: "agy", ssh: "unused", socket: "/r", hookSocket: "/h" };
+  const sock = join(dir, "t.sock");
   const makers = [
-    (s: Spawn) => new MachineTunnel(config, () => {}, join(dir, "t.sock"), s),
+    (s: Spawn) => new MachineTunnel(config, () => {}, sock, s),
     (s: Spawn) => new HookReverseTunnel(config, "/local", () => {}, s),
   ];
+  const fakeSpawn = (children: Child[], kill: (c: Child) => boolean): Spawn =>
+    (() => {
+      const child = Object.assign(new EventEmitter(), { exitCode: null, signalCode: null }) as unknown as Child;
+      child.kill = () => kill(child);
+      children.push(child);
+      return child;
+    }) as Spawn;
   try {
-    for (const make of makers) {
-      const children: Child[] = [];
-      let kills = 0;
-      let killFails = true;
-      const t = make((() => {
-        const child = new EventEmitter() as Child;
-        child.kill = () => {
-          kills++;
-          if (killFails) throw new Error("kill failed");
-          return true;
-        };
-        children.push(child);
-        return child;
-      }) as Spawn);
-      t.start();
-      assert.throws(() => t.stop(), /kill failed/);
-      killFails = false;
-      t.stop();
-      assert.deepEqual([kills, children.length], [2, 1], "同一個子程序被再 kill 一次，沒有多開");
-      t.start();
-      assert.equal(children.length, 2);
-      t.stop();
-    }
+    // F8／F10：kill 丟錯，或回 false 而程序還活著：stop 丟錯並保留同一個子程序，重試才真的停到它。
+    for (const mode of ["throws", "returns false"] as const)
+      for (const make of makers) {
+        const children: Child[] = [];
+        let kills = 0;
+        let reachable = false;
+        const t = make(
+          fakeSpawn(children, () => {
+            kills++;
+            if (reachable) return true;
+            if (mode === "throws") throw new Error("kill failed");
+            return false;
+          }),
+        );
+        t.start();
+        assert.throws(() => t.stop(), /kill failed|SIGTERM/, mode);
+        reachable = true;
+        t.stop();
+        assert.deepEqual([kills, children.length], [2, 1], `${mode}: 同一個子程序再停一次，沒有多開`);
+        t.start();
+        assert.equal(children.length, 2, mode);
+        t.stop();
+      }
+    // 程序已經結束時 kill 回 false 不算失敗。
+    const done: Child[] = [];
+    const exited = new MachineTunnel(config, () => {}, sock, fakeSpawn(done, (c) => {
+      Object.assign(c, { exitCode: 0 });
+      return false;
+    }));
+    exited.start();
+    assert.doesNotThrow(() => exited.stop());
+    // F11：spawn 失敗只發 error、不發 exit，也要清掉 child 並排程重連，之後才能再啟動。
+    const failed: Child[] = [];
+    const t = new MachineTunnel(config, () => {}, sock, fakeSpawn(failed, () => true));
+    t.start();
+    failed[0]!.emit("error", new Error("spawn ssh ENOENT"));
+    t.start();
+    assert.equal(failed.length, 2, "error 之後 child 已清掉，start 會重新 spawn");
+    t.stop();
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

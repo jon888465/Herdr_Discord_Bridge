@@ -104,6 +104,17 @@ export function tunnelSocketPath(id: string): string {
   );
 }
 
+/** SIGTERM 沒送達（kill 丟錯，或回 false 而程序還活著）就丟錯，呼叫端因此保留參照讓重試找得到（review F8、F10）。 */
+function terminate(child: ChildProcess | null): void {
+  if (
+    child &&
+    !child.kill("SIGTERM") &&
+    child.exitCode === null &&
+    child.signalCode === null
+  )
+    throw new Error("tunnel process did not receive SIGTERM");
+}
+
 /** 維持一條 `ssh -L` 轉發；斷線後以退避重連。 */
 export class MachineTunnel {
   readonly socketPath: string;
@@ -137,8 +148,7 @@ export class MachineTunnel {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     const child = this.child;
-    // 先 kill 再清參照：kill 丟錯時要保留，重試才找得到（review F8）。
-    child?.kill("SIGTERM");
+    terminate(child); // 失敗會丟錯，先不清參照（review F8、F10）
     this.child = null;
     fs.rmSync(this.socketPath, { force: true });
   }
@@ -170,10 +180,8 @@ export class MachineTunnel {
     child.stderr?.on("data", (chunk: Buffer) => {
       stderr = (stderr + chunk.toString()).slice(-300);
     });
-    child.once("error", (error) =>
-      this.log(`machine ${this.machine.id}: ssh failed: ${error.message}`),
-    );
-    child.once("exit", (code) => {
+    // spawn 失敗（ENOENT／EACCES）只發 error、不保證有 exit：error 也要走同一個收尾，child 才會清掉、退避重連（review F11）。
+    const closed = (code: number | null) => {
       if (this.child !== child) return;
       this.child = null;
       if (this.stopped) return;
@@ -184,7 +192,12 @@ export class MachineTunnel {
       );
       this.timer = setTimeout(() => this.spawnSsh(), this.backoffMs);
       this.backoffMs = Math.min(this.backoffMs * 2, 30000);
+    };
+    child.once("error", (error) => {
+      this.log(`machine ${this.machine.id}: ssh failed: ${error.message}`);
+      closed(null);
     });
+    child.once("exit", closed);
   }
 }
 
@@ -239,8 +252,7 @@ export class HookReverseTunnel {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     const child = this.child;
-    // 同 MachineTunnel.stop（review F8）。
-    child?.kill("SIGTERM");
+    terminate(child);
     this.child = null;
   }
 
@@ -602,10 +614,7 @@ export class HerdrHub extends HerdrClient {
   }
 
   stopTunnels(): void {
-    for (const remote of this.remotes.values()) {
-      remote.tunnel.stop();
-      remote.hookTunnel?.stop();
-    }
+    for (const remote of this.remotes.values()) this.stopRemoteTunnels(remote);
   }
 
   /** 把本機檔案上傳到該機器上的目錄；機器不存在時回報錯誤。 */

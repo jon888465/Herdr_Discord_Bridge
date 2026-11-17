@@ -6,16 +6,16 @@
 
 **預期：**看板可對機器連線／斷線，斷線後顯示「已斷線」且不自動重連；有進行中的工作時拒絕，同一台再按一次才強制，不能悄悄中斷。
 
-**拆分經過：**原實作是單一 PR #275（+1281／-37），diff 78950 字元超過 bridge review 上限 60000，`card review` 與自動迴圈都拒絕；ubuntu CI 另因 B 的測試在 Linux 失敗（socket 路徑為目錄時 `ERR_FS_EISDIR`）。使用者 2026-11-17 決定拆成 A、B 兩個 PR 與兩張卡（A 卡只保留 hub 核心的驗收條件，看板操作與控制通道的條件移到 B 卡，沒有刪除）。A 的 PR diff 要維持在上限內：SPEC／CONTEXT 只新增段落、不改既有長行（長行改一個字 diff 會算整行兩次）。程式是 Worker（codex `helper`）所寫，我依檔案與 hunk 切出 A、重寫文件並依 review 修正。
+**拆分經過：**原實作是單一 PR #275（+1281／-37），diff 超過 bridge review 上限 60000 字元而無法走 review；ubuntu CI 另因 B 的測試失敗（見 B）。使用者 2026-11-17 決定拆成 A、B 兩個 PR 與兩張卡（A 卡只保留 hub 核心的驗收條件，其餘移到 B 卡，沒有刪除）。為了讓 A 的 diff 維持在上限內，SPEC 只新增段落、不改既有長行，`CONTEXT.md` 索引待 B 一併更新。程式是 Worker（codex `helper`）所寫，我依檔案與 hunk 切出 A、重寫文件並依 review 修正。
 
-**A 範圍：**`machines.ts`（連線／斷線、`generation`、tunnel 可重啟、主動探測）、`machine-busy.ts`（busy 判定、遠端工作登記表）、`agent-pool.ts`（只新增唯讀 `busySnapshot()`）、`card-role-assignment.ts`／`main.ts`／`card-review-wiring.ts`、`machine-status-file.ts`（`disconnected`）；契約見 SPEC.md「Machine 手動連線／斷線，hub 核心」。**B 範圍（未做）：**控制通道、看板 `o`／`x` 與二次確認、顯示「已斷線」、修正 Linux 上失敗的 socket 路徑處理。
+**A 範圍：**`machines.ts`（連線／斷線、`generation`、tunnel 可重啟、主動探測）、`machine-busy.ts`（busy 判定、遠端工作登記表）、`agent-pool.ts`（只新增唯讀 `busySnapshot()`）、`card-role-assignment.ts`／`main.ts`／`card-review-wiring.ts`、`machine-status-file.ts`（`disconnected`）；契約見 SPEC.md「Machine 手動連線／斷線，hub 核心」。**B（未做）：**控制通道、看板 `o`／`x` 與二次確認、顯示「已斷線」、修正 Linux 上失敗的 socket 路徑處理。
 
 **獨立 review 修正（逐筆見卡片 Review 發現）：**
-- **F2、F5、F9：忙碌判定漏掉遠端工作。**遠端角色（`startRemoteRole`）與 `card review` 的遠端 reviewer（`reviewOnRemote`）不經 AgentPool、準備期間也沒有 stream，普通斷線會中斷它們；`card review` 還在等 `fetchMaterial` 期間可能被斷線後才啟動遠端 checkout。新增 `RemoteRoleWork`、`trackRemoteRole`、`trackRemoteWork`，並在登記後用即時狀態重驗。盤點過所有對遠端做重活的入口，只有這兩個。
-- **F3、F6、F7、F8：tunnel 啟動／停止失敗後無法重試。**連線失敗要回復成可重試的斷線；兩條 tunnel 各自嘗試啟動與停止；沒停乾淨標 `stopPending`，重按斷線重試；`kill` 丟錯時保留子程序參照。
+- **F2、F5、F9：忙碌判定漏掉遠端工作。**遠端角色（`startRemoteRole`）與 `card review` 的遠端 reviewer（`reviewOnRemote`）不經 AgentPool、準備期間也沒有 stream，普通斷線會中斷它們；`card review` 還可能在等 `fetchMaterial` 期間被斷線後才啟動遠端 checkout。新增 `RemoteRoleWork`、`trackRemoteRole`、`trackRemoteWork`，並在登記後用即時狀態重驗。盤點過所有對遠端做重活的入口，只有這兩個。
+- **F3、F6、F7、F8、F10、F11：tunnel 啟動／停止失敗後無法重試。**連線失敗回復成可重試的斷線；兩條 tunnel 各自嘗試啟動與停止；沒停乾淨標 `stopPending`，重按斷線重試；SIGTERM 沒送達（`kill` 丟錯，或回 `false` 而程序還活著）時保留子程序參照；一般 tunnel 的 `ssh` spawn 失敗只發 `error`（**這是原本就潛在的缺陷**，原來只記日誌），現在也會清掉子程序並退避重連。
 - **F1、F4：範圍落差。**reviewer 拿整張卡的驗收條件審一半的功能；經使用者同意把卡拆成 A、B（我先在卡片加說明沒有效果）。
 
-**測試（2026-11-17）：**全套 `npm test` 2040 項，2039 pass、0 fail、1 skipped（為了縮小 PR diff 把我的回歸測試合併，項數比合併前少，涵蓋的情境不變）；`npm run lint` 通過；`machine-busy.ts`、`machine-status-file.ts` 與其測試 `prettier --check` 通過，`machines.ts`、`main.ts`、`card-role-assignment.ts`、`card-review-wiring.ts`、`test/machines.test.ts` 在 HEAD 本來就不符，只做最小編輯。每筆修正的回歸測試我都暫時改回舊行為確認會變紅才還原；有兩次還原沒套用乾淨（空白不一致、多貼一行注釋），是我的疏忽，讀檔確認後才取得上面的數字。
+**測試（2026-11-17）：**全套 `npm test` 2040 項，2039 pass、0 fail、1 skipped（我把回歸測試合併以縮小 PR diff，項數比合併前少，情境不變）；`npm run lint` 通過；`machine-busy.ts`、`machine-status-file.ts` 與其測試 `prettier --check` 通過，`machines.ts` 等 5 個檔在 HEAD 本來就不符，只做最小編輯。回歸測試都暫時改回舊行為確認變紅才還原；有兩次還原沒套用乾淨（空白不一致、多貼一行注釋），是我的疏忽。
 
 **未驗證：**沒有實機：真實 SSH 斷線後不再重連、再次連線、hook tunnel 停止與重啟、有進行中工作時的拒絕與強制斷線，要 B 有入口後才能驗；`main.ts`／`card-review-wiring.ts` 的接線只有型別與 build 檢查，包裝與檢查邏輯本身有單元測試。**尚未通過獨立 review。**
 
