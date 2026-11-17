@@ -7,6 +7,7 @@ import { configDirectory, stateDirectory } from "./config.js";
 import { LEDGER_MAX_FILE_BYTES } from "./card.js";
 import { CardStore } from "./card-store.js";
 import { ensureCardsDirectory } from "./card-directory.js";
+import { boardEditingMarker } from "./card-board-open.js";
 import {
   applyEdit,
   boardKeyAction,
@@ -115,6 +116,15 @@ function editText(initial: string): string | undefined {
   const file = path.join(dir, "card.md");
   fs.writeFileSync(file, initial, { mode: 0o600 });
   editing = true;
+  // bridge 啟動時會把舊看板換成新的；留下標記讓它知道這裡正在編輯，不要關掉（ISSUE-160）。
+  const marker = boardEditingMarker(stateDirectory());
+  try {
+    fs.writeFileSync(marker, JSON.stringify({ pid: process.pid }), {
+      mode: 0o600,
+    });
+  } catch {
+    // 寫不出標記只代表 bridge 可能在編輯中重開看板，不影響編輯本身。
+  }
   process.stdin.setRawMode(false);
   process.stdout.write(LEAVE_ALT_SCREEN);
   try {
@@ -128,6 +138,7 @@ function editText(initial: string): string | undefined {
     return text === initial ? undefined : text;
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(marker, { force: true });
     process.stdout.write(ENTER_ALT_SCREEN);
     process.stdin.setRawMode(true);
     editing = false;
