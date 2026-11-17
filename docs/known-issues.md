@@ -12,10 +12,11 @@
 
 **獨立 review 修正（逐筆見卡片 Review 發現）：**
 - **F2、F5、F9：忙碌判定漏掉遠端工作。**遠端角色（`startRemoteRole`）與 `card review` 的遠端 reviewer（`reviewOnRemote`）不經 AgentPool、準備期間也沒有 stream，普通斷線會中斷它們；`card review` 還可能在等 `fetchMaterial` 期間被斷線後才啟動遠端 checkout。新增 `RemoteRoleWork`、`trackRemoteRole`、`trackRemoteWork`，並在登記後用即時狀態重驗。盤點過所有對遠端做重活的入口，只有這兩個。
-- **F3、F6、F7、F8、F10、F11：tunnel 啟動／停止失敗後無法重試。**連線失敗回復成可重試的斷線；兩條 tunnel 各自嘗試啟動與停止；沒停乾淨標 `stopPending`，重按斷線重試；SIGTERM 沒送達（`kill` 丟錯，或回 `false` 而程序還活著）時保留子程序參照；一般 tunnel 的 `ssh` spawn 失敗只發 `error`（**這是原本就潛在的缺陷**，原來只記日誌），現在也會清掉子程序並退避重連。
+- **F3、F6、F7、F8、F10、F11、F12：tunnel 啟動／停止失敗後無法重試。**連線失敗回復成可重試的斷線；兩條 tunnel 各自嘗試啟動與停止；沒停乾淨標 `stopPending`，重按斷線重試；SIGTERM 沒送達（`kill` 丟錯，或回 `false` 而程序還活著）時保留子程序參照；一般 tunnel 的 `ssh` spawn 失敗只發 `error`（**這是原本就潛在的缺陷**，原來只記日誌），現在也會清掉子程序並退避重連；但 `kill` 送不到信號（EPERM 等）的 `error` 有 pid、程序還活著，不能當成 spawn 失敗（F12，是我上一輪 F11 修法引出的）。
+- **F13：直接 SSH 操作沒擋手動斷線。**`uploadTo`、`cleanupAttachments` 只檢查 machine 存在，斷線後仍會直接開 SSH 上傳或刪除遠端檔案；兩處加斷線檢查。沒有改 `machineConfig`（那會讓強制斷線後的遠端清理找不到設定）。
 - **F1、F4：範圍落差。**reviewer 拿整張卡的驗收條件審一半的功能；經使用者同意把卡拆成 A、B（我先在卡片加說明沒有效果）。
 
-**測試（2026-11-17）：**全套 `npm test` 2040 項，2039 pass、0 fail、1 skipped（我把回歸測試合併以縮小 PR diff，項數比合併前少，情境不變）；`npm run lint` 通過；`machine-busy.ts`、`machine-status-file.ts` 與其測試 `prettier --check` 通過，`machines.ts` 等 5 個檔在 HEAD 本來就不符，只做最小編輯。回歸測試都暫時改回舊行為確認變紅才還原；有兩次還原沒套用乾淨（空白不一致、多貼一行注釋），是我的疏忽。
+**測試（2026-11-17）：**全套 `npm test` 2041 項，2040 pass、0 fail、1 skipped（我把回歸測試合併以縮小 PR diff，項數比合併前少，情境不變）；`npm run lint` 通過；`machine-busy.ts`、`machine-status-file.ts` 與其測試 `prettier --check` 通過，`machines.ts` 等 5 個檔在 HEAD 本來就不符，只做最小編輯。回歸測試都暫時改回舊行為確認變紅才還原；有兩次還原沒套用乾淨（空白不一致、多貼一行注釋），是我的疏忽。
 
 **未驗證：**沒有實機：真實 SSH 斷線後不再重連、再次連線、hook tunnel 停止與重啟、有進行中工作時的拒絕與強制斷線，要 B 有入口後才能驗；`main.ts`／`card-review-wiring.ts` 的接線只有型別與 build 檢查，包裝與檢查邏輯本身有單元測試。**尚未通過獨立 review。**
 

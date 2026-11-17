@@ -711,9 +711,9 @@ Card 看板 pane（ISSUE-160，`card-board`，已實作，2026-11-16 實機驗�
 
 Machine 手動連線／斷線，hub 核心（第三階段 A，ISSUE-166，已實作、待實機驗收；**目前沒有任何入口可以觸發**，控制通道與看板按鍵屬於第三階段 B）：
 
-- **斷線** `HerdrHub.disconnectMachine(id, {force})`：標為手動斷線並停止一般與 hook tunnel，兩條各自嘗試。SIGTERM 沒送達（`kill` 丟錯，或回 `false` 而程序還活著）時保留子程序參照；沒停乾淨時仍標為斷線、請求照樣被擋，但回 `ok: false` 並記 `stopPending`，重按斷線直接重試停止，成功才回 `ok: true`。之後 aggregate 跳過這台、不讀寫快取，直接請求與 `freshAgentsOn` 拒絕「machine 已斷線」；在途的舊回應不能改寫狀態（`generation`）；不自動重連；只存在記憶體，bridge 重啟會按 config 重新連線。
+- **斷線** `HerdrHub.disconnectMachine(id, {force})`：標為手動斷線並停止一般與 hook tunnel，兩條各自嘗試；`uploadTo`、`cleanupAttachments` 這類直接 SSH 操作在手動斷線後也拒絕「machine 已斷線」。SIGTERM 沒送達（`kill` 丟錯，或回 `false` 而程序還活著）時保留子程序參照；沒停乾淨時仍標為斷線、請求照樣被擋，但回 `ok: false` 並記 `stopPending`，重按斷線直接重試停止，成功才回 `ok: true`。之後 aggregate 跳過這台、不讀寫快取，直接請求與 `freshAgentsOn` 拒絕「machine 已斷線」；在途的舊回應不能改寫狀態（`generation`）；不自動重連；只存在記憶體，bridge 重啟會按 config 重新連線。
 - **忙碌守門：**有進行中的工作且未 `force` 時拒絕，回 `{ ok: false, needsForce: true, reason: "有進行中的工作：N 個進行中的回合，再按一次強制斷線" }`。判定 `machineBusyReason`（`src/machine-busy.ts`）＝該機器的 active stream ＋ AgentPool 租約與啟動中（`busySnapshot()`）＋遠端工作登記表 `RemoteRoleWork`。遠端工作含 task 的遠端角色（`trackRemoteRole`，cleanup 結束才釋放）與 `card review` 的遠端 reviewer（`trackRemoteWork`），對遠端做重活的入口目前只有這兩個；沒人呼叫 cleanup 會一直忙碌，偏安全。`card review` 登記後還要用即時的 `isDisconnected` 重驗，等待 `fetchMaterial` 期間被斷線就拒絕。
-- **連線** `connectMachine(id)`：清掉斷線旗標與 `stopPending`，兩條 tunnel 各自嘗試啟動，任一失敗就回復成可重試的斷線（停掉已啟動的）並回「連線失敗」；一般 tunnel 的 `ssh` spawn 失敗只發 `error`、不一定有 `exit`，`error` 也會清掉子程序並排程退避重連。成功只代表已開始連線，約 2 秒後以 `agent.list`（timeout 3000ms、retries 0）主動探測並更新旗標與 `observedAt`。重複連線／斷線是 no-op，未知 id 回「machine 不存在」。
+- **連線** `connectMachine(id)`：清掉斷線旗標與 `stopPending`，兩條 tunnel 各自嘗試啟動，任一失敗就回復成可重試的斷線（停掉已啟動的）並回「連線失敗」；`ssh` spawn 失敗只發 `error`、不一定有 `exit`，所以兩種 tunnel 在 spawn 失敗（`child.pid` 為空）的 `error` 也會清掉子程序並排程退避重連；`kill` 送不到信號（EPERM 等）的 `error` 有 pid，程序還活著，不收尾。成功只代表已開始連線，約 2 秒後以 `agent.list`（timeout 3000ms、retries 0）主動探測並更新旗標與 `observedAt`。重複連線／斷線是 no-op，未知 id 回「machine 不存在」。
 - 卡片遠端 reviewer 與 task 遠端角色的候選與 preflight 排除已手動斷線的 machine（`isDisconnected`）。
 
 Card 看板的 `project`（ISSUE-161，已實作，2026-11-16 實機驗收）：編輯／新增範本含 `project:` 行（`<機器>:<repo 目錄名>`，格式不合拒絕，留空＝不設）；新增預設 `local:<看板工作目錄名>`。bridge 只自動撿宣告 `project`／`projects` 且政策選用的卡，所以放行沒有 `project` 的卡仍允許（可手動 `card assign`），但看板必須提醒「bridge 不會自動撿卡」。看板只寫 `project`，不改 `projects`。

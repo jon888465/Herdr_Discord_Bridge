@@ -195,7 +195,8 @@ export class MachineTunnel {
     };
     child.once("error", (error) => {
       this.log(`machine ${this.machine.id}: ssh failed: ${error.message}`);
-      closed(null);
+      // 只有 spawn 失敗（沒有 pid）才收尾；kill 送不到信號（EPERM 等）也會發 error，但程序還活著（review F12）。
+      if (child.pid === undefined) closed(null);
     });
     child.once("exit", closed);
   }
@@ -283,7 +284,9 @@ export class HookReverseTunnel {
       this.backoffMs = Math.min(this.backoffMs * 2, 30000);
     };
     this.child = prepare;
-    prepare.once("error", (error) => retry(`mkdir failed: ${error.message}`));
+    prepare.once("error", (error) => {
+      if (prepare.pid === undefined) retry(`mkdir failed: ${error.message}`); // 有 pid 的 error 是信號失敗（review F12）
+    });
     prepare.once("exit", (code) => {
       if (this.stopped || this.child !== prepare) return;
       if (code !== 0) return retry(`mkdir exited ${code}`);
@@ -300,7 +303,9 @@ export class HookReverseTunnel {
       child.stderr?.on("data", (chunk: Buffer) => {
         stderr = (stderr + chunk.toString()).slice(-300);
       });
-      child.once("error", (error) => retry(`ssh failed: ${error.message}`));
+      child.once("error", (error) => {
+        if (child.pid === undefined) retry(`ssh failed: ${error.message}`);
+      });
       child.once("exit", (exit) =>
         retry(`closed (exit ${exit}) ${stderr.trim()}`),
       );
@@ -625,6 +630,7 @@ export class HerdrHub extends HerdrClient {
   ): Promise<string[]> {
     const remote = this.remotes.get(machineId);
     if (!remote) throw new Error(`unknown machine ${machineId}`);
+    if (remote.disconnected) throw new Error("machine 已斷線"); // review F13
     return uploadFiles(remote.config, remoteDir, files);
   }
 
@@ -635,6 +641,7 @@ export class HerdrHub extends HerdrClient {
   ): Promise<void> {
     const remote = this.remotes.get(machineId);
     if (!remote) throw new Error(`unknown machine ${machineId}`);
+    if (remote.disconnected) throw new Error("machine 已斷線");
     await cleanupRemoteAttachments(remote.config, root, minutes);
   }
 

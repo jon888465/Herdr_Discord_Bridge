@@ -673,7 +673,25 @@ test("a stop that cannot reach its process keeps the child for a retry, and a sp
     t.start();
     assert.equal(failed.length, 2, "error 之後 child 已清掉，start 會重新 spawn");
     t.stop();
+    // F12：有 pid 的 error 是信號失敗（例如 EPERM），程序還活著，不能被當成 spawn 失敗清掉。
+    for (const make of makers) {
+      const alive: Child[] = [];
+      const u = make(fakeSpawn(alive, () => true));
+      u.start();
+      Object.assign(alive[0]!, { pid: 4242 });
+      alive[0]!.emit("error", new Error("EPERM"));
+      u.start();
+      assert.equal(alive.length, 1, "仍活著的 child 沒被清掉");
+      u.stop();
+    }
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("direct SSH operations are refused on a manually disconnected machine (review F13)", async () => {
+  const { hub } = podHub();
+  hub.disconnectMachine("pod");
+  await assert.rejects(hub.uploadTo("pod", "/d", []), /已斷線/);
+  await assert.rejects(hub.cleanupAttachments("pod", "/d", 1), /已斷線/);
 });
