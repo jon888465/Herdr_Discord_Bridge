@@ -196,7 +196,7 @@ test("machineObservations records when a remote was last probed, and a failing l
   try {
     // 還沒請求過：沒有觀測時間。
     assert.deepEqual(hub.machineObservations(), [
-      { id: "agy", reachable: false },
+      { id: "agy", reachable: false, disconnected: false },
     ]);
     const before = Date.now();
     await hub.listAgents();
@@ -332,4 +332,380 @@ test("machines hookSocket validation and reverse-tunnel args (ISSUE-045)", async
     "pod",
   ]);
   assert.ok(args.includes("ExitOnForwardFailure=yes"));
+});
+
+test("manual disconnect skips aggregate/cache and rejects direct requests until reconnect", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "mc-"));
+  let probes = 0;
+  const local = await fake(join(dir, "l.sock"), () => ({ agents: [] }));
+  const remote = await fake(join(dir, "r.sock"), () => {
+    probes++;
+    return { agents: [{ terminal_id: "t", pane_id: "p", workspace_id: "w" }] };
+  });
+  let busy: string | undefined;
+  const hub = new HerdrHub(
+    [{ id: "agy", ssh: "unused", socket: "/r" }],
+    join(dir, "l.sock"),
+    1000,
+    10,
+    () => {},
+    () => join(dir, "r.sock"),
+    () => busy,
+  );
+  const state = hub["remotes"].get("agy")!;
+  let starts = 0,
+    stops = 0;
+  state.tunnel.start = () => {
+    starts++;
+  };
+  state.tunnel.stop = () => {
+    stops++;
+  };
+  try {
+    assert.deepEqual(hub.connectMachine("missing"), {
+      ok: false,
+      reason: "machine 不存在",
+    });
+    assert.deepEqual(hub.disconnectMachine("missing"), {
+      ok: false,
+      reason: "machine 不存在",
+    });
+    assert.equal(hub.connectMachine("agy").ok, true);
+    assert.equal(starts, 0);
+    assert.equal((await hub.listAgents()).length, 1);
+    busy = "2 個進行中的回合";
+    assert.deepEqual(hub.disconnectMachine("agy"), {
+      ok: false,
+      reason: "有進行中的工作：2 個進行中的回合，再按一次強制斷線",
+      needsForce: true,
+    });
+    assert.equal(stops, 0);
+    assert.deepEqual(hub.disconnectMachine("agy", { force: true }), {
+      ok: true,
+      status: "disconnected",
+    });
+    const before = hub.machineObservations();
+    assert.deepEqual(hub.disconnectMachine("agy"), {
+      ok: true,
+      status: "disconnected",
+      note: "已是斷線",
+    });
+    assert.equal(stops, 1);
+    assert.deepEqual(await hub.listAgents(), []);
+    await assert.rejects(hub.requestOn("agy", "agent.list"), /machine 已斷線/);
+    await assert.rejects(hub.freshAgentsOn("agy"), /machine 已斷線/);
+    await assert.rejects(
+      hub.request("agent.read", { target: "agy:p" }),
+      /machine 已斷線/,
+    );
+    assert.equal(probes, 1);
+    assert.deepEqual(hub.machineObservations(), before);
+    assert.equal(state.cache.size, 1);
+    assert.deepEqual(hub.connectMachine("agy"), {
+      ok: true,
+      status: "connected",
+    });
+    assert.equal(starts, 1);
+    assert.deepEqual(hub.connectMachine("agy"), {
+      ok: true,
+      status: "connected",
+      note: "已在連線中",
+    });
+    assert.equal(starts, 1);
+    assert.equal((await hub.listAgents()).length, 1);
+    assert.equal(hub.machineObservations()[0].disconnected, false);
+  } finally {
+    local.close();
+    remote.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("both tunnels restart after stop and ignore old process exit", async () => {
+  const { MachineTunnel, HookReverseTunnel } =
+    await import("../src/machines.js");
+  const { EventEmitter } = await import("node:events");
+  const { spawn } = await import("node:child_process");
+  const children: import("node:child_process").ChildProcess[] = [];
+  const spawnProcess: typeof spawn = (() => {
+    const child =
+      new EventEmitter() as import("node:child_process").ChildProcess;
+    child.kill = () => true;
+    children.push(child);
+    return child;
+  }) as typeof spawn;
+  const dir = await mkdtemp(join(tmpdir(), "mt-"));
+  const config = { id: "agy", ssh: "unused", socket: "/r", hookSocket: "/h" };
+  const tunnel = new MachineTunnel(
+    config,
+    () => {},
+    join(dir, "t.sock"),
+    spawnProcess,
+  );
+  const hook = new HookReverseTunnel(config, "/local", () => {}, spawnProcess);
+  try {
+    for (const t of [tunnel, hook]) {
+      t.start();
+      const old = children.at(-1)!;
+      t.stop();
+      const count = children.length;
+      t.start();
+      assert.equal(children.length, count + 1);
+      old.emit("exit", 0);
+      assert.equal(children.length, count + 1);
+      if (t === hook) {
+        children.at(-1)!.emit("exit", 0);
+        assert.equal(children.length, count + 2);
+      }
+      t.stop();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("in-flight aggregate response cannot revive a manually disconnected remote", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "mf-"));
+  const local = await fake(join(dir, "l.sock"), () => ({ agents: [] }));
+  const hub = new HerdrHub(
+    [{ id: "agy", ssh: "unused", socket: "/r" }],
+    join(dir, "l.sock"),
+    1000,
+    10,
+    () => {},
+    () => join(dir, "r.sock"),
+  );
+  const remote = hub["remotes"].get("agy")!;
+  remote.tunnel.stop = () => {};
+  let release!: (result: unknown) => void;
+  let started!: () => void;
+  const probing = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  remote.client.request = <T>() =>
+    new Promise<T>((resolve) => {
+      release = (value) => resolve(value as T);
+      started();
+    });
+  try {
+    const request = hub.listAgents();
+    await probing;
+    hub.disconnectMachine("agy");
+    const before = hub.machineObservations();
+    release({ agents: [{ terminal_id: "t" }] });
+    assert.deepEqual(await request, []);
+    assert.deepEqual(hub.machineObservations(), before);
+    assert.equal(remote.cache.size, 0);
+  } finally {
+    local.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("reconnect schedules a probe, records success/failure, and discards results after disconnect", async () => {
+  const scheduled: Array<() => void> = [];
+  const hub = new HerdrHub(
+    [{ id: "pod", ssh: "unused", socket: "/unused" }],
+    undefined,
+    100,
+    10,
+    () => {},
+    () => "/unused",
+    undefined,
+    (callback, delay) => {
+      assert.equal(delay, 2000);
+      scheduled.push(callback);
+    },
+  );
+  const remote = hub["remotes"].get("pod")!;
+  remote.tunnel.start = () => {};
+  remote.tunnel.stop = () => {};
+  for (const succeeds of [true, false]) {
+    hub.disconnectMachine("pod");
+    remote.client.request = async <T,>(
+      _method: string,
+      _params?: unknown,
+      options?: { timeoutMs?: number; retries?: number },
+    ) => {
+      assert.deepEqual(options, { timeoutMs: 3000, retries: 0 });
+      if (!succeeds) throw new Error("unreachable");
+      return { agents: [] } as T;
+    };
+    hub.connectMachine("pod");
+    assert.equal(hub.machineObservations()[0].observedAt, undefined);
+    scheduled.shift()!();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(hub.machineObservations()[0].reachable, succeeds);
+    assert.equal(typeof hub.machineObservations()[0].observedAt, "number");
+  }
+  hub.disconnectMachine("pod");
+  hub.connectMachine("pod");
+  let release!: (value: unknown) => void;
+  remote.client.request = <T,>() =>
+    new Promise<T>((resolve) => {
+      release = (value) => resolve(value as T);
+    });
+  scheduled.shift()!();
+  hub.disconnectMachine("pod");
+  const before = hub.machineObservations();
+  release({ agents: [] });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.deepEqual(hub.machineObservations(), before);
+  hub.connectMachine("pod");
+  hub.disconnectMachine("pod");
+  remote.client.request = () => {
+    throw new Error("stale timer must not probe");
+  };
+  scheduled.shift()!();
+});
+
+// ISSUE-166 review F3／F6／F7：tunnel 啟動或停止失敗後，狀態要能重試。
+function podHub() {
+  const config = { id: "pod", ssh: "unused", socket: "/unused", hookSocket: "/h" };
+  const hub = new HerdrHub([config], undefined, 100, 10, () => {}, () => "/unused", undefined, () => {});
+  const remote = hub["remotes"].get("pod")!;
+  const calls: Record<string, number> = { start: 0, hookStart: 0, stop: 0, hookStop: 0 };
+  const fail: Record<string, boolean> = {};
+  const wire = (name: string, tunnel: { start(): void; stop(): void }, key: "start" | "stop") => {
+    tunnel[key] = () => {
+      calls[name]!++;
+      if (fail[name]) throw new Error("tunnel error");
+    };
+  };
+  wire("start", remote.tunnel, "start");
+  wire("stop", remote.tunnel, "stop");
+  wire("hookStart", remote.hookTunnel!, "start");
+  wire("hookStop", remote.hookTunnel!, "stop");
+  return { hub, calls, fail };
+}
+
+test("a failed reconnect tries both tunnels, stops the started one and stays retryable (review F3, F7)", () => {
+  const { hub, calls, fail } = podHub();
+  hub.disconnectMachine("pod");
+  fail.start = true; // 一般 tunnel 啟動丟錯：hook tunnel 仍要被嘗試
+  assert.deepEqual(hub.connectMachine("pod"), { ok: false, reason: "連線失敗" });
+  assert.equal(calls.hookStart, 1);
+  assert.equal(hub.isDisconnected("pod"), true);
+  fail.start = false;
+  fail.hookStart = true; // hook tunnel 啟動丟錯：已啟動的一般 tunnel 要停掉
+  const stops = calls.stop!;
+  assert.equal(hub.connectMachine("pod").ok, false);
+  assert.equal(calls.stop, stops + 1);
+  fail.hookStart = false;
+  assert.deepEqual(hub.connectMachine("pod"), { ok: true, status: "connected" });
+});
+
+test("a tunnel that fails to stop leaves the other one stopped, and disconnecting again retries (review F6)", () => {
+  const { hub, calls, fail } = podHub();
+  fail.stop = true;
+  assert.equal(hub.disconnectMachine("pod").ok, false, "沒停乾淨不能回成功");
+  assert.equal(hub.isDisconnected("pod"), true);
+  assert.equal(calls.hookStop, 1, "一般 tunnel 丟錯，hook tunnel 仍要停");
+  fail.stop = false;
+  assert.deepEqual(hub.disconnectMachine("pod"), { ok: true, status: "disconnected" });
+  assert.deepEqual([calls.stop, calls.hookStop], [2, 2]);
+  const noop = { ok: true, status: "disconnected", note: "已是斷線" };
+  assert.deepEqual(hub.disconnectMachine("pod"), noop, "清理完成後才是 no-op");
+  fail.stop = true; // 待清理時重新連線會清掉待清理，之後的斷線走一般流程
+  hub.connectMachine("pod");
+  assert.equal(hub.disconnectMachine("pod").ok, false);
+  assert.equal(hub.connectMachine("pod").ok, true);
+  fail.stop = false;
+  assert.deepEqual(hub.disconnectMachine("pod"), { ok: true, status: "disconnected" });
+});
+
+test("a stop that cannot reach its process keeps the child for a retry, and a spawn error recovers (review F8, F10, F11)", async () => {
+  const { MachineTunnel, HookReverseTunnel } = await import("../src/machines.js");
+  const { EventEmitter } = await import("node:events");
+  type Spawn = typeof import("node:child_process").spawn;
+  type Child = import("node:child_process").ChildProcess;
+  const dir = await mkdtemp(join(tmpdir(), "mt-"));
+  const config = { id: "agy", ssh: "unused", socket: "/r", hookSocket: "/h" };
+  const sock = join(dir, "t.sock");
+  const makers = [
+    (s: Spawn) => new MachineTunnel(config, () => {}, sock, s),
+    (s: Spawn) => new HookReverseTunnel(config, "/local", () => {}, s),
+  ];
+  const fakeSpawn = (children: Child[], kill: (c: Child) => boolean): Spawn =>
+    (() => {
+      const child = Object.assign(new EventEmitter(), { exitCode: null, signalCode: null }) as unknown as Child;
+      child.kill = () => kill(child);
+      children.push(child);
+      return child;
+    }) as Spawn;
+  try {
+    // F8／F10：kill 丟錯，或回 false 而程序還活著：stop 丟錯並保留同一個子程序，重試才真的停到它。
+    for (const mode of ["throws", "returns false"] as const)
+      for (const make of makers) {
+        const children: Child[] = [];
+        let kills = 0;
+        let reachable = false;
+        const t = make(
+          fakeSpawn(children, () => {
+            kills++;
+            if (reachable) return true;
+            if (mode === "throws") throw new Error("kill failed");
+            return false;
+          }),
+        );
+        t.start();
+        assert.throws(() => t.stop(), /kill failed|SIGTERM/, mode);
+        reachable = true;
+        t.stop();
+        assert.deepEqual([kills, children.length], [2, 1], `${mode}: 同一個子程序再停一次，沒有多開`);
+        t.start();
+        assert.equal(children.length, 2, mode);
+        t.stop();
+      }
+    // 程序已經結束時 kill 回 false 不算失敗。
+    const done: Child[] = [];
+    const exited = new MachineTunnel(config, () => {}, sock, fakeSpawn(done, (c) => {
+      Object.assign(c, { exitCode: 0 });
+      return false;
+    }));
+    exited.start();
+    assert.doesNotThrow(() => exited.stop());
+    // F11：spawn 失敗只發 error、不發 exit，也要清掉 child 並排程重連，之後才能再啟動。
+    const failed: Child[] = [];
+    const t = new MachineTunnel(config, () => {}, sock, fakeSpawn(failed, () => true));
+    t.start();
+    failed[0]!.emit("error", new Error("spawn ssh ENOENT"));
+    t.start();
+    assert.equal(failed.length, 2, "error 之後 child 已清掉，start 會重新 spawn");
+    t.stop();
+    // F12：有 pid 的 error 是信號失敗（例如 EPERM），程序還活著，不能被當成 spawn 失敗清掉。
+    for (const make of makers) {
+      const alive: Child[] = [];
+      const u = make(fakeSpawn(alive, () => true));
+      u.start();
+      Object.assign(alive[0]!, { pid: 4242 });
+      alive[0]!.emit("error", new Error("EPERM"));
+      u.start();
+      assert.equal(alive.length, 1, "仍活著的 child 沒被清掉");
+      u.stop();
+    }
+    // F14：hook 準備程序 kill 失敗後自己退出，不能留著舊 child 擋住之後的重新啟動。
+    const kids: Child[] = [];
+    let reachable = false;
+    const hook = new HookReverseTunnel(config, "/local", () => {}, fakeSpawn(kids, () => {
+      if (!reachable) throw new Error("kill failed");
+      return true;
+    }));
+    hook.start();
+    assert.throws(() => hook.stop(), /kill failed/);
+    kids[0]!.emit("exit", 0);
+    hook.start();
+    assert.equal(kids.length, 2, "舊程序已退出，重新啟動要真的 spawn");
+    reachable = true;
+    hook.stop();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("direct SSH operations are refused on a manually disconnected machine (review F13)", async () => {
+  const { hub } = podHub();
+  hub.disconnectMachine("pod");
+  await assert.rejects(hub.uploadTo("pod", "/d", []), /已斷線/);
+  await assert.rejects(hub.cleanupAttachments("pod", "/d", 1), /已斷線/);
 });

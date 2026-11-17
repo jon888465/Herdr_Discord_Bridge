@@ -1,3 +1,4 @@
+import type { MachinePoolSnapshot, MachineWork } from "./machine-busy.js";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -123,6 +124,27 @@ export class AgentPool {
     if (!profile) throw new Error(`unknown Agent profile: ${id}`);
     return profile;
   }
+  /** Detached read-only snapshot, including profiles still starting before a lease exists. */
+  busySnapshot(): MachinePoolSnapshot {
+    const entry = (key: string): MachineWork => {
+      const binding = this.state.sessions[key];
+      return {
+        key,
+        workspace: key.slice(0, key.lastIndexOf("/")),
+        paneId: binding?.paneId,
+        terminalId: binding?.agent?.terminal_id,
+        machine:
+          typeof binding?.agent?.machine === "string"
+            ? binding.agent.machine
+            : undefined,
+      };
+    };
+    return {
+      leases: [...this.leases.keys()].map(entry),
+      pending: [...this.pending].map(entry),
+    };
+  }
+
   members(workspace: string): string[] {
     this.authorize(workspace);
     return [...(this.state.teams[workspace] ?? [])];
