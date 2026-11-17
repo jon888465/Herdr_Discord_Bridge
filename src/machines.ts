@@ -157,7 +157,7 @@ function sshProbeKeys(alias: string, configPath: string | undefined): { key: str
  * 同時解析這個名字與一個一定沒設定的哨兵名字（`alias` 有 `user@` 時兩者都帶同一個 user，讓 `Match user` 一致），
  * 把輸出裡的名字換成佔位後比對：有任何差異（HostName、User、Port、IdentityFile…）就是有 Host／Match 對它生效；
  * 完全相同表示只有 `Host *` 之類的通用設定（Host 只寫了與名字相同的 `HostName` 時也無法分辨，視為沒設定）。
- * `ssh -G` 只印設定、不連線、不轉發；以 `execFile` 傳參數不經 shell，名字以 `--` 隔開且不得以 `-` 開頭；`ssh` 不存在、
+ * `ssh -G` 不連線、不轉發，但會執行 `Match exec` 指令；以 `execFile` 傳參數不經 shell，名字以 `--` 隔開且不得以 `-` 開頭；`ssh` 不存在、
  * 逾時或失敗一律當作沒有。`configPath` 只給測試指定設定檔（`-F`）。結果快取 30 秒。
  */
 export function sshConfigHasHost(alias: string, configPath?: string): boolean {
@@ -198,14 +198,15 @@ export function refreshSshConfigHost(alias: string, configPath?: string): Promis
 }
 
 /**
- * 給看板繪製用：只讀快取、不阻塞；沒有或過期就在背景刷新，下一次繪製（定時刷新）才會用到新結果。
- * 第一次繪製前沒有結果時回 false。
+ * 給看板繪製用：只讀快取、不阻塞；同一個名字只在第一次沒有結果時背景探測一次，之後不再自動重跑
+ * （`ssh -G` 會執行 `Match exec` 指令，不能因為看板定時刷新就反覆觸發；review F15）。第一次繪製前沒有結果時回 false，
+ * 之後的繪製才用到結果。
  */
 export function sshConfigHasHostCached(alias: string): boolean {
   const probe = sshProbeKeys(alias, undefined);
   if (!probe) return false;
   const cached = sshProbeCache.get(probe.key);
-  if (!cached || Date.now() - cached.at >= SSH_PROBE_TTL_MS) void refreshSshConfigHost(alias);
+  if (!cached) void refreshSshConfigHost(alias);
   return cached?.value ?? false;
 }
 
