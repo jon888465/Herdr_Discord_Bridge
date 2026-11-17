@@ -754,6 +754,13 @@ test("sshConfigHasHost recognises Host entries in ~/.ssh/config and Include file
     await mkdir(join(dir, "config.d"));
     await writeFile(join(dir, "config.d", "work.conf"), "Host work-* !work-old\n  HostName work.example\n");
     await writeFile(join(dir, "config.d", "loop.conf"), `Include ${config}\nHost=looped\n`);
+    // 巢狀 Include 的相對路徑以設定目錄為基準：config.d/nested.conf 引入 hosts/extra.conf 要讀 <dir>/hosts/extra.conf，
+    // 不是 config.d/hosts/extra.conf（review round 2 F2）。
+    await writeFile(join(dir, "config.d", "nested.conf"), "Include hosts/extra.conf\n");
+    await mkdir(join(dir, "hosts"));
+    await writeFile(join(dir, "hosts", "extra.conf"), "Host nested-top\n");
+    await mkdir(join(dir, "config.d", "hosts"));
+    await writeFile(join(dir, "config.d", "hosts", "extra.conf"), "Host nested-wrong\n");
     await writeFile(
       config,
       [
@@ -774,6 +781,8 @@ test("sshConfigHasHost recognises Host entries in ~/.ssh/config and Include file
     assert.equal(sshConfigHasHost("quoted name", config), true);
     assert.equal(sshConfigHasHost("work-1", config), true, "Include 的檔與 pattern");
     assert.equal(sshConfigHasHost("looped", config), true, "Include 循環不會無限遞迴");
+    assert.equal(sshConfigHasHost("nested-top", config), true, "巢狀 Include 相對路徑以設定目錄為基準");
+    assert.equal(sshConfigHasHost("nested-wrong", config), false, "不以被 Include 的檔所在目錄解析");
     assert.equal(sshConfigHasHost("work-old", config), false, "否定 pattern 排除");
     assert.equal(sshConfigHasHost("other", config), false, "只有 Host * 不算已設定");
     assert.equal(sshConfigHasHost("x", config), false, "只有 ? 的 pattern 不算已設定");

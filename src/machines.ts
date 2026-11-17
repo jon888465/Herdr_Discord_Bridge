@@ -160,6 +160,8 @@ function includeFiles(value: string, baseDir: string): string[] {
 export function sshConfigHasHost(alias: string, configPath: string = defaultSshConfigPath()): boolean {
   const name = alias.includes("@") ? alias.slice(alias.lastIndexOf("@") + 1) : alias;
   if (!name) return false;
+  // ssh 的相對 Include 一律以使用者設定目錄（預設 ~/.ssh）為基準，不是被 Include 的檔所在目錄（review round 2 F2）。
+  const includeBaseDir = path.dirname(configPath);
   const visited = new Set<string>();
   const scan = (file: string, depth: number): boolean => {
     if (depth > 8 || visited.has(file)) return false;
@@ -188,7 +190,7 @@ export function sshConfigHasHost(alias: string, configPath: string = defaultSshC
         if (positive && !negated) return true;
       } else if (keyword === "include") {
         for (const value of args)
-          for (const included of includeFiles(value, path.dirname(file))) if (scan(included, depth + 1)) return true;
+          for (const included of includeFiles(value, includeBaseDir)) if (scan(included, depth + 1)) return true;
       }
     }
     return false;
