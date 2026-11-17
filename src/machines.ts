@@ -1,5 +1,5 @@
 import { isIP } from "node:net";
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { execFile, execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import fs from "node:fs";
 import os from "node:os";
@@ -114,25 +114,88 @@ function validHost(host: string): boolean {
     label.length <= 63 && /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(label));
 }
 
+const SSH_PROBE_SENTINEL = "herdr-bridge-unconfigured-probe.invalid";
+const SSH_PROBE_TTL_MS = 30_000;
+const sshProbeCache = new Map<string, { value: boolean; at: number }>();
+const sshProbeInFlight = new Map<string, Promise<boolean>>();
+
+function sshProbeArgs(destination: string, configPath: string | undefined): string[] {
+  return [...(configPath ? ["-F", configPath] : []), "-G", "--", destination];
+}
+
+/** 把輸出裡的名字換成佔位，讓「名字本身」造成的差異（hostname、host）不算設定。 */
+function sshProbeNormalize(output: string, name: string): string {
+  return output.split(name.toLowerCase()).join("\0");
+}
+
+/** 名字相對於哨兵名字：`ssh -G` 輸出（名字正規化後）有任何差異，表示有 Host／Match 對這個名字（或 user@名字）生效。 */
+function sshProbeDiffers(alias: string, own: string, sentinel: string): boolean {
+  const name = alias.includes("@") ? alias.slice(alias.lastIndexOf("@") + 1) : alias;
+  return sshProbeNormalize(own.toLowerCase(), name) !== sshProbeNormalize(sentinel.toLowerCase(), SSH_PROBE_SENTINEL);
+}
+
+function sshProbeKeys(alias: string, configPath: string | undefined): { key: string; own: string[]; sentinel: string[] } | undefined {
+  const name = alias.includes("@") ? alias.slice(alias.lastIndexOf("@") + 1) : alias;
+  if (!name || alias.startsWith("-") || name.startsWith("-")) return undefined;
+  const sentinelDestination = alias.includes("@") ? `${alias.slice(0, alias.lastIndexOf("@"))}@${SSH_PROBE_SENTINEL}` : SSH_PROBE_SENTINEL;
+  return { key: `${configPath ?? ""}\0${alias}`, own: sshProbeArgs(alias, configPath), sentinel: sshProbeArgs(sentinelDestination, configPath) };
+}
+
 /**
- * ssh 是否認得這個名字：交給 `ssh -G` 解析（Include、Host／Match 條件、註解都由 OpenSSH 處理，bridge 不自己讀設定檔）。
- * `ssh -G` 對任何名字都會輸出結果，所以比對解析出的 `hostname`：與輸入不同表示 config 有對應的 Host（alias）；
- * 相同表示沒設定（Host 沒寫 `HostName` 也會被當成沒設定）。不連線、不開通道；名字以 `--` 隔開、不經 shell；
- * alias 允許 `user@` 前綴，只比對 `@` 後面；`ssh` 不存在、逾時或失敗一律當作沒有。
- * `configPath` 只給測試與看板指定設定檔（`-F`），預設用 ssh 自己的設定。
+ * ssh 是否認得這個名字：交給 `ssh -G` 解析（`Include`、`Host`／`Match` 條件與註解都由 OpenSSH 處理，bridge 不自己讀設定檔）。
+ * 同時解析這個名字與一個一定沒設定的哨兵名字（`alias` 有 `user@` 時兩者都帶同一個 user，讓 `Match user` 一致），
+ * 把輸出裡的名字換成佔位後比對：有任何差異（HostName、User、Port、IdentityFile…）就是有 Host／Match 對它生效；
+ * 完全相同表示只有 `Host *` 之類的通用設定（Host 只寫了與名字相同的 `HostName` 時也無法分辨，視為沒設定）。
+ * `ssh -G` 只印設定、不連線、不轉發；以 `execFile` 傳參數不經 shell，名字以 `--` 隔開且不得以 `-` 開頭；`ssh` 不存在、
+ * 逾時或失敗一律當作沒有。`configPath` 只給測試指定設定檔（`-F`）。結果快取 30 秒。
  */
 export function sshConfigHasHost(alias: string, configPath?: string): boolean {
-  const name = alias.includes("@") ? alias.slice(alias.lastIndexOf("@") + 1) : alias;
-  if (!name || name.startsWith("-")) return false;
+  const probe = sshProbeKeys(alias, configPath);
+  if (!probe) return false;
+  const cached = sshProbeCache.get(probe.key);
+  if (cached && Date.now() - cached.at < SSH_PROBE_TTL_MS) return cached.value;
+  let value = false;
   try {
-    const out = execFileSync("ssh", [...(configPath ? ["-F", configPath] : []), "-G", "--", name], {
-      encoding: "utf8", timeout: 3000, stdio: ["ignore", "pipe", "ignore"],
-    });
-    const hostname = /^hostname\s+(\S+)/im.exec(out)?.[1];
-    return !!hostname && hostname.toLowerCase() !== name.toLowerCase();
+    const run = (args: string[]): string => execFileSync("ssh", args, { encoding: "utf8", timeout: 3000, stdio: ["ignore", "pipe", "ignore"] });
+    value = sshProbeDiffers(alias, run(probe.own), run(probe.sentinel));
   } catch {
-    return false;
+    value = false;
   }
+  sshProbeCache.set(probe.key, { value, at: Date.now() });
+  return value;
+}
+
+/** 非同步版本，結果寫進同一份快取；同一個名字同時只跑一次。 */
+export function refreshSshConfigHost(alias: string, configPath?: string): Promise<boolean> {
+  const probe = sshProbeKeys(alias, configPath);
+  if (!probe) return Promise.resolve(false);
+  const running = sshProbeInFlight.get(probe.key);
+  if (running) return running;
+  const run = (args: string[]): Promise<string> =>
+    new Promise((resolve, reject) =>
+      execFile("ssh", args, { encoding: "utf8", timeout: 3000 }, (error, stdout) => (error ? reject(error) : resolve(stdout))),
+    );
+  const task = Promise.all([run(probe.own), run(probe.sentinel)])
+    .then(([own, sentinel]) => sshProbeDiffers(alias, own, sentinel), () => false)
+    .then((value) => {
+      sshProbeCache.set(probe.key, { value, at: Date.now() });
+      sshProbeInFlight.delete(probe.key);
+      return value;
+    });
+  sshProbeInFlight.set(probe.key, task);
+  return task;
+}
+
+/**
+ * 給看板繪製用：只讀快取、不阻塞；沒有或過期就在背景刷新，下一次繪製（定時刷新）才會用到新結果。
+ * 第一次繪製前沒有結果時回 false。
+ */
+export function sshConfigHasHostCached(alias: string): boolean {
+  const probe = sshProbeKeys(alias, undefined);
+  if (!probe) return false;
+  const cached = sshProbeCache.get(probe.key);
+  if (!cached || Date.now() - cached.at >= SSH_PROBE_TTL_MS) void refreshSshConfigHost(alias);
+  return cached?.value ?? false;
 }
 
 /** 要用哪個 SSH 目標：alias（`ssh` 欄位原樣）或結構化的 user／host／port。 */

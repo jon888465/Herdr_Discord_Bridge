@@ -232,7 +232,7 @@ test("uploadFiles streams bytes to the remote path and rejects unsafe names", as
     await writeFile(src, "hello remote");
     const remoteDir = join(dir, "remote", "message-1");
     const [path] = await uploadFiles(
-      { id: "agy", ssh: "x", host: "host", user: "alice", port: 2222, socket: "/s" },
+      { id: "agy", ssh: "herdr-test-unconfigured", host: "host", user: "alice", port: 2222, socket: "/s" },
       remoteDir,
       [{ localPath: src, name: "1-note.txt" }],
       stub,
@@ -242,7 +242,7 @@ test("uploadFiles streams bytes to the remote path and rejects unsafe names", as
     assert.equal(await readFile(path, "utf8"), "hello remote");
     await assert.rejects(
       uploadFiles(
-        { id: "agy", ssh: "x", host: "host", user: "alice", port: 2222, socket: "/s" },
+        { id: "agy", ssh: "herdr-test-unconfigured", host: "host", user: "alice", port: 2222, socket: "/s" },
         remoteDir,
         [{ localPath: src, name: "../evil" }],
         stub,
@@ -250,7 +250,7 @@ test("uploadFiles streams bytes to the remote path and rejects unsafe names", as
       /unsafe/,
     );
     await assert.rejects(
-      uploadFiles({ id: "agy", ssh: "x", host: "host", user: "alice", port: 2222, socket: "/s" }, "relative", [], stub),
+      uploadFiles({ id: "agy", ssh: "herdr-test-unconfigured", host: "host", user: "alice", port: 2222, socket: "/s" }, "relative", [], stub),
       /absolute/,
     );
   } finally {
@@ -263,7 +263,7 @@ test("cleanupRemoteAttachments runs a scoped find and validates input", async ()
   const { writeFile, chmod, mkdir, utimes, stat } =
     await import("node:fs/promises");
   const dir = await mkdtemp(join(tmpdir(), "bq-"));
-  const machine = { id: "agy", ssh: "x", host: "host", user: "alice", port: 2222, socket: "/s" };
+  const machine = { id: "agy", ssh: "herdr-test-unconfigured", host: "host", user: "alice", port: 2222, socket: "/s" };
   try {
     const stub = join(dir, "fakessh");
     await writeFile(
@@ -762,6 +762,10 @@ test("sshConfigHasHost 交給 ssh -G 判斷：hostname 與輸入不同才算已�
         "  HostName 192.0.2.2",
         "Host nohost",
         "  User alice",
+        "Host same",
+        "  Port 2200",
+        "Match user bob host matched",
+        "  HostName match.example",
         "Host other # pod-comment",
         "  HostName other.example",
         "Host other2",
@@ -773,11 +777,17 @@ test("sshConfigHasHost 交給 ssh -G 判斷：hostname 與輸入不同才算已�
     assert.equal(sshConfigHasHost("alice@pod", config), true, "user@alias 只比對 alias");
     assert.equal(sshConfigHasHost("nested-top", config), false, "Include 掛在 Host other2 底下，查別的名字不套用（F5）");
     assert.equal(sshConfigHasHost("pod-comment", config), false, "行尾註解不是 Host pattern（F6）");
-    assert.equal(sshConfigHasHost("nohost", config), false, "Host 沒寫 HostName 視為沒設定");
+    assert.equal(sshConfigHasHost("nohost", config), true, "只有 User 的 Host 也算已設定（F7）");
+    assert.equal(sshConfigHasHost("same", config), true, "只有 Port／IdentityFile 的 Host 也算已設定（F7）");
+    assert.equal(sshConfigHasHost("bob@matched", config), true, "Match user 以完整 user@alias 解析（F8）");
+    assert.equal(sshConfigHasHost("alice@matched", config), false, "Match user 不符時不算已設定（F8）");
     assert.equal(sshConfigHasHost("unknown", config), false);
     assert.equal(sshConfigHasHost("pod", join(dir, "absent")), false, "設定檔讀不到當作沒有");
     assert.equal(sshConfigHasHost("-oProxyCommand=x", config), false, "以 - 開頭不傳給 ssh");
     assert.equal(sshConfigHasHost("", config), false);
+    const { refreshSshConfigHost } = await import("../src/machines.js");
+    assert.equal(await refreshSshConfigHost("pod", config), true, "非同步版本同一結果（F9）");
+    assert.equal(await refreshSshConfigHost("unknown", config), false);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

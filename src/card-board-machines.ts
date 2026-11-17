@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { stripJsonComments } from "./config.js";
-import { sshConfigHasHost, sshTargetLabel, validateMachines, type MachineConfig } from "./machines.js";
+import { sshConfigHasHostCached, sshTargetLabel, validateMachines, type MachineConfig } from "./machines.js";
 import {
   firstVisible,
   truncateToWidth,
@@ -214,7 +214,7 @@ export function machineLines(
   width: number,
   room: number,
   statuses: Map<string, MachineStatus> = new Map(),
-  hasConfiguredHost: (alias: string) => boolean = sshConfigHasHost,
+  hasConfiguredHost: (alias: string) => boolean = sshConfigHasHostCached,
 ): string[] {
   if (!machines.length)
     return [
