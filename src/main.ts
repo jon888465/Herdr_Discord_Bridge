@@ -3,6 +3,7 @@ import {
   remoteRoleWork,
   trackRemoteRole,
 } from "./machine-busy.js";
+import { startMachineControlServerSafely } from "./machine-control-channel.js";
 import {
   startMachineStatusWriter,
   MACHINE_STATUS_WRITE_INTERVAL_MS,
@@ -288,6 +289,8 @@ async function startBridge(
     join(stateDirectory(), "machine-status.json"),
     MACHINE_STATUS_WRITE_INTERVAL_MS,
   );
+  // 看板 o／x 的控制通道；啟動失敗只記一行，不擋 bridge（ISSUE-166 第三階段 B）。
+  const stopMachineControl = await startMachineControlServerSafely(herdr);
   const routing = new RoutingStore(
     statePath(config),
     config.maxTrackedApprovals,
@@ -310,6 +313,7 @@ async function startBridge(
 
   if (!(await herdr.ping())) {
     stopMachineStatus();
+    stopMachineControl();
     herdr.stopTunnels();
     throw new Error(
       "Herdr socket is not reachable; the bridge cannot control agents. Herdr itself is left untouched.",
@@ -330,6 +334,7 @@ async function startBridge(
     watcher.start();
     installShutdown(() => {
       stopMachineStatus();
+      stopMachineControl();
       herdr.stopTunnels();
       watcher.stop();
     }, routing);
@@ -637,6 +642,7 @@ async function startBridge(
     stopAutopick();
     stopPullRequestSync();
     stopMachineStatus();
+    stopMachineControl();
     herdr.stopTunnels();
     stopSend();
     stopHooks();

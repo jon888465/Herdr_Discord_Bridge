@@ -22,13 +22,13 @@
 
 ## ISSUE-166：Card 看板 Machine 第三階段：從看板連線／手動斷線（拆成 A、B）
 
-更新日期：2026-11-17。狀態：修正中（A＝hub 核心，本 PR，已修正、待驗收；B＝控制通道與看板按鍵，卡片 `REQ-20261117-board-machine-connect-b`，待 A merge 後做）。**尚未部署，沒有入口可以觸發，沒有實機驗證。**
+更新日期：2026-11-17。狀態：已修正、待驗收（A＝hub 核心，PR #277 已 merge；B＝控制通道與看板 `o`／`x`，卡片 `REQ-20261117-board-machine-connect-b`，原始碼與自動化檢查完成）。**尚未部署、未重啟執行中的 bridge，沒有實機驗證。**
 
 **預期：**看板可對機器連線／斷線，斷線後顯示「已斷線」且不自動重連；有進行中的工作時拒絕，同一台再按一次才強制，不能悄悄中斷。
 
 **拆分經過：**原實作是單一 PR #275（+1281／-37），diff 超過 bridge review 上限 60000 字元而無法走 review；ubuntu CI 另因 B 的測試失敗（見 B）。使用者 2026-11-17 決定拆成 A、B 兩個 PR 與兩張卡（A 卡只保留 hub 核心的驗收條件，其餘移到 B 卡，沒有刪除）。為了讓 A 的 diff 維持在上限內，SPEC 只新增段落、不改既有長行，`CONTEXT.md` 索引待 B 一併更新。程式是 Worker（codex `helper`）所寫，我依檔案與 hunk 切出 A、重寫文件並依 review 修正。
 
-**A 範圍：**`machines.ts`（連線／斷線、`generation`、tunnel 可重啟、主動探測）、`machine-busy.ts`（busy 判定、遠端工作登記表）、`agent-pool.ts`（只新增唯讀 `busySnapshot()`）、`card-role-assignment.ts`／`main.ts`／`card-review-wiring.ts`、`machine-status-file.ts`（`disconnected`）；契約見 SPEC.md「Machine 手動連線／斷線，hub 核心」。**B（未做）：**控制通道、看板 `o`／`x` 與二次確認、顯示「已斷線」、修正 Linux 上失敗的 socket 路徑處理。
+**A 範圍：**`machines.ts`（連線／斷線、`generation`、tunnel 可重啟、主動探測）、`machine-busy.ts`（busy 判定、遠端工作登記表）、`agent-pool.ts`（只新增唯讀 `busySnapshot()`）、`card-role-assignment.ts`／`main.ts`／`card-review-wiring.ts`、`machine-status-file.ts`（`disconnected`）；契約見 SPEC.md「Machine 手動連線／斷線，hub 核心」。**B：**控制通道、看板 `o`／`x` 與二次確認、顯示「已斷線」、修正 Linux 上失敗的 socket 路徑處理（見下方「B 修正範圍」）。
 
 **獨立 review 修正（逐筆見卡片 Review 發現）：**
 - **F2、F5、F9：忙碌判定漏掉遠端工作。**遠端角色（`startRemoteRole`）與 `card review` 的遠端 reviewer（`reviewOnRemote`）不經 AgentPool、準備期間也沒有 stream，普通斷線會中斷它們；`card review` 還可能在等 `fetchMaterial` 期間被斷線後才啟動遠端 checkout。新增 `RemoteRoleWork`、`trackRemoteRole`、`trackRemoteWork`，並在登記後用即時狀態重驗。盤點過所有對遠端做重活的入口，只有這兩個。
@@ -38,7 +38,18 @@
 
 **測試（2026-11-17）：**全套 `npm test` 2041 項，2040 pass、0 fail、1 skipped（我把回歸測試合併以縮小 PR diff，項數比合併前少，情境不變）；`npm run lint` 通過；`machine-busy.ts`、`machine-status-file.ts` 與其測試 `prettier --check` 通過，`machines.ts` 等 5 個檔在 HEAD 本來就不符，只做最小編輯。回歸測試都暫時改回舊行為確認變紅才還原；有兩次還原沒套用乾淨（空白不一致、多貼一行注釋），是我的疏忽。
 
-**未驗證：**沒有實機：真實 SSH 斷線後不再重連、再次連線、hook tunnel 停止與重啟、有進行中工作時的拒絕與強制斷線，要 B 有入口後才能驗；`main.ts`／`card-review-wiring.ts` 的接線只有型別與 build 檢查，包裝與檢查邏輯本身有單元測試。**尚未通過獨立 review。**
+**B 修正範圍（2026-11-17，Worker：claude）：**
+- 新增 `src/machine-control-channel.ts`：bridge 端 server 在 config 目錄 `run/mc.sock`（目錄 0700、socket 0600、listen 期間 umask 077 並在成功或失敗後還原）；每次啟動以 0600 暫存檔＋rename 寫入 state 目錄 `machine-control.token`，`timingSafeEqual` 比對（長度不同先拒絕）；單行 JSON 驗證版本、token、action、machineId、force，上限 4096 bytes、逾時 5 秒；失敗只回「請求被拒絕／請求過大／請求逾時／操作失敗」，格式或 token 錯誤不呼叫 hub；回應只轉送已知欄位並保留 `needsForce:true`。看板端 client `sendMachineControl` 把傳輸錯誤轉成固定短句。
+- **PR #275 已知錯誤的修正：**它對 ECONNREFUSED 無條件 `rmSync`，Linux 上路徑是目錄時丟 `ERR_FS_EISDIR`（ubuntu CI 失敗原因），是普通檔案時被刪掉。現在探測回 ECONNREFUSED 且 `lstat` 確認是 socket 才 `unlink`；目錄與普通檔案保留、讓 listen 失敗；有程序在聽則拒絕啟動。macOS 對目錄／普通檔案的探測回的不是 ECONNREFUSED（本機實測：暫改成舊行為時，用真實探測的測試仍通過），所以把探測做成可注入，用注入 ECONNREFUSED 的測試讓兩個平台都走到這條路；暫改回 PR #275 的行為時該測試變紅（1 fail），已還原。
+- `main.ts`：建立 hub 後 `startMachineControlServerSafely(herdr)`，失敗只記「Machine control channel unavailable」一行；Herdr ping 失敗、dry-run 與一般 shutdown 三處都關閉通道。
+- 看板（`card-board-machines.ts`／`card-board-cli.ts`）：純函式 `machineControlKey`（q／Ctrl-C 一律離開、處理中擋其他鍵、Machine 檢視 `o`／`x` 送出、空清單顯示「沒有選取 machine」、其他鍵清除確認）與 `machineControlResult`（只依結構化 `needsForce:true` 記下確認對象）；提示列加「o 連線  x 斷線」；狀態 `disconnected` 顯示「已斷線」，斷線成功後 6 秒內本機先顯示「已斷線」（`withStatusOverrides`），不必等狀態檔下一次寫入。Card 檢視按鍵與 `k` 向上移動不變。
+- SPEC.md（新增第三階段 B 段落，更新第三階段 A 與第四階段的入口／footer 說明）、README.md、README.zh-TW.md、CONTEXT.md 同步。
+
+**B 測試（2026-11-17，本機 macOS）：**新增 `test/machine-control-channel.test.ts` 13 項（socket／token／目錄權限與 umask 還原、每次啟動新 token、合法請求與 needsForce／force 傳遞、15 種格式／版本／token／action／machineId／force 錯誤被拒且 hub 未被呼叫、超大與逾時請求、hub 例外固定短句、目錄與普通檔案路徑保留且失敗後 umask 還原、注入 ECONNREFUSED 時只清 socket、舊 socket 清除後可 listen、已有程序在聽時不搶、啟動失敗只記一行且回傳可呼叫的停止函式、看板端無 token／無 bridge／回應格式錯誤）與 `test/card-board-machine-control.test.ts` 9 項（處理中阻擋與 q／Ctrl-C 離開、空清單、同一台二次 x 才 force、換台／其他鍵／o 清除確認、不比對文案、訊息列與已斷線顯示及過期、提示列截斷、Card 檢視與 k 不變）。開發中一次失敗：測試用的假 server 沒讀取資料，`server.close` 一直等待而逾時，是測試本身的問題，已改測試（`socket.resume()`），產品程式不變。`node --test dist/test/machine-control-channel.test.js dist/test/card-board-machine-control.test.js` 22 pass、0 fail；全套 `npm test`（含 build）2074 項：2073 pass、0 fail、1 skipped，exit 0；`npm run lint` exit 0（248 TypeScript files）；新檔與 `card-board-cli.ts` 的 `prettier --check` 通過，`card-board-machines.ts` 在 HEAD 就不符（import 那一行），未整檔重排。**Linux 上的測試本輪沒有在本機執行，要靠 CI ubuntu 確認。**
+
+**B 的 task 內 review（2026-11-17，changes_requested）：**f1（P2）：server 與 client 都只用 `socket.setTimeout`，那是閒置逾時，每收到資料就重新計時。持續慢速送資料就能拖過 5 秒上限，server 仍呼叫 hub，client 也可能一直等。reviewer 的重現：timeoutMs=120、每 40ms 送一個空白、約 333ms 後才送完整合法 JSON，hub 被呼叫一次並回成功。**根因（已確認）：**只有閒置逾時，沒有總期限。**修正：**server 在連線建立時開一個不隨資料重設的 `setTimeout` 總期限，到期回「請求逾時」並結束連線；`done` 旗標確保之後不再解析請求、不呼叫 hub，回覆、關閉時都清除 timer，socket 已銷毀時不再寫入。client `sendMachineControl` 同樣加總期限，到期回「bridge 沒有回應」並清除 timer。閒置逾時保留為額外保護。**回歸測試（`test/machine-control-channel.test.ts` 新增 2 項）：**①timeoutMs=120、每 40ms 送一個空白、約 400ms 才送完整合法 JSON，收到「請求逾時」、hub 呼叫 0 次（再等 200ms 確認）；②client 遇到每 40ms 送空白但不送換行的 server，在 2 秒內以「bridge 沒有回應」結束。把兩個總期限暫改成實際不會到期（1e9 ms）時，①變紅（hub 被呼叫、回 connected），②逾時被取消，確認測試抓得到問題，已還原。**f1 修正後驗證（2026-11-17，本機 macOS）：**`node --test dist/test/machine-control-channel.test.js` 15 pass、0 fail；全套 `npm test`（含 build）2076 項：2075 pass、0 fail、1 skipped，exit 0；`npm run lint` exit 0（248 TypeScript files）；兩檔 `prettier --check` 通過。Linux 仍未在本機執行。
+
+**未驗證：**沒有實機：真實 SSH 斷線後不再重連、再次連線、hook tunnel 停止與重啟、有進行中工作時的拒絕與強制斷線、Herdr pane 內 `o`／`x` 的按鍵與畫面、bridge 未啟動或舊版 bridge 時看板顯示「bridge 未連線」；尚未部署、未重啟執行中的 bridge；B 尚未通過獨立 review。A 部分的原紀錄：`main.ts`／`card-review-wiring.ts` 的接線只有型別與 build 檢查，包裝與檢查邏輯本身有單元測試。**尚未通過獨立 review。**
 
 ## ISSUE-165：同一個 task 連續兩次取用同一個 codex Worker，第二次被「bound session identity changed」拒絕
 

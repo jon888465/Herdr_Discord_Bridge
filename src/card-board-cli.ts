@@ -26,6 +26,11 @@ import {
 } from "./card-board.js";
 
 import {
+  machineControlKey,
+  machineControlResult,
+  withStatusOverrides,
+  type MachineControlUi,
+  type StatusOverride,
   machineEditorText,
   parseMachineEditorText,
   cardRoom,
@@ -47,6 +52,7 @@ import {
   saveMachinesConfig,
 } from "./machines-config-write.js";
 import { validateMachines, type MachineConfig } from "./machines.js";
+import { sendMachineControl } from "./machine-control-channel.js";
 
 // Herdr plugin pane：卡片看板。只編輯 draft 類與已停手的卡，其餘唯讀。
 const rootDir = path.join(stateDirectory(), "cards");
@@ -68,6 +74,8 @@ let machines: MachineConfig[] = [];
 let machineCursor = 0;
 let statuses = new Map<string, MachineStatus>();
 let machineError = "";
+let control: MachineControlUi = { pending: false };
+const statusOverrides = new Map<string, StatusOverride>();
 
 function reloadMachines(): void {
   statuses = readMachineStatus(
@@ -101,7 +109,7 @@ function render(): void {
       `\x1b[2J\x1b[H${machineViewLines(
         {
           machines,
-          statuses,
+          statuses: withStatusOverrides(statuses, statusOverrides, Date.now()),
           cursor: machineCursor,
           error: machineError,
           message,
@@ -283,8 +291,42 @@ const timer = setInterval(() => {
   reload();
   render();
 }, 3000);
+/** 送出 o／x 請求；等待期間 control.pending 擋下其他按鍵，q／Ctrl-C 仍會直接離開。 */
+function sendControl(command: Parameters<typeof sendMachineControl>[0]): void {
+  void sendMachineControl(command).then((response) => {
+    const result = machineControlResult(
+      command.machineId,
+      response,
+      Date.now(),
+    );
+    control = result.ui;
+    message = result.message;
+    if (result.override)
+      statusOverrides.set(command.machineId, result.override);
+    else statusOverrides.delete(command.machineId);
+    reloadMachines();
+    render();
+  });
+}
+
 process.stdin.on("data", (key: string) => {
   if (editing) return;
+  const decision = machineControlKey(
+    control,
+    key,
+    view,
+    machines[machineCursor]?.id,
+  );
+  control = decision.ui;
+  const outcome = decision.outcome;
+  // quit 與 pass 交給下面既有的處理（q／Ctrl-C 在那裡離開）。
+  if (outcome.kind === "ignore") return;
+  if (outcome.kind === "message" || outcome.kind === "send") {
+    message = outcome.message;
+    render();
+    if (outcome.kind === "send") sendControl(outcome.command);
+    return;
+  }
   message = "";
   if (key === "q" || key === "\x03") {
     clearInterval(timer);
