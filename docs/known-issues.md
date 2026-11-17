@@ -1,5 +1,23 @@
 # Known Issues
 
+## ISSUE-165：同一個 task 連續兩次取用同一個 codex Worker，第二次被「bound session identity changed」拒絕
+
+更新日期：2026-11-17。狀態：已修正、待驗收（程式與單元測試完成，**尚未部署，也尚未實機驗證**）。
+
+**使用者可見症狀：** 放行 Card 看板第 3 階段的卡 `REQ-20261116-board-machine-connect`，bridge 撿起後 Lead 派了 `d1-design`（codex `helper`）、`d2-facts`（codex `reviewer`），兩個都完成；接著 `w1-implement` 用同一個 codex `helper` 時立刻 failed，blocker 為 `bound session identity changed; explicitly bind after inspection`，`r1-review`、`v1-verify` 因依賴失敗跟著 failed，task failed，卡片記 `autopick_stopped`／`task_failed`，沒有開 PR。
+
+**重現（2026-11-17 01:39–01:46Z，本機；task `task-69048d38…`，workspace `w8B`）：** 讀 `agent-pool.json`：`w8B/helper` 的登記資料 `agent_session` 為 `null`，同一個 pane 目前（`herdr pane list`）回報 `{"kind":"id","source":"herdr:codex",…}`；其餘 terminal／kind／workspace 都相符。
+
+**根因（已確認，讀 `src/agent-pool.ts`）：**`acquire` 取用既有 pane 時，除了 workspace／pane／terminal／kind，還用 `sameAgentSession` 比對登記的 session 與目前回報的 session；兩邊一邊 `null`、一邊有值就判定「身分變了」而拒絕（fail-closed，設計上「session 從未知變已知不會在任意 acquire 被接受」）。為此 agy 有 `refreshSession` 在第一個回合後把 session 補登記（ISSUE-107），但它對 codex 一律回 false（原註解：「codex 的 Herdr session 不可信，不採用」），所以 codex 補不進去。**之前 codex helper 連用兩次沒事，是因為當時 Herdr 沒有回報 codex 的 session（兩邊都是 null，被當成「身分未知但可用」）；現在 Herdr 開始回報 `herdr:codex` session，一邊 null、一邊有值就撞到這個檢查。**這是「不被信任的資料突然出現，讓原本能用的流程被擋」，我沒有查 Herdr 是從什麼時候開始回報 codex session 的（推測，未驗證）。
+
+**預期行為（使用者 2026-11-17 在「codex 不比對 session／同租約內採用目前 session／改卡片分工」三個選項中選「codex 不比對 session」）：**登記時沒有 session 的 codex pane，之後 Herdr 才回報 session id，不算身分改變。
+
+**修正（`src/agent-pool.ts` 的 `acquire`）：**`unboundCodex`＝profile 是 codex 且登記裡沒有 session 時，略過 session 比對，也不採用該 session，continuity 回 `unknown`；workspace、pane、terminal、kind、不是 Lead pane 仍要符合，否則照舊拒絕。**範圍刻意比選項字面窄：**登記時已有 session 的 codex、以及 agy 等其他種類仍照常比對。原因：既有測試（`agent-pool.test.ts`）把 codex 當一般 profile，要求已登記 session 的 codex 換 session 必須拒絕、同 session 重用為 `same-session`；「agy 的 session 從未知變已知、沒補登記就拒絕」也是明文行為。完全不比對 codex 會破壞這些保證，而這次問題只發生在「登記時沒有 session」這一種情形。`refreshSession` 不變（仍不採用 codex 的 session）。
+
+**測試（2026-11-17）：** `test/agent-pool.test.ts` 新增 2 項：①codex 登記時沒有 session、之後 Herdr 回報 session，同 pane 可再取用、continuity `unknown`、沒有重開 pane，之後 session 再換也一樣不比對；②同樣情形下 terminal 被換、kind 不同、workspace 不同仍拒絕（`/identity changed/`）。把 `unboundCodex` 暫時恒設為 false（回到舊行為）時第 1 項變紅，已還原。`agent-pool.test.ts` 33 項全過；全套 `npm test` 2020 項，2019 pass、0 fail、1 skipped；`npm run lint` 通過；變更的程式與測試檔 `prettier --check` 通過。
+
+**未驗證／風險：** 沒有實機驗證：需重啟 bridge，並重新跑一張會對同一個 codex profile 連續派兩次的卡（例如第 3 階段那張）。**這放寬了身分檢查**：登記時沒有 session 的 codex pane，若被換成同 terminal 的另一段 conversation，bridge 偵測不到，continuity 只標 `unknown`；這與 Herdr 沒回報 session 時既有的行為相同，沒有新增信任，但也沒有新增防護。`REQ-20261116-board-machine-connect` 那張卡本身仍是失敗狀態、未重跑；`REQ-20261116-board-machine-status` 第 2 階段當時 console 的「Worker pool session refresh rejected」是同一個機制的訊息。
+
 ## ISSUE-164：Card 看板 Machine 檢視第二階段：連線狀態
 
 更新日期：2026-11-16。狀態：已修正、待驗收。
