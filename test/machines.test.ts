@@ -746,48 +746,37 @@ test("structured SSH validation and target precedence", async () => {
   assert.throws(() => sshTargetArgs(base as never), /no SSH target/);
 });
 
-test("sshConfigHasHost recognises Host entries in ~/.ssh/config and Include files (review round 1 F1)", async () => {
+test("sshConfigHasHost 交給 ssh -G 判斷：hostname 與輸入不同才算已設定（review F1/F2/F5/F6）", async () => {
   const { sshConfigHasHost } = await import("../src/machines.js");
   const dir = await mkdtemp(join(tmpdir(), "ssh-config-"));
   try {
     const config = join(dir, "config");
-    await mkdir(join(dir, "config.d"));
-    await writeFile(join(dir, "config.d", "work.conf"), "Host work-* !work-old\n  HostName work.example\n");
-    await writeFile(join(dir, "config.d", "loop.conf"), `Include ${config}\nHost=looped\n`);
-    // 巢狀 Include 的相對路徑以設定目錄為基準：config.d/nested.conf 引入 hosts/extra.conf 要讀 <dir>/hosts/extra.conf，
-    // 不是 config.d/hosts/extra.conf（review round 2 F2）。
-    await writeFile(join(dir, "config.d", "nested.conf"), "Include hosts/extra.conf\n");
     await mkdir(join(dir, "hosts"));
-    await writeFile(join(dir, "hosts", "extra.conf"), "Host nested-top\n");
-    await mkdir(join(dir, "config.d", "hosts"));
-    await writeFile(join(dir, "config.d", "hosts", "extra.conf"), "Host nested-wrong\n");
+    await writeFile(join(dir, "hosts", "extra.conf"), "Host nested-top\n  HostName nested.example\nHost pod-in-other\n  HostName x.example\n");
     await writeFile(
       config,
       [
-        "# comment",
         "Host *",
         "  ServerAliveInterval 15",
-        "host pod \"quoted name\" ?",
-        "  HostName 10.0.0.2",
-        "Match host matched",
+        "Host pod",
+        "  HostName 192.0.2.2",
+        "Host nohost",
         "  User alice",
-        "Include config.d/*.conf missing-file",
+        "Host other # pod-comment",
+        "  HostName other.example",
+        "Host other2",
+        "  Include hosts/extra.conf",
         "",
       ].join("\n"),
     );
     assert.equal(sshConfigHasHost("pod", config), true);
-    assert.equal(sshConfigHasHost("POD", config), true, "Host 比對不分大小寫");
     assert.equal(sshConfigHasHost("alice@pod", config), true, "user@alias 只比對 alias");
-    assert.equal(sshConfigHasHost("quoted name", config), true);
-    assert.equal(sshConfigHasHost("work-1", config), true, "Include 的檔與 pattern");
-    assert.equal(sshConfigHasHost("looped", config), true, "Include 循環不會無限遞迴");
-    assert.equal(sshConfigHasHost("nested-top", config), true, "巢狀 Include 相對路徑以設定目錄為基準");
-    assert.equal(sshConfigHasHost("nested-wrong", config), false, "不以被 Include 的檔所在目錄解析");
-    assert.equal(sshConfigHasHost("work-old", config), false, "否定 pattern 排除");
-    assert.equal(sshConfigHasHost("other", config), false, "只有 Host * 不算已設定");
-    assert.equal(sshConfigHasHost("x", config), false, "只有 ? 的 pattern 不算已設定");
-    assert.equal(sshConfigHasHost("matched", config), false, "不解讀 Match");
-    assert.equal(sshConfigHasHost("pod", join(dir, "absent")), false, "沒有設定檔當作沒有");
+    assert.equal(sshConfigHasHost("nested-top", config), false, "Include 掛在 Host other2 底下，查別的名字不套用（F5）");
+    assert.equal(sshConfigHasHost("pod-comment", config), false, "行尾註解不是 Host pattern（F6）");
+    assert.equal(sshConfigHasHost("nohost", config), false, "Host 沒寫 HostName 視為沒設定");
+    assert.equal(sshConfigHasHost("unknown", config), false);
+    assert.equal(sshConfigHasHost("pod", join(dir, "absent")), false, "設定檔讀不到當作沒有");
+    assert.equal(sshConfigHasHost("-oProxyCommand=x", config), false, "以 - 開頭不傳給 ssh");
     assert.equal(sshConfigHasHost("", config), false);
   } finally {
     await rm(dir, { recursive: true, force: true });
