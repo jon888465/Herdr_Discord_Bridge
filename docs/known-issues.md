@@ -21,7 +21,13 @@
 
 **測試（2026-11-17）：** A 相關五個測試檔（`machines`、`machine-busy`、`agent-pool`、`card-role-assignment`、`machine-status-file`）`node --test` 102 項全過；全套 `npm test` 2028 項，2027 pass、0 fail、1 skipped；`npm run lint` 通過；`machine-busy.ts`、`machine-status-file.ts`、`agent-pool.ts` 與相關測試檔 `prettier --check` 通過；`machines.ts`、`main.ts`、`card-role-assignment.ts`、`test/machines.test.ts` 在 HEAD 本來就不符 prettier，沒有整檔重排。
 
-**未驗證：** 沒有實機：真實 SSH 斷線後不再重連、再次連線、hook tunnel 停止與重啟、有進行中工作時的拒絕與強制斷線；這些在 B 有入口之後才能驗。`main.ts` 把 busy 判定注入 hub 的接線只有型別與 build 檢查，沒有單獨的整合測試。
+**獨立 review 第 1 輪（2026-11-17，head `bed3a6792b8e`，changes_requested）：**
+- **F1（high）：** 「整體需求要求從看板操作並顯示結果，A 卻延後到 B，沒有入口、缺控制通道權限測試」。**這是拆分造成的範圍落差，不是 A 的缺陷**：reviewer 拿整張卡的驗收條件審一半的功能。A 本身修不掉；我把拆分的事實寫進卡片（「拆分說明」），讓 reviewer 以 A 的範圍判斷。這是補充範圍說明，沒有降低驗收標準，看板操作、控制通道與其權限測試仍是 B 的驗收條件。
+- **F2（high）：** busy 判定只讀 active stream 與 AgentPool，但遠端角色（`acquireWorker` 的遠端分支）直接呼叫 `startRemoteRole`，不經 pool，SSH checkout／啟動期間也還沒有 stream，所以普通斷線會被放行並中斷準備中的角色。**根因（已確認，讀 `src/main.ts` 與 `src/remote-snapshot.ts`）：**`startRemoteRole` 的 clone／fetch／checkout、建 workspace、啟動 agent 都不在 pool 的租約或 pending 裡；而且不只準備期間，整個遠端角色的生命週期都沒被計入。**修正：**`src/machine-busy.ts` 新增 `RemoteRoleWork` 登記表與 `trackRemoteRole`：啟動前登記、啟動失敗立刻釋放、成功後把 `cleanup` 包起來，cleanup 結束（成功或失敗）才釋放；`machineBusyReason` 多一個 `remoteRoles` 輸入；`main.ts` 兩處接上（hub 的 busy 判定帶登記表、遠端角色啟動用 `trackRemoteRole` 包起來）。沒人呼叫 cleanup 時會一直算忙碌（偏安全，要強制才能斷線）。
+- **F3（medium）：** `connectMachine` 在啟動 tunnel 前就清掉 `disconnected`，若啟動同步丟錯，`catch` 沒回復狀態，之後重按連線直接回「已在連線中」，不會重新啟動或探測。**已確認屬實。修正：**失敗時停掉可能已啟動的一般與 hook tunnel（停止失敗不蓋掉原本的失敗結果），回復成斷線（`generation` 加一、`observedAt` 設為現在），回「連線失敗」，之後重按會真的重新啟動。
+- **測試：** `machine-busy.test.ts` 由 1 項增為 4 項（準備期間、啟動前尚無 stream 與租約就算忙碌；別台機器不受影響；cleanup 重複呼叫沒有副作用且不釋放別的工作；啟動失敗與 cleanup 失敗都釋放；與 stream、租約依 key 去重），`machines.test.ts` 新增 1 項（hook tunnel 啟動丟錯後回復為斷線、停掉一般 tunnel、之後重按連線會重新啟動）。把 `machineBusyReason` 暫時改成忽略登記表時 2 項變紅、把 `connectMachine` 的狀態回復拿掉時新測試變紅，確認抓得到問題，已還原。全套 `npm test`（2026-11-17，此輪修正後）2036 項，2035 pass、0 fail、1 skipped；`npm run lint` 通過；`machine-busy.ts` 與其測試 `prettier --check` 通過。
+
+**未驗證：** 沒有實機：真實 SSH 斷線後不再重連、再次連線、hook tunnel 停止與重啟、有進行中工作時的拒絕與強制斷線；這些在 B 有入口之後才能驗。`main.ts` 兩處接線（busy 判定帶登記表、遠端角色用 `trackRemoteRole` 包起來）只有型別與 build 檢查，包裝邏輯本身有單元測試，但沒有走真實遠端角色的整合測試。
 
 ## ISSUE-165：同一個 task 連續兩次取用同一個 codex Worker，第二次被「bound session identity changed」拒絕
 

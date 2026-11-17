@@ -502,6 +502,51 @@ test("in-flight aggregate response cannot revive a manually disconnected remote"
   }
 });
 
+test("a failed reconnect leaves the machine disconnected and retryable, and stops a half-started tunnel (review F3)", () => {
+  const hub = new HerdrHub(
+    [{ id: "pod", ssh: "unused", socket: "/unused", hookSocket: "/h" }],
+    undefined,
+    100,
+    10,
+    () => {},
+    () => "/unused",
+    undefined,
+    () => {},
+  );
+  const remote = hub["remotes"].get("pod")!;
+  let startFails = true;
+  let tunnelStarts = 0;
+  let tunnelStops = 0;
+  let hookStops = 0;
+  remote.tunnel.start = () => {
+    tunnelStarts++;
+  };
+  remote.tunnel.stop = () => {
+    tunnelStops++;
+  };
+  // 一般 tunnel 已經啟動，hook tunnel 啟動才丟錯：要停掉一般 tunnel，不能留下半啟動的狀態。
+  remote.hookTunnel!.start = () => {
+    if (startFails) throw new Error("spawn failed");
+  };
+  remote.hookTunnel!.stop = () => {
+    hookStops++;
+  };
+  hub.disconnectMachine("pod");
+  const stopsAfterDisconnect = tunnelStops;
+  const failed = hub.connectMachine("pod");
+  assert.deepEqual(failed, { ok: false, reason: "連線失敗" });
+  assert.equal(hub.isDisconnected("pod"), true, "旗標要回復成斷線，才能重試");
+  assert.equal(tunnelStops, stopsAfterDisconnect + 1, "半啟動的一般 tunnel 要停掉");
+  assert.equal(hookStops >= 1, true);
+  assert.equal(hub.machineObservations()[0].reachable, false);
+  // 重按連線：不是回「已在連線中」，而是真的重新啟動。
+  startFails = false;
+  const retried = hub.connectMachine("pod");
+  assert.deepEqual(retried, { ok: true, status: "connected" });
+  assert.equal(hub.isDisconnected("pod"), false);
+  assert.equal(tunnelStarts, 2, "第二次連線重新啟動了 tunnel");
+});
+
 test("reconnect schedules a probe, records success/failure, and discards results after disconnect", async () => {
   const scheduled: Array<() => void> = [];
   const hub = new HerdrHub(

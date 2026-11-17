@@ -506,6 +506,21 @@ export class HerdrHub extends HerdrClient {
       }, 2000);
       return { ok: true, status: "connected" };
     } catch {
+      // 啟動途中丟錯：回復成可重試的斷線狀態，並清掉可能已經啟動的 tunnel；否則旗標已清、
+      // 下次重按連線會直接回「已在連線中」，永遠不會重新啟動或探測（review 第 1 輪 F3）。
+      for (const stop of [
+        () => remote.tunnel.stop(),
+        () => remote.hookTunnel?.stop(),
+      ])
+        try {
+          stop();
+        } catch {
+          /* 清理失敗不能蓋掉原本的失敗結果 */
+        }
+      remote.disconnected = true;
+      remote.generation++;
+      remote.up = false;
+      remote.observedAt = Date.now();
       return { ok: false, reason: "連線失敗" };
     }
   }

@@ -1,4 +1,8 @@
-import { machineBusyReason } from "./machine-busy.js";
+import {
+  machineBusyReason,
+  remoteRoleWork,
+  trackRemoteRole,
+} from "./machine-busy.js";
 import {
   startMachineStatusWriter,
   MACHINE_STATUS_WRITE_INTERVAL_MS,
@@ -272,7 +276,7 @@ async function startBridge(
     config.reconnectBaseMs,
     undefined,
     undefined,
-    (machineId) => machineBusyReason(machineId, { activeTerminals: activeStreams, pool: pool.busySnapshot() }),
+    (machineId) => machineBusyReason(machineId, { activeTerminals: activeStreams, pool: pool.busySnapshot(), remoteRoles: remoteRoleWork }),
   );
   // ISSUE-113：本機的 hub 才注入 agy 卡片 worktree 的預先信任；遠端 agy 只回報需人工處理。
   const agyTrust = defaultAgyWorktreeTrust(config.agyTrustedDirectories);
@@ -2286,7 +2290,9 @@ async function startTeamTask(
             throw new Error("遠端角色失敗：machine 目前未開放這個角色或 agent 種類");
           const cwd = lead.foreground_cwd || lead.cwd;
           if (typeof cwd !== "string") throw new Error("遠端角色失敗：Lead 沒有本機工作目錄");
-          return startRemoteRole(remoteReviewDeps(runtime.herdr), {
+          // 遠端角色不經 AgentPool，準備與執行期間都要算進該機器的進行中工作，普通斷線才會被擋下（ISSUE-166 review F2）。
+          const hub = runtime.herdr; // 上面的檢查已把它窄化成 HerdrHub；放進 closure 前先取出來，型別才不會掉回 HerdrClient。
+          return trackRemoteRole(remoteRoleWork, `${taskId}/${assignment.id}`, remote.machine, () => startRemoteRole(remoteReviewDeps(hub), {
             machineId: remote.machine,
             role: remote.role,
             key: `${taskId}/${assignment.id}`,
@@ -2294,7 +2300,7 @@ async function startTeamTask(
             profile: frozen,
             name: `hdb-${remote.role}-${randomUUID().slice(0, 8)}`,
             ...(signal ? { signal } : {}),
-          });
+          }));
         }
         if (roleSnapshot && target.roleTarget) {
           const role = assignment?.coding?.role;

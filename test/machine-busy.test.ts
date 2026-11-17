@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { machineBusyReason } from "../src/machine-busy.js";
+import {
+  machineBusyReason,
+  RemoteRoleWork,
+  trackRemoteRole,
+} from "../src/machine-busy.js";
+
+const idle = { activeTerminals: [], pool: { leases: [], pending: [] } };
 
 test("busy reason covers active prefix, pane prefix, machine field, pending and terminal dedup", () => {
   assert.equal(
@@ -26,5 +32,95 @@ test("busy reason covers active prefix, pane prefix, machine field, pending and 
       pool: { leases: [], pending: [{ key: "local/a", workspace: "local" }] },
     }),
     undefined,
+  );
+});
+
+// review 第 1 輪 F2：遠端角色不經 AgentPool，準備期間也還沒有 stream。
+test("a remote role counts as busy from the moment it starts preparing, before a stream or lease exists", async () => {
+  const registry = new RemoteRoleWork();
+  let release!: (role: { cleanup(): Promise<string> }) => void;
+  const starting = trackRemoteRole(
+    registry,
+    "task/w1",
+    "pod",
+    () =>
+      new Promise<{ cleanup(): Promise<string> }>((resolve) => {
+        release = resolve;
+      }),
+  );
+  // 還在 SSH checkout／啟動 agent：沒有 stream、沒有租約，但普通斷線必須看得到。
+  assert.equal(
+    machineBusyReason("pod", { ...idle, remoteRoles: registry }),
+    "1 個進行中的回合",
+  );
+  assert.equal(
+    machineBusyReason("other", { ...idle, remoteRoles: registry }),
+    undefined,
+    "別台機器不受影響",
+  );
+  let cleanups = 0;
+  release({
+    cleanup: async () => {
+      cleanups++;
+      return "";
+    },
+  });
+  const role = await starting;
+  // 啟動完成不代表結束：角色還在跑，直到 cleanup。
+  assert.equal(
+    machineBusyReason("pod", { ...idle, remoteRoles: registry }),
+    "1 個進行中的回合",
+  );
+  await role.cleanup();
+  assert.equal(cleanups, 1);
+  assert.equal(
+    machineBusyReason("pod", { ...idle, remoteRoles: registry }),
+    undefined,
+  );
+  // cleanup 重複呼叫沒有副作用，也不會把別的工作一起釋放。
+  const other = registry.begin("task/w2", "pod");
+  await role.cleanup();
+  assert.equal(
+    machineBusyReason("pod", { ...idle, remoteRoles: registry }),
+    "1 個進行中的回合",
+  );
+  other();
+});
+
+test("a remote role that fails to start is released immediately, and a failing cleanup still releases it", async () => {
+  const registry = new RemoteRoleWork();
+  await assert.rejects(
+    trackRemoteRole(registry, "task/w1", "pod", async () => {
+      throw new Error("checkout failed");
+    }),
+    /checkout failed/,
+  );
+  assert.equal(registry.entries().size, 0, "啟動失敗不能留下殘留的忙碌紀錄");
+  const role = await trackRemoteRole(registry, "task/w2", "pod", async () => ({
+    cleanup: async (): Promise<string> => {
+      throw new Error("cleanup failed");
+    },
+  }));
+  assert.equal(registry.entries().size, 1);
+  await assert.rejects(role.cleanup(), /cleanup failed/);
+  assert.equal(
+    registry.entries().size,
+    0,
+    "cleanup 失敗也要釋放，不能永遠卡在忙碌",
+  );
+});
+
+test("remote roles are deduplicated together with streams and leases by key, per machine", () => {
+  const registry = new RemoteRoleWork();
+  registry.begin("task/a", "pod");
+  registry.begin("task/b", "pod");
+  registry.begin("task/c", "other");
+  assert.equal(
+    machineBusyReason("pod", {
+      activeTerminals: ["pod:t1"],
+      pool: { leases: [], pending: [] },
+      remoteRoles: registry,
+    }),
+    "3 個進行中的回合",
   );
 });
