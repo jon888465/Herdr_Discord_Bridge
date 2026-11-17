@@ -37,6 +37,7 @@ import {
   cardViewLines,
   machineRoom,
   machineViewLines,
+  applyStatusOverride,
   readMachinesSection,
   toggleView,
   viewKeyAction,
@@ -301,9 +302,7 @@ function sendControl(command: Parameters<typeof sendMachineControl>[0]): void {
     );
     control = result.ui;
     message = result.message;
-    if (result.override)
-      statusOverrides.set(command.machineId, result.override);
-    else statusOverrides.delete(command.machineId);
+    applyStatusOverride(statusOverrides, command.machineId, result.override);
     reloadMachines();
     render();
   });

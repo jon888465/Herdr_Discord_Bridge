@@ -390,6 +390,15 @@ export function machineControlResult(
   };
 }
 
+/** 套用一次控制回應的覆寫：有新的就取代；沒有就保留尚未到期的舊值（到期由 `withStatusOverrides` 略過，review F3）。 */
+export function applyStatusOverride(
+  overrides: Map<string, StatusOverride>,
+  id: string,
+  next: StatusOverride | undefined,
+): void {
+  if (next) overrides.set(id, next);
+}
+
 export function withStatusOverrides(
   statuses: Map<string, MachineStatus>,
   overrides: Map<string, StatusOverride>,
