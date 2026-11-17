@@ -30,6 +30,7 @@ export interface RoleSnapshot {
   remoteMachines?: RemoteReviewMachine[];
 }
 export interface RoleContext {
+  isDisconnected?: (id: string) => boolean;
   machineIds: readonly string[];
   profiles: readonly AgentProfile[];
   enabledProfileIds?: readonly string[];
@@ -181,14 +182,14 @@ export function preflightRoles(
 function remoteReviewMachine(role: CardRole, c: RoleConstraint, context: RoleContext): RemoteReviewMachine {
   const unsupported = `卡片流程尚未支援 machine ${c.machine}`;
   if (role === "implement" || role === "fixer") roleError(role, `remote 寫入尚未支援：${unsupported} 的寫入角色`);
-  const remote = context.remoteMachines?.find((m) => m.id === c.machine);
+  const remote = context.remoteMachines?.find((m) => m.id === c.machine && !context.isDisconnected?.(m.id));
   if (!remote || (c.agent && !remote.kinds.includes(c.agent))) roleError(role, `machine 未開放卡片 review（${c.machine}）`);
   if (role === "verify" && !remote.toolchain) roleError(role, `remote verify 不可用：machine ${c.machine} 沒有工具鏈`);
   return remote;
 }
 /** Lead 候選；沒有工具鏈的 verify 標 unavailable。 */
 export function remoteRoleCandidates(context: RoleContext) {
-  return (context.remoteMachines ?? []).flatMap((m) =>
+  return (context.remoteMachines ?? []).filter((m) => !context.isDisconnected?.(m.id)).flatMap((m) =>
     REMOTE_TASK_ROLES.flatMap((role) =>
       context.profiles
         .filter((p) => m.kinds.includes(p.kind) && roleProfileEnabled(role, p) && (context.enabledProfileIds?.includes(p.id) ?? true))
@@ -248,7 +249,7 @@ export function roleConstraint(snapshot: RoleSnapshot, role: CardRole): RoleCons
 }
 /** Lead 候選：每個開放遠端上的可用 reviewer profile，標明 machine。 */
 export function remoteReviewerCandidates(context: RoleContext) {
-  return (context.remoteMachines ?? []).flatMap((m) =>
+  return (context.remoteMachines ?? []).filter((m) => !context.isDisconnected?.(m.id)).flatMap((m) =>
     context.profiles
       .filter((p) => m.kinds.includes(p.kind) && roleProfileEnabled("reviewer", p) && (context.enabledProfileIds?.includes(p.id) ?? true))
       .map((p) => ({ machine: m.id, kind: p.kind, profileId: p.id, ...(p.model ? { model: p.model } : {}) })),

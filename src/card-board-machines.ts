@@ -81,7 +81,7 @@ export function boardHeader(
 }
 
 export const MACHINE_HINT =
-  "Tab/m/c 切換檢視  j/k 移動  PgUp/PgDn 翻頁  Home/End 頭尾  q 離開";
+  "Tab/m/c 切換檢視  o 連線 x 斷線  j/k 移動  PgUp/PgDn 翻頁  Home/End 頭尾  q 離開";
 
 export interface MachineViewState {
   machines: MachineConfig[];
@@ -228,9 +228,71 @@ export function machineLines(
     .map((machine, offset) =>
       truncateToWidth(
         sanitizeForTerminal(
-          `${first + offset === cursor ? ">" : " "} ${machine.id}  ${machine.ssh}  ${statuses.get(machine.id) ?? "未知"}  ${machine.socket}`,
+          `${first + offset === cursor ? ">" : " "} ${machine.id}  ${machine.ssh}  ${statuses.get(machine.id) === "disconnected" ? "已斷線" : (statuses.get(machine.id) ?? "未知")}  ${machine.socket}`,
         ),
         width - 1,
       ),
     );
+}
+
+/** A single pending operation and explicit same-machine second-press confirmation. */
+export class MachineControlState {
+  pending = false;
+  private forceMachine: string | undefined;
+
+  clearConfirmation(): void {
+    this.forceMachine = undefined;
+  }
+
+  async run(
+    key: "o" | "x",
+    machineId: string | undefined,
+    request: (request: {
+      action: "connect" | "disconnect";
+      machineId: string;
+      force?: boolean;
+    }) => Promise<import("./machines.js").MachineControlResult>,
+    show: (message: string) => void,
+  ): Promise<void> {
+    if (this.pending) return;
+    if (!machineId) {
+      this.clearConfirmation();
+      show("沒有選取 machine");
+      return;
+    }
+    const force = key === "x" && this.forceMachine === machineId;
+    this.clearConfirmation();
+    this.pending = true;
+    show("處理中…");
+    try {
+      const result = await request({
+        action: key === "o" ? "connect" : "disconnect",
+        machineId,
+        ...(force ? { force: true } : {}),
+      });
+      if (!result.ok && result.needsForce === true)
+        this.forceMachine = machineId;
+      show(
+        result.ok
+          ? (result.note ??
+              (result.status === "connected"
+                ? "已開始連線，結果見狀態欄"
+                : "已斷線"))
+          : result.reason,
+      );
+    } catch {
+      show("bridge 未連線");
+    } finally {
+      this.pending = false;
+    }
+  }
+}
+
+export function machineInputAction(
+  key: string,
+  pending: boolean,
+): "quit" | "ignore" | "control" | "other" {
+  if (key === "q" || key === "\x03") return "quit";
+  if (pending) return "ignore";
+  return key === "o" || key === "x" ? "control" : "other";
 }

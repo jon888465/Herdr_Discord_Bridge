@@ -767,3 +767,48 @@ test("passive usage profile lookup requires a known matching session and never s
     f.close();
   }
 });
+
+test("busySnapshot exposes detached leases and pending before startup has a pane", async () => {
+  const f = fixture();
+  const remoteLead = { ...lead, workspace_id: "pod:w1", pane_id: "pod:w1:p1" };
+  let finish!: (agents: AgentRecord[]) => void;
+  const waiting = new Promise<AgentRecord[]>((resolve) => {
+    finish = resolve;
+  });
+  const dir = mkdtempSync(join(tmpdir(), "pool-busy-"));
+  const agent = { ...remoteLead, pane_id: "pod:w1:p2", terminal_id: "pod:t2" };
+  const pool = new AgentPool(
+    join(dir, "pool.json"),
+    [profile],
+    {
+      listAgentsWithWorkspaceNames: () => waiting,
+      startProfile: async () => agent,
+    },
+    [],
+  );
+  try {
+    pool.select(remoteLead.workspace_id, profile.id, true);
+    const acquiring = pool.acquire(
+      remoteLead.workspace_id,
+      profile.id,
+      remoteLead,
+      "task",
+    );
+    const pending = pool.busySnapshot();
+    assert.equal(pending.pending[0].workspace, "pod:w1");
+    assert.equal(pending.leases.length, 0);
+    finish([]);
+    await acquiring;
+    const snapshot = pool.busySnapshot();
+    assert.equal(snapshot.pending.length, 0);
+    assert.equal(snapshot.leases[0].paneId, agent.pane_id);
+    assert.equal(snapshot.leases[0].terminalId, agent.terminal_id);
+    snapshot.leases[0].paneId = "modified";
+    assert.equal(pool.busySnapshot().leases[0].paneId, agent.pane_id);
+    pool.release("task");
+    assert.equal(pool.busySnapshot().leases.length, 0);
+  } finally {
+    f.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

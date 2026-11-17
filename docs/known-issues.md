@@ -1,5 +1,41 @@
 # Known Issues
 
+## ISSUE-166：Card 看板 Machine 第三階段：連線／手動斷線
+
+更新日期：2026-11-17。狀態：已修正、待驗收。
+
+**使用者可見症狀／預期：** 第二階段只有 connected／unreachable 觀測，無法從看板對選取機器連線／斷線。預期 `o` 連線、`x` 斷線，顯示結果；斷線後顯示「已斷線」，不自動重連，直到再按連線。有工作時拒絕，使用者對同台再按 `x` 才強制斷線。重複操作、未知 id、空清單及 bridge 不可用均以短句回報，不印設定。
+
+**重現／環境：** 2026-11-17，隔離 worktree、本機 macOS，node:test 假 Herdr socket／可注入 spawn；未操作真實遠端或執行中的 bridge。已確認根因（讀碼）：看板沒有控制通道，hub 沒有手動斷線狀態，兩種 tunnel 的 stopped 旗標不會在 start 重設。
+
+**修正範圍：** `machines.ts` 新增 connectMachine／disconnectMachine、busy／force 守門、disconnected 觀測與 generation；停止前在途的請求不能回寫狀態／快取。aggregate 跳過手動斷線遠端，requestOn／freshAgentsOn／定向請求拒絕；兩種 tunnel 可 stop 後重啟，舊 child 的退出不會重啟或覆蓋新 child。`machine-status-file.ts` 支援 disconnected，保留操作時間不受逐筆 TTL 影響，整份檔案仍須新鮮。新增 `machine-control-ipc.ts`：單行 JSON、version／token（時間常數）／action／machineId／force 驗證、0600 Unix socket、隨機 32 bytes hex 0600 token（暫存檔 rename）、固定短句錯誤、shutdown 清 socket。看板新增處理中阻擋重複按鍵、同台二次強制確認、其他按鍵清除確認、已斷線呈現與依寬度截斷提示；初版 Machine 的 `k` 改為連線；review 修正後改為 `o` 連線，`k` 保留移動（見下段）。SPEC 與 CONTEXT 同步，README 不變。
+
+**第一輪實作限制（已由下列 review 修正取代）：** AgentPool 當時沒有公開同步租約查詢 API，本次授權寫入範圍不含 `agent-pool.ts`，因此 main callback 以 TypeScript 可檢查的索引存取唯讀查 `pool["leases"]`／`pool["state"].sessions`，以 pane 前綴或 agent.machine 辨識，合併 terminal id 避免與 activeStreams 重複計數。這保留既有 pool 模組不變，但耦合其內部欄位；日後新增公開查詢可替換。main 只加必要接線與三處 shutdown，未整檔格式化。
+
+**測試命令與結果（2026-11-17）：** `npm ci` 完成。初次 typecheck 因 optional paneId 與舊 writer fixture 缺少 disconnected 失敗，已修正型別；相關測試初跑因舊提示字串預期失敗 1 項，已更新新契約。第一輪全套 `npm test`（含 build）2026 項：2025 pass、0 fail、1 skipped。之後補在途請求回歸與 token 讀取失敗測試並強化 token 原子寫入，最終 `npm test`（含 build）2028 項：2027 pass、0 fail、0 cancelled、1 skipped，exit 0。最終 `npm run typecheck`／`npm run lint`（242 TypeScript files）皆 exit 0。
+
+**格式檢查：** 針對全部修改 TS 執行 `npx prettier --check`，僅 `src/main.ts` 失敗；以 `git show HEAD:src/main.ts | npx prettier --check --stdin-filepath src/main.ts` 確認 HEAD 本身也失敗（同 ISSUE-164 的既有格式限制）。依任務要求不重排 main 無關段落；其餘 9 個修改 TS 執行 `npx prettier --check src/machines.ts src/machine-status-file.ts src/machine-control-ipc.ts src/card-board-cli.ts src/card-board-machines.ts test/machines.test.ts test/machine-status-file.test.ts test/machine-control-ipc.test.ts test/card-board-machines.test.ts` 全部通過。最終 `git diff --check` 通過。`git diff --stat src/main.ts` 為 19 行新增、1 行刪除，全為實質接線（activeStreams 宣告移位）。
+
+**未驗證／下一步：** 原始碼與本機 build／自動化檢查不等同 Discord／Herdr／CLI 端到端驗收；本輪未部署、未重啟 bridge、未實機測試。執行中的 bridge 尚未載入此變更，舊失敗訊息不會補送。Windows named pipe 實機、真實 SSH 斷線後不重連／再次連線、hook tunnel、忙碌回合拒絕與強制二次確認，以及不同終端尺寸仍待 Lead 安排授權重啟後驗收。手動斷線只在程序記憶體，bridge 重啟會按 config 再啟動 tunnels；本階段不寫 config.json、不編輯 SSH。未 commit／push／PR。
+
+### 獨立 review 第 1 輪（2026-11-17，changes_requested → 本輪修正）
+
+本輪依 r1f1–r1f7 修正，狀態維持「已修正、待驗收」；下列為本輪證據，不沿用初版測試當最新結果。
+
+- **F1／r1f1：** 手動斷線後 config.cardReview 仍被列為候選，remote checkout 直接 ssh 不經 hub。新增 hub.isDisconnected；cardRoleContext 過濾設定來源，remoteReviewerCandidates／remoteRoleCandidates 與角色 preflight 再依 callback 過濾。`card-role-assignment.test.ts` 驗證斷線後兩類候選皆空、重新連線後恢復，且未知 id 不視為已斷線。
+- **F2／r1f2：** state 目錄可過長且 IPC 啟動錯誤原會中止 bridge。socket 改放 configDirectory()/machine-control.sock，token 仍在 stateDirectory；新增 startMachineControlServerSafely，固定短句 log 並回 no-op stop，main 使用該包裝；listen 失敗清 server／自建 socket／token，不觸碰另一個 live server。`machine-control-ipc.test.ts` 驗證 occupied socket 不 throw、不覆寫 live token、不刪別人的 socket，且長 state 不影響短 socket 路徑與環境覆寫。
+- **F3／r1f3：** 原判定漏 pending，啟動尚未取得租約就可被斷線。AgentPool.busySnapshot 公開 detached snapshot，含 leases／pending、workspace／pane／terminal／machine；沒有 pane 的 pending 由 workspace 前綴辨識。`agent-pool.test.ts` 在 acquire 等待期間驗證 pending、完成後租約與 release，以及修改回傳快照不影響內部 binding。
+- **F4／r1f4：** 原 main 私有欄位 callback 無獨立測試。抽 src/machine-busy.ts 純函式 machineBusyReason，main 只用公開 snapshot；`machine-busy.test.ts` 覆蓋 activeTerminals 前綴、pane 前綴、agent.machine、pending、排除其他機器與同 terminal 去重。
+- **F5／r1f5：** listen 到 chmod 間可能使用寬鬆 umask。listen 前暫設 077，try/finally 還原，完成後 chmod 0600；`machine-control-ipc.test.ts` 在已存在 0755 父目錄驗證 socket 0600 與 umask 還原。
+- **F6／r1f6：** 初版整檔 prettier 重排了既有驗證函式與測試。還原 unsafeRemoteValue／validateCardReview／validateMachines、requestOn／freshAgentsOn（保留斷線 guard）及既有 cardReview.toolchain 測試的 HEAD 格式。`git diff HEAD -- src/machines.ts test/machines.test.ts` 確認這些段落只剩功能差異。格式限制與本輪檢查結果見下。
+- **F7／r1f7：** 原 pending 擋離開、force 依賴文案、k 破壞已驗收移動鍵、重連不會主動觀測。看板 input action 讓 q／Ctrl-C 優先離開，連線改 o（k 保留向上），busy 回 needsForce:true，控制狀態只依結構欄位確認；連線訊息顯示「已開始連線，結果見狀態欄」，hub 約 2 秒主動 agent.list（timeout 3000ms、retries 0），成功失敗皆更新觀測，舊 timer／在途結果以 generation 擋掉。`card-board-machines.test.ts` 驗證 pending 離開、k 導航、文案不觸發 force／不同文案 needsForce 仍觸發，以及新訊息；`machines.test.ts` 用注入 timer／client 驗證成功、失敗、斷線後忽略回應及過期 timer 不送探測。
+
+**本輪驗證（2026-11-17）：** 初次 typecheck 曾因 callback 循環推導、machine 欄位為 unknown 與舊按鍵測試不符失敗，已修正。相關六檔 `npm run build && node --test dist/test/machines.test.js dist/test/machine-control-ipc.test.js dist/test/machine-busy.test.js dist/test/card-board-machines.test.js dist/test/agent-pool.test.js dist/test/card-role-assignment.test.js`：105/105 pass、0 fail。前一輪全套 `npm test` 2034 項：2033 pass、0 fail、1 skipped；再補 listen 失敗資源清理測試後，最終 `npm test`（含 build）2035 項：2034 pass、0 fail、0 cancelled、1 skipped，exit 0。最終 `npm run typecheck`、`npm run lint`（244 TypeScript files）通過。
+
+**本輪格式與差異（2026-11-17）：** 對全部 16 個新增／修改 TS 執行 `npx prettier --check`，4 檔失敗：src/main.ts、src/machines.ts、src/card-role-assignment.ts、test/machines.test.ts；逐一以 HEAD 內容及相同 prettier 設定比較，這 4 檔 HEAD 本身也不符，遵守 F6 不整檔重排。其餘 12 檔另行 `npx prettier --check src/machine-status-file.ts src/machine-control-ipc.ts src/machine-busy.ts src/card-board-cli.ts src/card-board-machines.ts src/agent-pool.ts test/machine-status-file.test.ts test/machine-control-ipc.test.ts test/machine-busy.test.ts test/card-board-machines.test.ts test/card-role-assignment.test.ts test/agent-pool.test.ts` 全部通過；test/card-role-assignment.test.ts 原有格式可通過，已只加入並格式化新測試。`git diff --check` 通過。`git diff --numstat src/main.ts src/machines.ts test/machines.test.ts`：main +16/-4、machines +128/-9、test/machines +226/-1（皆相對 HEAD，含上一輪功能）。
+
+**交接與未驗證：** 本輪未 commit／push／PR、未部署、未重啟 bridge、未實機。真實 SSH／hook tunnel、busy 啟動中拒絕、o／x 與 pending 離開、狀態更新及端到端驗收仍需 Lead 安排。初版測試數字與 main 行數屬前輪歷史，不代表本輪版本。
+
 ## ISSUE-165：同一個 task 連續兩次取用同一個 codex Worker，第二次被「bound session identity changed」拒絕
 
 更新日期：2026-11-17。狀態：已修正、待驗收（程式與單元測試完成，**尚未部署，也尚未實機驗證**）。
@@ -63,7 +99,7 @@
 **第五輪修正（2026-11-16）：** reviewer 第 5 輪指出 F7（Card 提示加長到約 95 格卻沒截斷，30 欄、24 列、至少 19 張卡且有讀檔錯誤時總畫面多 1 列）與 F8（Machine 翻頁仍用 `visibleRows`，高度 4 時畫面顯示 2 台，PageDown 卻移動 3 台）。**根因（已確認）：**看板各處各自計算「畫面能放幾列」，Card 檢視、Machine 檢視與翻頁沒有共用同一個容量計算，第 3 輪的 F4、第 5 輪的 F7／F8 都是這個根因在不同位置的表現。**修正：**`src/card-board-machines.ts` 新增 `listRoom`（取 `visibleRows` 與「高度減固定列」的較小值，不為負）、`machineRoom`、`cardRoom`、`cardViewLines`、`clampToHeight`；Card 與 Machine 兩個檢視的每一列（含加長後的切換提示、錯誤、訊息、選取 id）都依寬度截斷，總列數保證不超過高度；`src/card-board-cli.ts` 的 Card 畫面改用 `cardViewLines`，兩個檢視的翻頁一頁列數都改用同一個 `cardRoom`／`machineRoom`（與畫面實際顯示列數一致）。**這一輪動到 Card 檢視（ISSUE-160 已驗收的畫面）**：高度夠大時（例如 24 列）清單列數仍是 `visibleRows`，行為不變，測試有一項專門檢查這點；只有高度很小或有多個固定列同時出現時清單才縮小。測試：新增 `test/card-board-layout.test.ts` 6 項，以「高度 × 寬度 × 有無錯誤 × 有無訊息 × 卡片／machine 數」的組合驗證兩個檢視列數與每列寬度都不超出、提示列在最後、翻頁一頁等於畫面實際顯示列數，並含 F7、F8 的重現案例；把共用容量計算暫時改回舊行為時其中 3 項變紅（確認測試抓得到問題），已還原。全套 `npm test`（2026-11-16，此輪修正後）1997 項，1996 pass、0 fail、1 skipped；`npm run lint` 通過；變更的程式與測試檔 `prettier --check` 通過。**未驗證：**以上都是自動化結果，沒有在真實 Herdr pane 以各種終端尺寸實機確認畫面，Card 檢視在正常尺寸下行為不變也只靠測試。
 
 **實機驗收（2026-11-16，本機 macOS、Herdr 0.9.1，main `4e9b1ff`，其中看板程式為 PR #267 的 `3d33e73`）：** PR #267 經 bridge 自動流程與人工接手共 6 輪獨立 review（第 6 輪 pass，head `3f396511fce1`）、CI 在 macOS 與 ubuntu 全綠後 squash merge；主目錄 pull、重建，依使用者要求重啟 bridge（重啟前 active-streams 為 0），舊看板 pane 關閉後自動開出新看板；我讀 pane 畫面確認標題顯示 `Card 看板 [Card]  (71)`，提示列含「Tab/m/c 切換檢視」。使用者依我列的四點（Tab／`m` 切到 Machine、`c`／Tab 切回並保留 Card 游標、Machine 下 `e` 只提示唯讀、Tab 是否被 Herdr 攔截與切換後畫面還原）在新看板實機操作後回報「測試都 ok」。
-**驗收範圍與未涵蓋：** 使用者的回報是整體結論，沒有逐項列出每個操作的結果，本紀錄沒有逐項畫面證據；Machine 檢視的捲動（machine 很多台時）、極小終端尺寸下的畫面、Card 檢視在各種尺寸下與原本相同（只靠第五輪的自動化測試）沒有另外實機確認。後續階段（連線狀態、連線／斷線、編輯 SSH，卡片 `REQ-20261116-board-machine-status`／`-connect`／`-ssh-edit`）在這次驗收當時尚未開始、都還是 draft（歷史狀態，**不是現況**）；之後第二階段（連線狀態）已完成，見 ISSUE-164，連線／斷線與編輯 SSH 兩張卡仍是 draft。ISSUE-160 的 Card 檢視畫面因本 PR 的版面重構而被改動，這次使用者實機操作時也用過，沒有回報異常，但未針對 ISSUE-160 的項目逐項重測。
+**驗收範圍與未涵蓋：** 使用者的回報是整體結論，沒有逐項列出每個操作的結果，本紀錄沒有逐項畫面證據；Machine 檢視的捲動（machine 很多台時）、極小終端尺寸下的畫面、Card 檢視在各種尺寸下與原本相同（只靠第五輪的自動化測試）沒有另外實機確認。後續階段（連線狀態、連線／斷線、編輯 SSH，卡片 `REQ-20261116-board-machine-status`／`-connect`／`-ssh-edit`）在這次驗收當時尚未開始、都還是 draft（歷史狀態，**不是現況**）；之後第二階段（連線狀態）已完成，見 ISSUE-164，連線／斷線於 2026-11-17 完成原始碼與自動化檢查、待實機驗收（ISSUE-166）；編輯 SSH 尚未實作。ISSUE-160 的 Card 檢視畫面因本 PR 的版面重構而被改動，這次使用者實機操作時也用過，沒有回報異常，但未針對 ISSUE-160 的項目逐項重測。
 
 ## ISSUE-162：只讀的 coding 任務在 review 階段必定失敗（沒有 implementation artifact）
 

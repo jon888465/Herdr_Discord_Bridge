@@ -110,7 +110,7 @@ test("machineViewLines never exceeds terminal height on a narrow screen (F3)", (
   );
   assert.deepEqual(errored.slice(1), [
     "config.json 讀不到",
-    "Tab/m/c 切換檢視  j/k 移動  PgUp/PgDn 翻頁  Home/End 頭尾  q 離開",
+    "Tab/m/c 切換檢視  o 連線 x 斷線  j/k 移動  PgUp/PgDn 翻頁  Home/End 頭尾  q 離開",
   ]);
   const wide = machineViewLines(
     { machines: many, cursor: 0, error: "", message: "hi" },
@@ -299,4 +299,141 @@ test("machineLines shows only configured machine statuses within width", () => {
   for (const width of [10, 20, 40])
     for (const line of machineLines(machines, 0, width, 3, statuses))
       assert.ok(displayWidth(line) < width);
+});
+
+test("machine status displays 已斷線 and control hint respects width", async () => {
+  const { MACHINE_HINT } = await import("../src/card-board-machines.js");
+  assert.match(MACHINE_HINT, /o 連線 x 斷線/);
+  assert.match(
+    machineLines(
+      [machine],
+      0,
+      200,
+      10,
+      new Map([[machine.id, "disconnected"]]),
+    )[0],
+    /已斷線/,
+  );
+  for (const line of machineViewLines(
+    { machines: [machine], cursor: 0, error: "", message: "處理中…" },
+    25,
+    4,
+  ))
+    assert.ok(displayWidth(line.replace(/\x1b\[[0-9;]*m/g, "")) < 25);
+});
+
+test("machine controls block repeated keys, require second x on same machine, clear on other keys", async () => {
+  const { MachineControlState } = await import("../src/card-board-machines.js");
+  const state = new MachineControlState();
+  const calls: unknown[] = [],
+    messages: string[] = [];
+  let release!: (
+    result: import("../src/machines.js").MachineControlResult,
+  ) => void;
+  const pending = state.run(
+    "x",
+    "a",
+    (request) => {
+      calls.push(request);
+      return new Promise((resolve) => {
+        release = resolve;
+      });
+    },
+    (s) => messages.push(s),
+  );
+  assert.equal(state.pending, true);
+  assert.deepEqual(messages, ["處理中…"]);
+  await state.run(
+    "x",
+    "a",
+    async () => {
+      throw new Error("should not run");
+    },
+    () => {},
+  );
+  assert.equal(calls.length, 1);
+  release({
+    ok: false,
+    reason: "有進行中的工作：2 個進行中的回合，再按一次強制斷線",
+    needsForce: true,
+  });
+  await pending;
+  const request = async (
+    v: unknown,
+  ): Promise<import("../src/machines.js").MachineControlResult> => {
+    calls.push(v);
+    return { ok: false, reason: "busy wording can change", needsForce: true };
+  };
+  await state.run("x", "a", request, () => {});
+  assert.deepEqual(calls.at(-1), {
+    action: "disconnect",
+    machineId: "a",
+    force: true,
+  });
+  await state.run("x", "b", request, () => {});
+  assert.deepEqual(calls.at(-1), { action: "disconnect", machineId: "b" });
+  state.clearConfirmation();
+  await state.run("x", "b", request, () => {});
+  assert.deepEqual(calls.at(-1), { action: "disconnect", machineId: "b" });
+  await state.run("o", "b", request, () => {});
+  await state.run("x", "a", request, () => {});
+  assert.deepEqual(calls.at(-1), { action: "disconnect", machineId: "a" });
+  const count = calls.length;
+  await state.run("x", undefined, request, (s) => messages.push(s));
+  assert.equal(calls.length, count);
+  assert.equal(messages.at(-1), "沒有選取 machine");
+  assert.equal(state.pending, false);
+});
+
+test("pending controls still allow quit, keep k navigation, and force uses structured flag", async () => {
+  const { MachineControlState, machineInputAction } =
+    await import("../src/card-board-machines.js");
+  for (const key of ["q", "\x03"])
+    assert.equal(machineInputAction(key, true), "quit");
+  assert.equal(machineInputAction("x", true), "ignore");
+  assert.equal(machineInputAction("k", false), "other");
+  assert.equal(boardKeyAction("k"), "up");
+  const state = new MachineControlState();
+  const requests: unknown[] = [],
+    messages: string[] = [];
+  await state.run(
+    "x",
+    "pod",
+    async (r) => {
+      requests.push(r);
+      return { ok: false, reason: "再按一次強制斷線" };
+    },
+    () => {},
+  );
+  await state.run(
+    "x",
+    "pod",
+    async (r) => {
+      requests.push(r);
+      return { ok: false, reason: "different text", needsForce: true };
+    },
+    () => {},
+  );
+  assert.deepEqual(requests[1], { action: "disconnect", machineId: "pod" });
+  await state.run(
+    "x",
+    "pod",
+    async (r) => {
+      requests.push(r);
+      return { ok: true, status: "disconnected" };
+    },
+    () => {},
+  );
+  assert.deepEqual(requests[2], {
+    action: "disconnect",
+    machineId: "pod",
+    force: true,
+  });
+  await state.run(
+    "o",
+    "pod",
+    async () => ({ ok: true, status: "connected" }),
+    (m) => messages.push(m),
+  );
+  assert.equal(messages.at(-1), "已開始連線，結果見狀態欄");
 });

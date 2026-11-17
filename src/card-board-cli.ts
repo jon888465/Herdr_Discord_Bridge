@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { machineControlRequest } from "./machine-control-ipc.js";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -22,6 +23,8 @@ import {
 } from "./card-board.js";
 
 import {
+  MachineControlState,
+  machineInputAction,
   cardRoom,
   cardViewLines,
   machineRoom,
@@ -58,6 +61,7 @@ let machines: MachineConfig[] = [];
 let machineCursor = 0;
 let statuses = new Map<string, MachineStatus>();
 let machineError = "";
+const machineControl = new MachineControlState();
 
 function reloadMachines(): void {
   statuses = readMachineStatus(
@@ -223,6 +227,26 @@ const timer = setInterval(() => {
 }, 3000);
 process.stdin.on("data", (key: string) => {
   if (editing) return;
+  const input = machineInputAction(key, machineControl.pending);
+  if (input === "quit") {
+    clearInterval(timer);
+    process.exit(0);
+  }
+  if (input === "ignore") return;
+  if (view === "machines" && (key === "o" || key === "x")) {
+    void machineControl.run(
+      key,
+      machines[machineCursor]?.id,
+      machineControlRequest,
+      (text) => {
+        message = text;
+        reloadMachines();
+        render();
+      },
+    );
+    return;
+  }
+  machineControl.clearConfirmation();
   message = "";
   if (key === "q" || key === "\x03") {
     clearInterval(timer);
