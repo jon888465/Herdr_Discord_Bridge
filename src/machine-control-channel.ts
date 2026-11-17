@@ -256,11 +256,17 @@ export async function startMachineControlServer(
       if (done) return;
       done = true;
       clearTimeout(deadline);
-      if (!socket.destroyed) socket.end(JSON.stringify(result) + "\n");
+      if (socket.destroyed) return;
+      socket.end(JSON.stringify(result) + "\n");
+      // 回覆後的銷毀期限不會被對方繼續寫入重設：半開的 client 持續送資料也不能永久占用 socket（review f1）。
+      destroyTimer = setTimeout(() => socket.destroy(), timeoutMs);
+      destroyTimer.unref();
     };
+    let destroyTimer: NodeJS.Timeout | undefined;
     socket.once("close", () => {
       done = true;
       clearTimeout(deadline);
+      clearTimeout(destroyTimer);
     });
     // 閒置逾時是額外保護：回覆後對方不關也不讀時直接切斷。
     socket.setTimeout(timeoutMs, () =>

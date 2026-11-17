@@ -243,6 +243,35 @@ test("超大與逾時的請求被拒絕且不呼叫 hub", async () => {
   }
 });
 
+test("回覆後對方持續寫入也會在期限內被切斷（review f1）", async () => {
+  const env = setup();
+  const { hub } = recordingHub();
+  const stop = await startMachineControlServer(hub, { ...env, timeoutMs: 120 });
+  try {
+    const closedAfter = await new Promise<number>((resolve) => {
+      const started = Date.now();
+      const client = connect(env.socketPath);
+      client.on("error", () => {});
+      client.on("connect", () => client.write('{"version":1'));
+      // 每 30ms 寫一次，讓閒置逾時永遠不會觸發；只有不可重設的銷毀期限能切斷。
+      const keep = setInterval(() => client.write("x"), 30);
+      client.on("close", () => {
+        clearInterval(keep);
+        resolve(Date.now() - started);
+      });
+      setTimeout(() => {
+        clearInterval(keep);
+        client.destroy();
+        resolve(Number.POSITIVE_INFINITY);
+      }, 2000);
+    });
+    assert.ok(closedAfter < 1000, `被切斷花了 ${closedAfter}ms`);
+  } finally {
+    stop();
+    env.cleanup();
+  }
+});
+
 test("hub 丟例外只回固定短句", async () => {
   const env = setup();
   const hub: MachineControlHub = {
