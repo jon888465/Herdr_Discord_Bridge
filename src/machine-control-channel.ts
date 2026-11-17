@@ -326,6 +326,16 @@ export async function startMachineControlServerSafely(
   }
 }
 
+/** 啟動途中失敗（Discord 停用、reconcile 丟例外…）時清掉已建立的通道，成功就不動；原例外照常往外丟（review F2）。 */
+export async function runWithCleanupOnFailure<T>(body: () => Promise<T>, cleanup: () => void): Promise<T> {
+  try {
+    return await body();
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
+}
+
 function readToken(file: string): string | undefined {
   try {
     const stat = fs.statSync(file);

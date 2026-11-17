@@ -272,6 +272,18 @@ test("回覆後對方持續寫入也會在期限內被切斷（review f1）", as
   }
 });
 
+test("runWithCleanupOnFailure：失敗才清理並保留原例外，成功不清理（review F2）", async () => {
+  const { runWithCleanupOnFailure } = await import("../src/machine-control-channel.js");
+  let cleaned = 0;
+  assert.equal(await runWithCleanupOnFailure(async () => 7, () => cleaned++), 7);
+  assert.equal(cleaned, 0);
+  await assert.rejects(
+    runWithCleanupOnFailure(async () => { throw new Error("boom"); }, () => cleaned++),
+    /boom/,
+  );
+  assert.equal(cleaned, 1);
+});
+
 test("hub 丟例外只回固定短句", async () => {
   const env = setup();
   const hub: MachineControlHub = {
