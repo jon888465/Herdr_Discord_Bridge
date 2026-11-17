@@ -1,39 +1,25 @@
 # Known Issues
 
-## ISSUE-166：Card 看板 Machine 第三階段：從看板連線／手動斷線（拆成 A、B 兩個 PR）
+## ISSUE-166：Card 看板 Machine 第三階段：從看板連線／手動斷線（拆成 A、B）
 
-更新日期：2026-11-17。狀態：修正中（A＝hub 核心：程式與單元測試完成、本 PR 提交；B＝控制通道與看板按鍵：待 A merge 後做）。**尚未部署，目前沒有任何入口可以觸發連線／斷線，也沒有實機驗證。**
+更新日期：2026-11-17。狀態：修正中（A＝hub 核心，本 PR，已修正、待驗收；B＝控制通道與看板按鍵，卡片 `REQ-20261117-board-machine-connect-b`，待 A merge 後做）。**尚未部署，沒有入口可以觸發，沒有實機驗證。**
 
-**使用者可見症狀／預期：** 第二階段（ISSUE-164）只有 connected／unreachable／未知的觀測，無法從看板對選取的 machine 連線或斷線。預期：看板選取機器後可連線、斷線；斷線後顯示「已斷線」，bridge 不再自動重連，直到再按連線；該機器有進行中的工作時拒絕斷線，使用者對同一台再按一次才強制；不能悄悄中斷工作。
+**症狀／預期：** 第二階段（ISSUE-164）只有 connected／unreachable／未知的觀測，不能從看板對機器連線或斷線。預期：可連線、斷線，斷線後顯示「已斷線」且不自動重連；有進行中的工作時拒絕，同一台再按一次才強制，不能悄悄中斷。
 
-**拆分原因與經過：** 第三階段原本是單一 PR #275（+1281／-37，19 個檔案）。bridge 的 review 拒絕了它：「PR 的 diff 有 78950 字元，超過 review 上限 60000」，所以 `card review` 與 bridge 自己的 review 迴圈都沒辦法進行；同一個 PR 的 CI 在 ubuntu 另外失敗（測試 `listen failure cleans its token…`，`ERR_FS_EISDIR`，屬於 B 的程式，見 B）。使用者 2026-11-17 選擇拆成兩個較小的 PR。B 依賴 A（B 呼叫 A 的 `connectMachine`／`disconnectMachine`），所以順序是先 A、merge 後再 B。
+**拆分經過：** 原實作是單一 PR #275（+1281／-37），diff 78950 字元超過 bridge review 上限 60000，`card review` 與自動迴圈都拒絕；ubuntu CI 另因 B 的測試在 Linux 失敗（socket 路徑為目錄時 `ERR_FS_EISDIR`）。使用者 2026-11-17 決定拆成 A、B 兩個 PR 與兩張卡（A 卡只保留 hub 核心的驗收條件，看板操作與控制通道的條件移到 B 卡，沒有刪除）。A 經 review 修正後 diff 又超過上限（63914 字元），所以文件改成「新增一段」、不改 SPEC／CONTEXT 既有的長行（長行改一個字 diff 會算整行兩次）。程式是 Worker（codex `helper`，原 PR #275）所寫，我依檔案與 hunk 切出 A、重寫文件；A 的程式沿用 Worker 的版本加上下列 review 修正。
 
-**程式來源：** 這份程式是 bridge 的 Worker（codex `helper`，task `task-8cabb951…`）寫的（原 PR #275，head `f9b005db57aa`）。我（Claude Code）依檔案與 hunk 把與 hub 核心有關的部分切出來，**程式碼沒有改**，只把 `src/main.ts` 裡屬於 B 的 5 處引用（控制通道的 import、啟動、三處 shutdown）拿掉；文件是我依 A 的範圍重寫的，沒有沿用 Worker 夾雜各輪過程、其中已過時的敘述（例如「本輪未 commit／push／PR」）。**這份程式尚未經過獨立 review。**
+**A 範圍：** `machines.ts`（`connectMachine`／`disconnectMachine`、手動斷線旗標與 `generation`、tunnel 可重啟、連線後約 2 秒主動 `agent.list` 探測）、`machine-busy.ts`（busy 判定、遠端工作登記表）、`agent-pool.ts`（只新增唯讀 `busySnapshot()`，身分檢查不動）、`card-role-assignment.ts`／`main.ts`／`card-review-wiring.ts`（排除已斷線機器、注入 busy 判定、登記遠端工作）、`machine-status-file.ts`（`disconnected`）。契約見 SPEC.md「Machine 手動連線／斷線，hub 核心」。手動斷線只存在記憶體，bridge 重啟會按 config 重新連線。
 
-**A 的範圍：**
-- `src/machines.ts`：`HerdrHub.connectMachine`／`disconnectMachine`、`isDisconnected`、手動斷線旗標與 `generation`、斷線／連線時一般與 hook tunnel 的停止與重新啟動（舊 child 的退出不會重啟或覆蓋新 child）、aggregate 與直接請求對斷線機器的處理、連線後約 2 秒的主動探測；`MachineControlResult` 型別。
-- `src/machine-busy.ts`（新）：純函式 `machineBusyReason`；`src/agent-pool.ts`：唯讀的 `busySnapshot()`（**沒有碰身分檢查**，ISSUE-165 的修正不變）。
-- `src/card-role-assignment.ts`、`src/main.ts`：卡片遠端角色的候選與 preflight 排除已手動斷線的 machine；`main.ts` 把 busy 判定注入 hub（active stream ＋ AgentPool 租約與 pending）。
-- `src/machine-status-file.ts`：狀態檔支援 `disconnected`，以斷線操作時間寫入、不受逐筆 15 秒期限限制，整份檔案的 `updatedAt` 仍須新鮮。
-- 行為契約見 SPEC.md「Machine 手動連線／斷線，hub 核心」。手動斷線只存在程序記憶體，bridge 重啟會按 config 重新連線（卡片原本留的待決問題，這裡的決定是不持久化，也不寫 config）。
+**B 範圍（未做）：** 控制通道、看板 `o`／`x` 與「再按一次強制」、顯示「已斷線」，並修正 Linux 上失敗的 socket 路徑處理。
 
-**B 的範圍（尚未做）：** 控制通道（看板到 bridge 的 Unix socket 加 token）、看板 `o`／`x` 按鍵與「再按一次強制」確認、看板顯示「已斷線」，以及修正新增測試在 Linux 失敗的 socket 路徑處理。
+**獨立 review 修正（逐筆見卡片 Review 發現）：**
+- **忙碌判定漏掉遠端工作（F2、F5，屬實）：**遠端角色（`startRemoteRole`）與 `card review` 的遠端 reviewer（`reviewOnRemote`）都不經 AgentPool、準備期間也沒有 stream，普通斷線會中斷它們。盤點所有對遠端做重活的入口，只有這兩個。新增 `RemoteRoleWork` 登記表（每份工作有唯一 id）、`trackRemoteRole`（到 `cleanup` 結束才釋放）、`trackRemoteWork`（包住整段 await）。沒人呼叫 cleanup 時一直算忙碌，偏安全。
+- **失敗後無法重試（F3、F6，屬實）：**`connectMachine` 啟動 tunnel 途中丟錯、或 `disconnectMachine` 一條 tunnel 停止丟錯，旗標已改，重按會回「已在連線中」／「已是斷線」。改為：連線失敗回復成斷線並停掉半啟動的 tunnel；斷線時兩條 tunnel 各自嘗試，沒停乾淨標 `stopPending`，重按斷線直接重試停止，重新連線清掉。
+- **範圍落差（F1、F4）：**reviewer 拿整張卡的驗收條件審拆出來的一半，A 本身修不掉。我先在卡片加說明，沒有改變它的判斷，之後經使用者同意把卡拆成 A、B 兩張。
 
-**測試（2026-11-17）：** A 相關五個測試檔（`machines`、`machine-busy`、`agent-pool`、`card-role-assignment`、`machine-status-file`）`node --test` 102 項全過；全套 `npm test` 2028 項，2027 pass、0 fail、1 skipped；`npm run lint` 通過；`machine-busy.ts`、`machine-status-file.ts`、`agent-pool.ts` 與相關測試檔 `prettier --check` 通過；`machines.ts`、`main.ts`、`card-role-assignment.ts`、`test/machines.test.ts` 在 HEAD 本來就不符 prettier，沒有整檔重排。
+**測試（2026-11-17）：**全套 `npm test` 2040 項，2039 pass、0 fail、1 skipped；`npm run lint` 通過；`machine-busy.ts` 與其測試、`machine-status-file.ts` 等 `prettier --check` 通過，`machines.ts`、`main.ts`、`card-role-assignment.ts`、`card-review-wiring.ts`、`test/machines.test.ts` 在 HEAD 本來就不符，只做最小編輯。F2／F3／F5／F6 的回歸測試我都暫時改回舊行為確認會變紅後才還原；有一次還原沒套用成功（空白不一致）造成全套 2 個失敗，是我的疏忽，讀檔補回後才取得上面的數字。
 
-**獨立 review 第 1 輪（2026-11-17，head `bed3a6792b8e`，changes_requested）：**
-- **F1（high）：** 「整體需求要求從看板操作並顯示結果，A 卻延後到 B，沒有入口、缺控制通道權限測試」。**這是拆分造成的範圍落差，不是 A 的缺陷**：reviewer 拿整張卡的驗收條件審一半的功能。A 本身修不掉；我把拆分的事實寫進卡片（「拆分說明」），讓 reviewer 以 A 的範圍判斷。這是補充範圍說明，沒有降低驗收標準，看板操作、控制通道與其權限測試仍是 B 的驗收條件。
-- **F2（high）：** busy 判定只讀 active stream 與 AgentPool，但遠端角色（`acquireWorker` 的遠端分支）直接呼叫 `startRemoteRole`，不經 pool，SSH checkout／啟動期間也還沒有 stream，所以普通斷線會被放行並中斷準備中的角色。**根因（已確認，讀 `src/main.ts` 與 `src/remote-snapshot.ts`）：**`startRemoteRole` 的 clone／fetch／checkout、建 workspace、啟動 agent 都不在 pool 的租約或 pending 裡；而且不只準備期間，整個遠端角色的生命週期都沒被計入。**修正：**`src/machine-busy.ts` 新增 `RemoteRoleWork` 登記表與 `trackRemoteRole`：啟動前登記、啟動失敗立刻釋放、成功後把 `cleanup` 包起來，cleanup 結束（成功或失敗）才釋放；`machineBusyReason` 多一個 `remoteRoles` 輸入；`main.ts` 兩處接上（hub 的 busy 判定帶登記表、遠端角色啟動用 `trackRemoteRole` 包起來）。沒人呼叫 cleanup 時會一直算忙碌（偏安全，要強制才能斷線）。
-- **F3（medium）：** `connectMachine` 在啟動 tunnel 前就清掉 `disconnected`，若啟動同步丟錯，`catch` 沒回復狀態，之後重按連線直接回「已在連線中」，不會重新啟動或探測。**已確認屬實。修正：**失敗時停掉可能已啟動的一般與 hook tunnel（停止失敗不蓋掉原本的失敗結果），回復成斷線（`generation` 加一、`observedAt` 設為現在），回「連線失敗」，之後重按會真的重新啟動。
-- **測試：** `machine-busy.test.ts` 由 1 項增為 4 項（準備期間、啟動前尚無 stream 與租約就算忙碌；別台機器不受影響；cleanup 重複呼叫沒有副作用且不釋放別的工作；啟動失敗與 cleanup 失敗都釋放；與 stream、租約依 key 去重），`machines.test.ts` 新增 1 項（hook tunnel 啟動丟錯後回復為斷線、停掉一般 tunnel、之後重按連線會重新啟動）。把 `machineBusyReason` 暫時改成忽略登記表時 2 項變紅、把 `connectMachine` 的狀態回復拿掉時新測試變紅，確認抓得到問題，已還原。全套 `npm test`（2026-11-17，此輪修正後）2036 項，2035 pass、0 fail、1 skipped；`npm run lint` 通過；`machine-busy.ts` 與其測試 `prettier --check` 通過。
-
-**獨立 review 第 2 輪（2026-11-17，head `03d632ae66c1`，changes_requested）：**
-- **F4（high）：** 與 F1 同一件事（整體驗收要求看板操作，A 刻意沒有入口）。我上一輪在卡片寫的「拆分說明」**沒有改變 reviewer 的判斷**，它仍要求「補齊後續交付才能通過本次整體驗收」。這筆 A 的程式修不掉；處理方式見 PR 說明與使用者決定。
-- **F5（high，屬實）：** `card review` 的遠端 reviewer（`reviewPullRequest` → `reviewOnRemote`）沒有登記進進行中工作，SSH checkout、啟動與 review 回合期間普通斷線仍會被放行。**根因：**F2 只補了 task 的遠端角色（`startRemoteRole`），而 `reviewOnRemote` 是另一個入口。**修正：**先盤點所有對遠端做重活的入口（`grep` `reviewOnRemote`／`startRemoteRole`／`requestOn`／`freshAgentsOn` 的呼叫者），只有這兩個；新增 `trackRemoteWork`（包住整段 await，結束成功或失敗才釋放），`card-review-wiring.ts` 的遠端分支用它包起來；登記表每份工作改用自己的單元 id，同 key 重複登記不互相覆蓋。
-- **F6（medium，屬實）：** `disconnectMachine` 先設 `disconnected` 再依序停 tunnel，一般 tunnel 停止丟錯時 hook tunnel 不會停，重按斷線又因旗標已設而回成功，沒辦法重試。**修正：**兩條 tunnel 各自嘗試停止（`stopRemoteTunnels`），任何一條沒停成功就標 `stopPending`，回 `ok: false`；重按斷線直接重試停止，成功才回 `ok: true`；重新連線清掉 `stopPending`；`connectMachine` 失敗的回復路徑也用同一個函式。
-- **測試：** `machine-busy.test.ts` 6 項（新增 `trackRemoteWork`、同 key 重複登記不互相覆蓋），`machines.test.ts` 新增 2 項（一條 tunnel 停不掉時另一條仍停、重按重試清理、清理完成後才是 no-op；重新連線清掉待清理）。暫時把「重按斷線不重試」與「登記表用 key 當唯一 id」改回舊行為時各有 1 項變紅，已還原並逐一確認。全套 `npm test`（2026-11-17，此輪修正後）2040 項，2039 pass、0 fail、1 skipped；`npm run lint` 通過；`machine-busy.ts` 與其測試 `prettier --check` 通過；`card-review-wiring.ts` 在 HEAD 本來就不符 prettier，只做最小編輯。我做驗證時有一次還原沒套用成功（空白不一致），造成全套出現 2 個失敗，是我自己的疏忽，讀檔確認後補回，上面的數字是補回後的結果。
-
-**未驗證：** 沒有實機：真實 SSH 斷線後不再重連、再次連線、hook tunnel 停止與重啟、有進行中工作時的拒絕與強制斷線；這些在 B 有入口之後才能驗。`main.ts` 與 `card-review-wiring.ts` 的接線（busy 判定帶登記表、遠端角色用 `trackRemoteRole` 包起來）只有型別與 build 檢查，包裝邏輯本身有單元測試，但沒有走真實遠端角色的整合測試。
+**未驗證：**沒有實機：真實 SSH 斷線後不再重連、再次連線、hook tunnel 停止與重啟、有進行中工作時的拒絕與強制斷線，要 B 有入口後才能驗；`main.ts`／`card-review-wiring.ts` 的接線只有型別與 build 檢查，包裝邏輯本身有單元測試。**尚未通過獨立 review。**
 
 ## ISSUE-165：同一個 task 連續兩次取用同一個 codex Worker，第二次被「bound session identity changed」拒絕
 
