@@ -26,7 +26,8 @@ import { redactSecrets } from "./redact.js";
 import { unwrapCodexJson } from "./team-orchestration.js";
 
 export const MAX_REVIEW_FILES = 20;
-export const MAX_REVIEW_DIFF_CHARS = 60_000;
+/** 使用者 2026-11-17 由 60,000 提高到 80,000（ISSUE-111）；超過仍拒絕並要求 Lead 重新切分。 */
+export const MAX_REVIEW_DIFF_CHARS = 80_000;
 export const MAX_CRITERIA = 20;
 export const MAX_REPLY_CHARS = 64 * 1024;
 
