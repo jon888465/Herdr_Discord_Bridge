@@ -603,3 +603,75 @@ test("reconnect schedules a probe, records success/failure, and discards results
   };
   scheduled.shift()!();
 });
+
+// review 第 2 輪 F6：一條 tunnel 停不掉不能害另一條也沒停，重按斷線要能重試清理。
+test("a tunnel that fails to stop does not keep the other one running, and pressing disconnect again retries the cleanup (review F6)", () => {
+  const hub = new HerdrHub(
+    [{ id: "pod", ssh: "unused", socket: "/unused", hookSocket: "/h" }],
+    undefined,
+    100,
+    10,
+    () => {},
+    () => "/unused",
+    undefined,
+    () => {},
+  );
+  const remote = hub["remotes"].get("pod")!;
+  let generalFails = true;
+  let generalStops = 0;
+  let hookStops = 0;
+  remote.tunnel.start = () => {};
+  remote.tunnel.stop = () => {
+    generalStops++;
+    if (generalFails) throw new Error("socket remove failed");
+  };
+  remote.hookTunnel!.start = () => {};
+  remote.hookTunnel!.stop = () => {
+    hookStops++;
+  };
+  const first = hub.disconnectMachine("pod");
+  assert.equal(first.ok, false, "沒停乾淨不能回成功");
+  assert.equal(hub.isDisconnected("pod"), true, "已標為斷線，之後的請求照樣被擋");
+  assert.equal(hookStops, 1, "一般 tunnel 丟錯，hook tunnel 仍要停");
+  // 重按：不是回「已是斷線」，而是重試停止；這次兩條都停成功。
+  generalFails = false;
+  const retried = hub.disconnectMachine("pod");
+  assert.deepEqual(retried, { ok: true, status: "disconnected" });
+  assert.equal(generalStops, 2);
+  assert.equal(hookStops, 2);
+  // 清理完成後才是真正的「已是斷線」no-op，不會再停一次。
+  assert.deepEqual(hub.disconnectMachine("pod"), {
+    ok: true,
+    status: "disconnected",
+    note: "已是斷線",
+  });
+  assert.equal(generalStops, 2);
+});
+
+test("reconnecting clears a pending stop, so the next disconnect is a normal one (review F6)", () => {
+  const hub = new HerdrHub(
+    [{ id: "pod", ssh: "unused", socket: "/unused" }],
+    undefined,
+    100,
+    10,
+    () => {},
+    () => "/unused",
+    undefined,
+    () => {},
+  );
+  const remote = hub["remotes"].get("pod")!;
+  let stopFails = true;
+  remote.tunnel.start = () => {};
+  remote.tunnel.stop = () => {
+    if (stopFails) throw new Error("stop failed");
+  };
+  assert.equal(hub.disconnectMachine("pod").ok, false);
+  assert.equal(hub.connectMachine("pod").ok, true);
+  assert.equal(hub.isDisconnected("pod"), false);
+  stopFails = false;
+  // 重新連線後再斷線走一般流程（含有沒有工作的檢查），而不是殘留的「重試清理」。
+  assert.deepEqual(hub.disconnectMachine("pod"), {
+    ok: true,
+    status: "disconnected",
+  });
+});

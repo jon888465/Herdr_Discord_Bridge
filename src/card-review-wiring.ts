@@ -21,6 +21,7 @@ import type { CardWorktree } from "./card-worktrees.js";
 import { levelFor, type LoadedPolicy } from "./policy.js";
 import type { AgentRecord } from "./types.js";
 import { reviewOnRemote, type RemoteReviewDeps } from "./remote-checkout.js";
+import { remoteRoleWork, trackRemoteWork } from "./machine-busy.js";
 
 export interface ReviewWiringDeps {
   roleContext?: RoleContext;
@@ -151,7 +152,7 @@ export async function reviewCardPullRequest(
   if (remote && !deps.roleContext?.remoteMachines?.find((m) => m.id === remote)?.kinds.includes(flowInput.launch?.kind ?? ""))
     throw new Error("遠端 review 失敗：machine 目前未開放這個 agent 種類");
   const result = remote
-    ? await reviewOnRemote(deps.remote!, deps.flow, remote, { ...flowInput, prRepo: pr.repo, localWorktree: entry.path })
+    ? await trackRemoteWork(remoteRoleWork, `card-review:${pr.repo}#${pr.number}`, remote, () => reviewOnRemote(deps.remote!, deps.flow, remote, { ...flowInput, prRepo: pr.repo, localWorktree: entry.path }))
     : await runCardReview(deps.flow, flowInput);
   return {
     pr: { number: pr.number, url: pr.url, headSha: material.headSha },

@@ -27,7 +27,13 @@
 - **F3（medium）：** `connectMachine` 在啟動 tunnel 前就清掉 `disconnected`，若啟動同步丟錯，`catch` 沒回復狀態，之後重按連線直接回「已在連線中」，不會重新啟動或探測。**已確認屬實。修正：**失敗時停掉可能已啟動的一般與 hook tunnel（停止失敗不蓋掉原本的失敗結果），回復成斷線（`generation` 加一、`observedAt` 設為現在），回「連線失敗」，之後重按會真的重新啟動。
 - **測試：** `machine-busy.test.ts` 由 1 項增為 4 項（準備期間、啟動前尚無 stream 與租約就算忙碌；別台機器不受影響；cleanup 重複呼叫沒有副作用且不釋放別的工作；啟動失敗與 cleanup 失敗都釋放；與 stream、租約依 key 去重），`machines.test.ts` 新增 1 項（hook tunnel 啟動丟錯後回復為斷線、停掉一般 tunnel、之後重按連線會重新啟動）。把 `machineBusyReason` 暫時改成忽略登記表時 2 項變紅、把 `connectMachine` 的狀態回復拿掉時新測試變紅，確認抓得到問題，已還原。全套 `npm test`（2026-11-17，此輪修正後）2036 項，2035 pass、0 fail、1 skipped；`npm run lint` 通過；`machine-busy.ts` 與其測試 `prettier --check` 通過。
 
-**未驗證：** 沒有實機：真實 SSH 斷線後不再重連、再次連線、hook tunnel 停止與重啟、有進行中工作時的拒絕與強制斷線；這些在 B 有入口之後才能驗。`main.ts` 兩處接線（busy 判定帶登記表、遠端角色用 `trackRemoteRole` 包起來）只有型別與 build 檢查，包裝邏輯本身有單元測試，但沒有走真實遠端角色的整合測試。
+**獨立 review 第 2 輪（2026-11-17，head `03d632ae66c1`，changes_requested）：**
+- **F4（high）：** 與 F1 同一件事（整體驗收要求看板操作，A 刻意沒有入口）。我上一輪在卡片寫的「拆分說明」**沒有改變 reviewer 的判斷**，它仍要求「補齊後續交付才能通過本次整體驗收」。這筆 A 的程式修不掉；處理方式見 PR 說明與使用者決定。
+- **F5（high，屬實）：** `card review` 的遠端 reviewer（`reviewPullRequest` → `reviewOnRemote`）沒有登記進進行中工作，SSH checkout、啟動與 review 回合期間普通斷線仍會被放行。**根因：**F2 只補了 task 的遠端角色（`startRemoteRole`），而 `reviewOnRemote` 是另一個入口。**修正：**先盤點所有對遠端做重活的入口（`grep` `reviewOnRemote`／`startRemoteRole`／`requestOn`／`freshAgentsOn` 的呼叫者），只有這兩個；新增 `trackRemoteWork`（包住整段 await，結束成功或失敗才釋放），`card-review-wiring.ts` 的遠端分支用它包起來；登記表每份工作改用自己的單元 id，同 key 重複登記不互相覆蓋。
+- **F6（medium，屬實）：** `disconnectMachine` 先設 `disconnected` 再依序停 tunnel，一般 tunnel 停止丟錯時 hook tunnel 不會停，重按斷線又因旗標已設而回成功，沒辦法重試。**修正：**兩條 tunnel 各自嘗試停止（`stopRemoteTunnels`），任何一條沒停成功就標 `stopPending`，回 `ok: false`；重按斷線直接重試停止，成功才回 `ok: true`；重新連線清掉 `stopPending`；`connectMachine` 失敗的回復路徑也用同一個函式。
+- **測試：** `machine-busy.test.ts` 6 項（新增 `trackRemoteWork`、同 key 重複登記不互相覆蓋），`machines.test.ts` 新增 2 項（一條 tunnel 停不掉時另一條仍停、重按重試清理、清理完成後才是 no-op；重新連線清掉待清理）。暫時把「重按斷線不重試」與「登記表用 key 當唯一 id」改回舊行為時各有 1 項變紅，已還原並逐一確認。全套 `npm test`（2026-11-17，此輪修正後）2040 項，2039 pass、0 fail、1 skipped；`npm run lint` 通過；`machine-busy.ts` 與其測試 `prettier --check` 通過；`card-review-wiring.ts` 在 HEAD 本來就不符 prettier，只做最小編輯。我做驗證時有一次還原沒套用成功（空白不一致），造成全套出現 2 個失敗，是我自己的疏忽，讀檔確認後補回，上面的數字是補回後的結果。
+
+**未驗證：** 沒有實機：真實 SSH 斷線後不再重連、再次連線、hook tunnel 停止與重啟、有進行中工作時的拒絕與強制斷線；這些在 B 有入口之後才能驗。`main.ts` 與 `card-review-wiring.ts` 的接線（busy 判定帶登記表、遠端角色用 `trackRemoteRole` 包起來）只有型別與 build 檢查，包裝邏輯本身有單元測試，但沒有走真實遠端角色的整合測試。
 
 ## ISSUE-165：同一個 task 連續兩次取用同一個 codex Worker，第二次被「bound session identity changed」拒絕
 

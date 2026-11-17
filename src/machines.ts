@@ -424,6 +424,8 @@ interface Remote {
   client: HerdrClient;
   up: boolean;
   disconnected: boolean;
+  /** 已標為斷線，但至少一條 tunnel 沒停成功；重按斷線會重試停止（review 第 2 輪 F6）。 */
+  stopPending?: boolean;
   generation: number;
   /** 最後一次實際請求遠端（不論成功失敗）的時間；從沒請求過是 undefined。 */
   observedAt?: number;
@@ -494,6 +496,7 @@ export class HerdrHub extends HerdrClient {
       return { ok: true, status: "connected", note: "已在連線中" };
     try {
       remote.disconnected = false;
+      remote.stopPending = false;
       remote.up = false;
       remote.observedAt = undefined;
       remote.generation++;
@@ -508,15 +511,7 @@ export class HerdrHub extends HerdrClient {
     } catch {
       // 啟動途中丟錯：回復成可重試的斷線狀態，並清掉可能已經啟動的 tunnel；否則旗標已清、
       // 下次重按連線會直接回「已在連線中」，永遠不會重新啟動或探測（review 第 1 輪 F3）。
-      for (const stop of [
-        () => remote.tunnel.stop(),
-        () => remote.hookTunnel?.stop(),
-      ])
-        try {
-          stop();
-        } catch {
-          /* 清理失敗不能蓋掉原本的失敗結果 */
-        }
+      remote.stopPending = !this.stopRemoteTunnels(remote);
       remote.disconnected = true;
       remote.generation++;
       remote.up = false;
@@ -547,8 +542,15 @@ export class HerdrHub extends HerdrClient {
   ): MachineControlResult {
     const remote = this.remotes.get(id);
     if (!remote) return { ok: false, reason: "machine 不存在" };
-    if (remote.disconnected)
-      return { ok: true, status: "disconnected", note: "已是斷線" };
+    if (remote.disconnected) {
+      if (!remote.stopPending)
+        return { ok: true, status: "disconnected", note: "已是斷線" };
+      // 上次停 tunnel 沒停乾淨：已經是斷線狀態，不用再問有沒有進行中的工作，直接重試停止。
+      remote.stopPending = !this.stopRemoteTunnels(remote);
+      return remote.stopPending
+        ? { ok: false, reason: "停止連線時又出錯，請再按一次重試" }
+        : { ok: true, status: "disconnected" };
+    }
     try {
       const busy = !options.force && this.isBusy?.(id);
       if (busy)
@@ -561,12 +563,31 @@ export class HerdrHub extends HerdrClient {
       remote.generation++;
       remote.up = false;
       remote.observedAt = Date.now();
-      remote.tunnel.stop();
-      remote.hookTunnel?.stop();
-      return { ok: true, status: "disconnected" };
+      remote.stopPending = !this.stopRemoteTunnels(remote);
+      return remote.stopPending
+        ? {
+            ok: false,
+            reason: "已標為斷線，但停止連線時出錯，請再按一次重試",
+          }
+        : { ok: true, status: "disconnected" };
     } catch {
       return { ok: false, reason: "斷線失敗" };
     }
+  }
+
+  /** 兩條 tunnel 各自嘗試停止，一條丟錯不影響另一條；回傳是否都停成功。 */
+  private stopRemoteTunnels(remote: Remote): boolean {
+    let stopped = true;
+    for (const stop of [
+      () => remote.tunnel.stop(),
+      () => remote.hookTunnel?.stop(),
+    ])
+      try {
+        stop();
+      } catch {
+        stopped = false;
+      }
+    return stopped;
   }
 
   stopTunnels(): void {

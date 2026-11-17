@@ -4,6 +4,7 @@ import {
   machineBusyReason,
   RemoteRoleWork,
   trackRemoteRole,
+  trackRemoteWork,
 } from "../src/machine-busy.js";
 
 const idle = { activeTerminals: [], pool: { leases: [], pending: [] } };
@@ -123,4 +124,55 @@ test("remote roles are deduplicated together with streams and leases by key, per
     }),
     "3 個進行中的回合",
   );
+});
+
+// review 第 2 輪 F5：card review 的遠端 reviewer 整段都在一次 await 裡。
+test("trackRemoteWork counts the whole awaited remote call as busy and releases it on success or failure", async () => {
+  const registry = new RemoteRoleWork();
+  let finish!: (value: string) => void;
+  const running = trackRemoteWork(
+    registry,
+    "card-review:o/r#1",
+    "pod",
+    () =>
+      new Promise<string>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  assert.equal(
+    machineBusyReason("pod", { ...idle, remoteRoles: registry }),
+    "1 個進行中的回合",
+    "checkout、啟動 reviewer、review 回合期間都算忙碌",
+  );
+  finish("done");
+  assert.equal(await running, "done");
+  assert.equal(
+    machineBusyReason("pod", { ...idle, remoteRoles: registry }),
+    undefined,
+  );
+  await assert.rejects(
+    trackRemoteWork(registry, "card-review:o/r#2", "pod", async () => {
+      throw new Error("review failed");
+    }),
+    /review failed/,
+  );
+  assert.equal(registry.entries().size, 0, "失敗也要釋放");
+});
+
+test("registering the same key twice does not overwrite, and finishing one does not release the other", () => {
+  const registry = new RemoteRoleWork();
+  const endFirst = registry.begin("task/w1", "pod");
+  const endSecond = registry.begin("task/w1", "pod");
+  assert.equal(
+    machineBusyReason("pod", { ...idle, remoteRoles: registry }),
+    "2 個進行中的回合",
+  );
+  endFirst();
+  endFirst();
+  assert.equal(
+    machineBusyReason("pod", { ...idle, remoteRoles: registry }),
+    "1 個進行中的回合",
+  );
+  endSecond();
+  assert.equal(registry.entries().size, 0);
 });

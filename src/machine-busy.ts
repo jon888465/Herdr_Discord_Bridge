@@ -17,12 +17,17 @@ export interface MachinePoolSnapshot {
  */
 export class RemoteRoleWork {
   private readonly work = new Map<string, string>();
+  private sequence = 0;
 
-  /** 登記一份工作，回傳結束函式；重複呼叫結束函式沒有副作用。 */
+  /**
+   * 登記一份工作，回傳結束函式；重複呼叫結束函式沒有副作用。每一份都有自己的單元 id（key 只是說明），
+   * 同一個 key 重複登記（例如重試）不會互相覆蓋，先結束的那份也不會把另一份一起釋放。
+   */
   begin(key: string, machineId: string): () => void {
-    this.work.set(key, machineId);
+    const unit = `${key}#${++this.sequence}`;
+    this.work.set(unit, machineId);
     return () => {
-      this.work.delete(key);
+      this.work.delete(unit);
     };
   }
 
@@ -33,6 +38,24 @@ export class RemoteRoleWork {
 
 /** 整個 bridge 共用的登記表：`main.ts` 的 hub busy 判定與遠端角色啟動都用它。 */
 export const remoteRoleWork = new RemoteRoleWork();
+
+/**
+ * 包住「整段都在一次 await 裡」的遠端工作（例如 `card review` 的 `reviewOnRemote`：SSH checkout、啟動 reviewer、
+ * review 回合與清理）：執行前登記，結束（成功或失敗）才釋放（review 第 2 輪 F5）。
+ */
+export async function trackRemoteWork<T>(
+  registry: RemoteRoleWork,
+  key: string,
+  machineId: string,
+  run: () => Promise<T>,
+): Promise<T> {
+  const end = registry.begin(key, machineId);
+  try {
+    return await run();
+  } finally {
+    end();
+  }
+}
 
 /**
  * 包住遠端角色的啟動：啟動前就登記，啟動失敗立刻釋放；成功後把 `cleanup` 換成「cleanup 結束（成功或失敗）才釋放」，
