@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:net";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HerdrHub, validateMachines } from "../src/machines.js";
@@ -225,14 +225,14 @@ test("uploadFiles streams bytes to the remote path and rejects unsafe names", as
     const stub = join(dir, "fakessh");
     await writeFile(
       stub,
-      '#!/bin/sh\nfor a; do last="$a"; done\nexec sh -c "$last"\n',
+      '#!/bin/sh\n[ "$1" = -o ] && [ "$2" = BatchMode=yes ] && [ "$3" = -p ] && [ "$4" = 2222 ] && [ "$5" = alice@host ] || exit 91\nfor a; do last="$a"; done\nexec sh -c "$last"\n',
     );
     await chmod(stub, 0o755);
     const src = join(dir, "src.txt");
     await writeFile(src, "hello remote");
     const remoteDir = join(dir, "remote", "message-1");
     const [path] = await uploadFiles(
-      { id: "agy", ssh: "x", socket: "/s" },
+      { id: "agy", ssh: "herdr-test-unconfigured", host: "host", user: "alice", port: 2222, socket: "/s" },
       remoteDir,
       [{ localPath: src, name: "1-note.txt" }],
       stub,
@@ -242,7 +242,7 @@ test("uploadFiles streams bytes to the remote path and rejects unsafe names", as
     assert.equal(await readFile(path, "utf8"), "hello remote");
     await assert.rejects(
       uploadFiles(
-        { id: "agy", ssh: "x", socket: "/s" },
+        { id: "agy", ssh: "herdr-test-unconfigured", host: "host", user: "alice", port: 2222, socket: "/s" },
         remoteDir,
         [{ localPath: src, name: "../evil" }],
         stub,
@@ -250,7 +250,7 @@ test("uploadFiles streams bytes to the remote path and rejects unsafe names", as
       /unsafe/,
     );
     await assert.rejects(
-      uploadFiles({ id: "agy", ssh: "x", socket: "/s" }, "relative", [], stub),
+      uploadFiles({ id: "agy", ssh: "herdr-test-unconfigured", host: "host", user: "alice", port: 2222, socket: "/s" }, "relative", [], stub),
       /absolute/,
     );
   } finally {
@@ -263,12 +263,12 @@ test("cleanupRemoteAttachments runs a scoped find and validates input", async ()
   const { writeFile, chmod, mkdir, utimes, stat } =
     await import("node:fs/promises");
   const dir = await mkdtemp(join(tmpdir(), "bq-"));
-  const machine = { id: "agy", ssh: "x", socket: "/s" };
+  const machine = { id: "agy", ssh: "herdr-test-unconfigured", host: "host", user: "alice", port: 2222, socket: "/s" };
   try {
     const stub = join(dir, "fakessh");
     await writeFile(
       stub,
-      '#!/bin/sh\nfor a; do last="$a"; done\nexec sh -c "$last"\n',
+      '#!/bin/sh\n[ "$1" = -o ] && [ "$2" = BatchMode=yes ] && [ "$3" = -p ] && [ "$4" = 2222 ] && [ "$5" = alice@host ] || exit 91\nfor a; do last="$a"; done\nexec sh -c "$last"\n',
     );
     await chmod(stub, 0o755);
     const root = join(dir, "attachments");
@@ -427,7 +427,9 @@ test("both tunnels restart after stop and ignore old process exit", async () => 
   const { EventEmitter } = await import("node:events");
   const { spawn } = await import("node:child_process");
   const children: import("node:child_process").ChildProcess[] = [];
-  const spawnProcess: typeof spawn = (() => {
+  const calls: string[][] = [];
+  const spawnProcess: typeof spawn = ((_cmd: string, args: string[]) => {
+    calls.push(args);
     const child =
       new EventEmitter() as import("node:child_process").ChildProcess;
     child.kill = () => true;
@@ -435,7 +437,7 @@ test("both tunnels restart after stop and ignore old process exit", async () => 
     return child;
   }) as typeof spawn;
   const dir = await mkdtemp(join(tmpdir(), "mt-"));
-  const config = { id: "agy", ssh: "unused", socket: "/r", hookSocket: "/h" };
+  const config = { id: "agy", ssh: "unused", user: "alice", host: "host", port: 2222, socket: "/r", hookSocket: "/h" };
   const tunnel = new MachineTunnel(
     config,
     () => {},
@@ -458,6 +460,12 @@ test("both tunnels restart after stop and ignore old process exit", async () => 
         assert.equal(children.length, count + 2);
       }
       t.stop();
+    }
+    for (const args of calls) {
+      const p = args.indexOf("-p");
+      assert.ok(p > args.indexOf("BatchMode=yes"));
+      assert.deepEqual(args.slice(p, p + 3), ["-p", "2222", "alice@host"]);
+      assert.ok(!args.includes("unused"));
     }
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -708,4 +716,88 @@ test("direct SSH operations are refused on a manually disconnected machine (revi
   hub.disconnectMachine("pod");
   await assert.rejects(hub.uploadTo("pod", "/d", []), /已斷線/);
   await assert.rejects(hub.cleanupAttachments("pod", "/d", 1), /已斷線/);
+});
+
+test("structured SSH validation and target precedence", async () => {
+  const { sshTargetArgs } = await import("../src/machines.js");
+  const base = { id: "remote", socket: "/r.sock" };
+  for (const host of ["example.com", "host", "example.com.", "127.0.0.1", "::1", "2001:db8::1"])
+    for (const port of [1, 22, 65535])
+      assert.equal(validateMachines([{ ...base, host, port, user: "alice_1.x-y" }])[0]!.host, host);
+  for (const host of ["", "-x", "a..b", "a/b", "a b", "a\n", "a\u0080", "a;cmd", "[::1]", "fe80::1%eth0", "x".repeat(64), "x.".repeat(128)])
+    assert.throws(() => validateMachines([{ ...base, host }]));
+  for (const user of ["", "-x", "x y", "a/b", "a;cmd", "x\n", "x".repeat(201), null, 2])
+    assert.throws(() => validateMachines([{ ...base, host: "host", user }]));
+  for (const port of ["22", "22abc", 0, -1, 65536, 1.5, null, NaN, Infinity])
+    assert.throws(() => validateMachines([{ ...base, host: "host", port }]));
+  for (const extra of [{}, { ssh: "alias", user: "alice" }, { ssh: "alias", port: 22 }])
+    assert.throws(() => validateMachines([{ ...base, ...extra }]));
+  assert.deepEqual(sshTargetArgs({ ...base, ssh: "legacy@alias" }), ["legacy@alias"]);
+  assert.deepEqual(sshTargetArgs({ ...base, host: "host" }), ["-p", "22", "host"]);
+  const both = validateMachines([{ ...base, ssh: "alias", user: "alice", host: "host", port: 2222 }])[0]!;
+  // 同時有 ssh 與 host：ssh 是 ~/.ssh/config 已設定的 Host 就直接用 alias，否則回退 user／host／port（review round 1 F1）。
+  assert.deepEqual(sshTargetArgs(both, () => true), ["alias"]);
+  assert.deepEqual(sshTargetArgs(both, () => false), ["-p", "2222", "alice@host"]);
+  assert.deepEqual(sshTargetArgs({ ...base, ssh: "legacy@alias" }, () => false), ["legacy@alias"], "只有 ssh 時不管 config 都原樣用");
+  assert.deepEqual(sshTargetArgs({ ...base, host: "host" }, () => true), ["-p", "22", "host"]);
+  const { sshTargetLabel } = await import("../src/machines.js");
+  assert.equal(sshTargetLabel(both, () => true), "alias");
+  assert.equal(sshTargetLabel(both, () => false), "alice@host:2222");
+  assert.throws(() => sshTargetArgs(base as never), /no SSH target/);
+});
+
+test("sshConfigHasHost 交給 ssh -G 判斷：hostname 與輸入不同才算已設定（review F1/F2/F5/F6）", async () => {
+  const { sshConfigHasHost } = await import("../src/machines.js");
+  const dir = await mkdtemp(join(tmpdir(), "ssh-config-"));
+  try {
+    const config = join(dir, "config");
+    await mkdir(join(dir, "hosts"));
+    await writeFile(join(dir, "hosts", "extra.conf"), "Host nested-top\n  HostName nested.example\nHost pod-in-other\n  HostName x.example\n");
+    await writeFile(
+      config,
+      [
+        "Host *",
+        "  ServerAliveInterval 15",
+        "Host pod",
+        "  HostName 192.0.2.2",
+        "Host nohost",
+        "  User alice",
+        "Host same",
+        "  Port 2200",
+        "Match user bob host matched",
+        "  HostName match.example",
+        "Host other # pod-comment",
+        "  HostName other.example",
+        "Host other2",
+        "  Include hosts/extra.conf",
+        "",
+      ].join("\n"),
+    );
+    assert.equal(sshConfigHasHost("pod", config), true);
+    assert.equal(sshConfigHasHost("alice@pod", config), true, "user@alias 只比對 alias");
+    assert.equal(sshConfigHasHost("nested-top", config), false, "Include 掛在 Host other2 底下，查別的名字不套用（F5）");
+    assert.equal(sshConfigHasHost("pod-comment", config), false, "行尾註解不是 Host pattern（F6）");
+    assert.equal(sshConfigHasHost("nohost", config), true, "只有 User 的 Host 也算已設定（F7）");
+    assert.equal(sshConfigHasHost("same", config), true, "只有 Port／IdentityFile 的 Host 也算已設定（F7）");
+    assert.equal(sshConfigHasHost("bob@matched", config), true, "Match user 以完整 user@alias 解析（F8）");
+    assert.equal(sshConfigHasHost("alice@matched", config), false, "Match user 不符時不算已設定（F8）");
+    assert.equal(sshConfigHasHost("unknown", config), false);
+    assert.equal(sshConfigHasHost("Unconfigured-Review-Host", config), false, "大小寫混合的名字不誤判（F11）");
+    assert.equal(sshConfigHasHost("a", config), false, "短名字不能因為輸出裡別處含有同樣字母而誤判（F10）");
+    assert.equal(sshConfigHasHost("pod", join(dir, "absent")), false, "設定檔讀不到當作沒有");
+    assert.equal(sshConfigHasHost("-oProxyCommand=x", config), false, "以 - 開頭不傳給 ssh");
+    assert.equal(sshConfigHasHost("", config), false);
+    // F12：alias 剛好等於預設 SSH 使用者時，User 欄位不能被當成目的地正規化。
+    const { userInfo } = await import("node:os");
+    assert.equal(sshConfigHasHost(userInfo().username, config), false, "alias 等於本機使用者不誤判（F12）");
+    // F13：與通用設定只差大小寫的值（User）也算差異。
+    const cased = join(dir, "cased");
+    await writeFile(cased, "Host caseuser\n  User Alice\nHost *\n  User alice\n");
+    assert.equal(sshConfigHasHost("caseuser", cased), true, "只差大小寫的設定值也算已設定（F13）");
+    const { refreshSshConfigHost } = await import("../src/machines.js");
+    assert.equal(await refreshSshConfigHost("pod", config), true, "非同步版本同一結果（F9）");
+    assert.equal(await refreshSshConfigHost("unknown", config), false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

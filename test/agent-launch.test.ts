@@ -334,3 +334,14 @@ test("agent start codex --cwd <linked worktree> adds one --add-dir; claude does 
   await runAgentStart(baseDeps(b.port), { spec: ":claude", cwd: wt });
   assert.equal("args" in startParams(b.calls), false);
 });
+
+test("sshRealpath puts structured port before destination and command after it", async (t) => {
+  const { sshRealpath } = await import("../src/agent-launch.js");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "realpath-ssh-"));
+  const previous = process.env.PATH;
+  t.after(() => { process.env.PATH = previous; fs.rmSync(dir, { recursive: true, force: true }); });
+  fs.writeFileSync(path.join(dir, "ssh"), `#!/bin/sh\nprintf '%s\\n' "$@" > '${dir}/args'\nprintf '/canonical\\n'\n`, { mode: 0o700 });
+  process.env.PATH = `${dir}:${previous ?? ""}`;
+  assert.equal(await sshRealpath({ id: "remote", socket: "/r", ssh: "ignored", host: "host", user: "alice", port: 2222 }, "/target"), "/canonical");
+  assert.deepEqual(fs.readFileSync(path.join(dir, "args"), "utf8").trimEnd().split("\n"), ["-o", "BatchMode=yes", "-p", "2222", "alice@host", "realpath -- '/target'"]);
+});

@@ -1,4 +1,5 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { isIP } from "node:net";
+import { execFile, execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import fs from "node:fs";
 import os from "node:os";
@@ -12,7 +13,10 @@ export interface MachineConfig {
   /** 識別碼；ID 以 `<id>:` 當前綴區分，不帶前綴的一律是本機。 */
   id: string;
   /** `ssh` 的目標（~/.ssh/config 的 Host 或 user@host）。 */
-  ssh: string;
+  ssh?: string;
+  user?: string;
+  host?: string;
+  port?: number;
   /** 遠端 Herdr API socket 的絕對路徑。 */
   socket: string;
   /**
@@ -55,19 +59,26 @@ export function validateMachines(value: unknown): MachineConfig[] {
   const machines: MachineConfig[] = [];
   for (const item of value) {
     if (!item || typeof item !== "object") continue;
-    const { id, ssh, socket, hookSocket, cardReview } = item as Record<string, unknown>;
+    const { id, ssh, user, host, port, socket, hookSocket, cardReview } = item as Record<string, unknown>;
     if (
       typeof id !== "string" ||
-      typeof ssh !== "string" ||
       typeof socket !== "string"
     )
-      throw new Error("machines[] needs string id, ssh and socket");
+      throw new Error("machines[] needs string id and socket");
     if (!MACHINE_ID.test(id) || LOCAL_LOOKALIKE.test(id))
       throw new Error(`machines[].id "${id}" is not a valid machine id`);
     if (seen.has(id)) throw new Error(`machines[].id "${id}" is duplicated`);
     // ssh 目標不可被當成 ssh 選項，socket 必須是遠端絕對路徑。
-    if (!ssh || ssh.startsWith("-") || /\s/.test(ssh))
+    if (ssh !== undefined && (typeof ssh !== "string" || !ssh || ssh.startsWith("-") || /\s/.test(ssh)))
       throw new Error(`machines[${id}].ssh is not a valid ssh target`);
+    if (host !== undefined && (typeof host !== "string" || !validHost(host)))
+      throw new Error("machines host is invalid");
+    if (user !== undefined && (typeof user !== "string" || user.length > 200 || !/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(user)))
+      throw new Error("machines user is invalid");
+    if (port !== undefined && (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65535))
+      throw new Error("machines port is invalid");
+    if ((!host && !ssh) || (!host && (user !== undefined || port !== undefined)))
+      throw new Error("machines needs host or ssh; user and port need host");
     if (!socket.startsWith("/") || /[\s:]/.test(socket))
       throw new Error(`machines[${id}].socket must be an absolute path`);
     if (
@@ -84,13 +95,146 @@ export function validateMachines(value: unknown): MachineConfig[] {
     seen.add(id);
     machines.push({
       id,
-      ssh,
+      ...(typeof ssh === "string" ? { ssh } : {}),
+      ...(typeof user === "string" ? { user } : {}),
+      ...(typeof host === "string" ? { host } : {}),
+      ...(typeof port === "number" ? { port } : {}),
       socket,
       ...(typeof hookSocket === "string" ? { hookSocket } : {}),
       ...(review ? { cardReview: review } : {}),
     });
   }
   return machines;
+}
+
+function validHost(host: string): boolean {
+  if (!host || host.length > 253 || host.includes("%")) return false;
+  if (isIP(host)) return true;
+  return host.replace(/\.$/, "").split(".").every((label) =>
+    label.length <= 63 && /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(label));
+}
+
+const SSH_PROBE_SENTINEL = "herdr-bridge-unconfigured-probe.invalid";
+const SSH_PROBE_TTL_MS = 30_000;
+const sshProbeCache = new Map<string, { value: boolean; at: number }>();
+const sshProbeInFlight = new Map<string, Promise<boolean>>();
+
+function sshProbeArgs(destination: string, configPath: string | undefined): string[] {
+  return [...(configPath ? ["-F", configPath] : []), "-G", "--", destination];
+}
+
+/** 代表連線目的地名字的設定鍵：只有這些行的值會正規化（其餘如 User、IdentityFile 照原樣比，大小寫也保留；review F12／F13）。 */
+const SSH_PROBE_DESTINATION_KEYS = new Set(["host", "hostname", "hostkeyalias"]);
+
+/** 目的地欄位的值不分大小寫、並把完整詞的名字換成佔位。 */
+function sshProbeNormalize(output: string, name: string): string {
+  const word = new RegExp(`(?<![A-Za-z0-9-])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9-])`, "gi");
+  return output
+    .split("\n")
+    .map((line) => {
+      const space = line.indexOf(" ");
+      if (space < 0 || !SSH_PROBE_DESTINATION_KEYS.has(line.slice(0, space))) return line;
+      return line.slice(0, space) + line.slice(space).toLowerCase().replace(word, "\0");
+    })
+    .join("\n");
+}
+
+/** 名字相對於哨兵名字：`ssh -G` 輸出（目的地欄位正規化後）有任何差異，表示有 Host／Match 對這個名字（或 user@名字）生效。 */
+function sshProbeDiffers(alias: string, own: string, sentinel: string): boolean {
+  const name = alias.includes("@") ? alias.slice(alias.lastIndexOf("@") + 1) : alias;
+  return sshProbeNormalize(own, name) !== sshProbeNormalize(sentinel, SSH_PROBE_SENTINEL);
+}
+
+function sshProbeKeys(alias: string, configPath: string | undefined): { key: string; own: string[]; sentinel: string[] } | undefined {
+  const name = alias.includes("@") ? alias.slice(alias.lastIndexOf("@") + 1) : alias;
+  if (!name || alias.startsWith("-") || name.startsWith("-")) return undefined;
+  const sentinelDestination = alias.includes("@") ? `${alias.slice(0, alias.lastIndexOf("@"))}@${SSH_PROBE_SENTINEL}` : SSH_PROBE_SENTINEL;
+  return { key: `${configPath ?? ""}\0${alias}`, own: sshProbeArgs(alias, configPath), sentinel: sshProbeArgs(sentinelDestination, configPath) };
+}
+
+/**
+ * ssh 是否認得這個名字：交給 `ssh -G` 解析（`Include`、`Host`／`Match` 條件與註解都由 OpenSSH 處理，bridge 不自己讀設定檔）。
+ * 同時解析這個名字與一個一定沒設定的哨兵名字（`alias` 有 `user@` 時兩者都帶同一個 user，讓 `Match user` 一致），
+ * 把輸出裡的名字換成佔位後比對：有任何差異（HostName、User、Port、IdentityFile…）就是有 Host／Match 對它生效；
+ * 完全相同表示只有 `Host *` 之類的通用設定（Host 只寫了與名字相同的 `HostName` 時也無法分辨，視為沒設定）。
+ * `ssh -G` 不連線、不轉發，但會執行 `Match exec` 指令；以 `execFile` 傳參數不經 shell，名字以 `--` 隔開且不得以 `-` 開頭；`ssh` 不存在、
+ * 逾時或失敗一律當作沒有。`configPath` 只給測試指定設定檔（`-F`）。結果快取 30 秒。
+ */
+export function sshConfigHasHost(alias: string, configPath?: string): boolean {
+  const probe = sshProbeKeys(alias, configPath);
+  if (!probe) return false;
+  const cached = sshProbeCache.get(probe.key);
+  if (cached && Date.now() - cached.at < SSH_PROBE_TTL_MS) return cached.value;
+  let value = false;
+  try {
+    const run = (args: string[]): string => execFileSync("ssh", args, { encoding: "utf8", timeout: 3000, stdio: ["ignore", "pipe", "ignore"] });
+    value = sshProbeDiffers(alias, run(probe.own), run(probe.sentinel));
+  } catch {
+    value = false;
+  }
+  sshProbeCache.set(probe.key, { value, at: Date.now() });
+  return value;
+}
+
+/** 非同步版本，結果寫進同一份快取；同一個名字同時只跑一次。 */
+export function refreshSshConfigHost(alias: string, configPath?: string): Promise<boolean> {
+  const probe = sshProbeKeys(alias, configPath);
+  if (!probe) return Promise.resolve(false);
+  const running = sshProbeInFlight.get(probe.key);
+  if (running) return running;
+  const run = (args: string[]): Promise<string> =>
+    new Promise((resolve, reject) =>
+      execFile("ssh", args, { encoding: "utf8", timeout: 3000 }, (error, stdout) => (error ? reject(error) : resolve(stdout))),
+    );
+  const task = Promise.all([run(probe.own), run(probe.sentinel)])
+    .then(([own, sentinel]) => sshProbeDiffers(alias, own, sentinel), () => false)
+    .then((value) => {
+      sshProbeCache.set(probe.key, { value, at: Date.now() });
+      sshProbeInFlight.delete(probe.key);
+      return value;
+    });
+  sshProbeInFlight.set(probe.key, task);
+  return task;
+}
+
+/**
+ * 給看板繪製用：只讀快取、不阻塞；同一個名字只在第一次沒有結果時背景探測一次，之後不再自動重跑
+ * （`ssh -G` 會執行 `Match exec` 指令，不能因為看板定時刷新就反覆觸發；review F15）。第一次繪製前沒有結果時回 false，
+ * 之後的繪製才用到結果。
+ */
+export function sshConfigHasHostCached(alias: string): boolean {
+  const probe = sshProbeKeys(alias, undefined);
+  if (!probe) return false;
+  const cached = sshProbeCache.get(probe.key);
+  if (!cached) void refreshSshConfigHost(alias);
+  return cached?.value ?? false;
+}
+
+/** 要用哪個 SSH 目標：alias（`ssh` 欄位原樣）或結構化的 user／host／port。 */
+export type SshTarget =
+  | { kind: "alias"; ssh: string }
+  | { kind: "host"; user?: string; host: string; port: number };
+
+/**
+ * 目標選擇規則（SPEC「Machine SSH 編輯」）：只有 `ssh` 就原樣用；只有 host 就用 user／host／port；
+ * 兩者都有時，`ssh` 是 `~/.ssh/config` 已設定的 Host 就直接用它，否則回退 user／host／port。
+ */
+export function sshTarget(machine: MachineConfig, hasConfiguredHost: (alias: string) => boolean = sshConfigHasHost): SshTarget {
+  if (machine.ssh && (!machine.host || hasConfiguredHost(machine.ssh))) return { kind: "alias", ssh: machine.ssh };
+  if (!machine.host) throw new Error("machine has no SSH target");
+  return { kind: "host", ...(machine.user ? { user: machine.user } : {}), host: machine.host, port: machine.port ?? 22 };
+}
+
+/** 給看板顯示的有效目標：alias 原樣，結構化則 `user@host:port`。 */
+export function sshTargetLabel(machine: MachineConfig, hasConfiguredHost: (alias: string) => boolean = sshConfigHasHost): string {
+  const target = sshTarget(machine, hasConfiguredHost);
+  return target.kind === "alias" ? target.ssh : `${target.user ? target.user + "@" : ""}${target.host}:${target.port}`;
+}
+
+export function sshTargetArgs(machine: MachineConfig, hasConfiguredHost: (alias: string) => boolean = sshConfigHasHost): string[] {
+  const target = sshTarget(machine, hasConfiguredHost);
+  if (target.kind === "alias") return [target.ssh];
+  return ["-p", String(target.port), target.user ? `${target.user}@${target.host}` : target.host];
 }
 
 export function tunnelSocketPath(id: string): string {
@@ -171,7 +315,7 @@ export class MachineTunnel {
         "ServerAliveCountMax=3",
         "-L",
         `${this.socketPath}:${this.machine.socket}`,
-        this.machine.ssh,
+        ...sshTargetArgs(this.machine),
       ],
       { stdio: ["ignore", "ignore", "pipe"] },
     );
@@ -219,7 +363,7 @@ export function hookTunnelArgs(
     "ServerAliveCountMax=3",
     "-R",
     `${machine.hookSocket}:${localHookSocket}`,
-    machine.ssh,
+    ...sshTargetArgs(machine),
   ];
 }
 
@@ -266,7 +410,7 @@ export class HookReverseTunnel {
       [
         "-o",
         "BatchMode=yes",
-        this.machine.ssh,
+        ...sshTargetArgs(this.machine),
         `mkdir -p -m 700 ${shellQuote(dir)} && rm -f ${shellQuote(this.machine.hookSocket)}`,
       ],
       { stdio: "ignore" },
@@ -333,7 +477,7 @@ export async function cleanupRemoteAttachments(
   await new Promise<void>((resolve, reject) => {
     const child = spawn(
       sshCommand,
-      ["-o", "BatchMode=yes", machine.ssh, command],
+      ["-o", "BatchMode=yes", ...sshTargetArgs(machine), command],
       {
         stdio: ["ignore", "ignore", "pipe"],
       },
@@ -387,7 +531,7 @@ export async function uploadFiles(
     await new Promise<void>((resolve, reject) => {
       const child = spawn(
         sshCommand,
-        ["-o", "BatchMode=yes", machine.ssh, command],
+        ["-o", "BatchMode=yes", ...sshTargetArgs(machine), command],
         { stdio: ["pipe", "ignore", "pipe"] },
       );
       let stderr = "";

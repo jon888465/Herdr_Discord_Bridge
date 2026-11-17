@@ -7,7 +7,7 @@ import { startAgentInPane, type AgentStartPort } from "./agent-start.js";
 import { runCardReview, type ReviewFlowDeps, type ReviewFlowInput, type ReviewFlowResult } from "./card-review-flow.js";
 import { BLOCKED_AT_START } from "./agent-ready.js";
 import { defaultExec } from "./github.js";
-import { shellQuote, unsafeRemoteValue, type HerdrHub, type MachineConfig } from "./machines.js";
+import { sshTargetArgs, shellQuote, unsafeRemoteValue, type HerdrHub, type MachineConfig } from "./machines.js";
 import { editRemoteAgyTrust } from "./remote-agy-trust.js";
 
 export type RemoteExec = (
@@ -110,7 +110,7 @@ export function sshRemoteExec(machine: MachineConfig, sshCommand = "ssh", graceM
         return reject(new RemoteFailure("參數不合法", "argv"));
       const seconds = String(Math.max(1, Math.ceil(timeoutMs / 1000)));
       const command = ["timeout", "-k", "10", seconds, ...argv].map(shellQuote).join(" ");
-      const child = spawn(sshCommand, [...SSH_OPTIONS, machine.ssh, command], { stdio: [stdinFile ? "pipe" : "ignore", "pipe", "pipe"] });
+      const child = spawn(sshCommand, [...SSH_OPTIONS, ...sshTargetArgs(machine), command], { stdio: [stdinFile ? "pipe" : "ignore", "pipe", "pipe"] });
       if (stdinFile && child.stdin) {
         // 遠端提早結束（例如超過 head -c 上限）時 EPIPE 不算錯，結果看 exit code。
         child.stdin.on("error", () => {});

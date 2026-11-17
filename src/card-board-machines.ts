@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { stripJsonComments } from "./config.js";
-import { validateMachines, type MachineConfig } from "./machines.js";
+import { sshConfigHasHostCached, sshTargetLabel, validateMachines, type MachineConfig } from "./machines.js";
 import {
   firstVisible,
   truncateToWidth,
@@ -81,7 +81,7 @@ export function boardHeader(
 }
 
 export const MACHINE_HINT =
-  "Tab/m/c 切換檢視  j/k 移動  PgUp/PgDn 翻頁  Home/End 頭尾  q 離開";
+  "設定改動重啟 bridge 後生效；狀態＝執行中 bridge 的觀測 | Tab/m/c 切換  j/k 移動  PgUp/PgDn 翻頁  Home/End 頭尾  e/Enter 編輯  q 離開";
 
 export interface MachineViewState {
   machines: MachineConfig[];
@@ -214,6 +214,7 @@ export function machineLines(
   width: number,
   room: number,
   statuses: Map<string, MachineStatus> = new Map(),
+  hasConfiguredHost: (alias: string) => boolean = sshConfigHasHostCached,
 ): string[] {
   if (!machines.length)
     return [
@@ -228,9 +229,63 @@ export function machineLines(
     .map((machine, offset) =>
       truncateToWidth(
         sanitizeForTerminal(
-          `${first + offset === cursor ? ">" : " "} ${machine.id}  ${machine.ssh}  ${statuses.get(machine.id) ?? "未知"}  ${machine.socket}`,
+          `${first + offset === cursor ? ">" : " "} ${machine.id}  ${sshTargetLabel(machine, hasConfiguredHost)}  ${statuses.get(machine.id) ?? "未知"}  ${machine.socket}`,
         ),
         width - 1,
       ),
     );
+}
+
+export function machineEditorText(machine: MachineConfig): string {
+  return (
+    JSON.stringify(
+      {
+        user: machine.user ?? "",
+        host: machine.host ?? "",
+        port: machine.port ?? 22,
+      },
+      null,
+      2,
+    ) + "\n"
+  );
+}
+
+export function parseMachineEditorText(
+  text: string,
+):
+  | { ok: true; fields: { user?: string; host?: string; port?: number } }
+  | { ok: false; message: string } {
+  let value: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (!isPlainObject(parsed)) throw new Error();
+    value = parsed;
+    if (
+      Object.keys(value).length !== 3 ||
+      Object.keys(value).some((k) => !["user", "host", "port"].includes(k)) ||
+      typeof value.user !== "string" ||
+      typeof value.host !== "string" ||
+      typeof value.port !== "number"
+    )
+      throw new Error();
+  } catch {
+    return { ok: false, message: "未儲存：SSH 編輯格式不對" };
+  }
+  const { user, host, port } = value as {
+    user: string;
+    host: string;
+    port: number;
+  };
+  if (!host) {
+    return !user && port === 22
+      ? { ok: true, fields: {} }
+      : { ok: false, message: "未儲存：SSH 連線設定不合法" };
+  }
+  const fields = { ...(user ? { user } : {}), host, port };
+  try {
+    validateMachines([{ id: "edited", socket: "/unused", ...fields }]);
+    return { ok: true, fields };
+  } catch {
+    return { ok: false, message: "未儲存：SSH 連線設定不合法" };
+  }
 }

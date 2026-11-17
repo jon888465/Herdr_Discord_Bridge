@@ -178,6 +178,8 @@ test("ssh: forwarding off, remote timeout wraps argv, 124 clean timeout, 255/loc
     const args = (await readFile(`${dir}/args`, "utf8")).trimEnd().split("\n");
     eq(args, [...rc.SSH_OPTIONS, "pod", "'timeout' '-k' '10' '3' 'git' '/it'\\''s'"]);
     for (const o of ["ForwardAgent=no", "ForwardX11=no", "ClearAllForwardings=yes", "BatchMode=yes"]) ok(args.includes(o));
+    await rc.sshRemoteExec({ ...m, user: "alice", host: "host", port: 2222 }, echo)(["true"], 1000);
+    eq((await readFile(`${dir}/args`, "utf8")).trimEnd().split("\n"), [...rc.SSH_OPTIONS, "-p", "2222", "alice@host", "'timeout' '-k' '10' '1' 'true'"]);
     const fails = (l: string, uncertain: boolean) => (e: unknown) => label(l)(e) && (e as { uncertain: boolean }).uncertain === uncertain && !/secret/.test(String(e));
     await rejects(rc.sshRemoteExec(m, await sh("t", "exit 124"))(["true"], 2000), fails("逾時", false));
     await rejects(rc.sshRemoteExec(m, await sh("d", "echo secret >&2; exit 255"))(["true"], 2000), fails("連線失敗", true));

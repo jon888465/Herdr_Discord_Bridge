@@ -3,7 +3,11 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { configDirectory, stateDirectory } from "./config.js";
+import {
+  configDirectory,
+  stateDirectory,
+  stripJsonComments,
+} from "./config.js";
 import { LEDGER_MAX_FILE_BYTES } from "./card.js";
 import { CardStore } from "./card-store.js";
 import { ensureCardsDirectory } from "./card-directory.js";
@@ -22,6 +26,8 @@ import {
 } from "./card-board.js";
 
 import {
+  machineEditorText,
+  parseMachineEditorText,
   cardRoom,
   cardViewLines,
   machineRoom,
@@ -36,7 +42,11 @@ import {
   MACHINE_STATUS_MAX_AGE_MS,
   type MachineStatus,
 } from "./machine-status-file.js";
-import type { MachineConfig } from "./machines.js";
+import {
+  readMachinesSnapshot,
+  saveMachinesConfig,
+} from "./machines-config-write.js";
+import { validateMachines, type MachineConfig } from "./machines.js";
 
 // Herdr plugin pane：卡片看板。只編輯 draft 類與已停手的卡，其餘唯讀。
 const rootDir = path.join(stateDirectory(), "cards");
@@ -111,9 +121,9 @@ const ENTER_ALT_SCREEN = "\x1b[?1049h";
 const LEAVE_ALT_SCREEN = "\x1b[?1049l";
 
 /** 離開 raw mode 開 $EDITOR，結束後回來；沒改或編輯器失敗回傳 undefined。 */
-function editText(initial: string): string | undefined {
+function editText(initial: string, filename = "card.md"): string | undefined {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "herdr-card-board-"));
-  const file = path.join(dir, "card.md");
+  const file = path.join(dir, filename);
   fs.writeFileSync(file, initial, { mode: 0o600 });
   editing = true;
   // bridge 啟動時會把舊看板換成新的；留下標記讓它知道這裡正在編輯，不要關掉（ISSUE-160）。
@@ -169,6 +179,58 @@ function editSelected(): void {
   }
   const result = applyEdit(store, row.id, parsed.edit, today());
   message = result.ok ? `已儲存 ${row.id}` : `未儲存：${result.error}`;
+}
+
+function editMachine(): void {
+  const machine = machines[machineCursor];
+  if (!machine) return;
+  const file = path.join(configDirectory(), "config.json");
+  const snapshot = readMachinesSnapshot(file);
+  if (!snapshot.ok) {
+    message = "未儲存：config.json 寫入失敗";
+    return;
+  }
+  let text: string | undefined;
+  try {
+    const source = JSON.parse(
+      stripJsonComments(snapshot.value.bytes.toString("utf8")),
+    ) as { machines: unknown };
+    const current = validateMachines(source.machines).find(
+      (m) => m.id === machine.id,
+    );
+    if (!current) {
+      message = "未儲存：SSH 連線設定不合法";
+      return;
+    }
+    text = editText(machineEditorText(current), "machine.json");
+  } catch {
+    message = "未儲存：config.json 寫入失敗";
+    return;
+  }
+  if (text === undefined) {
+    message = "沒有修改";
+    return;
+  }
+  const parsed = parseMachineEditorText(text);
+  if (!parsed.ok) {
+    message = parsed.message;
+    return;
+  }
+  const result = saveMachinesConfig(
+    file,
+    snapshot.value,
+    machine.id,
+    parsed.fields,
+  );
+  message = result.ok
+    ? result.value === "unchanged"
+      ? "沒有修改"
+      : "已儲存；重啟 bridge 後生效"
+    : result.reason === "conflict"
+      ? "未儲存：config.json 已變更，請重新編輯"
+      : result.reason === "invalid"
+        ? "未儲存：SSH 連線設定不合法"
+        : "未儲存：config.json 寫入失敗";
 }
 
 function newCard(): void {
@@ -250,8 +312,9 @@ process.stdin.on("data", (key: string) => {
           ),
         ),
       );
-    else if (["e", "\r", "\n", "n", "r"].includes(key))
-      message = "Machine 檢視唯讀，本階段不支援編輯";
+    else if (["e", "\r", "\n"].includes(key)) editMachine();
+    else if (["n", "r"].includes(key))
+      message = "Machine 檢視不支援新增或設為 ready";
     reloadMachines();
     render();
     return;
