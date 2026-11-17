@@ -1,3 +1,4 @@
+import { machineBusyReason } from "./machine-busy.js";
 import {
   startMachineStatusWriter,
   MACHINE_STATUS_WRITE_INTERVAL_MS,
@@ -263,11 +264,15 @@ async function startBridge(
   config: ReturnType<typeof loadConfig>,
   dryRun: boolean,
 ): Promise<void> {
-  const herdr = new HerdrHub(
+  const activeStreams = new Set<string>();
+  const herdr: HerdrHub = new HerdrHub(
     config.machines,
     undefined,
     config.requestTimeoutMs,
     config.reconnectBaseMs,
+    undefined,
+    undefined,
+    (machineId) => machineBusyReason(machineId, { activeTerminals: activeStreams, pool: pool.busySnapshot() }),
   );
   // ISSUE-113：本機的 hub 才注入 agy 卡片 worktree 的預先信任；遠端 agy 只回報需人工處理。
   const agyTrust = defaultAgyWorktreeTrust(config.agyTrustedDirectories);
@@ -288,7 +293,6 @@ async function startBridge(
     routing,
     config.approvalTimeoutMs,
   );
-  const activeStreams = new Set<string>();
   const approvalFollowups = new Map<string, ApprovalFollowup>();
   const streamResume = new StreamResumeStore(
     join(stateDirectory(), "active-streams.json"),
@@ -2094,6 +2098,7 @@ export function liveAgentList(herdr: HerdrClient, agent: AgentRecord): Promise<A
  * 任務一經登記就會執行；回傳的 `running` 在任務結束時 resolve。
  */
 export function cardRoleContext(runtime: {
+  herdr?: HerdrClient;
   config: {
     machines: readonly { id: string; cardReview?: { kinds: readonly string[]; toolchain?: boolean } }[];
     agentProfiles?: Runtime["config"]["agentProfiles"];
@@ -2102,13 +2107,14 @@ export function cardRoleContext(runtime: {
 }): RoleContext {
   const profiles = runtime.pool?.profiles ?? runtime.config.agentProfiles ?? [];
   return {
+    isDisconnected: (id) => runtime.herdr instanceof HerdrHub && runtime.herdr.isDisconnected(id),
     machineIds: runtime.config.machines.map((m) => m.id),
     profiles,
     // 只有設定了 cardReview 的遠端才帶；沒有時與以前完全相同。
     ...(runtime.config.machines.some((m) => m.cardReview)
       ? {
           remoteMachines: runtime.config.machines.flatMap((m) =>
-            m.cardReview ? [{ id: m.id, kinds: [...m.cardReview.kinds], ...(m.cardReview.toolchain ? { toolchain: true } : {}) }] : [],
+            m.cardReview && !(runtime.herdr instanceof HerdrHub && runtime.herdr.isDisconnected(m.id)) ? [{ id: m.id, kinds: [...m.cardReview.kinds], ...(m.cardReview.toolchain ? { toolchain: true } : {}) }] : [],
           ),
         }
       : {}),
@@ -2185,7 +2191,7 @@ async function startTeamTask(
     coding,
     workers,
   );
-  const remoteReviewers = runtime.config.machines?.some((m) => m.cardReview) ? remoteReviewerCandidates(cardRoleContext(runtime)) : [];
+  const remoteReviewers = runtime.config.machines?.some((m) => m.cardReview && !(runtime.herdr instanceof HerdrHub && runtime.herdr.isDisconnected(m.id))) ? remoteReviewerCandidates(cardRoleContext(runtime)) : [];
   const remoteRoles = coding && runtime.herdr instanceof HerdrHub && remoteReviewers.length ? remoteRoleCandidates(cardRoleContext(runtime)) : [];
   if (remoteRoles.length) workers.push(...remoteRoleTargets(cardRoleContext(runtime), workspaceId));
   assertCodingRoster(coding, workers.length);

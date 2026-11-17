@@ -841,3 +841,54 @@ test("strict failure releases only the owned profile lease and preserves its bin
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("manual disconnect removes remote reviewer and role candidates until reconnect", async () => {
+  const { HerdrHub } = await import("../src/machines.js");
+  const { remoteReviewerCandidates, remoteRoleCandidates } =
+    await import("../src/card-role-assignment.js");
+  const { cardRoleContext } = await import("../src/main.js");
+  const machine = {
+    id: "pod",
+    ssh: "unused",
+    socket: "/unused",
+    cardReview: { root: "/tmp/review", kinds: ["codex"], toolchain: true },
+  };
+  const hub = new HerdrHub(
+    [machine],
+    undefined,
+    100,
+    10,
+    () => {},
+    () => "/unused",
+    undefined,
+    () => {},
+  );
+  const remote = hub["remotes"].get("pod")!;
+  remote.tunnel.start = () => {};
+  remote.tunnel.stop = () => {};
+  const runtime = {
+    herdr: hub,
+    config: {
+      machines: [machine],
+      agentProfiles: [{ id: "helper", kind: "codex" }],
+    },
+  };
+  assert.ok(remoteReviewerCandidates(cardRoleContext(runtime)).length > 0);
+  assert.ok(remoteRoleCandidates(cardRoleContext(runtime)).length > 0);
+  hub.disconnectMachine("pod");
+  assert.equal(hub.isDisconnected("pod"), true);
+  assert.equal(hub.isDisconnected("missing"), false);
+  assert.deepEqual(remoteReviewerCandidates(cardRoleContext(runtime)), []);
+  assert.deepEqual(remoteRoleCandidates(cardRoleContext(runtime)), []);
+  const context = {
+    machineIds: ["pod"],
+    profiles: runtime.config.agentProfiles,
+    remoteMachines: [{ id: "pod", kinds: ["codex"] }],
+    isDisconnected: (id: string) => hub.isDisconnected(id),
+  };
+  assert.deepEqual(remoteReviewerCandidates(context), []);
+  assert.deepEqual(remoteRoleCandidates(context), []);
+  hub.connectMachine("pod");
+  assert.ok(remoteReviewerCandidates(cardRoleContext(runtime)).length > 0);
+  assert.ok(remoteRoleCandidates(cardRoleContext(runtime)).length > 0);
+});

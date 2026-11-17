@@ -196,7 +196,7 @@ test("machineObservations records when a remote was last probed, and a failing l
   try {
     // 還沒請求過：沒有觀測時間。
     assert.deepEqual(hub.machineObservations(), [
-      { id: "agy", reachable: false },
+      { id: "agy", reachable: false, disconnected: false },
     ]);
     const before = Date.now();
     await hub.listAgents();
@@ -332,4 +332,229 @@ test("machines hookSocket validation and reverse-tunnel args (ISSUE-045)", async
     "pod",
   ]);
   assert.ok(args.includes("ExitOnForwardFailure=yes"));
+});
+
+test("manual disconnect skips aggregate/cache and rejects direct requests until reconnect", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "mc-"));
+  let probes = 0;
+  const local = await fake(join(dir, "l.sock"), () => ({ agents: [] }));
+  const remote = await fake(join(dir, "r.sock"), () => {
+    probes++;
+    return { agents: [{ terminal_id: "t", pane_id: "p", workspace_id: "w" }] };
+  });
+  let busy: string | undefined;
+  const hub = new HerdrHub(
+    [{ id: "agy", ssh: "unused", socket: "/r" }],
+    join(dir, "l.sock"),
+    1000,
+    10,
+    () => {},
+    () => join(dir, "r.sock"),
+    () => busy,
+  );
+  const state = hub["remotes"].get("agy")!;
+  let starts = 0,
+    stops = 0;
+  state.tunnel.start = () => {
+    starts++;
+  };
+  state.tunnel.stop = () => {
+    stops++;
+  };
+  try {
+    assert.deepEqual(hub.connectMachine("missing"), {
+      ok: false,
+      reason: "machine 不存在",
+    });
+    assert.deepEqual(hub.disconnectMachine("missing"), {
+      ok: false,
+      reason: "machine 不存在",
+    });
+    assert.equal(hub.connectMachine("agy").ok, true);
+    assert.equal(starts, 0);
+    assert.equal((await hub.listAgents()).length, 1);
+    busy = "2 個進行中的回合";
+    assert.deepEqual(hub.disconnectMachine("agy"), {
+      ok: false,
+      reason: "有進行中的工作：2 個進行中的回合，再按一次強制斷線",
+      needsForce: true,
+    });
+    assert.equal(stops, 0);
+    assert.deepEqual(hub.disconnectMachine("agy", { force: true }), {
+      ok: true,
+      status: "disconnected",
+    });
+    const before = hub.machineObservations();
+    assert.deepEqual(hub.disconnectMachine("agy"), {
+      ok: true,
+      status: "disconnected",
+      note: "已是斷線",
+    });
+    assert.equal(stops, 1);
+    assert.deepEqual(await hub.listAgents(), []);
+    await assert.rejects(hub.requestOn("agy", "agent.list"), /machine 已斷線/);
+    await assert.rejects(hub.freshAgentsOn("agy"), /machine 已斷線/);
+    await assert.rejects(
+      hub.request("agent.read", { target: "agy:p" }),
+      /machine 已斷線/,
+    );
+    assert.equal(probes, 1);
+    assert.deepEqual(hub.machineObservations(), before);
+    assert.equal(state.cache.size, 1);
+    assert.deepEqual(hub.connectMachine("agy"), {
+      ok: true,
+      status: "connected",
+    });
+    assert.equal(starts, 1);
+    assert.deepEqual(hub.connectMachine("agy"), {
+      ok: true,
+      status: "connected",
+      note: "已在連線中",
+    });
+    assert.equal(starts, 1);
+    assert.equal((await hub.listAgents()).length, 1);
+    assert.equal(hub.machineObservations()[0].disconnected, false);
+  } finally {
+    local.close();
+    remote.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("both tunnels restart after stop and ignore old process exit", async () => {
+  const { MachineTunnel, HookReverseTunnel } =
+    await import("../src/machines.js");
+  const { EventEmitter } = await import("node:events");
+  const { spawn } = await import("node:child_process");
+  const children: import("node:child_process").ChildProcess[] = [];
+  const spawnProcess: typeof spawn = (() => {
+    const child =
+      new EventEmitter() as import("node:child_process").ChildProcess;
+    child.kill = () => true;
+    children.push(child);
+    return child;
+  }) as typeof spawn;
+  const dir = await mkdtemp(join(tmpdir(), "mt-"));
+  const config = { id: "agy", ssh: "unused", socket: "/r", hookSocket: "/h" };
+  const tunnel = new MachineTunnel(
+    config,
+    () => {},
+    join(dir, "t.sock"),
+    spawnProcess,
+  );
+  const hook = new HookReverseTunnel(config, "/local", () => {}, spawnProcess);
+  try {
+    for (const t of [tunnel, hook]) {
+      t.start();
+      const old = children.at(-1)!;
+      t.stop();
+      const count = children.length;
+      t.start();
+      assert.equal(children.length, count + 1);
+      old.emit("exit", 0);
+      assert.equal(children.length, count + 1);
+      if (t === hook) {
+        children.at(-1)!.emit("exit", 0);
+        assert.equal(children.length, count + 2);
+      }
+      t.stop();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("in-flight aggregate response cannot revive a manually disconnected remote", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "mf-"));
+  const local = await fake(join(dir, "l.sock"), () => ({ agents: [] }));
+  const hub = new HerdrHub(
+    [{ id: "agy", ssh: "unused", socket: "/r" }],
+    join(dir, "l.sock"),
+    1000,
+    10,
+    () => {},
+    () => join(dir, "r.sock"),
+  );
+  const remote = hub["remotes"].get("agy")!;
+  remote.tunnel.stop = () => {};
+  let release!: (result: unknown) => void;
+  let started!: () => void;
+  const probing = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  remote.client.request = <T>() =>
+    new Promise<T>((resolve) => {
+      release = (value) => resolve(value as T);
+      started();
+    });
+  try {
+    const request = hub.listAgents();
+    await probing;
+    hub.disconnectMachine("agy");
+    const before = hub.machineObservations();
+    release({ agents: [{ terminal_id: "t" }] });
+    assert.deepEqual(await request, []);
+    assert.deepEqual(hub.machineObservations(), before);
+    assert.equal(remote.cache.size, 0);
+  } finally {
+    local.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("reconnect schedules a probe, records success/failure, and discards results after disconnect", async () => {
+  const scheduled: Array<() => void> = [];
+  const hub = new HerdrHub(
+    [{ id: "pod", ssh: "unused", socket: "/unused" }],
+    undefined,
+    100,
+    10,
+    () => {},
+    () => "/unused",
+    undefined,
+    (callback, delay) => {
+      assert.equal(delay, 2000);
+      scheduled.push(callback);
+    },
+  );
+  const remote = hub["remotes"].get("pod")!;
+  remote.tunnel.start = () => {};
+  remote.tunnel.stop = () => {};
+  for (const succeeds of [true, false]) {
+    hub.disconnectMachine("pod");
+    remote.client.request = async <T,>(
+      _method: string,
+      _params?: unknown,
+      options?: { timeoutMs?: number; retries?: number },
+    ) => {
+      assert.deepEqual(options, { timeoutMs: 3000, retries: 0 });
+      if (!succeeds) throw new Error("unreachable");
+      return { agents: [] } as T;
+    };
+    hub.connectMachine("pod");
+    assert.equal(hub.machineObservations()[0].observedAt, undefined);
+    scheduled.shift()!();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(hub.machineObservations()[0].reachable, succeeds);
+    assert.equal(typeof hub.machineObservations()[0].observedAt, "number");
+  }
+  hub.disconnectMachine("pod");
+  hub.connectMachine("pod");
+  let release!: (value: unknown) => void;
+  remote.client.request = <T,>() =>
+    new Promise<T>((resolve) => {
+      release = (value) => resolve(value as T);
+    });
+  scheduled.shift()!();
+  hub.disconnectMachine("pod");
+  const before = hub.machineObservations();
+  release({ agents: [] });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.deepEqual(hub.machineObservations(), before);
+  hub.connectMachine("pod");
+  hub.disconnectMachine("pod");
+  remote.client.request = () => {
+    throw new Error("stale timer must not probe");
+  };
+  scheduled.shift()!();
 });

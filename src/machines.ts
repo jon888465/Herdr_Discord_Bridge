@@ -116,6 +116,7 @@ export class MachineTunnel {
     readonly machine: MachineConfig,
     private readonly log: (message: string) => void = console.error,
     socketPath: string = tunnelSocketPath(machine.id),
+    private readonly spawnProcess: typeof spawn = spawn,
   ) {
     this.socketPath = socketPath;
   }
@@ -125,13 +126,19 @@ export class MachineTunnel {
       recursive: true,
       mode: 0o700,
     });
-    this.spawnSsh();
+    this.stopped = false;
+    this.backoffMs = 1000;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    if (!this.child) this.spawnSsh();
   }
 
   stop(): void {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
-    this.child?.kill("SIGTERM");
+    const child = this.child;
+    this.child = null;
+    child?.kill("SIGTERM");
     fs.rmSync(this.socketPath, { force: true });
   }
 
@@ -139,7 +146,7 @@ export class MachineTunnel {
     if (this.stopped) return;
     fs.rmSync(this.socketPath, { force: true });
     const startedAt = Date.now();
-    const child = spawn(
+    const child = this.spawnProcess(
       "ssh",
       [
         "-N",
@@ -166,6 +173,7 @@ export class MachineTunnel {
       this.log(`machine ${this.machine.id}: ssh failed: ${error.message}`),
     );
     child.once("exit", (code) => {
+      if (this.child !== child) return;
       this.child = null;
       if (this.stopped) return;
       // 撐過 30 秒才斷的連線視為曾經成功，退避從頭開始。
@@ -214,24 +222,31 @@ export class HookReverseTunnel {
     readonly machine: MachineConfig,
     private readonly localHookSocket: string,
     private readonly log: (message: string) => void = console.error,
+    private readonly spawnProcess: typeof spawn = spawn,
   ) {}
 
   start(): void {
     if (!this.machine.hookSocket) return;
-    this.spawnSsh();
+    this.stopped = false;
+    this.backoffMs = 1000;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    if (!this.child) this.spawnSsh();
   }
 
   stop(): void {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
-    this.child?.kill("SIGTERM");
+    const child = this.child;
+    this.child = null;
+    child?.kill("SIGTERM");
   }
 
   private spawnSsh(): void {
     if (this.stopped || !this.machine.hookSocket) return;
     const startedAt = Date.now();
     const dir = path.posix.dirname(this.machine.hookSocket);
-    const prepare = spawn(
+    const prepare = this.spawnProcess(
       "ssh",
       [
         "-o",
@@ -241,7 +256,9 @@ export class HookReverseTunnel {
       ],
       { stdio: "ignore" },
     );
+    let forwarding: ChildProcess | undefined;
     const retry = (reason: string) => {
+      if (this.child !== prepare && this.child !== forwarding) return;
       this.child = null;
       if (this.stopped) return;
       if (Date.now() - startedAt > 30000) this.backoffMs = 1000;
@@ -254,15 +271,16 @@ export class HookReverseTunnel {
     this.child = prepare;
     prepare.once("error", (error) => retry(`mkdir failed: ${error.message}`));
     prepare.once("exit", (code) => {
-      if (this.stopped) return;
+      if (this.stopped || this.child !== prepare) return;
       if (code !== 0) return retry(`mkdir exited ${code}`);
-      const child = spawn(
+      const child = this.spawnProcess(
         "ssh",
         hookTunnelArgs(this.machine, this.localHookSocket),
         {
           stdio: ["ignore", "ignore", "pipe"],
         },
       );
+      forwarding = child;
       this.child = child;
       let stderr = "";
       child.stderr?.on("data", (chunk: Buffer) => {
@@ -395,12 +413,18 @@ const AGGREGATE_METHODS = new Set([
 
 type Params = Record<string, unknown>;
 
+export type MachineControlResult =
+  | { ok: true; status: "connected" | "disconnected"; note?: string }
+  | { ok: false; reason: string; needsForce?: boolean };
+
 interface Remote {
   config: MachineConfig;
   tunnel: MachineTunnel;
   hookTunnel?: HookReverseTunnel;
   client: HerdrClient;
   up: boolean;
+  disconnected: boolean;
+  generation: number;
   /** 最後一次實際請求遠端（不論成功失敗）的時間；從沒請求過是 undefined。 */
   observedAt?: number;
   cache: Map<string, Record<string, unknown>>;
@@ -420,6 +444,11 @@ export class HerdrHub extends HerdrClient {
     reconnectBaseMs: number,
     log: (message: string) => void = console.error,
     socketFor: (id: string) => string = tunnelSocketPath,
+    private readonly isBusy?: (machineId: string) => string | undefined,
+    private readonly scheduleProbe: (callback: () => void, delayMs: number) => void = (callback, delayMs) => {
+      const timer = setTimeout(callback, delayMs);
+      timer.unref();
+    },
   ) {
     super(socketPath, defaultTimeoutMs, reconnectBaseMs);
     for (const config of machines) {
@@ -436,6 +465,8 @@ export class HerdrHub extends HerdrClient {
           reconnectBaseMs,
         ),
         up: false,
+        disconnected: false,
+        generation: 0,
         cache: new Map(),
       });
     }
@@ -446,8 +477,80 @@ export class HerdrHub extends HerdrClient {
 
   startTunnels(): void {
     for (const remote of this.remotes.values()) {
+      if (remote.disconnected) continue;
       remote.tunnel.start();
       remote.hookTunnel?.start();
+    }
+  }
+
+  isDisconnected(id: string): boolean {
+    return this.remotes.get(id)?.disconnected ?? false;
+  }
+
+  connectMachine(id: string): MachineControlResult {
+    const remote = this.remotes.get(id);
+    if (!remote) return { ok: false, reason: "machine 不存在" };
+    if (!remote.disconnected)
+      return { ok: true, status: "connected", note: "已在連線中" };
+    try {
+      remote.disconnected = false;
+      remote.up = false;
+      remote.observedAt = undefined;
+      remote.generation++;
+      remote.tunnel.start();
+      remote.hookTunnel?.start();
+      const generation = remote.generation;
+      this.scheduleProbe(() => {
+        if (remote.disconnected || remote.generation !== generation) return;
+        void this.probeRemote(remote, generation);
+      }, 2000);
+      return { ok: true, status: "connected" };
+    } catch {
+      return { ok: false, reason: "連線失敗" };
+    }
+  }
+
+  private async probeRemote(remote: Remote, generation: number): Promise<void> {
+    let up = false;
+    try {
+      await remote.client.request(
+        "agent.list",
+        {},
+        { timeoutMs: 3000, retries: 0 },
+      );
+      up = true;
+    } catch {
+      /* Probe failures are reflected only in the status channel. */
+    }
+    if (!remote.disconnected && remote.generation === generation)
+      this.markUp(remote, up);
+  }
+
+  disconnectMachine(
+    id: string,
+    options: { force?: boolean } = {},
+  ): MachineControlResult {
+    const remote = this.remotes.get(id);
+    if (!remote) return { ok: false, reason: "machine 不存在" };
+    if (remote.disconnected)
+      return { ok: true, status: "disconnected", note: "已是斷線" };
+    try {
+      const busy = !options.force && this.isBusy?.(id);
+      if (busy)
+        return {
+          ok: false,
+          reason: `有進行中的工作：${busy}，再按一次強制斷線`,
+          needsForce: true,
+        };
+      remote.disconnected = true;
+      remote.generation++;
+      remote.up = false;
+      remote.observedAt = Date.now();
+      remote.tunnel.stop();
+      remote.hookTunnel?.stop();
+      return { ok: true, status: "disconnected" };
+    } catch {
+      return { ok: false, reason: "斷線失敗" };
     }
   }
 
@@ -493,11 +596,13 @@ export class HerdrHub extends HerdrClient {
   machineObservations(): Array<{
     id: string;
     reachable: boolean;
+    disconnected: boolean;
     observedAt?: number;
   }> {
     return [...this.remotes.values()].map((r) => ({
       id: r.config.id,
       reachable: r.up,
+      disconnected: r.disconnected,
       ...(r.observedAt === undefined ? {} : { observedAt: r.observedAt }),
     }));
   }
@@ -514,6 +619,7 @@ export class HerdrHub extends HerdrClient {
   requestOn<T = unknown>(machineId: string, method: string, params: Params = {}, options: { timeoutMs?: number; retries?: number } = {}): Promise<T> {
     const remote = this.remotes.get(machineId);
     if (!remote) return Promise.reject(new Error(`unknown machine ${machineId}`));
+    if (remote.disconnected) return Promise.reject(new Error("machine 已斷線"));
     if (Object.entries(params).some(([k, v]) => ID_KEYS.has(k) && typeof v === "string" && !v.startsWith(`${machineId}:`)))
       return Promise.reject(new Error(`request on ${machineId} has a non-${machineId} ID`));
     return this.remoteRequest<T>(remote, method, params, options);
@@ -579,6 +685,8 @@ export class HerdrHub extends HerdrClient {
     params: Params,
     options: { timeoutMs?: number; retries?: number },
   ): Promise<T> {
+    if (remote.disconnected) throw new Error("machine 已斷線");
+    const generation = remote.generation;
     const prefix = `${remote.config.id}:`;
     const stripped: Params = {};
     for (const [key, value] of Object.entries(params)) {
@@ -591,10 +699,17 @@ export class HerdrHub extends HerdrClient {
     }
     try {
       const result = await remote.client.request<T>(method, stripped, options);
+      if (remote.disconnected || remote.generation !== generation)
+        throw new Error("machine 已斷線");
       this.markUp(remote, true);
       return this.decorate(result, remote.config.id) as T;
     } catch (error) {
-      if (!(error instanceof HerdrError)) this.markUp(remote, false);
+      if (
+        !remote.disconnected &&
+        remote.generation === generation &&
+        !(error instanceof HerdrError)
+      )
+        this.markUp(remote, false);
       throw error;
     }
   }
@@ -611,6 +726,8 @@ export class HerdrHub extends HerdrClient {
     );
     const merged: Record<string, unknown> = { ...local };
     for (const remote of this.remotes.values()) {
+      if (remote.disconnected) continue;
+      const generation = remote.generation;
       let part: Record<string, unknown> | undefined;
       try {
         part = (await remote.client.request<Record<string, unknown>>(
@@ -618,10 +735,12 @@ export class HerdrHub extends HerdrClient {
           params,
           { timeoutMs: 3000, retries: 0 },
         )) as Record<string, unknown>;
+        if (remote.disconnected || remote.generation !== generation) continue;
         part = this.decorate(part, remote.config.id) as Record<string, unknown>;
         remote.cache.set(method, part);
         this.markUp(remote, true);
       } catch {
+        if (remote.disconnected || remote.generation !== generation) continue;
         // 遠端暫時不通時沿用上次結果：避免 watcher 把遠端 Agent 誤判為已移除。
         this.markUp(remote, false);
         part = remote.cache.get(method);

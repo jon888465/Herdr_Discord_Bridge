@@ -1,5 +1,28 @@
 # Known Issues
 
+## ISSUE-166：Card 看板 Machine 第三階段：從看板連線／手動斷線（拆成 A、B 兩個 PR）
+
+更新日期：2026-11-17。狀態：修正中（A＝hub 核心：程式與單元測試完成、本 PR 提交；B＝控制通道與看板按鍵：待 A merge 後做）。**尚未部署，目前沒有任何入口可以觸發連線／斷線，也沒有實機驗證。**
+
+**使用者可見症狀／預期：** 第二階段（ISSUE-164）只有 connected／unreachable／未知的觀測，無法從看板對選取的 machine 連線或斷線。預期：看板選取機器後可連線、斷線；斷線後顯示「已斷線」，bridge 不再自動重連，直到再按連線；該機器有進行中的工作時拒絕斷線，使用者對同一台再按一次才強制；不能悄悄中斷工作。
+
+**拆分原因與經過：** 第三階段原本是單一 PR #275（+1281／-37，19 個檔案）。bridge 的 review 拒絕了它：「PR 的 diff 有 78950 字元，超過 review 上限 60000」，所以 `card review` 與 bridge 自己的 review 迴圈都沒辦法進行；同一個 PR 的 CI 在 ubuntu 另外失敗（測試 `listen failure cleans its token…`，`ERR_FS_EISDIR`，屬於 B 的程式，見 B）。使用者 2026-11-17 選擇拆成兩個較小的 PR。B 依賴 A（B 呼叫 A 的 `connectMachine`／`disconnectMachine`），所以順序是先 A、merge 後再 B。
+
+**程式來源：** 這份程式是 bridge 的 Worker（codex `helper`，task `task-8cabb951…`）寫的（原 PR #275，head `f9b005db57aa`）。我（Claude Code）依檔案與 hunk 把與 hub 核心有關的部分切出來，**程式碼沒有改**，只把 `src/main.ts` 裡屬於 B 的 5 處引用（控制通道的 import、啟動、三處 shutdown）拿掉；文件是我依 A 的範圍重寫的，沒有沿用 Worker 夾雜各輪過程、其中已過時的敘述（例如「本輪未 commit／push／PR」）。**這份程式尚未經過獨立 review。**
+
+**A 的範圍：**
+- `src/machines.ts`：`HerdrHub.connectMachine`／`disconnectMachine`、`isDisconnected`、手動斷線旗標與 `generation`、斷線／連線時一般與 hook tunnel 的停止與重新啟動（舊 child 的退出不會重啟或覆蓋新 child）、aggregate 與直接請求對斷線機器的處理、連線後約 2 秒的主動探測；`MachineControlResult` 型別。
+- `src/machine-busy.ts`（新）：純函式 `machineBusyReason`；`src/agent-pool.ts`：唯讀的 `busySnapshot()`（**沒有碰身分檢查**，ISSUE-165 的修正不變）。
+- `src/card-role-assignment.ts`、`src/main.ts`：卡片遠端角色的候選與 preflight 排除已手動斷線的 machine；`main.ts` 把 busy 判定注入 hub（active stream ＋ AgentPool 租約與 pending）。
+- `src/machine-status-file.ts`：狀態檔支援 `disconnected`，以斷線操作時間寫入、不受逐筆 15 秒期限限制，整份檔案的 `updatedAt` 仍須新鮮。
+- 行為契約見 SPEC.md「Machine 手動連線／斷線，hub 核心」。手動斷線只存在程序記憶體，bridge 重啟會按 config 重新連線（卡片原本留的待決問題，這裡的決定是不持久化，也不寫 config）。
+
+**B 的範圍（尚未做）：** 控制通道（看板到 bridge 的 Unix socket 加 token）、看板 `o`／`x` 按鍵與「再按一次強制」確認、看板顯示「已斷線」，以及修正新增測試在 Linux 失敗的 socket 路徑處理。
+
+**測試（2026-11-17）：** A 相關五個測試檔（`machines`、`machine-busy`、`agent-pool`、`card-role-assignment`、`machine-status-file`）`node --test` 102 項全過；全套 `npm test` 2028 項，2027 pass、0 fail、1 skipped；`npm run lint` 通過；`machine-busy.ts`、`machine-status-file.ts`、`agent-pool.ts` 與相關測試檔 `prettier --check` 通過；`machines.ts`、`main.ts`、`card-role-assignment.ts`、`test/machines.test.ts` 在 HEAD 本來就不符 prettier，沒有整檔重排。
+
+**未驗證：** 沒有實機：真實 SSH 斷線後不再重連、再次連線、hook tunnel 停止與重啟、有進行中工作時的拒絕與強制斷線；這些在 B 有入口之後才能驗。`main.ts` 把 busy 判定注入 hub 的接線只有型別與 build 檢查，沒有單獨的整合測試。
+
 ## ISSUE-165：同一個 task 連續兩次取用同一個 codex Worker，第二次被「bound session identity changed」拒絕
 
 更新日期：2026-11-17。狀態：已修正、待驗收（程式與單元測試完成，**尚未部署，也尚未實機驗證**）。

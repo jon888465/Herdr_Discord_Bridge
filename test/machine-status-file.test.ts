@@ -265,3 +265,33 @@ test("writer logs only a fixed message and survives write failures", (t) => {
     ["Machine status write failed"],
   ]);
 });
+
+test("disconnected persists past observation TTL, but still requires a live writer", (t) => {
+  const file = fixture(t);
+  const entries = freshObservations(
+    [
+      {
+        id: "remote",
+        reachable: false,
+        disconnected: true,
+        observedAt: now.getTime() - 60000,
+      },
+    ],
+    now.getTime(),
+    MACHINE_STATUS_MAX_AGE_MS,
+  );
+  assert.equal(entries.length, 1);
+  writeMachineStatus(file, entries, now);
+  assert.equal(
+    readMachineStatus(file, now, MACHINE_STATUS_MAX_AGE_MS).get("remote"),
+    "disconnected",
+  );
+  assert.equal(
+    readMachineStatus(
+      file,
+      new Date(now.getTime() + 16000),
+      MACHINE_STATUS_MAX_AGE_MS,
+    ).size,
+    0,
+  );
+});
