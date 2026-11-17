@@ -684,6 +684,20 @@ test("a stop that cannot reach its process keeps the child for a retry, and a sp
       assert.equal(alive.length, 1, "仍活著的 child 沒被清掉");
       u.stop();
     }
+    // F14：hook 準備程序 kill 失敗後自己退出，不能留著舊 child 擋住之後的重新啟動。
+    const kids: Child[] = [];
+    let reachable = false;
+    const hook = new HookReverseTunnel(config, "/local", () => {}, fakeSpawn(kids, () => {
+      if (!reachable) throw new Error("kill failed");
+      return true;
+    }));
+    hook.start();
+    assert.throws(() => hook.stop(), /kill failed/);
+    kids[0]!.emit("exit", 0);
+    hook.start();
+    assert.equal(kids.length, 2, "舊程序已退出，重新啟動要真的 spawn");
+    reachable = true;
+    hook.stop();
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

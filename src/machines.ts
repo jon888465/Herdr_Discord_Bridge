@@ -288,7 +288,11 @@ export class HookReverseTunnel {
       if (prepare.pid === undefined) retry(`mkdir failed: ${error.message}`); // 有 pid 的 error 是信號失敗（review F12）
     });
     prepare.once("exit", (code) => {
-      if (this.stopped || this.child !== prepare) return;
+      if (this.child !== prepare) return;
+      if (this.stopped) {
+        this.child = null; // kill 失敗後自己退出：清掉參照，之後重新啟動才會 spawn（review F14）
+        return;
+      }
       if (code !== 0) return retry(`mkdir exited ${code}`);
       const child = this.spawnProcess(
         "ssh",

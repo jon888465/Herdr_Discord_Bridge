@@ -12,7 +12,7 @@
 
 **獨立 review 修正（逐筆見卡片 Review 發現）：**
 - **F2、F5、F9：忙碌判定漏掉遠端工作。**遠端角色（`startRemoteRole`）與 `card review` 的遠端 reviewer（`reviewOnRemote`）不經 AgentPool、準備期間也沒有 stream，普通斷線會中斷它們；`card review` 還可能在等 `fetchMaterial` 期間被斷線後才啟動遠端 checkout。新增 `RemoteRoleWork`、`trackRemoteRole`、`trackRemoteWork`，並在登記後用即時狀態重驗。盤點過所有對遠端做重活的入口，只有這兩個。
-- **F3、F6、F7、F8、F10、F11、F12：tunnel 啟動／停止失敗後無法重試。**連線失敗回復成可重試的斷線；兩條 tunnel 各自嘗試啟動與停止；沒停乾淨標 `stopPending`，重按斷線重試；SIGTERM 沒送達（`kill` 丟錯，或回 `false` 而程序還活著）時保留子程序參照；一般 tunnel 的 `ssh` spawn 失敗只發 `error`（**這是原本就潛在的缺陷**，原來只記日誌），現在也會清掉子程序並退避重連；但 `kill` 送不到信號（EPERM 等）的 `error` 有 pid、程序還活著，不能當成 spawn 失敗（F12，是我上一輪 F11 修法引出的）。
+- **F3、F6、F7、F8、F10、F11、F12、F14：tunnel 啟動／停止失敗後無法重試。**連線失敗回復成可重試的斷線；兩條 tunnel 各自嘗試啟動與停止；沒停乾淨標 `stopPending`，重按斷線重試；SIGTERM 沒送達（`kill` 丟錯，或回 `false` 而程序還活著）時保留子程序參照；一般 tunnel 的 `ssh` spawn 失敗只發 `error`（**這是原本就潛在的缺陷**，原來只記日誌），現在也會清掉子程序並退避重連；但 `kill` 送不到信號（EPERM 等）的 `error` 有 pid、程序還活著，不能當成 spawn 失敗（F12，是我上一輪 F11 修法引出的）；hook 準備程序 `kill` 失敗後自己退出時，`exit` 處理因 `stopped` 直接返回、沒清 `child`，之後重新連線不會 spawn（F14），現在會清掉。
 - **F13：直接 SSH 操作沒擋手動斷線。**`uploadTo`、`cleanupAttachments` 只檢查 machine 存在，斷線後仍會直接開 SSH 上傳或刪除遠端檔案；兩處加斷線檢查。沒有改 `machineConfig`（那會讓強制斷線後的遠端清理找不到設定）。
 - **F1、F4：範圍落差。**reviewer 拿整張卡的驗收條件審一半的功能；經使用者同意把卡拆成 A、B（我先在卡片加說明沒有效果）。
 
