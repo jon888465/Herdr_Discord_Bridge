@@ -277,12 +277,19 @@ export class AgentPool {
       const live = await this.herdr.listAgentsWithWorkspaceNames();
       const prior = live.find((a) => a.pane_id === binding?.paneId);
       if (prior) {
+        // codex 的 Herdr session 不可信（見 refreshSession），登記時沒有 session 的 codex pane，之後 Herdr 才回報
+        // 一個 session id，不能因此被當成「身分變了」而拒絕：不比對、也不採用這個 session，continuity 維持 unknown，
+        // 行為等同 Herdr 一直沒回報。登記時已有 session 的 codex、以及其他種類（agy 等）仍照常比對（ISSUE-165）。
+        const unboundCodex =
+          p.kind.toLowerCase().includes("codex") &&
+          !hasAgentSession(binding?.agent?.agent_session);
         if (
           prior.workspace_id !== workspace ||
           prior.agent !== p.kind ||
           prior.pane_id === lead.pane_id ||
           prior.terminal_id !== binding?.agent?.terminal_id ||
-          !sameAgentSession(prior.agent_session, binding.agent.agent_session)
+          (!unboundCodex &&
+            !sameAgentSession(prior.agent_session, binding.agent.agent_session))
         )
           throw new Error(
             "bound session identity changed; explicitly bind after inspection",
@@ -292,7 +299,8 @@ export class AgentPool {
         this.leases.set(key, owner);
         return {
           agent: prior,
-          continuity: knownSession(prior) ? "same-session" : "unknown",
+          continuity:
+            !unboundCodex && knownSession(prior) ? "same-session" : "unknown",
         };
       }
       // Serialize layout changes and persist uncertainty immediately before mutation.

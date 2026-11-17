@@ -123,6 +123,78 @@ test("changed or busy session fails closed; missing metadata is never same-sessi
   }
 });
 
+// ISSUE-165：codex pane 登記時沒有 session，第一個 assignment 之後 Herdr 才回報 session id。
+// 同一個 task 接著取用同一個 codex helper 不能被當成「身分變了」而拒絕。
+test("a codex profile bound without a session is still acquirable after Herdr starts reporting one (ISSUE-165)", async () => {
+  const f = fixture();
+  try {
+    f.pool.select("w1", "helper", true);
+    const first = (await f.pool.acquire("w1", "helper", lead, "task")).agent;
+    f.pool.release("task");
+    // 登記時沒有 session：模擬 Herdr 當時沒回報。
+    const unbound = { ...first, agent_session: undefined };
+    f.set([lead, unbound]);
+    f.pool.bind("w1", "helper", unbound);
+    // 之後 Herdr 才回報一個 session id。
+    f.set([
+      lead,
+      { ...first, agent_session: { kind: "id", value: "reported-later" } },
+    ]);
+    const again = await f.pool.acquire("w1", "helper", lead, "task");
+    assert.equal(again.continuity, "unknown", "不採用也不信任這個 session");
+    assert.equal(again.agent.pane_id, first.pane_id);
+    assert.equal(f.starts, 1, "沿用同一個 pane，不重開");
+    // 沒有把這個 session 寫進登記：之後 Herdr 回報的 session 換掉也一樣不比對。
+    f.pool.release("task");
+    f.set([
+      lead,
+      { ...first, agent_session: { kind: "id", value: "another-one" } },
+    ]);
+    assert.equal(
+      (await f.pool.acquire("w1", "helper", lead, "task-2")).continuity,
+      "unknown",
+    );
+  } finally {
+    f.close();
+  }
+});
+
+test("an unbound codex profile is still rejected when anything else about the pane changed (ISSUE-165)", async () => {
+  const f = fixture();
+  try {
+    f.pool.select("w1", "helper", true);
+    const first = (await f.pool.acquire("w1", "helper", lead, "task")).agent;
+    f.pool.release("task");
+    const unbound = { ...first, agent_session: undefined };
+    f.set([lead, unbound]);
+    f.pool.bind("w1", "helper", unbound);
+    const reported = { kind: "id", value: "reported-later" };
+    // 不同 terminal（pane 被換成別的程序）。
+    f.set([
+      lead,
+      { ...first, terminal_id: "swapped", agent_session: reported },
+    ]);
+    await assert.rejects(
+      f.pool.acquire("w1", "helper", lead, "task"),
+      /identity changed/,
+    );
+    // 別的種類。
+    f.set([lead, { ...first, agent: "claude", agent_session: reported }]);
+    await assert.rejects(
+      f.pool.acquire("w1", "helper", lead, "task"),
+      /identity changed/,
+    );
+    // 別的 workspace。
+    f.set([lead, { ...first, workspace_id: "w9", agent_session: reported }]);
+    await assert.rejects(
+      f.pool.acquire("w1", "helper", lead, "task"),
+      /identity changed/,
+    );
+  } finally {
+    f.close();
+  }
+});
+
 test("uncertain startup survives restart and prevents duplicate creation", async () => {
   const f = fixture();
   try {
