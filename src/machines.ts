@@ -125,7 +125,7 @@ function sshProbeArgs(destination: string, configPath: string | undefined): stri
 
 /** 只在每行的「值」裡、以完整詞（前後不是英數或 `-`）把名字換成佔位，設定鍵與別的字串（如 `a` 出現在 `addressfamily`）不動（review F10）。 */
 function sshProbeNormalize(output: string, name: string): string {
-  const word = new RegExp(`(?<![A-Za-z0-9-])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9-])`, "g");
+  const word = new RegExp(`(?<![A-Za-z0-9-])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9-])`, "gi");
   return output
     .split("\n")
     .map((line) => {
