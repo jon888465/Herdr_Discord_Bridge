@@ -4,6 +4,7 @@ import {
   trackRemoteRole,
 } from "./machine-busy.js";
 import { syncHerdrMachine } from "./herdr-machine-sync.js";
+import { loadDisconnectedMachines, machineDisconnectedFile, saveDisconnectedMachines } from "./machine-disconnected-store.js";
 import { runWithCleanupOnFailure, startMachineControlServerSafely } from "./machine-control-channel.js";
 import {
   startMachineStatusWriter,
@@ -292,6 +293,10 @@ async function startBridge(
   const agyTrust = defaultAgyWorktreeTrust(config.agyTrustedDirectories);
   herdr.setAgyTrust(agyTrust);
   agyTrust.sweep();
+  // 看板 `x` 手動斷線的 machine 要記住：重啟後還原成已斷線、不自動重連，按 `o` 才連線（ISSUE-166）。
+  const disconnectedFile = machineDisconnectedFile();
+  herdr.restoreDisconnected(loadDisconnectedMachines(disconnectedFile, herdr.machineIds()));
+  herdr.setDisconnectedPersistence((ids) => void saveDisconnectedMachines(disconnectedFile, ids));
   herdr.startTunnels();
   const stopMachineStatus = startMachineStatusWriter(
     herdr,

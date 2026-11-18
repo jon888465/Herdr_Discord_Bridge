@@ -659,6 +659,32 @@ export class HerdrHub extends HerdrClient {
     return this.remotes.get(id)?.disconnected ?? false;
   }
 
+  private persistDisconnected?: (ids: string[]) => void;
+
+  /** 手動斷線清單有變時（`x`／`o`）交給呼叫者存檔；丟錯不影響連線／斷線結果（ISSUE-166）。 */
+  setDisconnectedPersistence(persist: (ids: string[]) => void): void {
+    this.persistDisconnected = persist;
+  }
+
+  /** 啟動時還原上次手動斷線的 machine：標為已斷線、不啟動 tunnel（要在看板按 `o` 才連線）；未知 id 略過。須在 `startTunnels()` 之前呼叫。 */
+  restoreDisconnected(ids: string[]): void {
+    for (const id of ids) {
+      const remote = this.remotes.get(id);
+      if (!remote) continue;
+      remote.disconnected = true;
+      remote.up = false;
+      remote.observedAt = Date.now();
+    }
+  }
+
+  private savedDisconnected(): void {
+    try {
+      this.persistDisconnected?.([...this.remotes.values()].filter((r) => r.disconnected).map((r) => r.config.id));
+    } catch {
+      /* 存檔失敗只代表重啟後不記得，不影響這次的連線／斷線 */
+    }
+  }
+
   connectMachine(id: string): MachineControlResult {
     const remote = this.remotes.get(id);
     if (!remote) return { ok: false, reason: "machine 不存在" };
@@ -670,6 +696,7 @@ export class HerdrHub extends HerdrClient {
       remote.up = false;
       remote.observedAt = undefined;
       remote.generation++;
+      this.savedDisconnected();
       // 兩條 tunnel 各自嘗試啟動；任何一條失敗才整體回復（review F7）。
       let startFailed = false;
       for (const start of [
@@ -695,6 +722,7 @@ export class HerdrHub extends HerdrClient {
       remote.generation++;
       remote.up = false;
       remote.observedAt = Date.now();
+      this.savedDisconnected();
       return { ok: false, reason: "連線失敗" };
     }
   }
@@ -742,6 +770,7 @@ export class HerdrHub extends HerdrClient {
       remote.generation++;
       remote.up = false;
       remote.observedAt = Date.now();
+      this.savedDisconnected();
       remote.stopPending = !this.stopRemoteTunnels(remote);
       return remote.stopPending
         ? {
