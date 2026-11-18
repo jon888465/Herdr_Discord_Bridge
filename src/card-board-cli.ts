@@ -28,6 +28,7 @@ import {
 import {
   machineControlKey,
   machineControlResult,
+  bridgeRestartResult,
   withStatusOverrides,
   type MachineControlUi,
   type StatusOverride,
@@ -295,6 +296,13 @@ const timer = setInterval(() => {
 /** 送出 o／x 請求；等待期間 control.pending 擋下其他按鍵，q／Ctrl-C 仍會直接離開。 */
 function sendControl(command: Parameters<typeof sendMachineControl>[0]): void {
   void sendMachineControl(command).then((response) => {
+    if (command.action === "restart") {
+      const restart = bridgeRestartResult(response);
+      control = restart.ui;
+      message = restart.message;
+      render();
+      return;
+    }
     const result = machineControlResult(
       command.machineId,
       response,

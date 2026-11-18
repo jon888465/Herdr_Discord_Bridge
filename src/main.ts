@@ -3,6 +3,7 @@ import {
   remoteRoleWork,
   trackRemoteRole,
 } from "./machine-busy.js";
+import { defaultProjectDir, requestBridgeRestart } from "./bridge-restart.js";
 import { syncHerdrMachine } from "./herdr-machine-sync.js";
 import { loadDisconnectedMachines, machineDisconnectedFile, saveDisconnectedMachines } from "./machine-disconnected-store.js";
 import { runWithCleanupOnFailure, startMachineControlServerSafely } from "./machine-control-channel.js";
@@ -305,6 +306,12 @@ async function startBridge(
   );
   // 看板 o／x 的控制通道；啟動失敗只記一行，不擋 bridge（ISSUE-166 第三階段 B）。
   const stopMachineControl = await startMachineControlServerSafely(herdr, {
+    // 看板 R：沒有進行中的串流才重啟（streamResume 在下面才建立，請求來時早已初始化）。
+    restart: () =>
+      requestBridgeRestart({
+        activeStreams: () => streamResume.list().length,
+        projectDir: defaultProjectDir(),
+      }),
     afterControl: (command, result) =>
       syncHerdrMachine(
         herdr.machineConfig(command.machineId),

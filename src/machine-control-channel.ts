@@ -21,7 +21,7 @@ export function machineControlTokenFile(): string {
   return path.join(stateDirectory(), "machine-control.token");
 }
 
-export type MachineControlAction = "connect" | "disconnect";
+export type MachineControlAction = "connect" | "disconnect" | "restart";
 
 export interface MachineControlCommand {
   action: MachineControlAction;
@@ -77,9 +77,11 @@ export function parseControlRequest(
     value.version !== 1 ||
     typeof value.token !== "string" ||
     !tokenMatches(value.token, token) ||
-    (value.action !== "connect" && value.action !== "disconnect") ||
+    (value.action !== "connect" &&
+      value.action !== "disconnect" &&
+      value.action !== "restart") ||
     typeof value.machineId !== "string" ||
-    !value.machineId ||
+    (value.action !== "restart" && !value.machineId) ||
     (value.force !== undefined && typeof value.force !== "boolean")
   )
     return undefined;
@@ -103,6 +105,7 @@ export function normalizeControlResult(value: unknown): MachineControlResult {
     return {
       ok: true,
       status: value.status,
+      ...(value.restarting === true ? { restarting: true } : {}),
       ...(typeof value.note === "string" ? { note: value.note } : {}),
       ...(typeof value.herdr === "string" ? { herdr: value.herdr } : {}),
     };
@@ -119,8 +122,11 @@ export function normalizeControlResult(value: unknown): MachineControlResult {
 function runCommand(
   hub: MachineControlHub,
   command: MachineControlCommand,
+  restart?: () => MachineControlResult,
 ): MachineControlResult {
   try {
+    if (command.action === "restart")
+      return normalizeControlResult(restart ? restart() : fail(CONTROL_FAILED));
     return normalizeControlResult(
       command.action === "connect"
         ? hub.connectMachine(command.machineId)
@@ -231,6 +237,8 @@ export interface MachineControlServerOptions {
   maxRequestBytes?: number;
   timeoutMs?: number;
   /** hub 操作成功後的附帶動作（例如同步 Herdr 側邊欄）；回傳的說明放進結果的 `herdr`，丟錯或逾時不影響結果。 */
+  /** 看板的「重啟 bridge」（ISSUE-169）；沒給就回操作失敗。 */
+  restart?: () => MachineControlResult;
   afterControl?: (
     command: MachineControlCommand,
     result: MachineControlResult,
@@ -293,8 +301,9 @@ export async function startMachineControlServer(
         token,
       );
       if (!command) return reply(fail(CONTROL_REJECTED));
-      const result = runCommand(hub, command);
-      if (!result.ok || !options.afterControl) return reply(result);
+      const result = runCommand(hub, command, options.restart);
+      if (!result.ok || command.action === "restart" || !options.afterControl)
+        return reply(result);
       // 總期限（deadline）照舊計時：附帶動作太慢時，原結果照回，不等它。
       options
         .afterControl(command, result)

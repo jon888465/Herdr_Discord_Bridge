@@ -239,6 +239,11 @@ ensure_herdr_server() {
     return 0
   fi
 
+  # 從看板重啟時由 bridge 設定：背景程序沒有 GUI session，在這裡開伺服器會踩到 keychain -25308（ISSUE-168）。
+  if [[ "${HERDR_BRIDGE_NO_SERVER_START:-}" == 1 ]]; then
+    echo "Herdr server is not running; start it from the Herdr app, then retry." >&2
+    return 1
+  fi
   local server_log="${TMPDIR:-/tmp}/herdr-server.log"
   echo "Herdr server is not running; starting headless server..."
   nohup herdr server >>"$server_log" 2>&1 </dev/null &
