@@ -1,5 +1,27 @@
 # Known Issues
 
+## ISSUE-168：埠會變動的 machine：Herdr 目標與 bridge 設定無法跟著改
+
+更新日期：2026-11-18。狀態：待調查（設定方式已在實機走通並寫入 README，缺口未修）。
+
+**使用者可見症狀（2026-11-18 實機）：**
+- 新增 machine `devbox`（devtunnel 轉發到 `127.0.0.1`，埠每次不同）後，Herdr 側邊欄先是 `! attention`、之後一直 reconnecting。
+- 看板 `x` 斷線後，Herdr 側邊欄的同一台仍在線、仍可下指令（已由 PR #281 修正：`x`／`o` 一併 `herdr machine disable`／`enable`，待實機驗收）。
+
+**已確認：**
+1. `! attention`：本機 Herdr 0.9.1 對遠端 0.9.5；升級本機客戶端（Homebrew 要用 `brew upgrade herdr`，`herdr update` 會拒絕）並重啟 Herdr 後恢復。原因是推測：0.9.1 沒有 `herdr machine status`，當時看不到實際錯誤。
+2. reconnecting：Herdr 回報 `Connection refused`，我直接 `ssh` 同一位址與埠也被拒，是那個埠沒有東西在聽，不是金鑰或版本問題。
+3. 換埠後仍被問密碼：`ssh://帳號@位址:埠` 這種目標 ssh 只試預設金鑰，不會試 `~/.ssh/devbox`。以 `Host devbox`（HostName 127.0.0.1、IdentityFile、不寫 Port）解決；用別名加 `-p` 可登入。
+4. Herdr 沒有修改既有 machine 目標的指令；`herdr machine add ssh://devbox:50123 --label …` 實測可連線（`reachable`），舊的需 `remove`，新的 `rename`。
+5. `devtunnel connect` 的鑰匙圈錯誤 `-25308`（`errSecInteractionNotAllowed`）：我這邊的 shell 同樣得到 `User interaction is not allowed`，`launchctl managername` 為 `Background`；Herdr 伺服器（`herdr server`）是 launchd 底下的背景程序。**我沒有在使用者的 Herdr shell 內確認**，也不確定是誰、何時以背景方式啟動它；`scripts/run.sh -r` 在伺服器沒跑時會印「starting headless server…」，有可能是這一條。
+
+**未解決的缺口：**
+- bridge 的 machine 設了 `ssh` 別名就原樣使用、不能另外帶埠，所以「別名＋可變埠」沒有支援；看板改 host／port 後，Herdr 存的目標（含埠）也不會跟著更新。
+- `scripts/run.sh` 在 Herdr 伺服器沒跑時從目前環境啟動無介面伺服器，可能讓之後的 pane 沒有 GUI 工作階段；是否要改成提示、尚待決定。
+
+**文件：**README.md、README.zh-TW.md 新增「埠會變動的 machine」。
+**驗證：**以上現象均為 2026-11-18 在使用者環境觀察；沒有自動化測試（設定與環境問題）。
+
 ## ISSUE-167：Card 看板 Machine 第四階段：編輯 SSH user／host／port
 
 更新日期：2026-11-17。狀態：已修正、待驗收（程式與自動化檢查完成；尚未部署／重啟或實機驗收）。

@@ -298,6 +298,28 @@ npm run build
 Machine 也可設定 `{"id":"server","host":"example.com","user":"alice","port":2222,"socket":"/run/user/1000/herdr.sock"}`。ssh 與 host 同時存在時，只要 `ssh` 是 `~/.ssh/config` 已設定的 Host（由 `ssh -G` 判定） 就仍用該 alias，ssh 不認得時才回退 user／host／port；user 省略用 SSH 預設，port 省略用 22。沒有 host 時既有 ssh alias 原樣可用，不修改 `~/.ssh/config`。Card 看板 Machine 檢視按 `e`／Enter 編輯三個欄位；儲存先備份 config.json、只替換 machines array，重啟 bridge 後生效。狀態代表執行中 bridge 的觀測，不代表新設定已連線；真實 SSH／Herdr 尚待驗收（ISSUE-167）。Machine 檢視按 `o` 連線、`x` 斷線（手動斷線後顯示「已斷線」、不自動重連，bridge 重啟後依設定重新連線）；有進行中的工作時會先拒絕並提示，緊接著對同一台再按 `x` 才強制斷線。看板經 config 目錄下的本機 Unix socket 與 bridge 溝通；實機 SSH 斷線／再連線尚待驗收（ISSUE-166）。
 
 
+### 埠會變動的 machine（例如 devtunnel 轉發到 127.0.0.1）
+
+Herdr 側邊欄的 machine 與 bridge 的 `machines` 是**兩套各自獨立的連線與設定**：看板的 `x`／`o` 成功後會一併 `herdr machine disable`／`enable` 對應的那台（對應規則：bridge 的 `ssh` 等於 Herdr 的 target，沒設 `ssh` 就比 label），但**不會改 Herdr 存的目標**。
+
+位址固定為 `127.0.0.1`、只有埠會變時，不要用 `Host 127.0.0.1` 把金鑰綁在位址上（會套到所有走本機轉發的連線），也不要把埠寫死在 `~/.ssh/config`。用「別名＋不寫 Port」：
+
+```
+Host devbox
+    HostName 127.0.0.1
+    User <帳號>
+    IdentityFile ~/.ssh/devbox
+    IdentitiesOnly yes
+```
+
+- `Host` 比對只看主機名、不看埠，所以只有明確用別名 `devbox` 才會套用這把金鑰；手動連線用 `ssh -p <新埠> devbox`，命令列的 `-p` 優先於設定檔。
+- **Herdr：**目標用 `ssh://devbox:<埠>`，例如 `herdr machine add ssh://devbox:50123 --label devbox`（2026-11-18 以 Herdr 0.9.5 實測可連線）。Herdr 沒有修改既有 machine 目標的指令，埠變了要重加：先用新的 label 加入並確認 `herdr machine status` 為 `reachable`，再 `herdr machine remove <舊 profile id>`、`herdr machine rename <新 profile id> --label devbox`。
+- **bridge：**設了 `ssh` 別名就原樣使用、不能另外帶埠，所以「別名＋可變埠」目前沒有支援，見 ISSUE-168。
+- 公鑰已加入遠端 `authorized_keys` 仍會被問密碼時，先確認 ssh 到底有沒有提供那把金鑰：用 `ssh -G <目標>` 看 `identityfile`；用 `ssh://帳號@位址:埠` 這種目標時 ssh 只會試預設金鑰（`id_ed25519` 等），不會試別的檔名。
+- 連線被拒絕（`Connection refused`）是那個埠沒有東西在聽（轉發掉了或遠端 sshd 停了），不是金鑰問題；Herdr 會一直停在 reconnecting。新埠第一次連線會要求確認主機金鑰（`known_hosts` 以位址加埠記錄），請核對指紋後互動接受一次。
+- 本機與遠端的 Herdr 版本要夠新：0.9.1 的客戶端連 0.9.5 的伺服器曾顯示 `! attention`，升級客戶端後恢復（原因是推測，Herdr 0.9.5 才有 `herdr machine status`／`reconnect` 可看實際錯誤）。Homebrew 安裝的 Herdr 用 `brew upgrade herdr`，`herdr update` 會拒絕。
+- Herdr 的 shell 若是從背景工作階段（沒有 GUI 登入環境）啟動的，鑰匙圈操作會失敗（例如 `devtunnel connect` 的 `-25308`，`errSecInteractionNotAllowed`）；用 `security show-keychain-info ~/Library/Keychains/login.keychain-db` 驗證，可先 `security unlock-keychain` 或改從 GUI 啟動 Herdr（ISSUE-168）。
+
 ### 遠端卡片 reviewer（選填）
 
 機器項目加 `"cardReview": { "root": "/root/hdb-card-review", "kinds": ["agy"] }` 後，卡片可寫 `roles: {reviewer: "agy-pod:agy"}`：PR push 之後，bridge 用匿名 https 把 GitHub `origin` clone 到該機器的 `<root>/`，checkout PR head 並驗證 HEAD 等於 PR head sha，再在該機器執行 reviewer（不轉送憑證、不 fallback 本機）。`root` 是 bridge 專用的絕對路徑，`kinds` 是允許的 Agent 種類。只有 reviewer 可以是 remote，卡片內容與 PR diff 會送到該機器。沒設定 `cardReview` 時一切不變；沒有 `roles` 的卡不支援由 Lead 自選 remote reviewer（後續卡片 REQ-20261111-remote-in-task-roles）。尚未實機驗收（ISSUE-143，見 [docs/remote-card-reviewer.md](docs/remote-card-reviewer.md)）。
