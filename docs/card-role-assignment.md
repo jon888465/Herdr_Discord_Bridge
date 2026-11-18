@@ -46,7 +46,7 @@ impl-1：claude（sonnet）；machine=local；task=task-…；v=2,cr=i,s=C,ss=CC
 
 codingRole：`cr=i/d/r/v`＝implement／diagnose／review／verify；reviewer／fixer 為 `-`。assignmentId 由 role 還原，不重複印：一般同 role；若原 id 是 lead（或 assignment- 前綴的 lead），role 多加一個 assignment-，還原移除一個前綴。source：`s=C/L/D/I`＝card／lead／default／CLI。selectionSources：`ss` 三碼依序 machine／agent／model，使用相同代碼（Lead 選了帶 model 的候選且卡片未約束 model 時，model 來源記 `L`）。modelEvidence：`me=L/O/U`＝launch／observed／unknown。未知 model 不寫 model 值。
 
-v2 只有四種 agent；machine 只能是 local，例外是 reviewer 與 `cr=d/r/v` 的 task 內 remote 角色（machine id 最多 32）；role 最多64、model80、task64、round最大1000000，完整組合仍不超300字。profileId 不重複印入 v2，完整配置候選在 durable task。parser／serializer／輪替沿用300字與既有格式；model 不截斷。v2 hash 加入來源 metadata，避免舊的少 metadata 紀錄先寫後吃掉新資訊；同一完整事件仍去重。role_assigned 表示已準備派工身分，**不代表 prompt 已送達或任務完成**；後續失敗另記。
+v2 只有四種 agent；machine 只能是 local，例外是 reviewer、fixer 與 `cr=d/r/v/i` 的 task 內 remote 角色（machine id 最多 32；fixer 與 `cr=i` 是遠端寫入角色，2026-11-18 實機驗收時才發現原先漏掉，見 ISSUE-171）；role 最多64、model80、task64、round最大1000000，完整組合仍不超300字。profileId 不重複印入 v2，完整配置候選在 durable task。parser／serializer／輪替沿用300字與既有格式；model 不截斷。v2 hash 加入來源 metadata，避免舊的少 metadata 紀錄先寫後吃掉新資訊；同一完整事件仍去重。role_assigned 表示已準備派工身分，**不代表 prompt 已送達或任務完成**；後續失敗另記。
 
 ## 無法解析的卡片
 
