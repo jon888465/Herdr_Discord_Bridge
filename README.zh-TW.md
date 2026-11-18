@@ -295,7 +295,7 @@ npm run build
 
 用 `herdr machine add` 加入遠端機器後，在 plugin `config.json` 加入 `machines`（見 [設定範例](config.example.jsonc)）：`id`、`ssh`（`~/.ssh/config` 的 Host）與遠端 Herdr API socket 的絕對路徑 `socket`。bridge 會以 `ssh -L` 轉發該 socket，遠端 Agent 的 ID 帶 `<id>:` 前綴（如 `agy-pod:w2:p1`），沒帶前綴的一律是本機。支援文字對話與 Discord → 遠端 Agent 的附件（經 ssh 上傳到遠端 cwd）；不支援 Agent → Discord 的檔案回送與 `herdr-discord-send`。文字對話已驗收，遠端附件待驗收（ISSUE-041）。
 
-Machine 也可設定 `{"id":"server","host":"example.com","user":"alice","port":2222,"socket":"/run/user/1000/herdr.sock"}`。ssh 與 host 同時存在時，只要 `ssh` 是 `~/.ssh/config` 已設定的 Host（由 `ssh -G` 判定） 就仍用該 alias，ssh 不認得時才回退 user／host／port；user 省略用 SSH 預設，port 省略用 22。沒有 host 時既有 ssh alias 原樣可用，不修改 `~/.ssh/config`。Card 看板 Machine 檢視按 `e`／Enter 編輯三個欄位；儲存先備份 config.json、只替換 machines array，重啟 bridge 後生效。狀態代表執行中 bridge 的觀測，不代表新設定已連線；真實 SSH／Herdr 尚待驗收（ISSUE-167）。
+Machine 也可設定 `{"id":"server","host":"example.com","user":"alice","port":2222,"socket":"/run/user/1000/herdr.sock"}`。ssh 與 host 同時存在時，只要 `ssh` 是 `~/.ssh/config` 已設定的 Host（由 `ssh -G` 判定） 就仍用該 alias，ssh 不認得時才回退 user／host／port；user 省略用 SSH 預設，port 省略用 22。沒有 host 時既有 ssh alias 原樣可用，不修改 `~/.ssh/config`。Card 看板 Machine 檢視按 `e`／Enter 編輯三個欄位；儲存先備份 config.json、只替換 machines array，重啟 bridge 後生效。狀態代表執行中 bridge 的觀測，不代表新設定已連線；真實 SSH／Herdr 尚待驗收（ISSUE-167）。Machine 檢視按 `o` 連線、`x` 斷線（手動斷線後顯示「已斷線」、不自動重連，bridge 重啟後依設定重新連線）；有進行中的工作時會先拒絕並提示，緊接著對同一台再按 `x` 才強制斷線。看板經 config 目錄下的本機 Unix socket 與 bridge 溝通；實機 SSH 斷線／再連線尚待驗收（ISSUE-166）。
 
 
 ### 遠端卡片 reviewer（選填）

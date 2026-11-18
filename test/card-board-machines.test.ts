@@ -8,6 +8,7 @@ import {
   machineEditorText,
   parseMachineEditorText,
   boardHeader,
+  applyStatusOverride,
   machineLines,
   machineViewLines,
   readMachinesSection,
@@ -360,4 +361,13 @@ test("restart explanation survives retained footer on short screens with message
       assert.ok(lines.at(-1)!.includes("狀態＝執行中 bridge 的觀測"));
     }
   }
+});
+
+test("applyStatusOverride：沒有新覆寫時保留尚未到期的舊值（review F3）", () => {
+  const overrides = new Map<string, { status: "unknown" | "disconnected" | "connected"; untilMs: number }>();
+  applyStatusOverride(overrides, "m1", { status: "unknown", untilMs: 5000 });
+  applyStatusOverride(overrides, "m1", undefined);
+  assert.deepEqual(overrides.get("m1"), { status: "unknown", untilMs: 5000 });
+  applyStatusOverride(overrides, "m1", { status: "connected", untilMs: 9000 });
+  assert.deepEqual(overrides.get("m1"), { status: "connected", untilMs: 9000 });
 });

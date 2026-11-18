@@ -3,6 +3,7 @@ import {
   remoteRoleWork,
   trackRemoteRole,
 } from "./machine-busy.js";
+import { runWithCleanupOnFailure, startMachineControlServerSafely } from "./machine-control-channel.js";
 import {
   startMachineStatusWriter,
   MACHINE_STATUS_WRITE_INTERVAL_MS,
@@ -221,7 +222,15 @@ import {
   runHerdrCli,
 } from "./card-board-open.js";
 
+// 看板控制通道在 bridge 初始化途中建立；初始化失敗時 index.ts 只設 exitCode，tunnel 可能讓程序繼續活著，
+// 所以失敗要自己關掉通道（ISSUE-166 B review F2）。
+let stopMachineControlOnFailure: (() => void) | undefined;
+
 export async function run(): Promise<void> {
+  return runWithCleanupOnFailure(runBridge, () => stopMachineControlOnFailure?.());
+}
+
+async function runBridge(): Promise<void> {
   const config = loadConfig();
   const runtimeKind = resolveRuntimeKind({ env: process.env, config });
   if (runtimeKind === "core") {
@@ -288,6 +297,9 @@ async function startBridge(
     join(stateDirectory(), "machine-status.json"),
     MACHINE_STATUS_WRITE_INTERVAL_MS,
   );
+  // 看板 o／x 的控制通道；啟動失敗只記一行，不擋 bridge（ISSUE-166 第三階段 B）。
+  const stopMachineControl = await startMachineControlServerSafely(herdr);
+  stopMachineControlOnFailure = stopMachineControl;
   const routing = new RoutingStore(
     statePath(config),
     config.maxTrackedApprovals,
@@ -310,6 +322,7 @@ async function startBridge(
 
   if (!(await herdr.ping())) {
     stopMachineStatus();
+    stopMachineControl();
     herdr.stopTunnels();
     throw new Error(
       "Herdr socket is not reachable; the bridge cannot control agents. Herdr itself is left untouched.",
@@ -330,6 +343,7 @@ async function startBridge(
     watcher.start();
     installShutdown(() => {
       stopMachineStatus();
+      stopMachineControl();
       herdr.stopTunnels();
       watcher.stop();
     }, routing);
@@ -637,6 +651,7 @@ async function startBridge(
     stopAutopick();
     stopPullRequestSync();
     stopMachineStatus();
+    stopMachineControl();
     herdr.stopTunnels();
     stopSend();
     stopHooks();

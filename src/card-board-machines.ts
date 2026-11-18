@@ -9,6 +9,8 @@ import {
 } from "./card-board.js";
 
 import type { MachineStatus } from "./machine-status-file.js";
+import type { MachineControlResult } from "./machines.js";
+import type { MachineControlCommand } from "./machine-control-channel.js";
 
 export type BoardView = "cards" | "machines";
 
@@ -81,7 +83,7 @@ export function boardHeader(
 }
 
 export const MACHINE_HINT =
-  "設定改動重啟 bridge 後生效；狀態＝執行中 bridge 的觀測 | Tab/m/c 切換  j/k 移動  PgUp/PgDn 翻頁  Home/End 頭尾  e/Enter 編輯  q 離開";
+  "設定改動重啟 bridge 後生效；狀態＝執行中 bridge 的觀測 | Tab/m/c 切換  j/k 移動  PgUp/PgDn 翻頁  Home/End 頭尾  e/Enter 編輯  o 連線  x 斷線  q 離開";
 
 export interface MachineViewState {
   machines: MachineConfig[];
@@ -229,7 +231,7 @@ export function machineLines(
     .map((machine, offset) =>
       truncateToWidth(
         sanitizeForTerminal(
-          `${first + offset === cursor ? ">" : " "} ${machine.id}  ${sshTargetLabel(machine, hasConfiguredHost)}  ${statuses.get(machine.id) ?? "未知"}  ${machine.socket}`,
+          `${first + offset === cursor ? ">" : " "} ${machine.id}  ${sshTargetLabel(machine, hasConfiguredHost)}  ${statusLabel(statuses.get(machine.id))}  ${machine.socket}`,
         ),
         width - 1,
       ),
@@ -288,4 +290,125 @@ export function parseMachineEditorText(
   } catch {
     return { ok: false, message: "未儲存：SSH 連線設定不合法" };
   }
+}
+
+function statusLabel(status: MachineStatus | undefined): string {
+  return status === "disconnected" ? "已斷線" : (status ?? "未知");
+}
+
+export const MACHINE_CONTROL_PENDING = "處理中…";
+export const MACHINE_CONTROL_NO_SELECTION = "沒有選取 machine";
+
+/** 看板 o／x 操作的狀態：等待回應中，以及上一個結果要求強制斷線的 machine。 */
+export interface MachineControlUi {
+  pending: boolean;
+  /** 上一個結果帶結構化 needsForce:true 的 machine；只有緊接著對同一台按 x 才送 force。 */
+  confirmFor?: string;
+}
+
+export type MachineKeyOutcome =
+  | { kind: "quit" }
+  /** 等待回應中，其他按鍵都不處理。 */
+  | { kind: "ignore" }
+  | { kind: "message"; message: string }
+  | { kind: "send"; command: MachineControlCommand; message: string }
+  /** 交給既有按鍵處理（Card 檢視的所有按鍵、Machine 檢視的移動／編輯等）。 */
+  | { kind: "pass" };
+
+/**
+ * 每個按鍵先經過這裡：q／Ctrl-C 一律離開；等待回應時擋下其他按鍵；Machine 檢視的 o／x 送出請求。
+ * 除了「緊接著對同一台再按 x」以外，任何按鍵都清掉強制斷線的確認（換台要按移動鍵，所以也會清掉）。
+ */
+export function machineControlKey(
+  ui: MachineControlUi,
+  key: string,
+  view: BoardView,
+  selectedId: string | undefined,
+): { ui: MachineControlUi; outcome: MachineKeyOutcome } {
+  if (key === "q" || key === "\x03") return { ui, outcome: { kind: "quit" } };
+  if (ui.pending) return { ui, outcome: { kind: "ignore" } };
+  if (view !== "machines" || (key !== "o" && key !== "x"))
+    return { ui: { pending: false }, outcome: { kind: "pass" } };
+  if (selectedId === undefined)
+    return {
+      ui: { pending: false },
+      outcome: { kind: "message", message: MACHINE_CONTROL_NO_SELECTION },
+    };
+  const force = key === "x" && ui.confirmFor === selectedId;
+  return {
+    ui: { pending: true },
+    outcome: {
+      kind: "send",
+      command: {
+        action: key === "o" ? "connect" : "disconnect",
+        machineId: selectedId,
+        ...(force ? { force: true } : {}),
+      },
+      message: MACHINE_CONTROL_PENDING,
+    },
+  };
+}
+
+/** 本機暫時蓋過狀態檔的顯示：斷線成功立即顯示「已斷線」、連線成功先顯示「未知」，直到 bridge 寫入新狀態。 */
+export interface StatusOverride {
+  status: MachineStatus | "unknown";
+  untilMs: number;
+}
+
+/** 略長於 bridge 寫狀態檔的間隔（5 秒），之後改看狀態檔。 */
+export const STATUS_OVERRIDE_MS = 6000;
+
+/** 收到回應：解除等待；只依結構化的 needsForce:true 記下確認對象，不比對文案。 */
+export function machineControlResult(
+  machineId: string,
+  result: MachineControlResult,
+  nowMs: number,
+): { ui: MachineControlUi; message: string; override?: StatusOverride } {
+  const label = sanitizeForTerminal(machineId);
+  if (!result.ok)
+    return {
+      ui:
+        result.needsForce === true
+          ? { pending: false, confirmFor: machineId }
+          : { pending: false },
+      message: `${label}：${sanitizeForTerminal(result.reason)}`,
+    };
+  const note = result.note ? sanitizeForTerminal(result.note) : undefined;
+  return {
+    ui: { pending: false },
+    message: `${label}：${note ?? (result.status === "disconnected" ? "已斷線" : "已開始連線")}`,
+    // 「已在連線中」沒有改變狀態，不必蓋過狀態檔。
+    ...(result.status === "connected" && result.note
+      ? {}
+      : {
+          override: {
+            status:
+              result.status === "disconnected" ? "disconnected" : "unknown",
+            untilMs: nowMs + STATUS_OVERRIDE_MS,
+          },
+        }),
+  };
+}
+
+/** 套用一次控制回應的覆寫：有新的就取代；沒有就保留尚未到期的舊值（到期由 `withStatusOverrides` 略過，review F3）。 */
+export function applyStatusOverride(
+  overrides: Map<string, StatusOverride>,
+  id: string,
+  next: StatusOverride | undefined,
+): void {
+  if (next) overrides.set(id, next);
+}
+
+export function withStatusOverrides(
+  statuses: Map<string, MachineStatus>,
+  overrides: Map<string, StatusOverride>,
+  nowMs: number,
+): Map<string, MachineStatus> {
+  const merged = new Map(statuses);
+  for (const [id, override] of overrides) {
+    if (override.untilMs <= nowMs) continue;
+    if (override.status === "unknown") merged.delete(id);
+    else merged.set(id, override.status);
+  }
+  return merged;
 }
