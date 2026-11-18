@@ -314,7 +314,7 @@ Host devbox
 
 - `Host` 比對只看主機名、不看埠，所以只有明確用別名 `devbox` 才會套用這把金鑰；手動連線用 `ssh -p <新埠> devbox`，命令列的 `-p` 優先於設定檔。
 - **Herdr：**目標用 `ssh://devbox:<埠>`，例如 `herdr machine add ssh://devbox:50123 --label devbox`（2026-11-18 以 Herdr 0.9.5 實測可連線）。Herdr 沒有修改既有 machine 目標的指令，埠變了要重加：先用新的 label 加入並確認 `herdr machine status` 為 `reachable`，再 `herdr machine remove <舊 profile id>`、`herdr machine rename <新 profile id> --label devbox`。
-- **bridge：**設了 `ssh` 別名就原樣使用、不能另外帶埠，所以「別名＋可變埠」目前沒有支援，見 ISSUE-168。
+- **bridge：**設 `"ssh": "devbox", "port": 50123`（不要寫 `host`），bridge 會執行 `ssh -p 50123 devbox`：別名提供帳號與金鑰，埠由你改；在看板 Machine 檢視按 `e`／Enter、`host` 與 `user` 留空、只改 `port`，重啟 bridge 生效。`ssh` 與 `host` 同時存在時仍原樣用別名，`port` 只在回退 host 時使用（ISSUE-168）。
 - 公鑰已加入遠端 `authorized_keys` 仍會被問密碼時，先確認 ssh 到底有沒有提供那把金鑰：用 `ssh -G <目標>` 看 `identityfile`；用 `ssh://帳號@位址:埠` 這種目標時 ssh 只會試預設金鑰（`id_ed25519` 等），不會試別的檔名。
 - 連線被拒絕（`Connection refused`）是那個埠沒有東西在聽（轉發掉了或遠端 sshd 停了），不是金鑰問題；Herdr 會一直停在 reconnecting。新埠第一次連線會要求確認主機金鑰（`known_hosts` 以位址加埠記錄），請核對指紋後互動接受一次。
 - 本機與遠端的 Herdr 版本要夠新：0.9.1 的客戶端連 0.9.5 的伺服器曾顯示 `! attention`，升級客戶端後恢復（原因是推測，Herdr 0.9.5 才有 `herdr machine status`／`reconnect` 可看實際錯誤）。Homebrew 安裝的 Herdr 用 `brew upgrade herdr`，`herdr update` 會拒絕。

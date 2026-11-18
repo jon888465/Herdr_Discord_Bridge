@@ -77,8 +77,8 @@ export function validateMachines(value: unknown): MachineConfig[] {
       throw new Error("machines user is invalid");
     if (port !== undefined && (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65535))
       throw new Error("machines port is invalid");
-    if ((!host && !ssh) || (!host && (user !== undefined || port !== undefined)))
-      throw new Error("machines needs host or ssh; user and port need host");
+    if ((!host && !ssh) || (!host && user !== undefined))
+      throw new Error("machines needs host or ssh; user needs host");
     if (!socket.startsWith("/") || /[\s:]/.test(socket))
       throw new Error(`machines[${id}].socket must be an absolute path`);
     if (
@@ -212,15 +212,17 @@ export function sshConfigHasHostCached(alias: string): boolean {
 
 /** 要用哪個 SSH 目標：alias（`ssh` 欄位原樣）或結構化的 user／host／port。 */
 export type SshTarget =
-  | { kind: "alias"; ssh: string }
+  | { kind: "alias"; ssh: string; port?: number }
   | { kind: "host"; user?: string; host: string; port: number };
 
 /**
  * 目標選擇規則（SPEC「Machine SSH 編輯」）：只有 `ssh` 就原樣用；只有 host 就用 user／host／port；
  * 兩者都有時，`ssh` 是 `~/.ssh/config` 已設定的 Host 就直接用它，否則回退 user／host／port。
+ * 只有 `ssh` 與 `port`（沒有 host）時用 alias 並以 `-p` 指定埠（命令列的埠優先於 config 的 Port），給埠會變動的轉發使用（ISSUE-168）。
  */
 export function sshTarget(machine: MachineConfig, hasConfiguredHost: (alias: string) => boolean = sshConfigHasHost): SshTarget {
-  if (machine.ssh && (!machine.host || hasConfiguredHost(machine.ssh))) return { kind: "alias", ssh: machine.ssh };
+  if (machine.ssh && (!machine.host || hasConfiguredHost(machine.ssh)))
+    return { kind: "alias", ssh: machine.ssh, ...(!machine.host && machine.port !== undefined ? { port: machine.port } : {}) };
   if (!machine.host) throw new Error("machine has no SSH target");
   return { kind: "host", ...(machine.user ? { user: machine.user } : {}), host: machine.host, port: machine.port ?? 22 };
 }
@@ -228,12 +230,13 @@ export function sshTarget(machine: MachineConfig, hasConfiguredHost: (alias: str
 /** 給看板顯示的有效目標：alias 原樣，結構化則 `user@host:port`。 */
 export function sshTargetLabel(machine: MachineConfig, hasConfiguredHost: (alias: string) => boolean = sshConfigHasHost): string {
   const target = sshTarget(machine, hasConfiguredHost);
-  return target.kind === "alias" ? target.ssh : `${target.user ? target.user + "@" : ""}${target.host}:${target.port}`;
+  if (target.kind === "alias") return target.port === undefined ? target.ssh : `${target.ssh}:${target.port}`;
+  return `${target.user ? target.user + "@" : ""}${target.host}:${target.port}`;
 }
 
 export function sshTargetArgs(machine: MachineConfig, hasConfiguredHost: (alias: string) => boolean = sshConfigHasHost): string[] {
   const target = sshTarget(machine, hasConfiguredHost);
-  if (target.kind === "alias") return [target.ssh];
+  if (target.kind === "alias") return target.port === undefined ? [target.ssh] : ["-p", String(target.port), target.ssh];
   return ["-p", String(target.port), target.user ? `${target.user}@${target.host}` : target.host];
 }
 

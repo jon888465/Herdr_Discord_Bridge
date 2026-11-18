@@ -17,7 +17,8 @@
    **使用者回報（2026-11-18）：**換一個環境重新啟動 Herdr 伺服器後，`-25308` 就不再出現。這與「伺服器從背景工作階段啟動、子 shell 繼承到不能互動的環境」的推測一致，但**沒有比對啟動前後的環境（`launchctl managername`、`security show-keychain-info`），根因仍未確認**。使用者的方向：伺服器要從 UI app（登入的 GUI 工作階段）啟動，**不要由背景程式啟動**。**尚未做的修正：**`scripts/run.sh` 在伺服器沒跑時仍會自行啟動無介面伺服器（約 `scripts/run.sh:243`），沒有改成提示或拒絕；尚未驗證從 Herdr.app 啟動是否同樣沒有此錯誤。
 
 **未解決的缺口：**
-- bridge 的 machine 設了 `ssh` 別名就原樣使用、不能另外帶埠，所以「別名＋可變埠」沒有支援；看板改 host／port 後，Herdr 存的目標（含埠）也不會跟著更新。
+- ~~bridge 的 machine 設了 `ssh` 別名就原樣使用、不能另外帶埠~~：已修正（2026-11-18，使用者選擇改程式）：`ssh` 加 `port`（不寫 host）時用 `ssh -p <port> <alias>`，編輯器允許單獨改 port；自動化測試通過，**尚未實機驗收**，bridge 需重啟才載入。
+- 看板改 port 後，Herdr 存的目標（含埠）仍不會跟著更新，要手動 `herdr machine` 重加。
 - `scripts/run.sh` 在 Herdr 伺服器沒跑時從目前環境啟動無介面伺服器，可能讓之後的 pane 沒有 GUI 工作階段；是否要改成提示、尚待決定。
 
 **文件：**README.md、README.zh-TW.md 新增「埠會變動的 machine」。
