@@ -2,7 +2,9 @@
 
 ## ISSUE-170：看板改 machine 的 port 後，Herdr 側邊欄還連舊埠
 
-更新日期：2026-11-18。狀態：已修正、待驗收（**重新開啟後再修正**：PR #291 部署後第一次實機換埠失敗，原因與修正見「實機失敗」；第二次修正尚未部署、未實機驗收）。
+更新日期：2026-11-18。狀態：已修正、待驗收（**重新開啟兩次後再修正**：PR #291 部署後第一次實機換埠失敗，修了逾時（PR #292）；部署後第二次仍失敗，見「第二次實機失敗」；第三次修正尚未部署、bridge 啟動路徑尚未實機驗收）。
+
+**第二次實機失敗（2026-11-18，PR #292 `7f4f6ff` 部署並重啟後再換一次埠）：**側邊欄仍連舊埠；bridge 日誌同樣是「沒有更新成功，保留原設定」，沒有留下多餘項目。我用包了計時與錯誤輸出的 runner 對真的 herdr 重現（沒有改 bridge 程式）：`list` 8ms、`add` 4.5 秒成功、`list` 成功、`machine status --json` 耗時 4.3 秒後**以非零 exit code 結束**、於是復原（移除剛新增的）。**根因（已確認）：**`herdr machine status` 只要有任何一台不通（這裡是舊埠那筆）就回 exit 1，但 stdout 仍有完整 JSON；程式把非零 exit 當錯誤丟掉。先前手動檢查都把輸出接給 `jq`，exit code 被隱藏，所以第一次分析沒發現；第一次修的逾時也確實是問題，兩個都要修。**修正：**新增 `settleHerdrOutput`：`status` 指令非零 exit、不是逾時被殺、且有輸出時照常使用輸出；其他指令、無輸出、逾時、spawn 失敗仍丟錯。測試 `test/herdr-status-exit.test.ts` 3 項；暫時讓判斷永不成立，測試 2 pass／1 fail，已還原；全套 `npm test` 2119 項，2118 pass、0 fail、1 skipped，`npm run lint` 通過（2026-11-18）。**實機（修正後、本機、真的 herdr）：**以預設 runner 直接呼叫 `reconcileHerdrPort`（不經 bridge 啟動），側邊欄由已失效的舊埠換到新埠，`herdr machine status` 為 reachable、列表只剩兩筆。**仍未驗收：**bridge 啟動時自動觸發的那條路徑（需要部署並在下次換埠重啟時觀察日誌與側邊欄）。
 
 **實機失敗（2026-11-18，PR #291 `e09d0d6` 部署並重啟後第一次換埠）：**使用者在看板把埠改成新值並重啟 bridge，bridge 以新埠連上，但側邊欄仍是舊埠、error（「Connection refused」）；bridge 日誌：`Herdr machine <id>：Herdr 側邊欄的埠沒有更新成功，保留原設定`，Herdr 沒有留下多餘的 `-new` 項目（復原有效）。**根因（已確認，實測計時）：**`herdr machine status` 要實際探測遠端，耗時約 4.4 秒，而 `reconcileHerdrPort` 對它沿用預設的 2 秒逾時，確認 reachable 那步逾時丟錯而整個復原。手動執行同樣的 add 約 4.5 秒就成功、之後狀態為 reachable。單元測試沒抓到是因為假的 herdr 指令不會花時間。**修正：**`status` 逾時改 20 秒、`remove`／`rename`／`disable` 改 10 秒；測試的假 herdr 改成依實機量到的耗時（status 約 4.4 秒、add 約 4.5 秒），逾時不夠就失敗；暫時把 status 逾時改回 2 秒，測試 5 pass／3 fail，已還原；全套 `npm test` 2116 項，2115 pass、0 fail、1 skipped，`npm run lint` 通過（2026-11-18）。使用者的側邊欄當天已手動換到新埠。
 
