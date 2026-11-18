@@ -63,16 +63,24 @@ test("frozen snapshot re-validation: dropped or tampered remoteMachines rejected
   validateRoleSnapshot(local);
 });
 
-test("notifications carry fixed labels; v2 record allows remote machine only for reviewer within 300", () => {
+test("notifications carry fixed labels; v2 record allows remote machine for reviewer, fixer and in-task roles within 300", () => {
   for (const label of ["implement：remote 寫入尚未支援", "verify：remote verify 不可用", "reviewer：machine 未開放卡片 review"])
     equal(notificationReason({ event: "failed", text: `失敗：autopick_stopped；原因：卡片角色指定無效：${label}：machine pod（x）；SECRET`, time: "", eventId: "x" }), `卡片角色指定無效：${label}`);
   const identity = { role: "reviewer", agent: "agy", machine: "a".repeat(32), model: "m".repeat(80), taskId: "t".repeat(64), round: 1_000_000, source: "card" as const, selectionSources: { machine: "card", agent: "card", model: "card" } as const, modelEvidence: "launch" as const };
   const built = buildLogEntry(roleEvent(identity, "2026-11-11T00:00:00Z"));
   ok(built.ok && Array.from(built.entry.text).length <= 300 && /machine=a{32}/.test(built.entry.text));
+  // 只有名叫 implement 的角色、沒有 coding role 時仍不允許遠端（寫入要走 task 內的 implement 或 fixer）。
   equal(buildLogEntry(roleEvent({ ...identity, role: "implement" }, "2026-11-11T00:00:00Z")).ok, false);
   const inTask = (codingRole: "review" | "implement") => buildLogEntry(roleEvent({ ...identity, role: "r".repeat(64), assignmentId: "r".repeat(64), codingRole }, "2026-11-11T00:00:00Z"));
   const read = inTask("review");
-  ok(read.ok && Array.from(read.entry.text).length <= 300 && !inTask("implement").ok);
+  ok(read.ok && Array.from(read.entry.text).length <= 300);
+  // ISSUE-171：task 內 implement 與 PR 階段 fixer 可以在遠端（實機驗收時曾被拒絕「invalid machine (one of local)」）。
+  const write = inTask("implement");
+  ok(write.ok && Array.from(write.entry.text).length <= 300 && /machine=a{32}/.test(write.entry.text));
+  const fixer = buildLogEntry(roleEvent({ ...identity, role: "fixer" }, "2026-11-18T00:00:00Z"));
+  ok(fixer.ok && Array.from(fixer.entry.text).length <= 300 && /machine=a{32}/.test(fixer.entry.text));
+  // 其他角色名稱（例如 lead）仍只能是 local。
+  equal(buildLogEntry(roleEvent({ ...identity, role: "lead" }, "2026-11-18T00:00:00Z")).ok, false);
 });
 
 test("Lead roster lists remote reviewers with machine; without remote config context and prompt are unchanged", () => {
