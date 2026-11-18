@@ -2,7 +2,9 @@
 
 ## ISSUE-169：Card 看板 Machine 檢視沒有「重啟 bridge」指令
 
-更新日期：2026-11-18。狀態：已修正、待驗收（程式與自動化檢查完成；**尚未部署、未重啟 bridge、沒有實機驗收**）。
+更新日期：2026-11-18。狀態：已驗收（2026-11-18 實機，見「實機驗收紀錄」；`restart.log` 損壞、失敗路徑與有進行中串流時的拒絕**只有單元測試，未實機驗**）。
+
+**實機驗收紀錄（2026-11-18，本機 macOS＋Herdr 0.9.5，bridge main `d5ddcdd`，PR #289 merge 後以 `scripts/run.sh -r` 部署並重啟）：**使用者在看板 Machine 檢視連按兩次 `R`，bridge 重啟成功。我事後檢查（只看計數與狀態）：state 目錄 `restart.log` 存在、權限 0600，內容是 run.sh 的輸出並結束於 `pane_move`；Discord bridge 的 pane 換成新的 pane id 且在 tab 1；看板 pane 仍在；Herdr 伺服器仍是同一個 running（0.9.5）；`machine-status.json` 重啟後 `agy-pod`、`devbox` 都是 connected。**因此先前列為最關鍵風險的「脫離的 run.sh 在舊 bridge pane 被關掉後是否存活」已驗證會存活。**重啟當下沒有進行中的串流（active-streams 為 0），所以「有串流時拒絕」沒有實機驗。
 
 **使用者要求（2026-11-18）：**看板的 Machine 檢視要能重啟 bridge（改完 machines 設定要重啟才生效，原本得回終端機執行 `scripts/run.sh`）。
 
@@ -11,8 +13,7 @@
 **測試（2026-11-18，本機 macOS，只有自動化）：**新增 `test/bridge-restart.test.ts`、`test/machine-control-restart.test.ts`、`test/card-board-restart-key.test.ts`；全套 `npm test` 2108 項，2107 pass、0 fail、1 skipped；`npm run lint` 通過；`bash -n scripts/run.sh` 通過。暫時把「有串流就拒絕」的條件改壞，`bridge-restart` 測試 4 pass／1 fail，已還原。
 
 **未驗證／風險：**
-- 脫離的 run.sh 在 `herdr pane close` 關掉 bridge pane 之後是否真的存活並開出新 pane，只有推論，需實機重啟驗證（這是這個功能最關鍵的風險）。
-- 重啟時看板自己所在的 pane 不會被 run.sh 關閉（它只關標題為 Discord bridge 的 pane），但沒實機確認。
+- ~~脫離的 run.sh 在 bridge pane 被關掉後是否存活~~、~~看板 pane 是否被關掉~~：2026-11-18 實機已確認存活、看板 pane 仍在（見實機驗收紀錄）。
 - `run.sh` 在 plugin 連結路徑與目前目錄不同時會重建並重新連結，可能耗時較久。
 - 失敗（例如 Herdr 伺服器沒在跑）時 bridge 仍活著，看板只會顯示「重啟中」，原因要看 state 目錄的 `restart.log`；60 秒後才允許再按。
 - 沒有強制重啟選項：有進行中串流時只能等或手動處理。
