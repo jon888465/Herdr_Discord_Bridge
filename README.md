@@ -320,6 +320,28 @@ Machine connections may also use `{"id":"server","host":"example.com","user":"al
 After `herdr machine add`, list the machine under `machines` in the plugin config (see [config.example.jsonc](config.example.jsonc)): `id`, `ssh` (a Host from `~/.ssh/config`) and `socket`, the absolute path of the remote Herdr API socket. The bridge forwards that socket with `ssh -L`; remote IDs carry an `<id>:` prefix (for example `agy-pod:w2:p1`) and unprefixed IDs are always local. Supported: text conversation and Discord → remote-agent attachments (uploaded over ssh into the remote cwd). Not supported: agent → Discord file return and `herdr-discord-send` for remote agents. Text conversation is accepted; remote attachments await acceptance (ISSUE-041).
 
 
+### Machines whose port changes (e.g. a devtunnel forwarded to 127.0.0.1)
+
+Herdr's sidebar machines and the bridge's `machines` are two separate connections with separate settings. Pressing `x`/`o` on the board also runs `herdr machine disable`/`enable` on the matching Herdr machine (matched by the bridge's `ssh` equal to Herdr's target, or by label when `ssh` is unset), but it does **not** change the target Herdr stored.
+
+When the address is always `127.0.0.1` and only the port changes, do not bind the key to the address with `Host 127.0.0.1` (it would apply to every local forward) and do not hard-code the port in `~/.ssh/config`. Use an alias without `Port`:
+
+```
+Host devbox
+    HostName 127.0.0.1
+    User <user>
+    IdentityFile ~/.ssh/devbox
+    IdentitiesOnly yes
+```
+
+- `Host` matching looks at the host name only, not the port, so the key applies only when the alias `devbox` is used explicitly; connect manually with `ssh -p <new port> devbox` (`-p` on the command line overrides the config).
+- **Herdr:** use `ssh://devbox:<port>` as the target, e.g. `herdr machine add ssh://devbox:50123 --label devbox` (connected on Herdr 0.9.5, 2026-11-18). Herdr cannot edit an existing machine's target, so re-add it when the port changes: add it under a new label, confirm `herdr machine status` says `reachable`, then `herdr machine remove <old profile id>` and `herdr machine rename <new profile id> --label devbox`.
+- **Bridge:** a machine with an `ssh` alias uses it as-is and cannot carry a separate port, so "alias plus variable port" is not supported yet (ISSUE-168).
+- Still asked for a password although the public key is in the remote `authorized_keys`? Check which keys ssh actually offers with `ssh -G <target>` (`identityfile`). With an `ssh://user@address:port` target ssh only tries the default keys (`id_ed25519`, …), not other file names.
+- `Connection refused` means nothing listens on that port (the forward dropped or the remote sshd stopped), not a key problem; Herdr stays in "reconnecting". The first connection to a new port asks you to accept the host key (`known_hosts` records address plus port): verify the fingerprint and accept it interactively once.
+- Keep Herdr recent on both ends: a 0.9.1 client against a 0.9.5 server showed `! attention` and recovered after upgrading the client (cause inferred; `herdr machine status`/`reconnect` only exist from 0.9.5). For a Homebrew install use `brew upgrade herdr`; `herdr update` refuses.
+- If the Herdr shell was started from a background session (no GUI login context), keychain access fails (e.g. `devtunnel connect` with `-25308`, `errSecInteractionNotAllowed`); verify with `security show-keychain-info ~/Library/Keychains/login.keychain-db`, then `security unlock-keychain` or start Herdr from the GUI (ISSUE-168).
+
 ### Remote card reviewer (optional)
 
 Add `"cardReview": { "root": "/root/hdb-card-review", "kinds": ["agy"] }` to a machine to let a card declare `roles: {reviewer: "agy-pod:agy"}`: after the PR is pushed the bridge clones the GitHub `origin` over anonymous https into `<root>/` on that machine, checks out the PR head, verifies HEAD equals the PR head sha and runs the reviewer there (no credentials forwarded, no fallback to local). `root` is a bridge-only absolute path; `kinds` lists allowed agent kinds. Only `reviewer` can be remote; the card text and PR diff are sent to that machine. Without `cardReview` nothing changes, and cards without `roles` cannot get a remote reviewer picked by the Lead (follow-up card REQ-20261111-remote-in-task-roles). Not accepted on real machines yet (ISSUE-143, [docs/remote-card-reviewer.md](docs/remote-card-reviewer.md)).
