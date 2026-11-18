@@ -3,6 +3,7 @@ import {
   remoteRoleWork,
   trackRemoteRole,
 } from "./machine-busy.js";
+import { syncHerdrMachine } from "./herdr-machine-sync.js";
 import { runWithCleanupOnFailure, startMachineControlServerSafely } from "./machine-control-channel.js";
 import {
   startMachineStatusWriter,
@@ -298,7 +299,13 @@ async function startBridge(
     MACHINE_STATUS_WRITE_INTERVAL_MS,
   );
   // 看板 o／x 的控制通道；啟動失敗只記一行，不擋 bridge（ISSUE-166 第三階段 B）。
-  const stopMachineControl = await startMachineControlServerSafely(herdr);
+  const stopMachineControl = await startMachineControlServerSafely(herdr, {
+    afterControl: (command, result) =>
+      syncHerdrMachine(
+        herdr.machineConfig(command.machineId),
+        result.ok && result.status === "connected",
+      ),
+  });
   stopMachineControlOnFailure = stopMachineControl;
   const routing = new RoutingStore(
     statePath(config),
@@ -1452,11 +1459,15 @@ async function startAgentCommand(
       selected,
       workspacePath: workspace ? workspacePath(workspace) : undefined,
       machineIds: runtime.config.machines.map((machine) => machine.id),
-      remoteRealpath: (id, target) =>
-        sshRealpath(
+      remoteRealpath: (id, target) => {
+        // 手動斷線的 machine 不開 SSH（這條路徑不經 hub）。
+        if (runtime.herdr instanceof HerdrHub && runtime.herdr.isDisconnected(id))
+          return Promise.reject(new Error("machine 已斷線"));
+        return sshRealpath(
           runtime.config.machines.find((m) => m.id === id)!,
           target,
-        ),
+        );
+      },
       allowedWorkspaceIds: runtime.config.allowedWorkspaceIds,
     },
     input,

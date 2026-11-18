@@ -581,7 +581,7 @@ const AGGREGATE_METHODS = new Set([
 type Params = Record<string, unknown>;
 
 export type MachineControlResult =
-  | { ok: true; status: "connected" | "disconnected"; note?: string }
+  | { ok: true; status: "connected" | "disconnected"; note?: string; herdr?: string }
   | { ok: false; reason: string; needsForce?: boolean };
 
 interface Remote {

@@ -374,9 +374,10 @@ export function machineControlResult(
       message: `${label}：${sanitizeForTerminal(result.reason)}`,
     };
   const note = result.note ? sanitizeForTerminal(result.note) : undefined;
+  const herdr = result.herdr ? `；${sanitizeForTerminal(result.herdr)}` : "";
   return {
     ui: { pending: false },
-    message: `${label}：${note ?? (result.status === "disconnected" ? "已斷線" : "已開始連線")}`,
+    message: `${label}：${note ?? (result.status === "disconnected" ? "已斷線" : "已開始連線")}${herdr}`,
     // 「已在連線中」沒有改變狀態，不必蓋過狀態檔。
     ...(result.status === "connected" && result.note
       ? {}

@@ -535,3 +535,35 @@ test("看板端：server 慢速送資料或不回應時，在總期限內以固�
     env.cleanup();
   }
 });
+
+test("afterControl 的說明放進結果的 herdr；失敗的結果不呼叫，它丟錯就回原結果", async () => {
+  const env = setup();
+  const seen: string[] = [];
+  const hub: MachineControlHub = {
+    connectMachine: () => ({ ok: true, status: "connected" }),
+    disconnectMachine: () => ({ ok: false, reason: "有進行中的工作", needsForce: true }),
+  };
+  const stop = await startMachineControlServer(hub, {
+    ...env,
+    afterControl: async (command) => {
+      seen.push(command.action);
+      if (command.machineId === "boom") throw new Error("x");
+      return "已同步";
+    },
+  });
+  try {
+    assert.deepEqual(
+      await sendMachineControl({ action: "connect", machineId: "m1" }, env),
+      { ok: true, status: "connected", herdr: "已同步" },
+    );
+    assert.deepEqual(
+      await sendMachineControl({ action: "connect", machineId: "boom" }, env),
+      { ok: true, status: "connected" },
+    );
+    assert.equal((await sendMachineControl({ action: "disconnect", machineId: "m1" }, env)).ok, false);
+    assert.deepEqual(seen, ["connect", "connect"]);
+  } finally {
+    stop();
+    env.cleanup();
+  }
+});
