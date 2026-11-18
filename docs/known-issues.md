@@ -19,6 +19,8 @@
 **未解決的缺口：**
 - ~~bridge 的 machine 設了 `ssh` 別名就原樣使用、不能另外帶埠~~：已修正（2026-11-18，使用者選擇改程式）：`ssh` 加 `port`（不寫 host）時用 `ssh -p <port> <alias>`，編輯器允許單獨改 port；自動化測試通過，**尚未實機驗收**，bridge 需重啟才載入。
 - 看板改 port 後，Herdr 存的目標（含埠）仍不會跟著更新，要手動 `herdr machine` 重加。
+- **實機回報（2026-11-18）：**看板對埠會變動的 machine 按 `x` 斷線後，Herdr 側邊欄沒有跟著停用，只有 target 與 bridge `ssh` 相同的那台有。**根因（已確認）：**同步的對應規則只比 `target` 與 `ssh` 是否相等，而這台在 Herdr 的 target 是 `ssh://別名:埠`，不相等，所以找不到、靜默不動作。**修正：**對應時也比較 `ssh://[帳號@]別名[:埠]` 的別名部分（`herdrTargetHost`）；以實際 config 與 `herdr machine list` 驗證兩台都對得上（2026-11-18）。全套 `npm test` 2089 項，2088 pass、0 fail、1 skipped；新增測試先確認會失敗再修。**未驗證：**修正後的實機 `x`／`o` 同步，bridge 需重啟載入。
+
 - `scripts/run.sh` 在 Herdr 伺服器沒跑時從目前環境啟動無介面伺服器，可能讓之後的 pane 沒有 GUI 工作階段；是否要改成提示、尚待決定。
 
 **文件：**README.md、README.zh-TW.md 新增「埠會變動的 machine」。

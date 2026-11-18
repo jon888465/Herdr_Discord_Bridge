@@ -38,15 +38,26 @@ export function parseHerdrProfiles(output: string): HerdrProfile[] {
 }
 
 /**
- * bridge 的 machine 對應到 Herdr 的 profile：設了 `ssh` 就比 `target`（Herdr 存的 SSH 目標），
- * 否則比 `label` 與 machine id。只認唯一符合的一筆；多筆符合不猜，交給呼叫者回報。
+ * Herdr 的 target 可能是 `ssh://[帳號@]主機[:埠]`（埠會變動的 machine 用 `ssh://別名:埠` 加入，ISSUE-168）：
+ * 取出主機（別名）部分；不是 ssh:// 開頭就原樣回傳。
+ */
+export function herdrTargetHost(target: string): string {
+  const match = /^ssh:\/\/(?:[^@/]*@)?([^:/]+)(?::\d+)?\/?$/.exec(target);
+  return match ? match[1]! : target;
+}
+
+/**
+ * bridge 的 machine 對應到 Herdr 的 profile：設了 `ssh` 就比 `target`（原樣相等，或 `ssh://` 形式的主機部分相等，
+ * 所以埠變了也對得上），否則比 `label` 與 machine id。只認唯一符合的一筆；多筆符合不猜，交給呼叫者回報。
  */
 export function matchHerdrProfiles(
   machine: MachineConfig,
   profiles: HerdrProfile[],
 ): HerdrProfile[] {
   return profiles.filter((profile) =>
-    machine.ssh ? profile.target === machine.ssh : profile.label === machine.id,
+    machine.ssh
+      ? profile.target === machine.ssh || herdrTargetHost(profile.target) === machine.ssh
+      : profile.label === machine.id,
   );
 }
 
