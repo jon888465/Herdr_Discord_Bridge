@@ -41,6 +41,19 @@ test("matchHerdrProfiles：有 ssh 比 target，沒有 ssh 比 label", () => {
   );
 });
 
+test("matchHerdrProfiles：Herdr 的 target 可以是 ssh://別名:埠，埠變了也對得上", () => {
+  const profiles = [profile("1", "devbox", "ssh://pod-alias:50123"), profile("2", "x", "ssh://alice@other:22")];
+  assert.deepEqual(matchHerdrProfiles(machine, profiles).map((p) => p.id), ["1"]);
+  assert.deepEqual(matchHerdrProfiles({ ...machine, port: 50999 }, profiles).map((p) => p.id), ["1"]);
+  // 帶帳號的別名、沒有埠的 URL 也認；只是前綴相同的別名不算
+  assert.deepEqual(matchHerdrProfiles({ ...machine, ssh: "other" }, profiles).map((p) => p.id), ["2"]);
+  assert.deepEqual(matchHerdrProfiles({ ...machine, ssh: "pod" }, profiles), []);
+  assert.deepEqual(
+    matchHerdrProfiles(machine, [profile("3", "z", "ssh://pod-alias")]).map((p) => p.id),
+    ["3"],
+  );
+});
+
 test("斷線停用、連線啟用；狀態已一致不再呼叫", async () => {
   const off = fakeRunner(listing(profile("p1", "pod", "pod-alias", true)));
   assert.equal(await syncHerdrMachine(machine, false, off.run), "Herdr 側邊欄已停用");
