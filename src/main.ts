@@ -119,6 +119,7 @@ import { fetchReviewMaterial } from "./card-review-fetch.js";
 import { reviewCardPullRequest } from "./card-review-wiring.js";
 import { RemoteFailure, remoteReviewDeps, type RemoteReviewDeps } from "./remote-checkout.js";
 import { sshRemoteFetch } from "./remote-write-result.js";
+import type { RemoteRoleDeps } from "./remote-snapshot.js";
 import { startRemoteRole } from "./remote-snapshot.js";
 import { fixCardWorktree } from "./card-fix-wiring.js";
 import {
@@ -954,6 +955,10 @@ export async function handleCommand(
               },
               listAgents: () => runtime.herdr.listAgentsWithWorkspaceNames(),
               roleContext: cardRoleContext(runtime),
+              // 遠端 fixer（ISSUE-171）：只有 hub 才有遠端機器。
+              ...(runtime.herdr instanceof HerdrHub
+                ? { remote: { start: (input: Parameters<typeof startRemoteRole>[1]) => startRemoteRole(remoteWriteDeps(runtime.herdr as HerdrHub), input) } }
+                : {}),
               flow: {
                 recordRoleStrict: options.recordRoleStrict,
                 onRoleAssigned: options.onRoleAssigned,
@@ -2142,6 +2147,21 @@ export function liveAgentList(herdr: HerdrClient, agent: AgentRecord): Promise<A
 }
 
 /**
+ * 遠端寫入角色（task 內 implement、PR 階段 fixer，ISSUE-171）需要的相依：遠端 reviewer 那一組，加上取回遠端改動的通道。
+ * 與 exec 一樣，手動斷線的 machine 不開 SSH。
+ */
+function remoteWriteDeps(hub: HerdrHub): RemoteRoleDeps {
+  return {
+    ...remoteReviewDeps(hub),
+    fetch: (machine) => {
+      const run = sshRemoteFetch(machine);
+      return (argv, timeoutMs, maxBytes) =>
+        hub.isDisconnected(machine.id) ? Promise.reject(new RemoteFailure("machine 已斷線")) : run(argv, timeoutMs, maxBytes);
+    },
+  };
+}
+
+/**
  * 解析 Lead 與 Workers、登記並啟動一個持久化的 Team 任務（`team ask` 與 `card assign` 共用）。
  * 任務一經登記就會執行；回傳的 `running` 在任務結束時 resolve。
  */
@@ -2336,14 +2356,7 @@ async function startTeamTask(
           if (typeof cwd !== "string") throw new Error("遠端角色失敗：Lead 沒有本機工作目錄");
           // 遠端角色不經 AgentPool，準備與執行期間都要算進該機器的進行中工作，普通斷線才會被擋下（ISSUE-166 review F2）。
           const hub = runtime.herdr; // 上面的檢查已把它窄化成 HerdrHub；放進 closure 前先取出來，型別才不會掉回 HerdrClient。
-          return trackRemoteRole(remoteRoleWork, `${taskId}/${assignment.id}`, remote.machine, () => startRemoteRole({
-            ...remoteReviewDeps(hub),
-            // implement（寫入）取回遠端改動用；與 exec 一樣，手動斷線的 machine 不開 SSH。
-            fetch: (machine) => {
-              const run = sshRemoteFetch(machine);
-              return (argv, timeoutMs, maxBytes) => (hub.isDisconnected(machine.id) ? Promise.reject(new RemoteFailure("machine 已斷線")) : run(argv, timeoutMs, maxBytes));
-            },
-          }, {
+          return trackRemoteRole(remoteRoleWork, `${taskId}/${assignment.id}`, remote.machine, () => startRemoteRole(remoteWriteDeps(hub), {
             machineId: remote.machine,
             role: remote.role,
             key: `${taskId}/${assignment.id}`,

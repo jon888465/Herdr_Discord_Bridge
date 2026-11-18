@@ -138,10 +138,10 @@ export async function startRemoteRole(
   const open = machine?.cardReview;
   if (!machine || !open?.kinds.includes(profile.kind)) throw fail("machine 未開放這個 agent 種類");
   if (input.role === "verify" && !open.toolchain) throw fail("verify 不可用（machine 沒有工具鏈）");
-  // implement 是寫入角色（ISSUE-171）：machine 要明確開放、要有取回通道；改動由 bridge 取回後在本機 commit。
-  const write = input.role === "implement";
-  if (write && !open.write) throw fail("implement 不可用（machine 沒有開放寫入）");
-  if (write && !deps.fetch) throw fail("implement 不可用（沒有取回通道）");
+  // implement／fixer 是寫入角色（ISSUE-171）：machine 要明確開放、要有取回通道；改動由 bridge 取回後在本機 commit。
+  const write = input.role === "implement" || input.role === "fixer";
+  if (write && !open.write) throw fail(`${input.role} 不可用（machine 沒有開放寫入）`);
+  if (write && !deps.fetch) throw fail(`${input.role} 不可用（沒有取回通道）`);
   const origin = githubOriginRepo((await deps.originUrl(input.cwd)).trim());
   if (!origin) throw fail("origin 不是 GitHub repo，不在遠端 clone");
   const exec = deps.exec(machine);
@@ -230,8 +230,8 @@ export async function startRemoteRole(
       try {
         if ((deps.treeDigest ?? treeDigest)(input.cwd) !== digestAtSnapshot) throw new RemoteFailure("快照已作廢（本機工作樹已改變），結果不採用");
         const result = await fetchRemoteResult(exec, deps.fetch!(machine), { dir, baseTree });
-        const applied = applyRemoteResult((deps.localGit ?? localGit)(input.cwd), { patch: result.patch, expectedTree: result.tree, message: `hdb remote implement (${id})` });
-        console.error(`remote role ${id}: implement 已套用 ${applied.files.length} 個檔案，commit ${applied.headAfter.slice(0, 12)}`);
+        const applied = applyRemoteResult((deps.localGit ?? localGit)(input.cwd), { patch: result.patch, expectedTree: result.tree, message: `hdb remote ${input.role} (${id})` });
+        console.error(`remote role ${id}: ${input.role} 已套用 ${applied.files.length} 個檔案，commit ${applied.headAfter.slice(0, 12)}`);
       } catch (error) {
         if (error instanceof RemoteFailure && error.uncertain) st.uncertain = true;
         throw fail(error instanceof RemoteFailure ? error.label : "套用遠端改動失敗", error);

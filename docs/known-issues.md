@@ -2,7 +2,7 @@
 
 ## ISSUE-171：遠端 machine 不能擔任 implement／fixer（寫入角色）
 
-更新日期：2026-11-18。狀態：修正中（第 1 階段「取回與套用的純管線」與第 2 階段「task 內 implement 接線」已實作並有單元測試；**remote fixer 還沒做，仍被撿卡前拒絕；沒有部署、沒有實機驗收**；設計與使用者的三項決定見 `docs/remote-write-roles.md`）。
+更新日期：2026-11-18。狀態：修正中（第 1～3 階段「取回與套用的純管線」「task 內 implement」「PR 階段 fixer」都已實作並有單元測試；**第 3 階段尚未部署；agent 與卡片流程都沒有實機驗收**；設計與使用者的三項決定見 `docs/remote-write-roles.md`）。
 
 **使用者要求（2026-11-18）：**agy-pod（agy）與 devbox（codex、pi）要能擔任所有卡片角色；目前只有 reviewer 與 task 內 diagnose／review／verify（唯讀）可以在遠端，implement／fixer 在撿卡前被拒絕「remote 寫入尚未支援」（`src/card-role-assignment.ts`）。
 
@@ -18,7 +18,9 @@
 
 **部署與真實 ssh 冒煙測試（2026-11-18，bridge main `5303286`，16:30 以 `scripts/run.sh -r` 重建並重啟，重啟前 active-streams 為 0）：**執行中的 bridge 已載入第 1、2 階段的程式；**使用者的 config 沒有開 `write`，所以行為沒有變化。**另外我用 `dist` 裡的 `sshRemoteExec`／`sshRemoteFetch`／`fetchRemoteResult`／`applyRemoteResult` 對**兩台真的機器（agy-pod、devbox，皆 Linux）各跑一次冒煙腳本**（遠端放 `/tmp` 下的隨機目錄、結束刪除，不含 agent 與卡片流程）：遠端建立基底並算出的 tree 等於本機 tree；遠端模擬修改（文字改動、新增、二進位檔、latin1 內容、刪除）後取回 patch（974 bytes）；本機套用後 tree 等於遠端回報、commit 的 parent 為派工前 HEAD、內容逐位元組正確、本機工作樹乾淨、遠端暫時 index 已刪除、遠端目錄已清除。兩台都是全部通過（第一次跑曾顯示 1 項 FAIL，是我的腳本預期檔案數寫錯，實際行為正確，改正後重跑通過）。**證明的：**真實 ssh 傳輸與遠端 shell／git 行為、patch 含二進位與非 UTF-8 內容的取回。**沒有證明的：**遠端 agent（codex／pi／agy）實際修改、卡片／task 流程、Lead 會不會派 implement、`write: true` 的設定路徑、writer 驗收閘門與 afterTurn 順序、取消與逾時。
 
-**狀態：**設計文件、第 1、2 階段的程式與測試，以及上述冒煙測試；尚未做 agent 與卡片流程的實機驗收。分階段計畫：(1) 純函式與管線單元測試；(2) task 內 implement 接線；(3) PR 階段 fixer 接線；(4) agy-pod 與 devbox 的實機驗收。
+**第 3 階段（2026-11-18，只有自動化測試）：**remote fixer。`startRemoteRole` 的寫入模式從 implement 擴到 fixer（錯誤標籤與 commit 訊息帶角色名）；`remoteReviewMachine` 對 fixer 與 implement 同樣要求 `cardReview.write`；新增 `src/card-fix-remote.ts`（`runRemoteCardFix`）：派工前本機 worktree 乾淨、啟動遠端作者、先記錄 fixer 角色、送修正提示、**作者宣告修好至少一個 finding 才取回**（回覆不合格、沒宣告、卡住、逾時都不取回；卡住與逾時保留遠端現場），取回後由 `startRemoteRole` 的 `afterTurn` 驗證並在本機 commit，輸出與本機 fixer 相同形狀的 `FixOutcome`；`card-fix-wiring` 依 `roles.fixer.machine` 路由到遠端並用目前 config 重驗 machine 仍開放寫入與這個 agent 種類，執行期間登記進行中工作；`main.ts` 抽出 `remoteWriteDeps` 與 task implement 共用。測試：新增 `test/card-fix-remote.test.ts` 8 項、`test/card-fix-remote-wiring.test.ts` 3 項、`remote-write-role.test.ts` 的 fixer 一項、更新 `card-role-remote.test.ts` 的 preflight；全套 `npm test` 2147 項，2146 pass、0 fail、1 skipped，`npm run lint` 通過（2026-11-18）。破壞性驗證：拿掉「宣告修好才取回」與拿掉 wiring 的「machine 要開放寫入」重驗，各有失敗，皆已還原。**另記：**全套測試某一次出現過 `cli-adapter.test.ts` 的「Grok boxed turn survives timestamps and wrapped markers」失敗，單獨重跑 5 次都通過、全套再跑也通過，與本次改動無關，視為待觀察的 flake（原因未查）。**未驗證：**沒有部署、沒有真的遠端 agent 修正一圈、`card fix`／`card loop` 實際走遠端的端到端；遠端作者實際會不會照 fix 提示回覆；已知限制：被保留（blocked／逾時）的遠端目錄要人工清理，重試用新目錄不會被擋；遠端 fixer 沒有「本機 pane 旁邊」的概念，看板或 Discord 看不到它的 pane，只有 console 記錄。
+
+**狀態：**設計文件、第 1～3 階段的程式與測試，以及第 1、2 階段的真實 ssh 冒煙測試；尚未做 agent 與卡片流程的實機驗收。分階段計畫：(1) 純函式與管線單元測試；(2) task 內 implement 接線；(3) PR 階段 fixer 接線；(4) agy-pod 與 devbox 的實機驗收。
 
 **未驗證／下一步：**`sshRemoteFetch` 沒有對真的 ssh 跑過（測試用本機指令代替）；遠端 `base64`／`wc`／`sh` 行為在 Linux 以外沒驗；遠端 codex／pi 的啟動提示與信任行為都沒在遠端驗過；patch 方案對 submodule、大二進位檔、檔案模式的行為要測；`write` 設定是否要加要使用者確認。
 
