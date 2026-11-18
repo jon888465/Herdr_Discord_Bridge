@@ -235,3 +235,12 @@ test("descriptor backup loops on short writes and prunes only older backup names
   assert.equal(fs.readFileSync(target, "utf8"), "UNCHANGED");
   assert.equal(fs.readFileSync(file + ".bak", "utf8"), "legacy");
 });
+
+test("ssh alias 的 machine 可以只改 port；沒有 ssh 的 machine 只給 port 會被擋下（ISSUE-168）", () => {
+  const next = spliceMachines(original, "remote", { port: 50123 });
+  assert.ok(next.ok);
+  assert.ok(next.value.includes('"port": 50123'));
+  assert.ok(!next.value.includes('"host"'));
+  const hostOnly = '{"machines":[{"id":"h","host":"example.com","socket":"/s"}]}';
+  assert.deepEqual(spliceMachines(hostOnly, "h", { port: 50123 }), { ok: false, reason: "invalid" });
+});

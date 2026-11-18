@@ -324,9 +324,13 @@ test("machine editor has explicit fields, alias fallback and fixed safe refusals
     parseMachineEditorText('{"user":"alice","host":"host","port":2222}'),
     { ok: true, fields: { user: "alice", host: "host", port: 2222 } },
   );
+  // 沒有 host 時只有 port 可以單獨設定（給 ssh alias 用）。
+  assert.deepEqual(parseMachineEditorText('{"user":"","host":"","port":50123}'), { ok: true, fields: { port: 50123 } });
   for (const value of [
     '{"user":"x","host":"","port":22}',
-    '{"user":"","host":"","port":23}',
+    '{"user":"x","host":"","port":2222}',
+    '{"user":"","host":"","port":0}',
+    '{"user":"","host":"","port":70000}',
     '{"user":"","host":"-bad","port":22}',
     '{"user":"","host":"host","port":0}',
     '{"user":"","host":"host","port":"22"}',

@@ -279,9 +279,15 @@ export function parseMachineEditorText(
     port: number;
   };
   if (!host) {
-    return !user && port === 22
-      ? { ok: true, fields: {} }
-      : { ok: false, message: "未儲存：SSH 連線設定不合法" };
+    // 沒有 host：只有 port 可以單獨設定（給 ssh alias 用，存檔時再驗證 machine 是否有 ssh）。
+    if (user) return { ok: false, message: "未儲存：SSH 連線設定不合法" };
+    if (port === 22) return { ok: true, fields: {} };
+    try {
+      validateMachines([{ id: "edited", ssh: "alias", socket: "/unused", port }]);
+      return { ok: true, fields: { port } };
+    } catch {
+      return { ok: false, message: "未儲存：SSH 連線設定不合法" };
+    }
   }
   const fields = { ...(user ? { user } : {}), host, port };
   try {

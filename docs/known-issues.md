@@ -16,7 +16,8 @@
 5. `devtunnel connect` 的鑰匙圈錯誤 `-25308`（`errSecInteractionNotAllowed`）：我這邊的 shell 同樣得到 `User interaction is not allowed`，`launchctl managername` 為 `Background`；Herdr 伺服器（`herdr server`）是 launchd 底下的背景程序。**我沒有在使用者的 Herdr shell 內確認**，也不確定是誰、何時以背景方式啟動它；`scripts/run.sh -r` 在伺服器沒跑時會印「starting headless server…」，有可能是這一條。
 
 **未解決的缺口：**
-- bridge 的 machine 設了 `ssh` 別名就原樣使用、不能另外帶埠，所以「別名＋可變埠」沒有支援；看板改 host／port 後，Herdr 存的目標（含埠）也不會跟著更新。
+- ~~bridge 的 machine 設了 `ssh` 別名就原樣使用、不能另外帶埠~~：已修正（2026-11-18，使用者選擇改程式）：`ssh` 加 `port`（不寫 host）時用 `ssh -p <port> <alias>`，編輯器允許單獨改 port；自動化測試通過，**尚未實機驗收**，bridge 需重啟才載入。
+- 看板改 port 後，Herdr 存的目標（含埠）仍不會跟著更新，要手動 `herdr machine` 重加。
 - `scripts/run.sh` 在 Herdr 伺服器沒跑時從目前環境啟動無介面伺服器，可能讓之後的 pane 沒有 GUI 工作階段；是否要改成提示、尚待決定。
 
 **文件：**README.md、README.zh-TW.md 新增「埠會變動的 machine」。

@@ -730,8 +730,13 @@ test("structured SSH validation and target precedence", async () => {
     assert.throws(() => validateMachines([{ ...base, host: "host", user }]));
   for (const port of ["22", "22abc", 0, -1, 65536, 1.5, null, NaN, Infinity])
     assert.throws(() => validateMachines([{ ...base, host: "host", port }]));
-  for (const extra of [{}, { ssh: "alias", user: "alice" }, { ssh: "alias", port: 22 }])
+  for (const extra of [{}, { ssh: "alias", user: "alice" }, { port: 22 }, { ssh: "alias", port: 0 }, { ssh: "alias", port: "22" }])
     assert.throws(() => validateMachines([{ ...base, ...extra }]));
+  // ssh alias 可以單獨帶 port（埠會變動的轉發，ISSUE-168）：用 `-p`，標籤帶埠；沒有 port 時維持原樣。
+  const aliasPort = validateMachines([{ ...base, ssh: "alias", port: 50123 }])[0]!;
+  assert.deepEqual(sshTargetArgs(aliasPort, () => false), ["-p", "50123", "alias"]);
+  assert.deepEqual(sshTargetArgs(aliasPort, () => true), ["-p", "50123", "alias"]);
+  assert.deepEqual(sshTargetArgs({ ...base, ssh: "alias" }, () => true), ["alias"]);
   assert.deepEqual(sshTargetArgs({ ...base, ssh: "legacy@alias" }), ["legacy@alias"]);
   assert.deepEqual(sshTargetArgs({ ...base, host: "host" }), ["-p", "22", "host"]);
   const both = validateMachines([{ ...base, ssh: "alias", user: "alice", host: "host", port: 2222 }])[0]!;
@@ -742,6 +747,7 @@ test("structured SSH validation and target precedence", async () => {
   assert.deepEqual(sshTargetArgs({ ...base, host: "host" }, () => true), ["-p", "22", "host"]);
   const { sshTargetLabel } = await import("../src/machines.js");
   assert.equal(sshTargetLabel(both, () => true), "alias");
+  assert.equal(sshTargetLabel(aliasPort, () => true), "alias:50123");
   assert.equal(sshTargetLabel(both, () => false), "alice@host:2222");
   assert.throws(() => sshTargetArgs(base as never), /no SSH target/);
 });
