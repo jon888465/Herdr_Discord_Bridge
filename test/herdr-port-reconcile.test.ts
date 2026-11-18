@@ -19,9 +19,12 @@ function fakeHerdr(
   const profiles = initial.map((p) => ({ ...p }));
   const calls: string[] = [];
   let next = 1;
-  const run = async (args: string[]): Promise<string> => {
+  /** 實機量到：`status` 約 4.4 秒、`add` 約 4.5 秒；預設逾時 2 秒，給的逾時不夠就像 execFile 一樣失敗。 */
+  const run = async (args: string[], timeoutMs = 2000): Promise<string> => {
     const [, verb] = args;
     calls.push(args.slice(1).join(" "));
+    if ((verb === "status" && timeoutMs < 4500) || (verb === "add" && timeoutMs < 5000))
+      throw new Error("timed out");
     if (options.failOn === verb) throw new Error("boom");
     if (verb === "list") return JSON.stringify(profiles);
     if (verb === "status")
