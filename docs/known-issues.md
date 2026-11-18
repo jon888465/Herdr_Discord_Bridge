@@ -2,7 +2,7 @@
 
 ## ISSUE-168：埠會變動的 machine：Herdr 目標與 bridge 設定無法跟著改
 
-更新日期：2026-11-18。狀態：待調查（設定方式已在實機走通並寫入 README，缺口未修）。
+更新日期：2026-11-18。狀態：待調查（設定方式已在實機走通並寫入 README，缺口未修；`-25308` 已由使用者以改變 Herdr 伺服器的啟動方式繞過，見下方第 5 點）。
 
 **使用者可見症狀（2026-11-18 實機）：**
 - 新增 machine `devbox`（devtunnel 轉發到 `127.0.0.1`，埠每次不同）後，Herdr 側邊欄先是 `! attention`、之後一直 reconnecting。
@@ -14,6 +14,7 @@
 3. 換埠後仍被問密碼：`ssh://帳號@位址:埠` 這種目標 ssh 只試預設金鑰，不會試 `~/.ssh/devbox`。以 `Host devbox`（HostName 127.0.0.1、IdentityFile、不寫 Port）解決；用別名加 `-p` 可登入。
 4. Herdr 沒有修改既有 machine 目標的指令；`herdr machine add ssh://devbox:50123 --label …` 實測可連線（`reachable`），舊的需 `remove`，新的 `rename`。
 5. `devtunnel connect` 的鑰匙圈錯誤 `-25308`（`errSecInteractionNotAllowed`）：我這邊的 shell 同樣得到 `User interaction is not allowed`，`launchctl managername` 為 `Background`；Herdr 伺服器（`herdr server`）是 launchd 底下的背景程序。**我沒有在使用者的 Herdr shell 內確認**，也不確定是誰、何時以背景方式啟動它；`scripts/run.sh -r` 在伺服器沒跑時會印「starting headless server…」，有可能是這一條。
+   **使用者回報（2026-11-18）：**改在 VS Code tunnel 的終端機執行 `run.sh` 啟動 Herdr 伺服器後，`-25308` 就不再出現。這與「伺服器從背景工作階段啟動、子 shell 繼承到不能互動的環境」的推測一致，但**沒有比對啟動前後的環境（`launchctl managername`、`security show-keychain-info`），根因仍未確認**。使用者的方向：伺服器要從 UI app（登入的 GUI 工作階段）啟動，**不要由背景程式啟動**。**尚未做的修正：**`scripts/run.sh` 在伺服器沒跑時仍會自行啟動無介面伺服器（約 `scripts/run.sh:243`），沒有改成提示或拒絕；尚未驗證從 Herdr.app 啟動是否同樣沒有此錯誤。
 
 **未解決的缺口：**
 - bridge 的 machine 設了 `ssh` 別名就原樣使用、不能另外帶埠，所以「別名＋可變埠」沒有支援；看板改 host／port 後，Herdr 存的目標（含埠）也不會跟著更新。
