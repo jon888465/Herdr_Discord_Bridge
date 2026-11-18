@@ -83,7 +83,7 @@ export function boardHeader(
 }
 
 export const MACHINE_HINT =
-  "設定改動重啟 bridge 後生效；狀態＝執行中 bridge 的觀測 | Tab/m/c 切換  j/k 移動  PgUp/PgDn 翻頁  Home/End 頭尾  e/Enter 編輯  o 連線  x 斷線  q 離開";
+  "設定改動重啟 bridge 後生效；狀態＝執行中 bridge 的觀測 | Tab/m/c 切換  j/k 移動  PgUp/PgDn 翻頁  Home/End 頭尾  e/Enter 編輯  o 連線  x 斷線  R 重啟 bridge  q 離開";
 
 export interface MachineViewState {
   machines: MachineConfig[];
@@ -310,7 +310,11 @@ export interface MachineControlUi {
   pending: boolean;
   /** 上一個結果帶結構化 needsForce:true 的 machine；只有緊接著對同一台按 x 才送 force。 */
   confirmFor?: string;
+  /** 已按過一次 R；緊接著再按 R 才送出重啟（任何其他按鍵都取消）。 */
+  restartConfirm?: boolean;
 }
+
+export const BRIDGE_RESTART_CONFIRM = "再按一次 R 確認重啟 bridge（其他鍵取消）";
 
 export type MachineKeyOutcome =
   | { kind: "quit" }
@@ -333,6 +337,21 @@ export function machineControlKey(
 ): { ui: MachineControlUi; outcome: MachineKeyOutcome } {
   if (key === "q" || key === "\x03") return { ui, outcome: { kind: "quit" } };
   if (ui.pending) return { ui, outcome: { kind: "ignore" } };
+  if (view === "machines" && key === "R") {
+    if (!ui.restartConfirm)
+      return {
+        ui: { pending: false, restartConfirm: true },
+        outcome: { kind: "message", message: BRIDGE_RESTART_CONFIRM },
+      };
+    return {
+      ui: { pending: true },
+      outcome: {
+        kind: "send",
+        command: { action: "restart", machineId: "" },
+        message: MACHINE_CONTROL_PENDING,
+      },
+    };
+  }
   if (view !== "machines" || (key !== "o" && key !== "x"))
     return { ui: { pending: false }, outcome: { kind: "pass" } };
   if (selectedId === undefined)
@@ -353,6 +372,17 @@ export function machineControlKey(
       message: MACHINE_CONTROL_PENDING,
     },
   };
+}
+
+/** 「重啟 bridge」的回應：成功只提示重啟中，失敗顯示固定短句。 */
+export function bridgeRestartResult(result: MachineControlResult): {
+  ui: MachineControlUi;
+  message: string;
+} {
+  const text = result.ok
+    ? (result.note ?? "bridge 重啟中")
+    : sanitizeForTerminal(result.reason);
+  return { ui: { pending: false }, message: `bridge：${sanitizeForTerminal(text)}` };
 }
 
 /** 本機暫時蓋過狀態檔的顯示：斷線成功立即顯示「已斷線」、連線成功先顯示「未知」，直到 bridge 寫入新狀態。 */

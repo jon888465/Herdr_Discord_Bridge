@@ -1,5 +1,22 @@
 # Known Issues
 
+## ISSUE-169：Card 看板 Machine 檢視沒有「重啟 bridge」指令
+
+更新日期：2026-11-18。狀態：已修正、待驗收（程式與自動化檢查完成；**尚未部署、未重啟 bridge、沒有實機驗收**）。
+
+**使用者要求（2026-11-18）：**看板的 Machine 檢視要能重啟 bridge（改完 machines 設定要重啟才生效，原本得回終端機執行 `scripts/run.sh`）。
+
+**行為：**Machine 檢視按 `R`（大寫，避免誤觸）→ 訊息列提示「再按一次 R 確認重啟 bridge（其他鍵取消）」→ 再按一次才送出。bridge 端（`src/bridge-restart.ts`）：有進行中的 Discord 串流（`active-streams`）就拒絕並回「有 N 個進行中的 Discord 串流，暫不重啟」；已在重啟中、找不到 `scripts/run.sh` 也拒絕；否則先回覆看板，約 0.3 秒後以**脫離的子程序**（新 session、stdio 導向 state 目錄的 `restart.log`）執行 `scripts/run.sh`（不加 `-r`，**不重建、不 npm ci**；要載入新程式碼仍須先在終端機 `run.sh -r`）。經既有的控制通道新增 `restart` action（不需要 machineId、不碰 hub、不走 Herdr 同步）。`run.sh` 新增環境變數 `HERDR_BRIDGE_NO_SERVER_START=1`：Herdr 伺服器沒在跑時直接失敗、不在背景開伺服器（避免 ISSUE-168 的 `-25308`）；bridge 啟動 run.sh 時一律帶這個變數。
+
+**測試（2026-11-18，本機 macOS，只有自動化）：**新增 `test/bridge-restart.test.ts`、`test/machine-control-restart.test.ts`、`test/card-board-restart-key.test.ts`；全套 `npm test` 2108 項，2107 pass、0 fail、1 skipped；`npm run lint` 通過；`bash -n scripts/run.sh` 通過。暫時把「有串流就拒絕」的條件改壞，`bridge-restart` 測試 4 pass／1 fail，已還原。
+
+**未驗證／風險：**
+- 脫離的 run.sh 在 `herdr pane close` 關掉 bridge pane 之後是否真的存活並開出新 pane，只有推論，需實機重啟驗證（這是這個功能最關鍵的風險）。
+- 重啟時看板自己所在的 pane 不會被 run.sh 關閉（它只關標題為 Discord bridge 的 pane），但沒實機確認。
+- `run.sh` 在 plugin 連結路徑與目前目錄不同時會重建並重新連結，可能耗時較久。
+- 失敗（例如 Herdr 伺服器沒在跑）時 bridge 仍活著，看板只會顯示「重啟中」，原因要看 state 目錄的 `restart.log`；60 秒後才允許再按。
+- 沒有強制重啟選項：有進行中串流時只能等或手動處理。
+
 ## ISSUE-168：埠會變動的 machine：Herdr 目標與 bridge 設定無法跟著改
 
 更新日期：2026-11-18。狀態：待調查（設定方式已在實機走通並寫入 README，缺口未修；`-25308` 已由使用者以改變 Herdr 伺服器的啟動方式繞過，見下方第 5 點）。
@@ -7,7 +24,7 @@
 **實機驗收紀錄（2026-11-18，本機 macOS＋Herdr 0.9.5，遠端 Linux 經 devtunnel 轉發到 127.0.0.1，bridge main `fe7c802`）：**
 - **已驗收（使用者實機＋我檢查狀態檔與指令輸出）：**`ssh` 別名加 `port`（不寫 host）的 machine 設定後，bridge 以 `ssh -p <port> <alias>` 連上遠端 Herdr（日誌 `connected`、`machine-status.json` 為 connected、側邊欄 reachable）；換埠後在 `known_hosts` 補上新埠的金鑰即可連線；另以 `HostKeyAlias` 登記後，只靠該名字的金鑰紀錄也連得上（同一個埠驗證，**沒有實際換到另一個埠驗證**）。
 - **已驗收：**Herdr 側邊欄的對應（含 `ssh://別名:埠` 形式的 target）：看板 `x` 後側邊欄停用，`o` 後重新啟用（`herdr machine list` 為 disabled／enabled）。
-- **仍未驗收／未修：**看板改 port 後 Herdr 存的目標不會跟著更新（仍要手動重加）；`HostKeyAlias` 與「換埠需補金鑰」尚未寫入 README；`run.sh` 偶爾誤判伺服器沒在跑；`-25308` 的根因仍是推測；看板的「重啟 bridge」指令尚未開 issue。
+- **仍未驗收／未修：**看板改 port 後 Herdr 存的目標不會跟著更新（仍要手動重加）；`HostKeyAlias` 與「換埠需補金鑰」尚未寫入 README；`run.sh` 偶爾誤判伺服器沒在跑；`-25308` 的根因仍是推測；看板的「重啟 bridge」指令見 ISSUE-169。
 
 **使用者可見症狀（2026-11-18 實機）：**
 - 新增 machine `devbox`（devtunnel 轉發到 `127.0.0.1`，埠每次不同）後，Herdr 側邊欄先是 `! attention`、之後一直 reconnecting。
@@ -33,7 +50,7 @@
 
 ## ISSUE-167：Card 看板 Machine 第四階段：編輯 SSH user／host／port
 
-更新日期：2026-11-17。狀態：已修正、待驗收（程式與自動化檢查完成；尚未部署／重啟或實機驗收）。
+更新日期：2026-11-18。狀態：已驗收（2026-11-18 使用者回報實機驗收通過；**我沒有逐項核對，也沒有取得個別項目的輸出**，因此「編輯中重啟保護」「小終端顯示」是否逐項驗過沒有記錄，之後發現問題就重新開啟）。以下為 2026-11-17 的開發與自動化檢查歷史。
 
 **症狀／預期／環境：** Machine 檢視目前只能讀 ssh alias，無法從看板修改 user／IP 或 hostname／port；本卡要求既有 alias 原樣可用，設定只動 machines 區塊、保留 token 等其他 bytes。本輪為 macOS 隔離 worktree 的原始碼與 node:test，沒有讀取真實 config 或連線遠端。
 
