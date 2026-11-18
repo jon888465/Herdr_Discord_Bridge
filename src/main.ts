@@ -117,7 +117,8 @@ import { openCardPullRequest } from "./card-pr-flow.js";
 import { attachCardPullRequest } from "./card-attach-pr.js";
 import { fetchReviewMaterial } from "./card-review-fetch.js";
 import { reviewCardPullRequest } from "./card-review-wiring.js";
-import { remoteReviewDeps, type RemoteReviewDeps } from "./remote-checkout.js";
+import { RemoteFailure, remoteReviewDeps, type RemoteReviewDeps } from "./remote-checkout.js";
+import { sshRemoteFetch } from "./remote-write-result.js";
 import { startRemoteRole } from "./remote-snapshot.js";
 import { fixCardWorktree } from "./card-fix-wiring.js";
 import {
@@ -2147,7 +2148,7 @@ export function liveAgentList(herdr: HerdrClient, agent: AgentRecord): Promise<A
 export function cardRoleContext(runtime: {
   herdr?: HerdrClient;
   config: {
-    machines: readonly { id: string; cardReview?: { kinds: readonly string[]; toolchain?: boolean } }[];
+    machines: readonly { id: string; cardReview?: { kinds: readonly string[]; toolchain?: boolean; write?: boolean } }[];
     agentProfiles?: Runtime["config"]["agentProfiles"];
   };
   pool?: { profiles: Runtime["config"]["agentProfiles"] };
@@ -2161,7 +2162,7 @@ export function cardRoleContext(runtime: {
     ...(runtime.config.machines.some((m) => m.cardReview)
       ? {
           remoteMachines: runtime.config.machines.flatMap((m) =>
-            m.cardReview && !(runtime.herdr instanceof HerdrHub && runtime.herdr.isDisconnected(m.id)) ? [{ id: m.id, kinds: [...m.cardReview.kinds], ...(m.cardReview.toolchain ? { toolchain: true } : {}) }] : [],
+            m.cardReview && !(runtime.herdr instanceof HerdrHub && runtime.herdr.isDisconnected(m.id)) ? [{ id: m.id, kinds: [...m.cardReview.kinds], ...(m.cardReview.toolchain ? { toolchain: true } : {}), ...(m.cardReview.write ? { write: true } : {}) }] : [],
           ),
         }
       : {}),
@@ -2335,7 +2336,14 @@ async function startTeamTask(
           if (typeof cwd !== "string") throw new Error("遠端角色失敗：Lead 沒有本機工作目錄");
           // 遠端角色不經 AgentPool，準備與執行期間都要算進該機器的進行中工作，普通斷線才會被擋下（ISSUE-166 review F2）。
           const hub = runtime.herdr; // 上面的檢查已把它窄化成 HerdrHub；放進 closure 前先取出來，型別才不會掉回 HerdrClient。
-          return trackRemoteRole(remoteRoleWork, `${taskId}/${assignment.id}`, remote.machine, () => startRemoteRole(remoteReviewDeps(hub), {
+          return trackRemoteRole(remoteRoleWork, `${taskId}/${assignment.id}`, remote.machine, () => startRemoteRole({
+            ...remoteReviewDeps(hub),
+            // implement（寫入）取回遠端改動用；與 exec 一樣，手動斷線的 machine 不開 SSH。
+            fetch: (machine) => {
+              const run = sshRemoteFetch(machine);
+              return (argv, timeoutMs, maxBytes) => (hub.isDisconnected(machine.id) ? Promise.reject(new RemoteFailure("machine 已斷線")) : run(argv, timeoutMs, maxBytes));
+            },
+          }, {
             machineId: remote.machine,
             role: remote.role,
             key: `${taskId}/${assignment.id}`,
