@@ -19,13 +19,39 @@ const HERDR_STATUS_TIMEOUT_MS = 20_000;
 /** remove／rename／disable 只改本機設定，但給寬鬆一點。 */
 const HERDR_CHANGE_TIMEOUT_MS = 10_000;
 
+/**
+ * `herdr machine status` 只要有任何一台不通就以非零 exit code 結束，但 stdout 仍有完整 JSON（ISSUE-170 實機：
+ * 舊埠那筆不通，status 回 exit 1，被當成失敗而整個復原）。status 有輸出就照常使用；逾時等其他失敗仍然丟錯。
+ */
+export function settleHerdrOutput(
+  args: string[],
+  error: (Error & { code?: unknown; killed?: boolean }) | null,
+  stdout: string,
+): string {
+  if (!error) return stdout;
+  if (
+    args[1] === "status" &&
+    !error.killed &&
+    typeof error.code === "number" &&
+    stdout.trim()
+  )
+    return stdout;
+  throw error;
+}
+
 const runHerdr: HerdrMachineRunner = (args, timeoutMs = HERDR_TIMEOUT_MS) =>
   new Promise((resolve, reject) =>
     execFile(
       "herdr",
       args,
       { encoding: "utf8", timeout: timeoutMs },
-      (error, stdout) => (error ? reject(error) : resolve(stdout)),
+      (error, stdout) => {
+        try {
+          resolve(settleHerdrOutput(args, error, stdout));
+        } catch (thrown) {
+          reject(thrown);
+        }
+      },
     ),
   );
 
