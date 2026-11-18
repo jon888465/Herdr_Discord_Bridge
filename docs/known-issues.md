@@ -1,5 +1,21 @@
 # Known Issues
 
+## ISSUE-171：遠端 machine 不能擔任 implement／fixer（寫入角色）
+
+更新日期：2026-11-18。狀態：待調查（**設計階段，尚未實作**；設計與使用者的三項決定見 `docs/remote-write-roles.md`）。
+
+**使用者要求（2026-11-18）：**agy-pod（agy）與 devbox（codex、pi）要能擔任所有卡片角色；目前只有 reviewer 與 task 內 diagnose／review／verify（唯讀）可以在遠端，implement／fixer 在撿卡前被拒絕「remote 寫入尚未支援」（`src/card-role-assignment.ts`）。
+
+**使用者決定（2026-11-18）：**(1) 改動以**打包**回傳，遠端不放任何 GitHub 憑證；(2) **implement 與 fixer 一起**做；(3) 由 **bridge 在本機 commit**，之後的 push 走既有本機流程。
+
+**已確認根因：**這是尚未開發的功能，不是 bug：現有遠端機制只有「快照送出、遠端唯讀、結果不採用任何遠端改動」，沒有把遠端產物取回並套用到本機 worktree 的路徑。
+
+**設計摘要（細節與風險見 `docs/remote-write-roles.md`）：**重用快照與清理機制；寫入模式的 `afterTurn` 在遠端用暫時 index 算出結果 tree，輸出 `git diff --binary --full-index` 的 patch，本機讀回後檢查路徑與大小、確認本機工作樹自快照後沒變、`git apply --index` 後 tree sha 必須等於遠端回報值，最後以固定訊息 commit，輸出與本機 fixer 相同的 `FixOutcome`。**與使用者選的「bundle」不同的地方：**回傳用 patch 而非 git bundle，理由與邊界見設計文件，需使用者知悉。**我另外建議、尚未經使用者確認：**寫入角色需要 machine 明確設定 `cardReview.write: true`（預設關閉），因為遠端 agent 能寫任意內容。
+
+**狀態：**只有設計文件與本 issue；沒有程式變更、沒有測試、沒有部署。分階段計畫：(1) 純函式與管線單元測試；(2) task 內 implement 接線；(3) PR 階段 fixer 接線；(4) agy-pod 與 devbox 的實機驗收。
+
+**未驗證／下一步：**遠端 codex／pi 的啟動提示與信任行為都沒在遠端驗過；patch 方案對 submodule、大二進位檔、檔案模式的行為要測；`write` 設定是否要加要使用者確認。
+
 ## ISSUE-170：看板改 machine 的 port 後，Herdr 側邊欄還連舊埠
 
 更新日期：2026-11-18。狀態：已驗收（2026-11-18 實機，見「實機驗收紀錄」；重新開啟兩次後第三次修正才通過）。
