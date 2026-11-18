@@ -36,7 +36,9 @@ test("preflight: remote reviewer/diagnose/review allowed and frozen; writers, to
   const read = preflightRoles({ diagnose: { machine: "pod", agent: "agy" }, review: { machine: "pod" }, ...reviewerRole }, context);
   eq([read.candidates.diagnose?.map((p) => p.id), read.remoteMachines], [["agy"], remoteMachines]);
   validateRoleSnapshot(structuredClone(read));
-  throws(() => preflightRoles({ fixer: { machine: "pod", agent: "agy" } }, context), /remote 寫入尚未支援/);
+  // fixer（ISSUE-171 第 3 階段）與 implement 一樣：machine 沒開放 write 就拒絕，開放後凍結 write。
+  throws(() => preflightRoles({ fixer: { machine: "pod", agent: "agy" } }, context), /remote fixer 不可用.*cardReview\.write/);
+  eq(preflightRoles({ fixer: { machine: "pod", agent: "agy" } }, { ...context, remoteMachines: [{ id: "pod", kinds: ["agy"], write: true }] }).remoteMachines, [{ id: "pod", kinds: ["agy"], write: true }]);
   // implement（ISSUE-171）：machine 沒開放 write 就拒絕；開放後凍結 write，快照可重新驗證。
   throws(() => preflightRoles({ implement: { machine: "pod", agent: "agy" } }, context), /remote implement 不可用.*cardReview\.write/);
   const writable = [{ id: "pod", kinds: ["agy"], write: true }];

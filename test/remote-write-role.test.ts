@@ -154,3 +154,23 @@ test("唯讀角色行為不變：review 不需要 write 與取回通道", async 
     h.done();
   }
 });
+
+test("fixer（PR 階段）使用同一條寫入管線：commit 訊息標明 fixer，沒開 write 就拒絕", async () => {
+  const h = harness();
+  try {
+    const role = await h.start("fixer");
+    fs.writeFileSync(`${h.pod}/a.txt`, "alpha\nfixed\n");
+    await role.afterTurn();
+    assert.equal(git(h.local, "log", "-1", "--format=%s"), "hdb remote fixer (pod)");
+    assert.equal(git(h.local, "rev-parse", "HEAD~1"), h.headBefore);
+    await role.cleanup("completed");
+  } finally {
+    h.done();
+  }
+  const closed = harness({ write: false });
+  try {
+    await assert.rejects(closed.start("fixer"), fixed(/fixer 不可用（machine 沒有開放寫入）/));
+  } finally {
+    closed.done();
+  }
+});

@@ -180,11 +180,9 @@ export function preflightRoles(
   return { roles: structuredClone(roles), candidates, ...(remoteMachines.length ? { remoteMachines } : {}) };
 }
 function remoteReviewMachine(role: CardRole, c: RoleConstraint, context: RoleContext): RemoteReviewMachine {
-  const unsupported = `卡片流程尚未支援 machine ${c.machine}`;
-  if (role === "fixer") roleError(role, `remote 寫入尚未支援：${unsupported} 的寫入角色`);
   const remote = context.remoteMachines?.find((m) => m.id === c.machine && !context.isDisconnected?.(m.id));
   if (!remote || (c.agent && !remote.kinds.includes(c.agent))) roleError(role, `machine 未開放卡片 review（${c.machine}）`);
-  if (role === "implement" && !remote.write) roleError(role, `remote implement 不可用：machine ${c.machine} 沒有開放寫入（cardReview.write）`);
+  if ((role === "implement" || role === "fixer") && !remote.write) roleError(role, `remote ${role} 不可用：machine ${c.machine} 沒有開放寫入（cardReview.write）`);
   if (role === "verify" && !remote.toolchain) roleError(role, `remote verify 不可用：machine ${c.machine} 沒有工具鏈`);
   return remote;
 }

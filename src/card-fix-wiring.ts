@@ -17,6 +17,8 @@ import {
   type FixFlowDeps,
   type FixFlowResult,
 } from "./card-fix-flow.js";
+import { runRemoteCardFix, type StartRemoteRole } from "./card-fix-remote.js";
+import { remoteRoleWork, trackRemoteWork } from "./machine-busy.js";
 import type { CardWorktree } from "./card-worktrees.js";
 import type { AgentRecord } from "./types.js";
 
@@ -30,6 +32,8 @@ export interface FixWiringDeps {
   taskLead(taskId: string): AgentRecord | undefined;
   listAgents(): Promise<AgentRecord[]>;
   flow: FixFlowDeps;
+  /** 遠端 fixer（ISSUE-171）：卡片 `roles.fixer` 指到開放寫入的 machine 時使用；沒給就拒絕遠端 fixer。 */
+  remote?: { start: StartRemoteRole };
 }
 
 export async function fixCardWorktree(
@@ -83,7 +87,7 @@ export async function fixCardWorktree(
       `最後一個作者的 pane（${lead.pane_id}）已不在，無法在它旁邊開新作者的 pane`,
     );
 
-  return runCardFix(deps.flow, {
+  const input: Parameters<typeof runCardFix>[1] = {
     card: effectiveCard,
     round: options.round,
     findings: options.findings,
@@ -100,5 +104,25 @@ export async function fixCardWorktree(
         }
       : {}),
     ...(options.agent !== undefined ? { requestedKind: options.agent } : {}),
-  });
+  };
+  // 卡片 fixer 在遠端（ISSUE-171）：執行中的 config 也必須仍開放這台機器的寫入與這個 agent 種類；舊快照允許的，目前配置可能已關閉。
+  const remote = snapshot?.roles.fixer?.machine?.replace(/^local$/, "");
+  if (!remote) return runCardFix(deps.flow, input);
+  const open = deps.roleContext?.remoteMachines?.find((m) => m.id === remote);
+  if (!open?.write) throw new Error("遠端修正失敗：machine 目前未開放寫入");
+  if (!open.kinds.includes(input.launch?.kind ?? ""))
+    throw new Error("遠端修正失敗：machine 目前未開放這個 agent 種類");
+  if (!deps.remote) throw new Error("remote fixer 介面不存在，不開始修正");
+  const start = deps.remote.start;
+  // 準備與執行期間都算進該機器的進行中工作，普通斷線才會被擋下（與遠端 reviewer 相同）。
+  return trackRemoteWork(
+    remoteRoleWork,
+    `card-fix:${card.id}:r${options.round}`,
+    remote,
+    () => {
+      if (deps.roleContext?.isDisconnected?.(remote))
+        throw new Error("遠端修正失敗：machine 已手動斷線");
+      return runRemoteCardFix({ flow: deps.flow, start }, remote, input);
+    },
+  );
 }
