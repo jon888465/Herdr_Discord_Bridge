@@ -897,11 +897,11 @@ PR #189（`88e1ce6`）已於 2026-11-09 merge，並重啟 bridge 載入（`card 
 
 ### 遠端卡片 reviewer（2026-11-11，ISSUE-143，未實機驗收）
 
-`machines[].cardReview {root, kinds}` 選填，未設定時行為完全不變（基礎層 PR #207，角色接線 PR #206，B 依賴 A）。reviewer 可指定開放的 remote（implement／fixer 拒絕「remote 寫入尚未支援」；task 內 diagnose／review／verify 見下一節），快照凍結 remoteMachines，啟動前重驗目前配置的 machine 與 kinds；沒有 roles 的卡仍不支援 Lead 自選 PR 後的 remote reviewer（Lead 可選的是 task 內角色，見下一節）。目錄 `<root>/<owner>__<repo>__<卡片雜湊>`；路徑須是遠端 canonical（符號連結拒絕）；clone 後寫 `.git/hdb-card-review` marker，沿用與清理要求 marker 相符、沿用還要工作樹乾淨；第一個遠端指令檢查 GNU `timeout`；create 逾時有界重查；HEAD 須等於 PR head；斷線不 fallback 本機；結果文字只放行固定標籤。見 docs/remote-card-reviewer.md。
+`machines[].cardReview {root, kinds}` 選填，未設定時行為完全不變（基礎層 PR #207，角色接線 PR #206，B 依賴 A）。reviewer 可指定開放的 remote（fixer 拒絕「remote 寫入尚未支援」，implement 見 task 內角色一節的 `cardReview.write`；task 內 diagnose／review／verify 見下一節），快照凍結 remoteMachines，啟動前重驗目前配置的 machine 與 kinds；沒有 roles 的卡仍不支援 Lead 自選 PR 後的 remote reviewer（Lead 可選的是 task 內角色，見下一節）。目錄 `<root>/<owner>__<repo>__<卡片雜湊>`；路徑須是遠端 canonical（符號連結拒絕）；clone 後寫 `.git/hdb-card-review` marker，沿用與清理要求 marker 相符、沿用還要工作樹乾淨；第一個遠端指令檢查 GNU `timeout`；create 逾時有界重查；HEAD 須等於 PR head；斷線不 fallback 本機；結果文字只放行固定標籤。見 docs/remote-card-reviewer.md。
 
 ### task 內 remote 唯讀角色（2026-11-12，REQ-20261111-remote-in-task-roles，未做實機驗收）
 
-- **開放：**`cardReview` 機器在 `--coding` task 內可做 diagnose、review；verify 要 `cardReview.toolchain: true`，否則候選標 `available:false`。remote implement／fixer 撿卡前拒絕；remote verify 沒工具鏈拒絕「remote verify 不可用」。
+- **開放：**`cardReview` 機器在 `--coding` task 內可做 diagnose、review；verify 要 `cardReview.toolchain: true`，否則候選標 `available:false`。**implement（寫入，ISSUE-171 第 2 階段，已實作、只有單元測試、未實機驗收）要 `cardReview.write: true`（預設關閉）**，否則撿卡前拒絕「remote implement 不可用」、候選標 `available:false`：bridge 送出快照，遠端 agent 修改後 `afterTurn` 取回 patch（`src/remote-write-result.ts`），本機重算 tree 與路徑／模式檢查全部通過才以固定身分 commit（`hdb remote implement (<machine>)`），任何失敗還原到派工前的 HEAD、不 fallback；派工前本機工作樹必須乾淨，快照後本機被改動則作廢；遠端沒有 GitHub 憑證、bridge 不 push。remote fixer 仍撿卡前拒絕（第 3 階段）；remote verify 沒工具鏈拒絕「remote verify 不可用」。
 - **選擇：**target `remote:<machine>:<role>:<profile>` 只能用於同名 `coding.role`，隨 roster 存進任務快照（沒有 roles 的卡也可）；取得時用凍結 profile（resume 類 args 拒絕），重驗目前配置與 kind，身分讀該機器當下清單；每個 assignment 新 session、新目錄。卡片 `roles.reviewer` 在 remote 而沒宣告 `review` 時，task 內 review 必須用同一台的 target（ISSUE-150）；閘門不變。
 - **快照：**暫時 `GIT_INDEX_FILE` 上 `read-tree HEAD`、`add -A`（含未追蹤、不含 ignored）、`write-tree`、`commit-tree`（固定身分與時間），分支、HEAD、index 不動；前後指紋不同作廢。暫時 ref 打 bundle（`--not --remotes=origin`）後即刪，上限 50 MiB。不推送到 origin。
 - **pod：**目錄須不存在；同一指令建目錄與 marker，再 `init`、fetch origin、ssh stdin 收 bundle（`head -c` 上限）、`bundle verify`、`fetch`（只此步開 `protocol.file.allow`）、`checkout --detach`；HEAD 與 tree 須等於快照。

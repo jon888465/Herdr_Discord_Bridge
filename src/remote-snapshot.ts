@@ -11,8 +11,10 @@ import { assertFreshProfile } from "./card-role-assignment.js";
 import { assertReadyIdentity, type RoleCleanupReason } from "./card-role-session.js";
 import { captureCodingTree, digest } from "./coding-version.js";
 import { editRemoteAgyTrust } from "./remote-agy-trust.js";
+import { applyRemoteResult, assertCleanBase, fetchRemoteResult, type RemoteFetch } from "./remote-write-result.js";
 import { GIT, LONG_MS, MARKER_FILE, RemoteFailure, SHA, SHORT_MS, assertRemoteValue, cardHash, githubOriginRepo, markerContent, must } from "./remote-checkout.js";
 import { remoteCheckoutDir, remoteFingerprint, removeRemoteCheckout, verifyCheckoutPath, type RemoteExec, type RemoteReviewDeps } from "./remote-checkout.js";
+import type { MachineConfig } from "./machines.js";
 import type { AgentRecord } from "./types.js";
 
 export const MAX_BUNDLE_BYTES = 50 * 1024 * 1024;
@@ -112,6 +114,9 @@ export async function prepareRemoteSnapshot(
 export type RemoteRoleDeps = Pick<RemoteReviewDeps, "machine" | "exec" | "originUrl" | "createWorkspace" | "closeWorkspace" | "closeWorkspaceLabeled" | "panePort" | "startAgent" | "sleep"> & {
   snapshot?(cwd: string): LocalSnapshot;
   treeDigest?(cwd: string): string;
+  /** implement（寫入模式）取回遠端改動用；沒給就不能派 implement。 */
+  fetch?(machine: MachineConfig): RemoteFetch;
+  localGit?(cwd: string): LocalGit;
 };
 
 /** 失敗不 fallback 本機。cleanup：blocked／timeout／uncertain 保留（與 card-role-session 對同一 RoleCleanupReason 一致）；workspace 沒關成不刪目錄，記 cleanup_pending。 */
@@ -133,6 +138,10 @@ export async function startRemoteRole(
   const open = machine?.cardReview;
   if (!machine || !open?.kinds.includes(profile.kind)) throw fail("machine 未開放這個 agent 種類");
   if (input.role === "verify" && !open.toolchain) throw fail("verify 不可用（machine 沒有工具鏈）");
+  // implement 是寫入角色（ISSUE-171）：machine 要明確開放、要有取回通道；改動由 bridge 取回後在本機 commit。
+  const write = input.role === "implement";
+  if (write && !open.write) throw fail("implement 不可用（machine 沒有開放寫入）");
+  if (write && !deps.fetch) throw fail("implement 不可用（沒有取回通道）");
   const origin = githubOriginRepo((await deps.originUrl(input.cwd)).trim());
   if (!origin) throw fail("origin 不是 GitHub repo，不在遠端 clone");
   const exec = deps.exec(machine);
@@ -171,12 +180,16 @@ export async function startRemoteRole(
       return pending.length ? `（cleanup_pending：${pending.join("、")}）` : "";
     })());
   let digestAtSnapshot: string;
-  let before: string;
+  let baseTree = "";
+  let before = "";
   let agent: AgentRecord;
   try {
     const snap = (deps.snapshot ?? createLocalSnapshot)(input.cwd);
     digestAtSnapshot = snap.digest;
+    baseTree = snap.tree;
     try {
+      // 寫入模式的 commit 是「HEAD＋遠端 patch」，派工前本機工作樹必須乾淨。
+      if (write) assertCleanBase((deps.localGit ?? localGit)(input.cwd), snap.tree);
       await prepareRemoteSnapshot(exec, { root, dir, ...origin, cardHash: hash, snapshot: snap }, () => (st.owned = true), undefined, input.signal);
     } finally {
       snap.dispose();
@@ -195,7 +208,7 @@ export async function startRemoteRole(
       }
     input.signal?.throwIfAborted();
     // 唯讀基準要在 Agent 啟動之前取（與 card-review-flow 一致），啟動期間寫進 pod 工作樹的檔案不會被算進基準。
-    before = await remoteFingerprint(exec, dir);
+    if (!write) before = await remoteFingerprint(exec, dir);
     const args = [...(profile.args ?? []), ...(profile.model ? [profile.modelFlag!, profile.model] : [])];
     const started = await deps.startAgent({ paneId: ws.paneId, kind: profile.kind, name: input.name, ...(args.length ? { args } : {}) });
     const port = deps.panePort(id);
@@ -212,6 +225,19 @@ export async function startRemoteRole(
     throw fail(`${reason}${await cleanup("before_dispatch_failure")}`, error);
   }
   const afterTurn = async () => {
+    if (write) {
+      // 本機工作樹自快照後不能被改動；之後取回、驗證、套用、commit，任何一步失敗都不採用（本機已還原）。
+      try {
+        if ((deps.treeDigest ?? treeDigest)(input.cwd) !== digestAtSnapshot) throw new RemoteFailure("快照已作廢（本機工作樹已改變），結果不採用");
+        const result = await fetchRemoteResult(exec, deps.fetch!(machine), { dir, baseTree });
+        const applied = applyRemoteResult((deps.localGit ?? localGit)(input.cwd), { patch: result.patch, expectedTree: result.tree, message: `hdb remote implement (${id})` });
+        console.error(`remote role ${id}: implement 已套用 ${applied.files.length} 個檔案，commit ${applied.headAfter.slice(0, 12)}`);
+      } catch (error) {
+        if (error instanceof RemoteFailure && error.uncertain) st.uncertain = true;
+        throw fail(error instanceof RemoteFailure ? error.label : "套用遠端改動失敗", error);
+      }
+      return;
+    }
     const after = await remoteFingerprint(exec, dir).catch((error: unknown) => {
       if (error instanceof RemoteFailure && error.uncertain) st.uncertain = true;
       throw fail("唯讀檢查失敗", error);

@@ -171,7 +171,7 @@ test("strict parser rejects repeated role and nested YAML without changing legac
 });
 for (const [constraint, error] of [
   [{ machine: "missing" }, /不存在 machine/],
-  [{ machine: "pod" }, /尚未支援 machine pod/],
+  [{ machine: "pod" }, /machine 未開放卡片 review（pod）/],
   [{ agent: "pi", model: "missing" }, /不合法 model/],
   [{ model: "missing" }, /不合法 model/],
   [{ agent: "codex", model: "sonnet" }, /不合法 model/],

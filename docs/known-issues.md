@@ -2,7 +2,7 @@
 
 ## ISSUE-171：遠端 machine 不能擔任 implement／fixer（寫入角色）
 
-更新日期：2026-11-18。狀態：修正中（第 1 階段「取回與套用的純管線」已實作並有單元測試；**task 內 implement／fixer 的接線、`write` 設定、Lead 候選都還沒做，remote implement／fixer 仍被撿卡前拒絕**；設計與使用者的三項決定見 `docs/remote-write-roles.md`）。
+更新日期：2026-11-18。狀態：修正中（第 1 階段「取回與套用的純管線」與第 2 階段「task 內 implement 接線」已實作並有單元測試；**remote fixer 還沒做，仍被撿卡前拒絕；沒有部署、沒有實機驗收**；設計與使用者的三項決定見 `docs/remote-write-roles.md`）。
 
 **使用者要求（2026-11-18）：**agy-pod（agy）與 devbox（codex、pi）要能擔任所有卡片角色；目前只有 reviewer 與 task 內 diagnose／review／verify（唯讀）可以在遠端，implement／fixer 在撿卡前被拒絕「remote 寫入尚未支援」（`src/card-role-assignment.ts`）。
 
@@ -14,7 +14,9 @@
 
 **第 1 階段（2026-11-18，只有自動化測試）：**新增 `src/remote-write-result.ts`：`fetchRemoteResult`（遠端暫時 index 算 tree、patch 寫到 `.git` 底下的檔案並回報大小，位元組經新的 `RemoteFetch`／`sshRemoteFetch` 取回，因為既有 `RemoteExec` 只留最後 64 KiB）、`applyRemoteResult`（本機 `git apply --index`、自己重算 tree 必須等於遠端回報值、路徑與模式檢查、固定身分 commit、任何失敗 `reset --hard` 回派工前 HEAD）、`assertCleanBase`（寫入模式要求派工前工作樹乾淨：快照 tree 等於 HEAD tree，否則不派工）。拒絕：絕對路徑、`..`、`.git` 元件、根目錄 `.gitmodules`、符號連結、submodule、檔案數超過 500、patch 超過 10 MiB、沒有任何改動。測試 `test/remote-write-result.test.ts` 9 項，用真的 git 在暫存目錄跑完整流程（遠端目錄是本機 clone，exec／fetch 在本機執行）；全套 `npm test` 2128 項，2127 pass、0 fail、1 skipped，`npm run lint` 通過（2026-11-18）。暫時拿掉 tree 比對，1 項變紅；暫時拿掉還原，3 項變紅，皆已還原。**這只證明管線邏輯；沒有連真的遠端、沒有接到任何角色流程。**
 
-**狀態：**設計文件、第 1 階段的程式與測試；沒有部署、沒有實機。分階段計畫：(1) 純函式與管線單元測試；(2) task 內 implement 接線；(3) PR 階段 fixer 接線；(4) agy-pod 與 devbox 的實機驗收。
+**第 2 階段（2026-11-18，只有自動化測試）：**`machines[].cardReview.write`（布林、預設關閉，與 toolchain 同樣驗證並凍結進角色快照，`validateRoleSnapshot` 接受新欄位）；implement 加入 task 內可派到遠端的角色，沒開 write 的 machine 在撿卡前被拒絕「remote implement 不可用」、Lead 候選標 `available:false`；`startRemoteRole` 寫入模式：machine 要開放 write 且要有取回通道、派工前本機工作樹必須乾淨（`assertCleanBase`）、`afterTurn` 先確認本機 digest 未變，再取回、驗證、套用並 commit，失敗一律不採用且本機還原；`main.ts` 注入的 `sshRemoteFetch` 與 exec 一樣尊重手動斷線。測試：新增 `test/remote-write-role.test.ts` 5 項（真的 git 當本機 repo、pod 目錄是它的 clone）、`test/machines.test.ts` 的 write 驗證、`test/card-role-remote.test.ts` 的 preflight／候選／target／快照凍結；更新 4 個原本斷言「implement 一律被拒絕」的既有測試；全套 `npm test` 2134 項，2133 pass、0 fail、1 skipped，`npm run lint` 通過（2026-11-18）。破壞性驗證：拿掉「要開放 write」檢查與拿掉寫入模式的本機 digest 檢查，各有 1 項變紅，皆已還原。**未驗證：**沒有部署、沒有真的遠端（agy-pod／devbox）、`sshRemoteFetch` 沒對真的 ssh 跑過、Lead 實際會不會把 implement 派到遠端、遠端 agent 的實際行為；writer 的 `writeScope` 與驗收閘門是否與「bridge 在 afterTurn 才 commit」順序相容，只靠讀程式碼判斷（afterTurn 在 `onAssignmentDone` 之前執行）。
+
+**狀態：**設計文件、第 1、2 階段的程式與測試；沒有部署、沒有實機。分階段計畫：(1) 純函式與管線單元測試；(2) task 內 implement 接線；(3) PR 階段 fixer 接線；(4) agy-pod 與 devbox 的實機驗收。
 
 **未驗證／下一步：**`sshRemoteFetch` 沒有對真的 ssh 跑過（測試用本機指令代替）；遠端 `base64`／`wc`／`sh` 行為在 Linux 以外沒驗；遠端 codex／pi 的啟動提示與信任行為都沒在遠端驗過；patch 方案對 submodule、大二進位檔、檔案模式的行為要測；`write` 設定是否要加要使用者確認。
 

@@ -978,7 +978,7 @@ export function planningInstruction(input: TeamTaskInput): string {
     ...(input.remoteReviewers?.length ? [`Remote card reviewer candidates (bridge-dispatched after the PR, not Worker targets): ${JSON.stringify(input.remoteReviewers)}`] : []),
     ...(input.remoteRoles?.length
       ? [
-          `Remote in-task role candidates (read-only; available ones are Worker targets remote:<machine>:<role>:<profileId>, used only for that coding.role; the bridge sends an uncommitted snapshot of the current worktree, never pushes): ${JSON.stringify(input.remoteRoles)}`,
+          `Remote in-task role candidates (diagnose, review and verify are read-only; implement writes, and only when the machine allows writes: the bridge commits the returned changes in the local worktree. Available ones are Worker targets remote:<machine>:<role>:<profileId>, used only for that coding.role; the bridge sends a snapshot of the current worktree, which must be clean for implement, and never pushes): ${JSON.stringify(input.remoteRoles)}`,
         ]
       : []),
     ...(input.roleSnapshot && roleConstraint(input.roleSnapshot, "review") && !input.roleSnapshot.roles.review

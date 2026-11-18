@@ -36,7 +36,14 @@ test("preflight: remote reviewer/diagnose/review allowed and frozen; writers, to
   const read = preflightRoles({ diagnose: { machine: "pod", agent: "agy" }, review: { machine: "pod" }, ...reviewerRole }, context);
   eq([read.candidates.diagnose?.map((p) => p.id), read.remoteMachines], [["agy"], remoteMachines]);
   validateRoleSnapshot(structuredClone(read));
-  for (const role of ["implement", "fixer"]) throws(() => preflightRoles({ [role]: { machine: "pod", agent: "agy" } }, context), /remote 寫入尚未支援/);
+  throws(() => preflightRoles({ fixer: { machine: "pod", agent: "agy" } }, context), /remote 寫入尚未支援/);
+  // implement（ISSUE-171）：machine 沒開放 write 就拒絕；開放後凍結 write，快照可重新驗證。
+  throws(() => preflightRoles({ implement: { machine: "pod", agent: "agy" } }, context), /remote implement 不可用.*cardReview\.write/);
+  const writable = [{ id: "pod", kinds: ["agy"], write: true }];
+  const written = preflightRoles({ implement: { machine: "pod", agent: "agy" } }, { ...context, remoteMachines: writable });
+  eq(written.remoteMachines, writable);
+  validateRoleSnapshot(structuredClone(written));
+  throws(() => validateRoleSnapshot({ ...written, remoteMachines: [{ id: "pod", kinds: ["agy"], write: false }] } as never));
   throws(() => preflightRoles({ verify: { machine: "pod", agent: "agy" } }, context), /remote verify 不可用/);
   validateRoleSnapshot(preflightRoles({ verify: { machine: "pod", agent: "agy" } }, { ...context, remoteMachines: [{ id: "pod", kinds: ["agy"], toolchain: true }] }));
   for (const [ctx, reviewer] of [[closed, reviewerRole.reviewer], [context, { machine: "pod", agent: "claude" }]] as const)
@@ -285,11 +292,14 @@ const ctx2: RoleContext = { ...context, remoteMachines: [{ id: "pod", kinds: ["a
 
 test("Lead candidates and targets: pod diagnose/review; verify unavailable without toolchain", () => {
   const listed = remoteRoleCandidates(context);
-  eq(listed.map((c) => [c.machine, c.kind, c.profileId, c.role, c.available, c.reason]), [["pod", "agy", "agy", "diagnose", true, undefined], ["pod", "agy", "agy", "review", true, undefined], ["pod", "agy", "agy", "verify", false, "no toolchain on machine"]]);
+  eq(listed.map((c) => [c.machine, c.kind, c.profileId, c.role, c.available, c.reason]), [["pod", "agy", "agy", "diagnose", true, undefined], ["pod", "agy", "agy", "review", true, undefined], ["pod", "agy", "agy", "verify", false, "no toolchain on machine"], ["pod", "agy", "agy", "implement", false, "machine does not allow writes"]]);
+  // implement 的 target 只有 machine 開放 write 才出現。
+  eq(remoteRoleTargets({ ...context, remoteMachines: [{ id: "pod", kinds: ["agy"], write: true }] }, "w1").map((t) => t.pane_id), ["remote:pod:diagnose:agy", "remote:pod:review:agy", "remote:pod:implement:agy"]);
+  eq(parseRemoteTarget("remote:pod:implement:agy"), { machine: "pod", role: "implement", profileId: "agy" });
   eq(pod.map((t) => [t.pane_id, t.machine, t.roleTarget, t.workspace_id]), [["remote:pod:diagnose:agy", "pod", "diagnose", "w1"], ["remote:pod:review:agy", "pod", "review", "w1"]]);
   eq([remoteRoleTargets(ctx2, "w1").map((t) => t.roleTarget), remoteRoleCandidates(closed)], [["diagnose", "review", "verify"], []]);
   eq(parseRemoteTarget("remote:pod:review:agy"), { machine: "pod", role: "review", profileId: "agy" });
-  for (const bad of ["remote:pod:implement:agy", "remote:pod:review:../x", "remote:-pod:review:agy", "remote:pod:review:a b", "remote:pod:review:a\nb", "role:review:agy"]) equal(parseRemoteTarget(bad), undefined);
+  for (const bad of ["remote:pod:fixer:agy", "remote:pod:review:../x", "remote:-pod:review:agy", "remote:pod:review:a b", "remote:pod:review:a\nb", "role:review:agy"]) equal(parseRemoteTarget(bad), undefined);
   ok(!roleTargets(preflightRoles({ diagnose: { machine: "pod" }, implement: { agent: "claude" } }, context), "w1").some((t) => t.roleTarget === "diagnose"));
   match(planningInstruction({ taskId: "t", prompt: "p", lead, workers: [], coding: true, remoteRoles: listed }), /Remote in-task role candidates.*never pushes.*"role":"verify".*"available":false/);
 });
