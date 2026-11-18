@@ -318,7 +318,7 @@ Host devbox
 - 公鑰已加入遠端 `authorized_keys` 仍會被問密碼時，先確認 ssh 到底有沒有提供那把金鑰：用 `ssh -G <目標>` 看 `identityfile`；用 `ssh://帳號@位址:埠` 這種目標時 ssh 只會試預設金鑰（`id_ed25519` 等），不會試別的檔名。
 - 連線被拒絕（`Connection refused`）是那個埠沒有東西在聽（轉發掉了或遠端 sshd 停了），不是金鑰問題；Herdr 會一直停在 reconnecting。新埠第一次連線會要求確認主機金鑰（`known_hosts` 以位址加埠記錄），請核對指紋後互動接受一次。
 - 本機與遠端的 Herdr 版本要夠新：0.9.1 的客戶端連 0.9.5 的伺服器曾顯示 `! attention`，升級客戶端後恢復（原因是推測，Herdr 0.9.5 才有 `herdr machine status`／`reconnect` 可看實際錯誤）。Homebrew 安裝的 Herdr 用 `brew upgrade herdr`，`herdr update` 會拒絕。
-- Herdr 的 shell 若是從背景工作階段（沒有 GUI 登入環境）啟動的，鑰匙圈操作會失敗（例如 `devtunnel connect` 的 `-25308`，`errSecInteractionNotAllowed`）；用 `security show-keychain-info ~/Library/Keychains/login.keychain-db` 驗證，可先 `security unlock-keychain` 或改從 GUI 啟動 Herdr（ISSUE-168）。
+- Herdr 的 shell 若是從背景工作階段（沒有 GUI 登入環境）啟動的，鑰匙圈操作會失敗（例如 `devtunnel connect` 的 `-25308`，`errSecInteractionNotAllowed`）；用 `security show-keychain-info ~/Library/Keychains/login.keychain-db` 驗證，之後請從 Herdr 的 UI app（登入的 GUI 工作階段）啟動伺服器，不要由背景程式啟動。有回報換一個環境重新啟動伺服器後此錯誤就消失，根因尚未確認。注意 `scripts/run.sh` 在伺服器沒跑時仍會自行啟動無介面伺服器（ISSUE-168）。
 
 ### 遠端卡片 reviewer（選填）
 
