@@ -52,7 +52,7 @@
 
 **實機回報（2026-11-18，使用者按 `x` 之後）：**看板顯示該 machine「已斷線」，但 Herdr 側邊欄的同一台仍有綠點、仍能在裡面下指令。**根因（已確認）：**Herdr 自己存的 SSH machine 與 bridge 的 tunnel 是兩套獨立連線，原設計只管 bridge 的；SPEC 沒寫清楚這個範圍。另外讀程式碼發現兩條不經 hub 的 SSH 路徑沒擋手動斷線（`sshRealpath`、`sshRemoteExec`，我在 F13 只補了 `uploadTo`／`cleanupAttachments`，漏了這兩處）。**修正（使用者 2026-11-18 選「`x` 也停用 Herdr 的 machine」）：**控制通道成功後同步 `herdr machine enable／disable`（對應規則與失敗處理見 SPEC），並擋掉兩條 SSH 路徑。**測試（2026-11-18）：**全套 `npm test` 2087 項，2086 pass、0 fail、1 skipped；`npm run lint` 通過；新增 `herdr-machine-sync`、控制通道 `afterControl`、看板訊息、遠端 exec 斷線拒絕的測試。**未驗證：**真實 `herdr machine disable` 後側邊欄與其 session 的行為（Herdr 文件寫明遠端 session 照舊，但我沒實測；本機 Herdr 是 0.9.1，文件是 0.9.5）、`enable` 後是否自動重連、版本差異；Herdr 的 profile 對應只靠 `target`／`label`。
 
-**預期：**看板可對機器連線／斷線，斷線後顯示「已斷線」且不自動重連；有進行中的工作時拒絕，同一台再按一次才強制，不能悄悄中斷。
+**預期：**看板可對機器連線／斷線，斷線後顯示「已斷線」且不自動重連（**使用者 2026-11-18 要求：bridge 重啟後也維持斷線，按 `o` 才連線**；已實作、待實機驗收，原本只存在記憶體、重啟會按 config 重新連線）；有進行中的工作時拒絕，同一台再按一次才強制，不能悄悄中斷。
 
 **拆分經過：**原實作是單一 PR #275（+1281／-37），diff 超過 bridge review 上限 60000 字元而無法走 review；ubuntu CI 另因 B 的測試失敗（見 B）。使用者 2026-11-17 決定拆成 A、B 兩個 PR 與兩張卡（A 卡只保留 hub 核心的驗收條件，其餘移到 B 卡，沒有刪除）。為了讓 A 的 diff 維持在上限內，SPEC 只新增段落、不改既有長行，`CONTEXT.md` 索引待 B 一併更新。程式是 Worker（codex `helper`）所寫，我依檔案與 hunk 切出 A、重寫文件並依 review 修正。
 
