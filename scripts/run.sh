@@ -231,7 +231,11 @@ case "$mode" in
     ;;
 esac
 is_herdr_server_running() {
-  herdr status server 2>/dev/null | grep -Eq "^status:[[:space:]]*running"
+  # 先把輸出收完再比對：`grep -q` 讀到第一行就結束，herdr 還在寫就會收到 SIGPIPE，
+  # 在 `set -o pipefail` 下整條管線被判失敗，誤判成「伺服器沒在跑」（ISSUE-168）。
+  local output
+  output="$(herdr status server 2>/dev/null)" || return 1
+  grep -Eq "^status:[[:space:]]*running" <<<"$output"
 }
 
 ensure_herdr_server() {

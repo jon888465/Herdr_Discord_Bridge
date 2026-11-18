@@ -135,7 +135,7 @@ if(cli==='herdr') {
   const r=require('node:child_process').spawnSync('/usr/bin/env',['-i','PATH='+process.env.PATH,setting,'node',root+'/dist/src/index.js'],{encoding:'utf8'});if(r.status!==0)throw new Error('plugin launch failed');
  }
 
- if(args.join(' ')==='status server'){console.log('status: running');process.exit(0);}
+ if(args.join(' ')==='status server'){if(scenario==='verbose-status'){const r=require('node:child_process').spawnSync('/bin/sh',['-c',"echo 'status: running'; yes xxxxxxxxxxxxxxxxxxxx | head -c 600000"],{stdio:'inherit'});process.exit(r.status===null?1:r.status);}console.log('status: running');process.exit(0);}
  let result={};
  if(args[0]==='workspace'&&args[1]==='list')result={workspaces:[{workspace_id:'w3',label:'bridge'}]};
  if(args[0]==='pane'&&args[1]==='list')result={panes:[{pane_id:'w3:p1',workspace_id:'w3',tab_id:'w3:t1',agent:'codex'}]};
@@ -432,6 +432,17 @@ for (const [pluginInstall, args] of [
     assert.equal(result.childEnv, undefined);
     assert.doesNotMatch(result.stderr, /fake-file-secret/);
   });
+test("herdr status server 在第一行之後還有大量輸出時，仍判定伺服器在跑，不在背景啟動伺服器（ISSUE-168）", () => {
+  // grep -q 讀到第一行就結束，herdr 繼續寫入收到 SIGPIPE；pipefail 會把整條管線判成失敗而誤判「沒在跑」。
+  const envs: Array<Record<string, string>> = [{}, { HERDR_BRIDGE_NO_SERVER_START: "1" }];
+  for (const env of envs) {
+    const result = runFixture([], "verbose-status", true, { env });
+    assert.equal(result.status, 0, result.stderr);
+    assert.doesNotMatch(result.stdout, /starting headless server/);
+    assert.doesNotMatch(result.stderr, /not running/);
+  }
+});
+
 test("Core 未 build 時提示 -r 且零 CLI 呼叫", () => {
   const result = runFixture(["--core"], "running", false);
   assert.equal(result.status, 1);

@@ -16,7 +16,9 @@
 
 **第 2 階段（2026-11-18，只有自動化測試）：**`machines[].cardReview.write`（布林、預設關閉，與 toolchain 同樣驗證並凍結進角色快照，`validateRoleSnapshot` 接受新欄位）；implement 加入 task 內可派到遠端的角色，沒開 write 的 machine 在撿卡前被拒絕「remote implement 不可用」、Lead 候選標 `available:false`；`startRemoteRole` 寫入模式：machine 要開放 write 且要有取回通道、派工前本機工作樹必須乾淨（`assertCleanBase`）、`afterTurn` 先確認本機 digest 未變，再取回、驗證、套用並 commit，失敗一律不採用且本機還原；`main.ts` 注入的 `sshRemoteFetch` 與 exec 一樣尊重手動斷線。測試：新增 `test/remote-write-role.test.ts` 5 項（真的 git 當本機 repo、pod 目錄是它的 clone）、`test/machines.test.ts` 的 write 驗證、`test/card-role-remote.test.ts` 的 preflight／候選／target／快照凍結；更新 4 個原本斷言「implement 一律被拒絕」的既有測試；全套 `npm test` 2134 項，2133 pass、0 fail、1 skipped，`npm run lint` 通過（2026-11-18）。破壞性驗證：拿掉「要開放 write」檢查與拿掉寫入模式的本機 digest 檢查，各有 1 項變紅，皆已還原。**未驗證：**沒有部署、沒有真的遠端（agy-pod／devbox）、`sshRemoteFetch` 沒對真的 ssh 跑過、Lead 實際會不會把 implement 派到遠端、遠端 agent 的實際行為；writer 的 `writeScope` 與驗收閘門是否與「bridge 在 afterTurn 才 commit」順序相容，只靠讀程式碼判斷（afterTurn 在 `onAssignmentDone` 之前執行）。
 
-**狀態：**設計文件、第 1、2 階段的程式與測試；沒有部署、沒有實機。分階段計畫：(1) 純函式與管線單元測試；(2) task 內 implement 接線；(3) PR 階段 fixer 接線；(4) agy-pod 與 devbox 的實機驗收。
+**部署與真實 ssh 冒煙測試（2026-11-18，bridge main `5303286`，16:30 以 `scripts/run.sh -r` 重建並重啟，重啟前 active-streams 為 0）：**執行中的 bridge 已載入第 1、2 階段的程式；**使用者的 config 沒有開 `write`，所以行為沒有變化。**另外我用 `dist` 裡的 `sshRemoteExec`／`sshRemoteFetch`／`fetchRemoteResult`／`applyRemoteResult` 對**兩台真的機器（agy-pod、devbox，皆 Linux）各跑一次冒煙腳本**（遠端放 `/tmp` 下的隨機目錄、結束刪除，不含 agent 與卡片流程）：遠端建立基底並算出的 tree 等於本機 tree；遠端模擬修改（文字改動、新增、二進位檔、latin1 內容、刪除）後取回 patch（974 bytes）；本機套用後 tree 等於遠端回報、commit 的 parent 為派工前 HEAD、內容逐位元組正確、本機工作樹乾淨、遠端暫時 index 已刪除、遠端目錄已清除。兩台都是全部通過（第一次跑曾顯示 1 項 FAIL，是我的腳本預期檔案數寫錯，實際行為正確，改正後重跑通過）。**證明的：**真實 ssh 傳輸與遠端 shell／git 行為、patch 含二進位與非 UTF-8 內容的取回。**沒有證明的：**遠端 agent（codex／pi／agy）實際修改、卡片／task 流程、Lead 會不會派 implement、`write: true` 的設定路徑、writer 驗收閘門與 afterTurn 順序、取消與逾時。
+
+**狀態：**設計文件、第 1、2 階段的程式與測試，以及上述冒煙測試；尚未做 agent 與卡片流程的實機驗收。分階段計畫：(1) 純函式與管線單元測試；(2) task 內 implement 接線；(3) PR 階段 fixer 接線；(4) agy-pod 與 devbox 的實機驗收。
 
 **未驗證／下一步：**`sshRemoteFetch` 沒有對真的 ssh 跑過（測試用本機指令代替）；遠端 `base64`／`wc`／`sh` 行為在 Linux 以外沒驗；遠端 codex／pi 的啟動提示與信任行為都沒在遠端驗過；patch 方案對 submodule、大二進位檔、檔案模式的行為要測；`write` 設定是否要加要使用者確認。
 
@@ -57,6 +59,7 @@
 - `run.sh` 在 plugin 連結路徑與目前目錄不同時會重建並重新連結，可能耗時較久。
 - 失敗（例如 Herdr 伺服器沒在跑）時 bridge 仍活著，看板只會顯示「重啟中」，原因要看 state 目錄的 `restart.log`；60 秒後才允許再按。
 - 沒有強制重啟選項：有進行中串流時只能等或手動處理。
+- **2026-11-18 發現的風險（已在 ISSUE-168 第 6 點修正、待部署驗收）：**`R` 重啟帶 `HERDR_BRIDGE_NO_SERVER_START=1`，而 `run.sh` 的伺服器判斷有 SIGPIPE 誤判，所以 `R` 重啟在修正部署前可能偶爾失敗（日誌 `restart.log` 會有「Herdr server is not running」，bridge 仍在原處執行）。ISSUE-169 的實機驗收當時成功是時序剛好沒踩到。
 
 ## ISSUE-168：埠會變動的 machine：Herdr 目標與 bridge 設定無法跟著改
 
@@ -65,7 +68,7 @@
 **實機驗收紀錄（2026-11-18，本機 macOS＋Herdr 0.9.5，遠端 Linux 經 devtunnel 轉發到 127.0.0.1，bridge main `fe7c802`）：**
 - **已驗收（使用者實機＋我檢查狀態檔與指令輸出）：**`ssh` 別名加 `port`（不寫 host）的 machine 設定後，bridge 以 `ssh -p <port> <alias>` 連上遠端 Herdr（日誌 `connected`、`machine-status.json` 為 connected、側邊欄 reachable）；換埠後在 `known_hosts` 補上新埠的金鑰即可連線；另以 `HostKeyAlias` 登記後，只靠該名字的金鑰紀錄也連得上（同一個埠驗證，**沒有實際換到另一個埠驗證**）。
 - **已驗收：**Herdr 側邊欄的對應（含 `ssh://別名:埠` 形式的 target）：看板 `x` 後側邊欄停用，`o` 後重新啟用（`herdr machine list` 為 disabled／enabled）。
-- **仍未驗收／未修：**看板改 port 後 Herdr 存的目標不會跟著更新（見 ISSUE-170）；`HostKeyAlias` 與「換埠需補金鑰」尚未寫入 README；`run.sh` 偶爾誤判伺服器沒在跑；`-25308` 的根因仍是推測；看板的「重啟 bridge」指令見 ISSUE-169。
+- **仍未驗收／未修：**看板改 port 後 Herdr 存的目標不會跟著更新（見 ISSUE-170）；`HostKeyAlias` 與「換埠需補金鑰」尚未寫入 README；`run.sh` 偶爾誤判伺服器沒在跑（2026-11-18 已找到根因並修正，待部署驗收，見第 6 點）；`-25308` 的根因仍是推測；看板的「重啟 bridge」指令見 ISSUE-169。
 
 **使用者可見症狀（2026-11-18 實機）：**
 - 新增 machine `devbox`（devtunnel 轉發到 `127.0.0.1`，埠每次不同）後，Herdr 側邊欄先是 `! attention`、之後一直 reconnecting。
@@ -77,6 +80,7 @@
 3. 換埠後仍被問密碼：`ssh://帳號@位址:埠` 這種目標 ssh 只試預設金鑰，不會試 `~/.ssh/devbox`。以 `Host devbox`（HostName 127.0.0.1、IdentityFile、不寫 Port）解決；用別名加 `-p` 可登入。
 4. Herdr 沒有修改既有 machine 目標的指令；`herdr machine add ssh://devbox:50123 --label …` 實測可連線（`reachable`），舊的需 `remove`，新的 `rename`。
 5. `devtunnel connect` 的鑰匙圈錯誤 `-25308`（`errSecInteractionNotAllowed`）：我這邊的 shell 同樣得到 `User interaction is not allowed`，`launchctl managername` 為 `Background`；Herdr 伺服器（`herdr server`）是 launchd 底下的背景程序。**我沒有在使用者的 Herdr shell 內確認**，也不確定是誰、何時以背景方式啟動它；`scripts/run.sh -r` 在伺服器沒跑時會印「starting headless server…」，有可能是這一條。
+6. **`run.sh` 誤判「Herdr 伺服器沒在跑」（2026-11-18，根因已確認、已修正、待部署驗收）：**`is_herdr_server_running` 是 `herdr status server 2>/dev/null | grep -Eq "^status:[[:space:]]*running"`，腳本開了 `set -o pipefail`。`grep -q` 讀到第一行就結束，`herdr` 若還有後續輸出（0.9.5 的 `status server` 第一行之後還有 `endpoint_compatible`、`socket` 等多行）就會收到 SIGPIPE，整條管線被判失敗，於是印「starting headless server…」並在背景再開一個 `herdr server`（先前觀察到的「誤判但沒有第二個伺服器」就是這個）；當 `HERDR_BRIDGE_NO_SERVER_START=1`（看板 `R` 重啟帶的變數，ISSUE-169）時則直接失敗「Herdr server is not running」。2026-11-18 16:30 部署 #297 時第一次直接撞到：`./scripts/run.sh -r` 失敗，但同時 `herdr status server` 明明是 running。**修正：**先把輸出收進變數再比對。**測試：**`test/run-sh-args.test.ts` 新增情境（假的 `herdr status server` 先印 `status: running`，再輸出約 600 KB），帶與不帶 `HERDR_BRIDGE_NO_SERVER_START` 都要成功且不得出現「starting headless server」；用舊版 `run.sh` 這個測試逾時變紅（16 秒）、修正後綠；全套 `npm test` 2135 項，2134 pass、0 fail、1 skipped，`npm run lint` 通過（2026-11-18）。**尚未部署（run.sh 是腳本，merge 後下次執行即生效）、未實機驗收。**這同時是 `-25308` 的一個可能成因：誤判時 `run.sh` 會在沒有 GUI session 的背景程序裡多開 `herdr server`，但是否就是使用者遇到的那個，沒有證據，仍標為推測。
    **使用者回報（2026-11-18）：**換一個環境重新啟動 Herdr 伺服器後，`-25308` 就不再出現。這與「伺服器從背景工作階段啟動、子 shell 繼承到不能互動的環境」的推測一致，但**沒有比對啟動前後的環境（`launchctl managername`、`security show-keychain-info`），根因仍未確認**。使用者的方向：伺服器要從 UI app（登入的 GUI 工作階段）啟動，**不要由背景程式啟動**。**尚未做的修正：**`scripts/run.sh` 在伺服器沒跑時仍會自行啟動無介面伺服器（約 `scripts/run.sh:243`），沒有改成提示或拒絕；尚未驗證從 Herdr.app 啟動是否同樣沒有此錯誤。
 
 **未解決的缺口：**
