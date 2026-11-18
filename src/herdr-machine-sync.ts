@@ -14,6 +14,10 @@ export type HerdrMachineRunner = (args: string[], timeoutMs?: number) => Promise
 const HERDR_TIMEOUT_MS = 2000;
 /** `machine add` 會準備遠端伺服器，比一般指令久。 */
 const HERDR_ADD_TIMEOUT_MS = 60_000;
+/** `machine status` 會實際探測遠端，實測約 4 秒，超過預設 2 秒（ISSUE-170 實機失敗的原因）。 */
+const HERDR_STATUS_TIMEOUT_MS = 20_000;
+/** remove／rename／disable 只改本機設定，但給寬鬆一點。 */
+const HERDR_CHANGE_TIMEOUT_MS = 10_000;
 
 const runHerdr: HerdrMachineRunner = (args, timeoutMs = HERDR_TIMEOUT_MS) =>
   new Promise((resolve, reject) =>
@@ -139,15 +143,18 @@ export async function reconcileHerdrPort(
     let reachable = false;
     for (let attempt = 0; attempt < REACHABLE_ATTEMPTS && !reachable; attempt++) {
       if (attempt > 0) await wait(REACHABLE_INTERVAL_MS);
-      reachable = parseReachable(await run(["machine", "status", "--json"]), created.id);
+      reachable = parseReachable(
+        await run(["machine", "status", "--json"], HERDR_STATUS_TIMEOUT_MS),
+        created.id,
+      );
     }
     if (!reachable) throw new Error("new profile not reachable");
-    await run(["machine", "remove", old.id]);
+    await run(["machine", "remove", old.id], HERDR_CHANGE_TIMEOUT_MS);
     const added = created;
     created = undefined; // 舊的已移除，之後失敗不能再移除新的
     try {
-      await run(["machine", "rename", added.id, "--label", old.label]);
-      if (!old.enabled) await run(["machine", "disable", added.id]);
+      await run(["machine", "rename", added.id, "--label", old.label], HERDR_CHANGE_TIMEOUT_MS);
+      if (!old.enabled) await run(["machine", "disable", added.id], HERDR_CHANGE_TIMEOUT_MS);
     } catch {
       return `Herdr 側邊欄已換到新埠，但改名或停用沒成功（目前標籤 ${temporary}）`;
     }
@@ -155,7 +162,7 @@ export async function reconcileHerdrPort(
   } catch {
     if (created) {
       try {
-        await run(["machine", "remove", created.id]);
+        await run(["machine", "remove", created.id], HERDR_CHANGE_TIMEOUT_MS);
       } catch {
         /* 復原失敗只留下多的一筆，呼叫者看到說明會知道 */
       }

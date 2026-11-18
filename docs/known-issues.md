@@ -2,7 +2,9 @@
 
 ## ISSUE-170：看板改 machine 的 port 後，Herdr 側邊欄還連舊埠
 
-更新日期：2026-11-18。狀態：已修正、待驗收（程式與自動化檢查完成；**尚未部署、未重啟 bridge、沒有實機驗收**）。
+更新日期：2026-11-18。狀態：已修正、待驗收（**重新開啟後再修正**：PR #291 部署後第一次實機換埠失敗，原因與修正見「實機失敗」；第二次修正尚未部署、未實機驗收）。
+
+**實機失敗（2026-11-18，PR #291 `e09d0d6` 部署並重啟後第一次換埠）：**使用者在看板把埠改成新值並重啟 bridge，bridge 以新埠連上，但側邊欄仍是舊埠、error（「Connection refused」）；bridge 日誌：`Herdr machine <id>：Herdr 側邊欄的埠沒有更新成功，保留原設定`，Herdr 沒有留下多餘的 `-new` 項目（復原有效）。**根因（已確認，實測計時）：**`herdr machine status` 要實際探測遠端，耗時約 4.4 秒，而 `reconcileHerdrPort` 對它沿用預設的 2 秒逾時，確認 reachable 那步逾時丟錯而整個復原。手動執行同樣的 add 約 4.5 秒就成功、之後狀態為 reachable。單元測試沒抓到是因為假的 herdr 指令不會花時間。**修正：**`status` 逾時改 20 秒、`remove`／`rename`／`disable` 改 10 秒；測試的假 herdr 改成依實機量到的耗時（status 約 4.4 秒、add 約 4.5 秒），逾時不夠就失敗；暫時把 status 逾時改回 2 秒，測試 5 pass／3 fail，已還原；全套 `npm test` 2116 項，2115 pass、0 fail、1 skipped，`npm run lint` 通過（2026-11-18）。使用者的側邊欄當天已手動換到新埠。
 
 **使用者可見症狀（2026-11-18 實機）：**在看板把 `ssh` 別名加 `port` 的 machine 改成新埠並重啟 bridge 後，bridge 以新埠連上（`ssh -p <新埠> <別名>`、狀態 connected），但 Herdr 側邊欄的同一台仍連舊埠、顯示 error，沒有用新埠重連。**預期：**換埠後側邊欄也跟著用新埠。
 
