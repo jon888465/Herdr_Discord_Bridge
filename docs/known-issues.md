@@ -22,7 +22,9 @@
 
 ## ISSUE-166：Card 看板 Machine 第三階段：從看板連線／手動斷線（拆成 A、B）
 
-更新日期：2026-11-17。狀態：已修正、待驗收（A＝hub 核心，PR #277 已 merge；B＝控制通道與看板 `o`／`x`，卡片 `REQ-20261117-board-machine-connect-b`，原始碼與自動化檢查完成）。**尚未部署、未重啟執行中的 bridge，沒有實機驗證。**
+更新日期：2026-11-18。狀態：已修正、待驗收（2026-11-18 重新開啟後再修正；A＝hub 核心，PR #277 已 merge；B＝控制通道與看板 `o`／`x`，PR #280 已 merge、bridge 已於 2026-11-18 重啟載入；2026-11-18 實機回報見「實機回報」，修正在分支 `worktree-board-machine-herdr-sync`，尚未 merge、未部署）。**沒有實機驗收通過。**
+
+**實機回報（2026-11-18，使用者按 `x` 之後）：**看板顯示該 machine「已斷線」，但 Herdr 側邊欄的同一台仍有綠點、仍能在裡面下指令。**根因（已確認）：**Herdr 自己存的 SSH machine 與 bridge 的 tunnel 是兩套獨立連線，原設計只管 bridge 的；SPEC 沒寫清楚這個範圍。另外讀程式碼發現兩條不經 hub 的 SSH 路徑沒擋手動斷線（`sshRealpath`、`sshRemoteExec`，我在 F13 只補了 `uploadTo`／`cleanupAttachments`，漏了這兩處）。**修正（使用者 2026-11-18 選「`x` 也停用 Herdr 的 machine」）：**控制通道成功後同步 `herdr machine enable／disable`（對應規則與失敗處理見 SPEC），並擋掉兩條 SSH 路徑。**測試（2026-11-18）：**全套 `npm test` 2087 項，2086 pass、0 fail、1 skipped；`npm run lint` 通過；新增 `herdr-machine-sync`、控制通道 `afterControl`、看板訊息、遠端 exec 斷線拒絕的測試。**未驗證：**真實 `herdr machine disable` 後側邊欄與其 session 的行為（Herdr 文件寫明遠端 session 照舊，但我沒實測；本機 Herdr 是 0.9.1，文件是 0.9.5）、`enable` 後是否自動重連、版本差異；Herdr 的 profile 對應只靠 `target`／`label`。
 
 **預期：**看板可對機器連線／斷線，斷線後顯示「已斷線」且不自動重連；有進行中的工作時拒絕，同一台再按一次才強制，不能悄悄中斷。
 

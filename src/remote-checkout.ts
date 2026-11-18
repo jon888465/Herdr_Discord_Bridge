@@ -415,11 +415,16 @@ export async function reviewOnRemote(
 }
 
 /** startAgent 由 pane id 前綴取 machine，不做本機信任預處理、不帶 cwd。 */
-export function remoteReviewDeps(hub: Pick<HerdrHub, "request" | "requestOn" | "freshAgentsOn" | "machineConfig">): RemoteReviewDeps {
+export function remoteReviewDeps(hub: Pick<HerdrHub, "request" | "requestOn" | "freshAgentsOn" | "machineConfig" | "isDisconnected">): RemoteReviewDeps {
   const panePort = (machine: string) => ({ request: hub.request.bind(hub), listAgentsWithWorkspaceNames: () => hub.freshAgentsOn(machine) });
   return {
     machine: (id) => hub.machineConfig(id),
-    exec: (machine) => sshRemoteExec(machine),
+    // 手動斷線的 machine 不開 SSH（這條路徑不經 hub）。
+    exec: (machine) => {
+      const run = sshRemoteExec(machine);
+      return (argv, timeoutMs, stdinFile) =>
+        hub.isDisconnected(machine.id) ? Promise.reject(new RemoteFailure("machine 已斷線")) : run(argv, timeoutMs, stdinFile);
+    },
     originUrl: async (cwd) => (await defaultExec("git", ["remote", "get-url", "origin"], { cwd })).stdout,
     createWorkspace: async (machine, cwd, label) => {
       const created = (await hub.requestOn(machine, "workspace.create", { cwd, label, focus: false })) as { workspace?: { workspace_id?: unknown }; root_pane?: { pane_id?: unknown } };

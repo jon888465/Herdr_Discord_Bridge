@@ -442,3 +442,10 @@ test("whitelist: every entry passes; BLOCKED_AT_START keeps the manual-handling 
   for (const text of produced) equal(rc.fixedResultText(text), text);
   match(BLOCKED_AT_START, /常見原因：.*請先.*處理一次/);
 });
+
+test("remoteReviewDeps：手動斷線的 machine 不開 SSH，exec 直接拒絕", async () => {
+  const machine = { id: "pod", ssh: "herdr-test-unconfigured", socket: "/s" };
+  const hub = { machineConfig: () => machine, isDisconnected: () => true };
+  const exec = rc.remoteReviewDeps(hub as never).exec(machine);
+  await rejects(exec(["true"], 1000), /machine 已斷線/);
+});

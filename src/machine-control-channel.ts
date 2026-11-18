@@ -98,10 +98,13 @@ export function normalizeControlResult(value: unknown): MachineControlResult {
       return fail(CONTROL_BAD_RESPONSE);
     if (value.note !== undefined && typeof value.note !== "string")
       return fail(CONTROL_BAD_RESPONSE);
+    if (value.herdr !== undefined && typeof value.herdr !== "string")
+      return fail(CONTROL_BAD_RESPONSE);
     return {
       ok: true,
       status: value.status,
       ...(typeof value.note === "string" ? { note: value.note } : {}),
+      ...(typeof value.herdr === "string" ? { herdr: value.herdr } : {}),
     };
   }
   if (value.ok !== false || typeof value.reason !== "string")
@@ -227,6 +230,11 @@ export interface MachineControlServerOptions {
   tokenFile?: string;
   maxRequestBytes?: number;
   timeoutMs?: number;
+  /** hub 操作成功後的附帶動作（例如同步 Herdr 側邊欄）；回傳的說明放進結果的 `herdr`，丟錯或逾時不影響結果。 */
+  afterControl?: (
+    command: MachineControlCommand,
+    result: MachineControlResult,
+  ) => Promise<string | undefined>;
 }
 
 export async function startMachineControlServer(
@@ -284,7 +292,15 @@ export async function startMachineControlServer(
         Buffer.concat(chunks).toString("utf8"),
         token,
       );
-      reply(command ? runCommand(hub, command) : fail(CONTROL_REJECTED));
+      if (!command) return reply(fail(CONTROL_REJECTED));
+      const result = runCommand(hub, command);
+      if (!result.ok || !options.afterControl) return reply(result);
+      // 總期限（deadline）照舊計時：附帶動作太慢時，原結果照回，不等它。
+      options
+        .afterControl(command, result)
+        .then((herdr) => (herdr ? { ...result, herdr } : result))
+        .catch(() => result)
+        .then(reply);
     });
   });
   try {

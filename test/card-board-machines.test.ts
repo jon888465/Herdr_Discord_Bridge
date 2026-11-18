@@ -9,6 +9,7 @@ import {
   parseMachineEditorText,
   boardHeader,
   applyStatusOverride,
+  machineControlResult,
   machineLines,
   machineViewLines,
   readMachinesSection,
@@ -370,4 +371,11 @@ test("applyStatusOverride：沒有新覆寫時保留尚未到期的舊值（revi
   assert.deepEqual(overrides.get("m1"), { status: "unknown", untilMs: 5000 });
   applyStatusOverride(overrides, "m1", { status: "connected", untilMs: 9000 });
   assert.deepEqual(overrides.get("m1"), { status: "connected", untilMs: 9000 });
+});
+
+test("machineControlResult 把 herdr 說明接在訊息後面，且不影響「已在連線中」的覆寫判斷", () => {
+  const done = machineControlResult("pod", { ok: true, status: "disconnected", herdr: "Herdr 側邊欄已停用" }, 0);
+  assert.equal(done.message, "pod：已斷線；Herdr 側邊欄已停用");
+  const already = machineControlResult("pod", { ok: true, status: "connected", note: "已在連線中", herdr: "Herdr 側邊欄已啟用" }, 0);
+  assert.equal(already.override, undefined);
 });
