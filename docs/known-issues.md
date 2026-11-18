@@ -2,7 +2,9 @@
 
 ## ISSUE-170：看板改 machine 的 port 後，Herdr 側邊欄還連舊埠
 
-更新日期：2026-11-18。狀態：已修正、待驗收（**重新開啟兩次後再修正**：PR #291 部署後第一次實機換埠失敗，修了逾時（PR #292）；部署後第二次仍失敗，見「第二次實機失敗」；第三次修正尚未部署、bridge 啟動路徑尚未實機驗收）。
+更新日期：2026-11-18。狀態：已驗收（2026-11-18 實機，見「實機驗收紀錄」；重新開啟兩次後第三次修正才通過）。
+
+**實機驗收紀錄（2026-11-18，本機 macOS＋Herdr 0.9.5，遠端 Linux 經轉發到 127.0.0.1，bridge main `9ee67fb`，PR #293 merge 後以 `scripts/run.sh -r` 重建並重啟）：**使用者在看板把埠改成新值（15:05）後，我重建並重啟 bridge。bridge 日誌出現「Herdr machine <id>：Herdr 側邊欄已更新到埠 <新埠>」，**是 bridge 啟動路徑自動觸發的，不是手動換的**；`herdr machine list` 的 target 變成新埠、`herdr machine status` 為 reachable、列表只剩原本兩筆沒有多餘的 `-new` 項目；bridge 內兩台 machine 都是 connected。使用者回報側邊欄有重新連上。**中間的兩次失敗與原因（保留供日後參考）：**(1) 逾時太短（status 要探測遠端約 4.4 秒，卻用 2 秒），PR #292 修；(2) `herdr machine status` 只要有機器不通就回非零 exit 但仍有 JSON，被當成失敗，PR #293 修；(3) 第二次失敗後使用者以看板 `R` 重啟，但 `R` 不重建，執行的還是舊的程式碼，載入新程式碼必須 `scripts/run.sh -r`，這點已補進 README。**沒有實機驗的：**失敗復原路徑（只有單元測試與一次真實的 status 失敗重現）、舊 profile 原本停用時維持停用、同別名多筆時不猜。
 
 **第二次實機失敗（2026-11-18，PR #292 `7f4f6ff` 部署並重啟後再換一次埠）：**側邊欄仍連舊埠；bridge 日誌同樣是「沒有更新成功，保留原設定」，沒有留下多餘項目。我用包了計時與錯誤輸出的 runner 對真的 herdr 重現（沒有改 bridge 程式）：`list` 8ms、`add` 4.5 秒成功、`list` 成功、`machine status --json` 耗時 4.3 秒後**以非零 exit code 結束**、於是復原（移除剛新增的）。**根因（已確認）：**`herdr machine status` 只要有任何一台不通（這裡是舊埠那筆）就回 exit 1，但 stdout 仍有完整 JSON；程式把非零 exit 當錯誤丟掉。先前手動檢查都把輸出接給 `jq`，exit code 被隱藏，所以第一次分析沒發現；第一次修的逾時也確實是問題，兩個都要修。**修正：**新增 `settleHerdrOutput`：`status` 指令非零 exit、不是逾時被殺、且有輸出時照常使用輸出；其他指令、無輸出、逾時、spawn 失敗仍丟錯。測試 `test/herdr-status-exit.test.ts` 3 項；暫時讓判斷永不成立，測試 2 pass／1 fail，已還原；全套 `npm test` 2119 項，2118 pass、0 fail、1 skipped，`npm run lint` 通過（2026-11-18）。**實機（修正後、本機、真的 herdr）：**以預設 runner 直接呼叫 `reconcileHerdrPort`（不經 bridge 啟動），側邊欄由已失效的舊埠換到新埠，`herdr machine status` 為 reachable、列表只剩兩筆。**仍未驗收：**bridge 啟動時自動觸發的那條路徑（需要部署並在下次換埠重啟時觀察日誌與側邊欄）。
 
@@ -16,7 +18,7 @@
 
 **測試（2026-11-18，本機 macOS，只有自動化）：**新增 `test/herdr-port-reconcile.test.ts` 8 項（替換流程與順序、停用維持停用、六種不動的情況且只讀取、多筆不猜、連不上復原、新增／移除失敗、改名失敗、list 失敗）；全套 `npm test` 2116 項，2115 pass、0 fail、1 skipped；`npm run lint` 通過。暫時讓「連不上」不再丟錯，測試 7 pass／1 fail，已還原。
 
-**未驗證／風險：**沒有實機驗證（要實際換一次埠、重啟 bridge）；`herdr machine add` 的互動行為（例如是否要求確認）只在非互動下看過；啟動時自動改 Herdr 設定，失敗時可能留下 `-new` 的多餘項目；暫時多一筆同別名 profile 的期間，看板 `x`／`o` 的同步會回「有多個符合」。只在啟動時處理，看板存檔後仍要重啟 bridge 才會更新側邊欄。
+**風險與限制（實機驗收見上方；原本「沒有實機驗證」已過時）：**`herdr machine add` 的互動行為（例如是否要求確認）只在非互動下看過；啟動時自動改 Herdr 設定，失敗時可能留下 `-new` 的多餘項目；暫時多一筆同別名 profile 的期間，看板 `x`／`o` 的同步會回「有多個符合」。只在啟動時處理，看板存檔後仍要重啟 bridge 才會更新側邊欄。
 
 ## ISSUE-169：Card 看板 Machine 檢視沒有「重啟 bridge」指令
 
