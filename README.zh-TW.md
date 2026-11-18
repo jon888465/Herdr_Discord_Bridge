@@ -300,7 +300,7 @@ Machine 也可設定 `{"id":"server","host":"example.com","user":"alice","port":
 
 ### 埠會變動的 machine（例如 devtunnel 轉發到 127.0.0.1）
 
-Herdr 側邊欄的 machine 與 bridge 的 `machines` 是**兩套各自獨立的連線與設定**：看板的 `x`／`o` 成功後會一併 `herdr machine disable`／`enable` 對應的那台（對應規則：bridge 的 `ssh` 等於 Herdr 的 target，沒設 `ssh` 就比 label），但**不會改 Herdr 存的目標**。
+Herdr 側邊欄的 machine 與 bridge 的 `machines` 是**兩套各自獨立的連線與設定**：看板的 `x`／`o` 成功後會一併 `herdr machine disable`／`enable` 對應的那台（對應規則：bridge 的 `ssh` 等於 Herdr 的 target，沒設 `ssh` 就比 label），但**不會改 Herdr 存的目標**。bridge 啟動時，`ssh` 別名加 `port` 的 machine 若 Herdr 有同別名不同埠的項目，會換成新埠（新增、確認 reachable、移除舊的、改回原 label；失敗就復原並保留舊的；實機驗收待完成，ISSUE-170）。
 
 位址固定為 `127.0.0.1`、只有埠會變時，不要用 `Host 127.0.0.1` 把金鑰綁在位址上（會套到所有走本機轉發的連線），也不要把埠寫死在 `~/.ssh/config`。用「別名＋不寫 Port」：
 

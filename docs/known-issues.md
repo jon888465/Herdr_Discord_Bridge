@@ -1,5 +1,19 @@
 # Known Issues
 
+## ISSUE-170：看板改 machine 的 port 後，Herdr 側邊欄還連舊埠
+
+更新日期：2026-11-18。狀態：已修正、待驗收（程式與自動化檢查完成；**尚未部署、未重啟 bridge、沒有實機驗收**）。
+
+**使用者可見症狀（2026-11-18 實機）：**在看板把 `ssh` 別名加 `port` 的 machine 改成新埠並重啟 bridge 後，bridge 以新埠連上（`ssh -p <新埠> <別名>`、狀態 connected），但 Herdr 側邊欄的同一台仍連舊埠、顯示 error，沒有用新埠重連。**預期：**換埠後側邊欄也跟著用新埠。
+
+**已確認根因：**Herdr 與 bridge 是兩套各自獨立的設定（見 ISSUE-168）；看板只改 bridge 的 config，Herdr 存的 `ssh://別名:舊埠` 沒人更新，而 Herdr 不能修改既有 machine 的 target。當天已手動重做（新增→確認 reachable→移除舊的→改名）。
+
+**修正：**`reconcileHerdrPort`（`src/herdr-machine-sync.ts`）。bridge 啟動時對每個 `ssh`＋`port`（不寫 host）的 machine，若 Herdr 已有 target 完全相同的 profile 就不動；若有**唯一**一筆同別名不同埠的 `ssh://` profile，就照手動流程替換：`machine add`（暫用 label `<原 label>-new`，逾時 60 秒）→ 最多 5 次（間隔 2 秒）確認 `machine status` 為 reachable → `machine remove` 舊的 → `rename` 回原 label → 原本停用的維持停用。任何一步失敗就移除剛新增的、舊的不動（若連復原都失敗只會多留一筆）；改名／停用失敗則保留新的並說明目前標籤；多筆不同埠不猜、不動。背景執行不擋啟動，結果只記一行（`Herdr machine <id>：…`）。沒有 `port`、有 `host`、或沒有舊 profile 都不動。
+
+**測試（2026-11-18，本機 macOS，只有自動化）：**新增 `test/herdr-port-reconcile.test.ts` 8 項（替換流程與順序、停用維持停用、六種不動的情況且只讀取、多筆不猜、連不上復原、新增／移除失敗、改名失敗、list 失敗）；全套 `npm test` 2116 項，2115 pass、0 fail、1 skipped；`npm run lint` 通過。暫時讓「連不上」不再丟錯，測試 7 pass／1 fail，已還原。
+
+**未驗證／風險：**沒有實機驗證（要實際換一次埠、重啟 bridge）；`herdr machine add` 的互動行為（例如是否要求確認）只在非互動下看過；啟動時自動改 Herdr 設定，失敗時可能留下 `-new` 的多餘項目；暫時多一筆同別名 profile 的期間，看板 `x`／`o` 的同步會回「有多個符合」。只在啟動時處理，看板存檔後仍要重啟 bridge 才會更新側邊欄。
+
 ## ISSUE-169：Card 看板 Machine 檢視沒有「重啟 bridge」指令
 
 更新日期：2026-11-18。狀態：已驗收（2026-11-18 實機，見「實機驗收紀錄」；`restart.log` 損壞、失敗路徑與有進行中串流時的拒絕**只有單元測試，未實機驗**）。
@@ -25,7 +39,7 @@
 **實機驗收紀錄（2026-11-18，本機 macOS＋Herdr 0.9.5，遠端 Linux 經 devtunnel 轉發到 127.0.0.1，bridge main `fe7c802`）：**
 - **已驗收（使用者實機＋我檢查狀態檔與指令輸出）：**`ssh` 別名加 `port`（不寫 host）的 machine 設定後，bridge 以 `ssh -p <port> <alias>` 連上遠端 Herdr（日誌 `connected`、`machine-status.json` 為 connected、側邊欄 reachable）；換埠後在 `known_hosts` 補上新埠的金鑰即可連線；另以 `HostKeyAlias` 登記後，只靠該名字的金鑰紀錄也連得上（同一個埠驗證，**沒有實際換到另一個埠驗證**）。
 - **已驗收：**Herdr 側邊欄的對應（含 `ssh://別名:埠` 形式的 target）：看板 `x` 後側邊欄停用，`o` 後重新啟用（`herdr machine list` 為 disabled／enabled）。
-- **仍未驗收／未修：**看板改 port 後 Herdr 存的目標不會跟著更新（仍要手動重加）；`HostKeyAlias` 與「換埠需補金鑰」尚未寫入 README；`run.sh` 偶爾誤判伺服器沒在跑；`-25308` 的根因仍是推測；看板的「重啟 bridge」指令見 ISSUE-169。
+- **仍未驗收／未修：**看板改 port 後 Herdr 存的目標不會跟著更新（見 ISSUE-170）；`HostKeyAlias` 與「換埠需補金鑰」尚未寫入 README；`run.sh` 偶爾誤判伺服器沒在跑；`-25308` 的根因仍是推測；看板的「重啟 bridge」指令見 ISSUE-169。
 
 **使用者可見症狀（2026-11-18 實機）：**
 - 新增 machine `devbox`（devtunnel 轉發到 `127.0.0.1`，埠每次不同）後，Herdr 側邊欄先是 `! attention`、之後一直 reconnecting。
@@ -41,7 +55,7 @@
 
 **未解決的缺口：**
 - ~~bridge 的 machine 設了 `ssh` 別名就原樣使用、不能另外帶埠~~：已修正（2026-11-18，使用者選擇改程式）：`ssh` 加 `port`（不寫 host）時用 `ssh -p <port> <alias>`，編輯器允許單獨改 port；自動化測試通過，**尚未實機驗收**，bridge 需重啟才載入。
-- 看板改 port 後，Herdr 存的目標（含埠）仍不會跟著更新，要手動 `herdr machine` 重加。
+- 看板改 port 後，Herdr 存的目標（含埠）不會跟著更新（見 ISSUE-170，已修正、待驗收）。
 - **實機回報（2026-11-18）：**看板對埠會變動的 machine 按 `x` 斷線後，Herdr 側邊欄沒有跟著停用，只有 target 與 bridge `ssh` 相同的那台有。**根因（已確認）：**同步的對應規則只比 `target` 與 `ssh` 是否相等，而這台在 Herdr 的 target 是 `ssh://別名:埠`，不相等，所以找不到、靜默不動作。**修正：**對應時也比較 `ssh://[帳號@]別名[:埠]` 的別名部分（`herdrTargetHost`）；以實際 config 與 `herdr machine list` 驗證兩台都對得上（2026-11-18）。全套 `npm test` 2089 項，2088 pass、0 fail、1 skipped；新增測試先確認會失敗再修。**未驗證：**修正後的實機 `x`／`o` 同步，bridge 需重啟載入。
 
 - `scripts/run.sh` 在 Herdr 伺服器沒跑時從目前環境啟動無介面伺服器，可能讓之後的 pane 沒有 GUI 工作階段；是否要改成提示、尚待決定。
