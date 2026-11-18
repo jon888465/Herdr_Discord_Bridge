@@ -4,7 +4,7 @@ import {
   trackRemoteRole,
 } from "./machine-busy.js";
 import { defaultProjectDir, requestBridgeRestart } from "./bridge-restart.js";
-import { syncHerdrMachine } from "./herdr-machine-sync.js";
+import { reconcileHerdrPort, syncHerdrMachine } from "./herdr-machine-sync.js";
 import { loadDisconnectedMachines, machineDisconnectedFile, saveDisconnectedMachines } from "./machine-disconnected-store.js";
 import { runWithCleanupOnFailure, startMachineControlServerSafely } from "./machine-control-channel.js";
 import {
@@ -299,6 +299,11 @@ async function startBridge(
   herdr.restoreDisconnected(loadDisconnectedMachines(disconnectedFile, herdr.machineIds()));
   herdr.setDisconnectedPersistence((ids) => void saveDisconnectedMachines(disconnectedFile, ids));
   herdr.startTunnels();
+  // 換過埠的 `ssh`＋`port` machine：Herdr 側邊欄存的舊埠也換掉（ISSUE-170）；背景執行，不擋啟動，結果只記一行。
+  for (const id of herdr.machineIds())
+    void reconcileHerdrPort(herdr.machineConfig(id)).then((note) => {
+      if (note) console.error(`Herdr machine ${id}：${note}`);
+    });
   const stopMachineStatus = startMachineStatusWriter(
     herdr,
     join(stateDirectory(), "machine-status.json"),

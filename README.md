@@ -322,7 +322,7 @@ After `herdr machine add`, list the machine under `machines` in the plugin confi
 
 ### Machines whose port changes (e.g. a devtunnel forwarded to 127.0.0.1)
 
-Herdr's sidebar machines and the bridge's `machines` are two separate connections with separate settings. Pressing `x`/`o` on the board also runs `herdr machine disable`/`enable` on the matching Herdr machine (matched by the bridge's `ssh` equal to Herdr's target, or by label when `ssh` is unset), but it does **not** change the target Herdr stored.
+Herdr's sidebar machines and the bridge's `machines` are two separate connections with separate settings. Pressing `x`/`o` on the board also runs `herdr machine disable`/`enable` on the matching Herdr machine (matched by the bridge's `ssh` equal to Herdr's target, or by label when `ssh` is unset), but it does **not** change the target Herdr stored. At bridge startup, for a machine configured as `ssh` alias plus `port`, a Herdr machine with the same alias but a different port is replaced by one with the new port (add, verify reachable, remove the old, restore the label; a failure rolls back and keeps the old one; real-machine acceptance pending, ISSUE-170).
 
 When the address is always `127.0.0.1` and only the port changes, do not bind the key to the address with `Host 127.0.0.1` (it would apply to every local forward) and do not hard-code the port in `~/.ssh/config`. Use an alias without `Port`:
 
