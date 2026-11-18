@@ -4,6 +4,11 @@
 
 更新日期：2026-11-18。狀態：待調查（設定方式已在實機走通並寫入 README，缺口未修；`-25308` 已由使用者以改變 Herdr 伺服器的啟動方式繞過，見下方第 5 點）。
 
+**實機驗收紀錄（2026-11-18，本機 macOS＋Herdr 0.9.5，遠端 Linux 經 devtunnel 轉發到 127.0.0.1，bridge main `fe7c802`）：**
+- **已驗收（使用者實機＋我檢查狀態檔與指令輸出）：**`ssh` 別名加 `port`（不寫 host）的 machine 設定後，bridge 以 `ssh -p <port> <alias>` 連上遠端 Herdr（日誌 `connected`、`machine-status.json` 為 connected、側邊欄 reachable）；換埠後在 `known_hosts` 補上新埠的金鑰即可連線；另以 `HostKeyAlias` 登記後，只靠該名字的金鑰紀錄也連得上（同一個埠驗證，**沒有實際換到另一個埠驗證**）。
+- **已驗收：**Herdr 側邊欄的對應（含 `ssh://別名:埠` 形式的 target）：看板 `x` 後側邊欄停用，`o` 後重新啟用（`herdr machine list` 為 disabled／enabled）。
+- **仍未驗收／未修：**看板改 port 後 Herdr 存的目標不會跟著更新（仍要手動重加）；`HostKeyAlias` 與「換埠需補金鑰」尚未寫入 README；`run.sh` 偶爾誤判伺服器沒在跑；`-25308` 的根因仍是推測；看板的「重啟 bridge」指令尚未開 issue。
+
 **使用者可見症狀（2026-11-18 實機）：**
 - 新增 machine `devbox`（devtunnel 轉發到 `127.0.0.1`，埠每次不同）後，Herdr 側邊欄先是 `! attention`、之後一直 reconnecting。
 - 看板 `x` 斷線後，Herdr 側邊欄的同一台仍在線、仍可下指令（已由 PR #281 修正：`x`／`o` 一併 `herdr machine disable`／`enable`，待實機驗收）。
@@ -51,6 +56,10 @@
 更新日期：2026-11-18。狀態：已修正、待驗收（2026-11-18 重新開啟後再修正；A＝hub 核心，PR #277 已 merge；B＝控制通道與看板 `o`／`x`，PR #280 已 merge、bridge 已於 2026-11-18 重啟載入；2026-11-18 實機回報見「實機回報」，修正在分支 `worktree-board-machine-herdr-sync`，尚未 merge、未部署）。**沒有實機驗收通過。**
 
 **實機回報（2026-11-18，使用者按 `x` 之後）：**看板顯示該 machine「已斷線」，但 Herdr 側邊欄的同一台仍有綠點、仍能在裡面下指令。**根因（已確認）：**Herdr 自己存的 SSH machine 與 bridge 的 tunnel 是兩套獨立連線，原設計只管 bridge 的；SPEC 沒寫清楚這個範圍。另外讀程式碼發現兩條不經 hub 的 SSH 路徑沒擋手動斷線（`sshRealpath`、`sshRemoteExec`，我在 F13 只補了 `uploadTo`／`cleanupAttachments`，漏了這兩處）。**修正（使用者 2026-11-18 選「`x` 也停用 Herdr 的 machine」）：**控制通道成功後同步 `herdr machine enable／disable`（對應規則與失敗處理見 SPEC），並擋掉兩條 SSH 路徑。**測試（2026-11-18）：**全套 `npm test` 2087 項，2086 pass、0 fail、1 skipped；`npm run lint` 通過；新增 `herdr-machine-sync`、控制通道 `afterControl`、看板訊息、遠端 exec 斷線拒絕的測試。**未驗證：**真實 `herdr machine disable` 後側邊欄與其 session 的行為（Herdr 文件寫明遠端 session 照舊，但我沒實測；本機 Herdr 是 0.9.1，文件是 0.9.5）、`enable` 後是否自動重連、版本差異；Herdr 的 profile 對應只靠 `target`／`label`。
+
+**實機驗收紀錄（2026-11-18，本機 macOS＋Herdr 0.9.5，遠端 Linux 經 devtunnel 轉發，bridge main `fe7c802`）：**
+- **已驗收（使用者實機＋我檢查狀態檔與指令輸出）：**看板 `x` 斷線後側邊欄的同一台跟著停用（兩種 target 形式：`agy-pod` 的別名、`devbox` 的 `ssh://別名:埠`）；斷線後重啟 bridge 仍維持「已斷線」、不啟動 tunnel、日誌沒有 `connected`、`machine-disconnected.json` 記得該 machine、側邊欄仍是停用；按 `o` 後重新連上，狀態回到 `connected`，`machine-disconnected.json` 清空，側邊欄重新啟用。
+- **仍未驗收：**有進行中的工作時 `x` 的拒絕與再按一次強制斷線；`ssh` 斷線後不自動重連的長時間觀察；`machine-disconnected.json` 損壞時的行為（只有單元測試）。**因此狀態維持「已修正、待驗收」。**
 
 **預期：**看板可對機器連線／斷線，斷線後顯示「已斷線」且不自動重連（**使用者 2026-11-18 要求：bridge 重啟後也維持斷線，按 `o` 才連線**；已實作、待實機驗收，原本只存在記憶體、重啟會按 config 重新連線）；有進行中的工作時拒絕，同一台再按一次才強制，不能悄悄中斷。
 
