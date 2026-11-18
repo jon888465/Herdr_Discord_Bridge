@@ -2,7 +2,7 @@
 
 ## ISSUE-171：遠端 machine 不能擔任 implement／fixer（寫入角色）
 
-更新日期：2026-11-18。狀態：待調查（**設計階段，尚未實作**；設計與使用者的三項決定見 `docs/remote-write-roles.md`）。
+更新日期：2026-11-18。狀態：修正中（第 1 階段「取回與套用的純管線」已實作並有單元測試；**task 內 implement／fixer 的接線、`write` 設定、Lead 候選都還沒做，remote implement／fixer 仍被撿卡前拒絕**；設計與使用者的三項決定見 `docs/remote-write-roles.md`）。
 
 **使用者要求（2026-11-18）：**agy-pod（agy）與 devbox（codex、pi）要能擔任所有卡片角色；目前只有 reviewer 與 task 內 diagnose／review／verify（唯讀）可以在遠端，implement／fixer 在撿卡前被拒絕「remote 寫入尚未支援」（`src/card-role-assignment.ts`）。
 
@@ -12,9 +12,11 @@
 
 **設計摘要（細節與風險見 `docs/remote-write-roles.md`）：**重用快照與清理機制；寫入模式的 `afterTurn` 在遠端用暫時 index 算出結果 tree，輸出 `git diff --binary --full-index` 的 patch，本機讀回後檢查路徑與大小、確認本機工作樹自快照後沒變、`git apply --index` 後 tree sha 必須等於遠端回報值，最後以固定訊息 commit，輸出與本機 fixer 相同的 `FixOutcome`。**與使用者選的「bundle」不同的地方：**回傳用 patch 而非 git bundle，理由與邊界見設計文件，需使用者知悉。**我另外建議、尚未經使用者確認：**寫入角色需要 machine 明確設定 `cardReview.write: true`（預設關閉），因為遠端 agent 能寫任意內容。
 
-**狀態：**只有設計文件與本 issue；沒有程式變更、沒有測試、沒有部署。分階段計畫：(1) 純函式與管線單元測試；(2) task 內 implement 接線；(3) PR 階段 fixer 接線；(4) agy-pod 與 devbox 的實機驗收。
+**第 1 階段（2026-11-18，只有自動化測試）：**新增 `src/remote-write-result.ts`：`fetchRemoteResult`（遠端暫時 index 算 tree、patch 寫到 `.git` 底下的檔案並回報大小，位元組經新的 `RemoteFetch`／`sshRemoteFetch` 取回，因為既有 `RemoteExec` 只留最後 64 KiB）、`applyRemoteResult`（本機 `git apply --index`、自己重算 tree 必須等於遠端回報值、路徑與模式檢查、固定身分 commit、任何失敗 `reset --hard` 回派工前 HEAD）、`assertCleanBase`（寫入模式要求派工前工作樹乾淨：快照 tree 等於 HEAD tree，否則不派工）。拒絕：絕對路徑、`..`、`.git` 元件、根目錄 `.gitmodules`、符號連結、submodule、檔案數超過 500、patch 超過 10 MiB、沒有任何改動。測試 `test/remote-write-result.test.ts` 9 項，用真的 git 在暫存目錄跑完整流程（遠端目錄是本機 clone，exec／fetch 在本機執行）；全套 `npm test` 2128 項，2127 pass、0 fail、1 skipped，`npm run lint` 通過（2026-11-18）。暫時拿掉 tree 比對，1 項變紅；暫時拿掉還原，3 項變紅，皆已還原。**這只證明管線邏輯；沒有連真的遠端、沒有接到任何角色流程。**
 
-**未驗證／下一步：**遠端 codex／pi 的啟動提示與信任行為都沒在遠端驗過；patch 方案對 submodule、大二進位檔、檔案模式的行為要測；`write` 設定是否要加要使用者確認。
+**狀態：**設計文件、第 1 階段的程式與測試；沒有部署、沒有實機。分階段計畫：(1) 純函式與管線單元測試；(2) task 內 implement 接線；(3) PR 階段 fixer 接線；(4) agy-pod 與 devbox 的實機驗收。
+
+**未驗證／下一步：**`sshRemoteFetch` 沒有對真的 ssh 跑過（測試用本機指令代替）；遠端 `base64`／`wc`／`sh` 行為在 Linux 以外沒驗；遠端 codex／pi 的啟動提示與信任行為都沒在遠端驗過；patch 方案對 submodule、大二進位檔、檔案模式的行為要測；`write` 設定是否要加要使用者確認。
 
 ## ISSUE-170：看板改 machine 的 port 後，Herdr 側邊欄還連舊埠
 

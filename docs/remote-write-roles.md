@@ -1,6 +1,6 @@
 # 遠端寫入角色：implement／fixer
 
-ISSUE-171。2026-11-18，**設計階段，尚未實作**。本文件是提案，不是現有行為；目前 remote implement／fixer 仍會在撿卡前被拒絕（「remote 寫入尚未支援」，見 `src/card-role-assignment.ts` 的 `remoteReviewMachine`）。
+ISSUE-171。2026-11-18，**第 1 階段（取回與套用的純管線）已實作並有單元測試，其餘仍是設計**（見文末「分階段」）。目前 remote implement／fixer 仍會在撿卡前被拒絕（「remote 寫入尚未支援」，見 `src/card-role-assignment.ts` 的 `remoteReviewMachine`）。
 
 ## 目標與決定（使用者 2026-11-18）
 
@@ -70,7 +70,7 @@ afterTurn（寫入模式）
 
 ## 分階段
 
-1. 純函式與管線：patch 取回、路徑檢查、套用＋tree 驗證＋commit、失敗還原（單元測試，不連真機器）。
+1. 純函式與管線：patch 取回、路徑檢查、套用＋tree 驗證＋commit、失敗還原（單元測試，不連真機器）。**已完成（2026-11-18，`src/remote-write-result.ts`）。**實作時補上的細節：寫入模式要求派工前本機工作樹乾淨（快照 tree 等於 HEAD tree），否則不派工，因為 commit 會是「HEAD＋patch」，不能夾帶先前未提交的本機改動；遠端 patch 寫成 `.git` 底下的檔案再用位元組取回（`RemoteExec` 只留 64 KiB）；符號連結一律拒絕；沒有任何改動視為失敗。
 2. task 內 `implement` 接線與 `write` 設定、preflight 與 Lead 候選。
 3. PR 階段 `fixer` 接線。
 4. 實機驗收（agy-pod／devbox 各一次成功路徑與一次失敗路徑），結果記進 ISSUE-171。
