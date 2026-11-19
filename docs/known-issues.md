@@ -2,7 +2,7 @@
 
 ## ISSUE-175：遠端 codex 當作者時，「獨立審查」因作者 session 身分不明而失敗，整個 task 被標 failed
 
-更新日期：2026-11-19。狀態：待調查（根因未確認，只有一個假設）。
+更新日期：2026-11-19。狀態：待決定修法（根因已由讀碼與 devbox 唯讀檢查確認，沒有另外做實機重現；尚未修正）。
 
 **使用者可見症狀（2026-11-19，第九次實機驗收，devbox 的 codex 當 implement 作者）：**implement 成功、正式驗收也通過，但 `review-independent-session` 失敗：「unknown author identity cannot establish an independent review」，task 整體 `failed`：「one or more Assignments failed; synthesis is partial; no passing review for the current version」。Lead 的收尾說「作者紀錄缺少 known session 身分，無法證明 reviewer 與作者為獨立 session」。
 
@@ -10,11 +10,21 @@
 
 **重現／環境：**同第九次；devbox 的 machine 設定沒有 `hookSocket`，agy-pod 有（遠端 agent 沒有 `hookSocket` 時，bridge 用畫面剖析而不是 hook 取得資料，見 README）。
 
-**已確認：**上述訊息與 task 結果；devbox 的設定沒有 `hookSocket`。**未確認（假設）：**codex 的 session 身分是靠 hook 回報的（本機 codex 的 hook 只回報 session 身分），遠端沒有 hook 通道所以作者 session 不明，所以獨立審查無法成立。沒有驗證：設定 `hookSocket` 後是否就解決、agy-pod 的 agy 為什麼不受影響（先前 agy-pod 的 implement task 有跑到完成，細節我沒有重新確認）。
+**已確認根因（2026-11-19，讀碼加 devbox 唯讀檢查）：**
+1. 閘門在 `src/coding-workflow.ts` 的 `assertIndependentReview`：作者的 `session` 是空的就丟這個訊息；作者 session 由 `src/team-task-engine.ts` 的 `onAssignmentDone` 在 implement 回合結束時登記。
+2. 對 codex，依 ISSUE-088 不採用 Herdr 的 `agent_session`（codex 的 hook 由長駐 app-server daemon 執行，pane 對應不可信），只採用「本回合 prompt 的 nonce 能在 rollout 檔裡找到」的觀察值（`src/team-turn.ts` 的 `observedSession` → `src/response-stream.ts` 的 `findCodexRolloutByNonce`）。
+3. 這個搜尋讀的是**本機**的 `$CODEX_HOME/sessions`（預設 `~/.codex/sessions`）。遠端 codex 的 rollout 檔在遠端機器上，本機找不到，所以作者 session 不明，閘門 fail closed。
+4. 證據：devbox 的 `~/.codex/sessions/<日期>` 底下有兩個含 `BRIDGE_BEGIN_` 標記的 rollout 檔，建立時間對應 implement（14:54）與 fixer（15:01）那兩次 session（檔名含 session id）；它們在本機的 `~/.codex/sessions` 不存在。
+5. 非 codex 的遠端 agent 走 ISSUE-154 的路徑（遠端 hook 的 Stop 事件帶 session id，機器要設 `hookSocket`），所以 agy-pod 的 agy 不受這個問題影響。**我前面「devbox 沒有 `hookSocket` 所以 session 不明」的假設是錯的因果**：codex 不走那條路，設 `hookSocket` 不會讓這個閘門通過（從程式路徑判斷，沒有實測）。
+6. 補充證據（Herdr 的 codex session 不可信，ISSUE-088 的另一個實例）：驗收後我對 devbox 執行 `agent list`，使用者自己的 codex pane 的 `agent_session` 值，與 bridge 那次 fixer 的 session（rollout 檔名裡的 id）完全相同；那是另一個 pane。所以不能直接採用 Herdr 的 `agent_session` 來解決。
+**沒驗證：**遠端 codex 當 reviewer 是否同樣因「reviewer 身分不明」失敗（從程式推論會，沒有測）。
 
 **影響：**遠端 codex 當 implement 作者的 `--coding` task 目前會在審查閘門失敗，即使 implement 本身成功；本次驗收的 implement 與 fixer 成功路徑不受影響，但完整流程（到 review）在 devbox 上走不通。
 
-**下一步：**讀程式找出「作者 session 身分」的來源與判斷位置；確認是否與 `hookSocket` 有關；必要時為遠端 codex 補上取得 session 身分的辦法，或調整閘門對遠端作者的處理（要先決定標準，不能為了通過而降低獨立審查的要求）。
+**修法選項（尚未決定、尚未實作）：**
+- A（我的建議）：讓 nonce 搜尋支援遠端：經該 machine 的 exec 在遠端 `$CODEX_HOME/sessions` 找含 nonce 的 rollout，只回傳 session id，規則與本機相同（恰好一個符合才採用，零個或多個視為不明、閘門照樣 fail closed）。需要新的固定遠端腳本、有界輸出與測試，不降低獨立審查的要求。
+- B：直接採用 Herdr 的 `agent_session`：不可行，見上面第 6 點。
+- C：放寬閘門讓遠端作者通過：不接受，這會降低獨立審查的標準。
 
 ## ISSUE-174：遠端 codex 在新資料夾停在「信任資料夾」提示，遠端寫入與 reviewer 角色啟動不就緒
 
