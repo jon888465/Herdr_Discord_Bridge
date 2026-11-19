@@ -2,7 +2,7 @@
 
 ## ISSUE-175：遠端 codex 當作者時，「獨立審查」因作者 session 身分不明而失敗，整個 task 被標 failed
 
-更新日期：2026-11-19。狀態：已修正、待驗收（修法 A 已實作；單元測試、真的 `sh` 測試與對 devbox 真實 rollout 的唯讀實測通過；**尚未部署、尚未用真實的 `--coding` task 驗證閘門會通過**）。根因已由讀碼與 devbox 唯讀檢查確認，沒有另外做實機重現。
+更新日期：2026-11-19。狀態：已驗收（2026-11-19，devbox 的 codex 當 implement 作者，獨立審查閘門通過一次；**未驗收：遠端 codex 當 reviewer、其他機器與其他種類**）。先前：已修正、待驗收。根因已由讀碼與 devbox 唯讀檢查確認，沒有另外做實機重現。
 
 **使用者可見症狀（2026-11-19，第九次實機驗收，devbox 的 codex 當 implement 作者）：**implement 成功、正式驗收也通過，但 `review-independent-session` 失敗：「unknown author identity cannot establish an independent review」，task 整體 `failed`：「one or more Assignments failed; synthesis is partial; no passing review for the current version」。Lead 的收尾說「作者紀錄缺少 known session 身分，無法證明 reviewer 與作者為獨立 session」。
 
@@ -30,7 +30,9 @@
 
 **測試（2026-11-19，本機 macOS）：**新增 `test/remote-codex-session.test.ts` 8 項（真的 `sh`：唯一的真 session 被回傳且子 agent 與沒有 nonce 的檔案被忽略、兩個或零個是不明、`source.subagent` 物件也算子 agent、太舊的檔案不是候選、sessions 是符號連結或不存在是不明；nonce 不合法不會送到遠端且遠端失敗不洩漏細節；輸出解析）與 `test/team-turn.test.ts` 2 項（有提供查詢函式時 codex 的 session 來自它並收到本回合 nonce；找不到時維持不明）。暫時拿掉 `team-turn` 的接線與子 agent 判斷，3 項失敗，已還原。`npm test` 2172 項、2171 pass、0 fail、1 skipped；`npm run lint` 通過（268 個 TypeScript 檔）。**對真實資料的唯讀實測（2026-11-19）：**用 devbox 上那次 implement 的 nonce 呼叫 `findRemoteCodexSession`，回傳的 session id 與該 rollout 檔名一致；錯的 nonce 與太短的時間窗都回傳不明。
 
-**未驗證／下一步：**(1) 部署後在 devbox 重跑一張 implement 卡，確認獨立審查閘門通過（目前只驗了查詢函式，沒有走完整的 `--coding` task）；(2) 遠端 codex 當 reviewer 是否也會因此改善（沒測）；(3) `main.ts` 的接線沒有單元測試，只有型別檢查與上述測試；(4) 腳本用 GNU／BSD 都有的 `find -mmin -size -maxdepth`，只在 Linux 的 devbox 實測；(5) 遠端的 codex 若用了不同的 `CODEX_HOME` 而 bridge 的 SSH 環境沒有設，會找不到而回傳不明（fail closed）。
+**實機驗收（2026-11-19，本機 macOS、Herdr 0.9.5、bridge main 含 #316，`scripts/run.sh -r` 部署後；devbox 的 codex 0.163.0；devbox 暫時 `write: true`、sandbox 暫時 L1，驗完已還原並重啟；卡片 `REQ-20261119-remote-codex-review`）：**卡片只宣告 `implement: devbox:codex`，Lead 照一般 coding 流程排了 implement（遠端）、獨立 review（本機 codex，另一個 session）、verify（遠端與本機各一個）。結果：task `completed`（2026-11-19T08:01:19Z），Lead 的收尾寫「Review：pass，無 findings；作者與 reviewer 的 session 已辨識且不同，未回報 unknown author identity」；`independent-review` 完成，先前（第九次實機驗收）失敗的就是這一步。**我獨立確認的：**本機 commit 的作者是 `hdb-remote`、訊息為 `hdb remote implement (devbox)`、只新增 `review.txt`（一行 `reviewed` 加換行）、工作樹乾淨；devbox 上 `config.toml` 沒有這次的信任條目、root 底下只剩備份目錄、沒有殘留 workspace。**這次順便驗到的：**devbox 上的 codex 也完成了 `verify-acceptance`（遠端 codex 當 verify，`toolchain: true`），遠端 codex 的 verify 路徑可用。**限制：**reviewer 是本機的 codex，不是遠端的；task 中途 devbox 的連線出現過幾次短暫的 `unreachable` 後恢復，不影響結果；devbox 的 verify 開始時 codex 停在 `Waiting for startup` 約 70 秒後自行恢復，原因沒查。
+
+**未驗證／下一步（以下是驗收前寫的；(1) 已完成，見上方「實機驗收」）：**(1) 已完成；(2) 遠端 codex 當 reviewer 是否也會因此改善（沒測）；(3) `main.ts` 的接線沒有單元測試，只有型別檢查與上述測試；(4) 腳本用 GNU／BSD 都有的 `find -mmin -size -maxdepth`，只在 Linux 的 devbox 實測；(5) 遠端的 codex 若用了不同的 `CODEX_HOME` 而 bridge 的 SSH 環境沒有設，會找不到而回傳不明（fail closed）。
 
 ## ISSUE-174：遠端 codex 在新資料夾停在「信任資料夾」提示，遠端寫入與 reviewer 角色啟動不就緒
 
