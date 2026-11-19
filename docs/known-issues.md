@@ -1,5 +1,25 @@
 # Known Issues
 
+## ISSUE-174：遠端 codex 在新資料夾停在「信任資料夾」提示，遠端寫入與 reviewer 角色啟動不就緒
+
+更新日期：2026-11-19。狀態：已修正、待驗收（單元測試與真的 `sh` 測試通過；**尚未部署、尚未在 devbox 實機驗證**）。
+
+**使用者可見症狀（2026-11-19，devbox 寫入驗收第二次嘗試，codex 0.163.0）：**卡片 `implement: devbox:codex` 的 task 失敗：「遠端角色失敗：Worker 沒有就緒: Worker 卡在啟動提示（blocked）。常見原因：Agent 自己的更新提示或新資料夾的信任提示」。
+
+**預期：**與 agy（ISSUE-113、ISSUE-143）一致：bridge 只把「自己管理、marker 相符的那一個 checkout 目錄」預先信任，結束後移除；使用者 2026-11-19 決定 codex 比照 agy 處理（原本 ISSUE-118 的原則是信任提示留給人）。
+
+**重現／環境與證據（2026-11-19，我用探針在 devbox 手動重現，不是 bridge 自己的 log）：**在 `<root>/` 底下建一個新的 git 資料夾，用 Herdr 開 workspace 後執行 `codex`，pane 狀態是 `blocked`，畫面是 `Folder access … Trust this folder? … 1. Trust and continue / 2. Quit`。同一個探針也試過用啟動參數 `-c 'projects."<dir>".trust_level="trusted"'` 覆寫，**提示仍然出現**（只試一次，寫法也可能不對）；`codex --help` 沒有信任相關旗標。codex 的信任記在 `~/.codex/config.toml` 的 `[projects."<完整路徑>"]`（`trust_level = "trusted"`），依完整路徑比對，所以 bridge 每次用不同目錄都會被問。
+
+**已確認根因：**codex 對每個新資料夾都問一次信任，bridge 沒有處理（agy 有，codex 沒有）。**未確認：**同一台機器的第一次探針還看到過 codex 的更新提示（`0.163.0 → 0.170.0`，選項含 `Skip until next version`），之後再開卻沒有再出現，原因不明；ISSUE-118 的更新提示清單只涵蓋 codex 的 `Update available`＋`Skip until next version`→`3`。
+
+**意外（我的探針造成，待你決定）：**第二次探針時我在讀不到畫面的情況下盲送了 `3`＋Enter，codex 把 Enter 當成接受預設的「Trust and continue」，並把 `3` 當成一句提問；我立刻關掉 workspace。結果 devbox 的 `~/.codex/config.toml` 留下 `[projects."<root>/_probe"]`（`trust_level = "trusted"`），該目錄已刪除，殘留條目尚未移除。
+
+**修正（2026-11-19，已實作、尚未部署）：**新增 `src/codex-project-trust.ts`（純函式：只在檔尾追加 `[projects."<dir>"]` 表，或只移除我們追加的「標頭＋`trust_level`」區塊；`[projects]`／`projects = {…}` 形式、含引號／反斜線／控制字元的路徑一律拒絕，不猜）；`src/remote-agy-trust.ts` 把寫入腳本與流程參數化成「信任目標」，agy 的腳本與訊息逐字不變（既有 16 項測試原封不動全過），codex 用相同的固定腳本（持鎖、雜湊驗證、備份留 5 份、符號連結拒絕、marker 檢查），備份目錄 `.hdb-codex-config-backups`；`remoteTrustEditor(kind)` 只對 agy、codex 回傳編輯器；`src/remote-snapshot.ts`（task 內角色與 PR 階段 fixer）與 `src/remote-checkout.ts`（PR 階段 remote reviewer）改成依 agent 種類選編輯器，其餘種類（claude、pi）不寫任何信任。`config.toml` 不存在就拒絕、不建立。
+
+**測試（2026-11-19，本機 macOS，只有自動化）：**新增 `test/remote-codex-trust.test.ts` 9 項（TOML 編輯的新增／重複／往返還原／不是我們寫的就不移除／拒絕的格式；選擇器只認 agy 與 codex；真 `sh`：新增與移除逐位元組還原、保留檔案權限、備份 600 且只留 5 份、缺檔／符號連結／marker 不符／無法解析的格式都拒絕且原檔不變）。暫時破壞「移除時一併拿掉前面的空行」，2 項失敗，已還原。`npm test` 2162 項、2161 pass、0 fail、1 skipped；`npm run lint` 通過（266 個 TypeScript 檔）。
+
+**未驗證／下一步：**(1) 部署後在 devbox 重跑 implement 卡，確認 codex 不再停在信任提示、結束後信任被移除；(2) 接線（`remote-snapshot.ts`、`remote-checkout.ts` 的呼叫點）沒有 codex 專屬的單元測試，只有型別檢查、agy 既有測試不變與上述單元測試；(3) pi 的啟動提示沒有測過；(4) 更新提示偶發出現的原因；(5) 殘留的 `_probe` 條目。
+
 ## ISSUE-173：card review／card fix 的 reviewer、fixer 剛啟動顯示 done 時被判「沒有就緒」
 
 更新日期：2026-11-19。狀態：已修正、待驗收（單元測試通過；尚未部署、尚未在真實 `card review` 觀察到不再失敗）。
@@ -55,6 +75,8 @@
 **第六次實機驗收（2026-11-19，同一張卡第三次 `card fix`，PR 階段 fixer 成功路徑，通過；#310 已部署）：**環境：本機 macOS、Herdr 0.9.5、bridge main（含 #309、#310，以 `scripts/run.sh -r` 重建並重啟）；agy-pod 暫時 `write: true`；sandbox 暫時 L1；先把前兩次失敗保留的遠端 workspace（`wA`、`wB`）用 `workspace close` 關掉。結果：`card fix` 在 agy-pod 開新 workspace 與 agy，送出提示（1595 字元）、agy 回覆，bridge 回報「fixer 已套用 1 個檔案，commit 379891035bf5」；F1 標為 `fixed`；新 commit `6436546a32e1 → 379891035bf5` 只改 `notes3.md`（刪掉 3 行額外內容）；本機 worktree 的 `notes3.md` 內容為單行 `# notes3` 加換行、worktree 乾淨；commit 作者是 `hdb-remote`（設計如此，`src/remote-write-result.ts`）；作者 pane 已關閉，遠端 workspace 清單只剩預設的 `w2`。**這次沒驗到的：**fixer 的失敗路徑；修正後 `card pr` 推新 commit 並做第 2 輪 review；遠端 agy 沒有 GitHub 憑證（沒檢查）；前兩次失敗保留的遠端目錄（`herdr-card-review/` 下）是否還在、是否要手動刪（沒檢查）；ISSUE-173 的 done 路徑（這張卡 reviewer 啟動是 `unknown`→`idle`，沒出現 done）。**第五次失敗的根因（machine local → agy-pod）見上方「根因」；修正是 #310。**
 
 **第七次實機驗收（2026-11-19，fixer 失敗路徑「遠端產生符號連結」，通過；第四張卡 `REQ-20261119-remote-fixer-live4`）：**環境同第六次（bridge 含 #309、#310；sandbox 暫時 L1、agy-pod 暫時 `write: true`，驗完已還原並重啟）。**測試素材有兩處不是 bridge 判定的，要看清楚：**(1) 卡片的 task 在 claude opus worker（`w8K:p4`）跳出 Claude Code 的 auto mode 確認後被標成 `blocked`（bridge 記成兩個 question，沒有自動恢復，也找不到可接續的指令），我用 `team cancel` 取消，並**手動把卡片改成 `done`**；(2) F1 是**我手寫進卡片「Review 發現」的**（要求 agy 建立指向 `/etc/hostname` 的符號連結 `link.txt`），不是 reviewer 判的，因為 reviewer 的 finding 不受我控制；本機 worktree 的 `notes4.md` 是我 commit 的（`9ca1818e65e5`）。另外：沒有 PR（PAT 不能開 PR，我也沒請你開）卻能跑 `card fix`，所以 `card fix` 不要求卡片已登記 PR。結果：`card fix` 在 agy-pod 開新 workspace 並送出提示（1661 字元），bridge 回報「遠端改動不被接受: 新增或修改了符號連結」「這一圈沒有被採用」「沒有改動任何 finding 的狀態」「作者的 pane 已關閉」。我另外確認：本機 worktree 沒有新 commit（HEAD 仍是 `9ca1818`）、工作樹乾淨、沒有 `link.txt`；卡片 F1 維持 `open`；agy-pod 的 workspace 清單只剩預設的 `w2`。**沒檢查的：**遠端目錄是否被清掉（沒有 ssh 進去看，只看到訊息沒有 `cleanup_pending`）；為什麼 Lead 排了 claude opus worker 且它會跳 auto mode 確認（bridge 只帶 `--model opus`，`args` 是空的，沒有 permission mode 參數；確切原因沒查清楚，沒有抓到當時的畫面）。**附帶事件：**那次 `/auto-mode-setup` 把 `autoMode.environment` 寫進使用者全域的 `~/.claude/settings.json`（受信任 repo 只列 sandbox）；使用者要求後已還原，備份在 scratchpad。這是 Claude Code 的行為，不是 bridge 寫的，但 bridge 啟動的 worker 在 worktree 裡會碰到。
+
+**第八次實機驗收（2026-11-19，devbox 的 codex 寫入角色，未完成，受阻；設定：devbox 暫時 `write: true`、sandbox 暫時 L1，驗完要還原）：**第一次嘗試 implement 在啟動前失敗：「遠端角色失敗：marker 寫入失敗」。**根因（我用唯讀 SSH 查證）：**devbox 上的 `cardReview.root`（`<root>`）不存在，而建 checkout 目錄的腳本用不帶 `-p` 的 `mkdir`（`src/remote-snapshot.ts` 的 `MKDIR_SCRIPT`），父目錄不存在就失敗；agy-pod 的 root 本來就存在所以先前沒遇到。文件沒有說這個 root 要事先建立（文件缺口，也可能是程式缺口，沒決定）。我在你的 devbox 上建了這個空目錄（權限 700，可再刪除）。`codex`、`git`、`timeout`、`pi` 在 devbox 都有。第二次嘗試 implement 失敗於「Worker 卡在啟動提示（blocked）」，原因見 ISSUE-174（codex 對新資料夾的信任提示）。因此 **devbox 的寫入角色（codex、pi）仍未驗收**。下一步：ISSUE-174 的修正部署後重跑 implement 與 fixer 各一次。
 
 **適用範圍決定（使用者 2026-11-19）：**遠端 implement 的用途是把拆好的小工作交給別的 agent、以 patch 傳回本機 worktree 再 commit；大功能在規劃時拆成多張卡（一卡一 worktree、一 PR），所以「派工前工作樹乾淨」「遠端工作期間本機不能改動」兩個限制不需要放寬，也不做多遠端 writer 的合併。程式面已確認 coding task 只允許一個 writer（讀程式碼，見 `docs/remote-write-roles.md`「適用範圍」）；同一個遠端 target 在同 task 連續做第二次 implement 未驗證。
 
