@@ -979,8 +979,10 @@ export async function handleCommand(
                       ...(hasRoleGuard()
                         ? {
                             beforePromptAttempt: async () => {
+                              // 遠端 fixer（ISSUE-171）的 agent 在遠端機器上：清單與 machine 都要跟著它，
+                              // 否則會拿本機清單比對、誤判「machine local → agy-pod」。
                               const live = (
-                                await runtime.herdr.listAgentsWithWorkspaceNames()
+                                await liveAgentList(runtime.herdr, agent)
                               ).find((a) => a.pane_id === agent.pane_id);
                               if (!live)
                                 throw new Error("卡片角色送出前 pane 已不存在");
@@ -989,6 +991,7 @@ export async function handleCommand(
                                 live,
                                 agent.agent!,
                                 agent.workspace_id,
+                                machineOfActor(agent),
                               );
                               if (
                                 agent.model &&
