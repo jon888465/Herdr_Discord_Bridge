@@ -2,7 +2,7 @@
 
 ## ISSUE-175：遠端 codex 當作者時，「獨立審查」因作者 session 身分不明而失敗，整個 task 被標 failed
 
-更新日期：2026-11-19。狀態：待決定修法（根因已由讀碼與 devbox 唯讀檢查確認，沒有另外做實機重現；尚未修正）。
+更新日期：2026-11-19。狀態：已修正、待驗收（修法 A 已實作；單元測試、真的 `sh` 測試與對 devbox 真實 rollout 的唯讀實測通過；**尚未部署、尚未用真實的 `--coding` task 驗證閘門會通過**）。根因已由讀碼與 devbox 唯讀檢查確認，沒有另外做實機重現。
 
 **使用者可見症狀（2026-11-19，第九次實機驗收，devbox 的 codex 當 implement 作者）：**implement 成功、正式驗收也通過，但 `review-independent-session` 失敗：「unknown author identity cannot establish an independent review」，task 整體 `failed`：「one or more Assignments failed; synthesis is partial; no passing review for the current version」。Lead 的收尾說「作者紀錄缺少 known session 身分，無法證明 reviewer 與作者為獨立 session」。
 
@@ -21,10 +21,16 @@
 
 **影響：**遠端 codex 當 implement 作者的 `--coding` task 目前會在審查閘門失敗，即使 implement 本身成功；本次驗收的 implement 與 fixer 成功路徑不受影響，但完整流程（到 review）在 devbox 上走不通。
 
-**修法選項（尚未決定、尚未實作）：**
-- A（我的建議）：讓 nonce 搜尋支援遠端：經該 machine 的 exec 在遠端 `$CODEX_HOME/sessions` 找含 nonce 的 rollout，只回傳 session id，規則與本機相同（恰好一個符合才採用，零個或多個視為不明、閘門照樣 fail closed）。需要新的固定遠端腳本、有界輸出與測試，不降低獨立審查的要求。
+**修法選項（使用者 2026-11-19 選 A）：**
+- A：讓 nonce 搜尋支援遠端（已實作，見下）。
 - B：直接採用 Herdr 的 `agent_session`：不可行，見上面第 6 點。
 - C：放寬閘門讓遠端作者通過：不接受，這會降低獨立審查的標準。
+
+**修正（2026-11-19，已實作、尚未部署）：**新增 `src/remote-codex-session.ts`：固定的遠端腳本（只讀 `$CODEX_HOME`，預設 `~/.codex`，底下的 `sessions`；是符號連結就當作沒有；只看最近寫入、小於 64 MiB 的 `rollout-*.jsonl`；含 nonce 的才輸出；第一行含 `"subagent"` 的標為子 agent；值只走位置參數，最多回傳 20 行）與 `findRemoteCodexSession`。規則與本機 `findCodexRolloutByNonce` 相同：排除子 agent、恰好一個 session 才採用，零個、多個、遠端失敗、nonce 格式不合都回傳「不明」（閘門照樣 fail closed），失敗原因只進 console 且不含遠端內容。遠端 exec 只保留最後 64 KiB 輸出，所以子 agent 的判斷在遠端做完，只回傳「旗標 檔名」。接線：`TeamTurnContext.findCodexSession`（`src/team-turn.ts` 的 `observedSession` 優先使用，沒有就維持原本的本機搜尋）、`TeamTaskRunInput.findCodexSession`（`src/team-orchestration.ts` 綁上 worker 後傳入回合）、`src/main.ts` 依 worker 所在機器選本機或遠端。本機 codex 的行為不變。
+
+**測試（2026-11-19，本機 macOS）：**新增 `test/remote-codex-session.test.ts` 8 項（真的 `sh`：唯一的真 session 被回傳且子 agent 與沒有 nonce 的檔案被忽略、兩個或零個是不明、`source.subagent` 物件也算子 agent、太舊的檔案不是候選、sessions 是符號連結或不存在是不明；nonce 不合法不會送到遠端且遠端失敗不洩漏細節；輸出解析）與 `test/team-turn.test.ts` 2 項（有提供查詢函式時 codex 的 session 來自它並收到本回合 nonce；找不到時維持不明）。暫時拿掉 `team-turn` 的接線與子 agent 判斷，3 項失敗，已還原。`npm test` 2172 項、2171 pass、0 fail、1 skipped；`npm run lint` 通過（268 個 TypeScript 檔）。**對真實資料的唯讀實測（2026-11-19）：**用 devbox 上那次 implement 的 nonce 呼叫 `findRemoteCodexSession`，回傳的 session id 與該 rollout 檔名一致；錯的 nonce 與太短的時間窗都回傳不明。
+
+**未驗證／下一步：**(1) 部署後在 devbox 重跑一張 implement 卡，確認獨立審查閘門通過（目前只驗了查詢函式，沒有走完整的 `--coding` task）；(2) 遠端 codex 當 reviewer 是否也會因此改善（沒測）；(3) `main.ts` 的接線沒有單元測試，只有型別檢查與上述測試；(4) 腳本用 GNU／BSD 都有的 `find -mmin -size -maxdepth`，只在 Linux 的 devbox 實測；(5) 遠端的 codex 若用了不同的 `CODEX_HOME` 而 bridge 的 SSH 環境沒有設，會找不到而回傳不明（fail closed）。
 
 ## ISSUE-174：遠端 codex 在新資料夾停在「信任資料夾」提示，遠端寫入與 reviewer 角色啟動不就緒
 

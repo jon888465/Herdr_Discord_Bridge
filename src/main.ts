@@ -147,7 +147,9 @@ import {
   isFirstSessionRegistration,
   sameAgentSession,
   sessionCreatedSince,
+  findCodexSessionByNonce,
 } from "./response-stream.js";
+import { findRemoteCodexSession } from "./remote-codex-session.js";
 import { AgentPool, type AgentProfile } from "./agent-pool.js";
 import { runTeamTurn } from "./team-turn.js";
 import { createTurnHookFinal } from "./turn-hook-final.js";
@@ -2287,6 +2289,18 @@ async function startTeamTask(
       ...(coding ? { coding: true } : {}),
       ...(coding && remoteReviewers.length ? { remoteReviewers } : {}),
       ...(remoteRoles.length ? { remoteRoles } : {}),
+      // ISSUE-175：遠端 codex 的 rollout 在遠端機器上，本機找不到，作者／reviewer 的 session 會變成「不明」而讓獨立審查失敗。
+      findCodexSession: async (worker, nonce, since) => {
+        const machine = machineOfActor(worker);
+        if (machine === "local" || !(runtime.herdr instanceof HerdrHub)) return findCodexSessionByNonce(nonce, since);
+        try {
+          const deps = remoteWriteDeps(runtime.herdr);
+          const config = deps.machine(machine);
+          return config ? await findRemoteCodexSession(deps.exec(config), nonce, since) : undefined;
+        } catch {
+          return undefined;
+        }
+      },
       ...(roleSnapshot
         ? {
             roleSnapshot,

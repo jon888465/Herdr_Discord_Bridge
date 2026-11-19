@@ -34,6 +34,11 @@ export interface TeamTurnContext {
    * 實際 session（只有 coding 的獨立 review 需要）。
    */
   observeSession?: boolean;
+  /**
+   * ISSUE-175：用 nonce 找 codex session 的方式。沒有就找本機的 rollout；遠端 codex 的 rollout 在遠端機器上，
+   * 由呼叫端提供查遠端的版本。找不到或不唯一都回傳 undefined（呼叫端 fail closed）。
+   */
+  findCodexSession?: (nonce: string, since: number) => Promise<{ kind: "id"; value: string } | undefined>;
 }
 
 /** 終端畫面已看到框、但 hook 事件可能還在路上時，最多再等多久。 */
@@ -136,6 +141,7 @@ export async function runTeamTurn(
       };
       return { kind, value };
     }
+    if (context.findCodexSession) return context.findCodexSession(nonce, since);
     const match = await findCodexRolloutByNonce(nonce, since);
     return match ? { kind: "id" as const, value: match.value } : undefined;
   };
