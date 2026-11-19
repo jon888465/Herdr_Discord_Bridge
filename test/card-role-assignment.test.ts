@@ -316,6 +316,23 @@ test("readiness rejects replacement terminal, kind, machine and known session; u
     "w1",
   );
 });
+test("assertReadyIdentity names the fields that changed (ISSUE-171 diagnostic)", () => {
+  assert.throws(
+    () =>
+      assertReadyIdentity(
+        actor(),
+        actor({ terminal_id: "other-terminal", pane_id: "w1:p9" }),
+        "claude",
+        "w1",
+      ),
+    (error: Error) =>
+      error.message.includes("pane ") &&
+      error.message.includes("→ w1:p9") &&
+      error.message.includes("terminal ") &&
+      error.message.includes("→ other-terminal") &&
+      !error.message.includes("workspace "),
+  );
+});
 test("v2 full-length metadata fits 300, survives parse/rotation; old hash and text unchanged", () => {
   const identity: RoleIdentity = {
     role: "a".repeat(64),

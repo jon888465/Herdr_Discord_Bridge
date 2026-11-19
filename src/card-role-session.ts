@@ -14,17 +14,27 @@ export function assertReadyIdentity(
   /** 只有卡片 remote reviewer 會傳遠端 machine；其餘一律 local。 */
   machine = "local",
 ): void {
+  // 列出是哪些欄位對不上（ISSUE-171 遠端 fixer 實機驗收遇到這個錯誤卻看不出原因）；只含 id／種類，不含內容。
+  const changed: string[] = [];
+  if (ready.pane_id !== started.pane_id)
+    changed.push(`pane ${started.pane_id} → ${ready.pane_id}`);
+  if (ready.terminal_id !== started.terminal_id)
+    changed.push(`terminal ${started.terminal_id} → ${ready.terminal_id}`);
+  if (ready.workspace_id !== workspace)
+    changed.push(`workspace ${workspace} → ${ready.workspace_id}`);
+  if (ready.agent !== kind) changed.push(`agent ${kind} → ${ready.agent}`);
+  if (machineOfActor(ready) !== machine)
+    changed.push(`machine ${machine} → ${machineOfActor(ready)}`);
   if (
-    ready.pane_id !== started.pane_id ||
-    ready.terminal_id !== started.terminal_id ||
-    ready.workspace_id !== workspace ||
-    ready.agent !== kind ||
-    machineOfActor(ready) !== machine ||
-    (hasAgentSession(started.agent_session) &&
-      !sameAgentSession(started.agent_session, ready.agent_session))
+    hasAgentSession(started.agent_session) &&
+    !sameAgentSession(started.agent_session, ready.agent_session)
   )
+    changed.push(
+      `session ${hasAgentSession(ready.agent_session) ? "已換" : "消失"}`,
+    );
+  if (changed.length)
     throw new Error(
-      "卡片角色派工前身分已改變（machine／agent／pane／terminal／session）",
+      `卡片角色派工前身分已改變（machine／agent／pane／terminal／session）：${changed.join("；")}`,
     );
 }
 export type RoleCleanupReason =
