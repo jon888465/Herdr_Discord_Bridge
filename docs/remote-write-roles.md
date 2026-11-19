@@ -1,6 +1,6 @@
 # 遠端寫入角色：implement／fixer
 
-ISSUE-171。2026-11-18，**第 1～3 階段（取回與套用的純管線、task 內 implement、PR 階段 fixer）都已實作並有單元測試；task 內 implement 的成功路徑（2026-11-18）與兩種失敗路徑（沒有任何改動、遠端產生符號連結，2026-11-19）已在 agy-pod 實機驗收通過，PR 階段 fixer 的成功路徑（2026-11-19，修正 #310 後）也已通過；其他失敗、fixer 的失敗路徑與修正後的 push、devbox 的 codex／pi 尚未實機驗收**（見文末「分階段」與 ISSUE-171）。目前 remote implement／fixer 仍會在撿卡前被拒絕（「remote 寫入尚未支援」，見 `src/card-role-assignment.ts` 的 `remoteReviewMachine`）。
+ISSUE-171。2026-11-18，**第 1～3 階段（取回與套用的純管線、task 內 implement、PR 階段 fixer）都已實作並有單元測試；task 內 implement 的成功路徑（2026-11-18）與兩種失敗路徑（沒有任何改動、遠端產生符號連結，2026-11-19）已在 agy-pod 實機驗收通過，PR 階段 fixer 的成功路徑（2026-11-19，修正 #310 後）與「遠端產生符號連結」失敗路徑（2026-11-19）也已通過；其他失敗、fixer 的其他失敗路徑與修正後的 push、devbox 的 codex／pi 尚未實機驗收**（見文末「分階段」與 ISSUE-171）。目前 remote implement／fixer 仍會在撿卡前被拒絕（「remote 寫入尚未支援」，見 `src/card-role-assignment.ts` 的 `remoteReviewMachine`）。
 
 ## 目標與決定（使用者 2026-11-18）
 
