@@ -1,5 +1,21 @@
 # Known Issues
 
+## ISSUE-173：card review／card fix 的 reviewer、fixer 剛啟動顯示 done 時被判「沒有就緒」
+
+更新日期：2026-11-19。狀態：已修正、待驗收（單元測試通過；尚未部署、尚未在真實 `card review` 觀察到不再失敗）。
+
+**使用者可見症狀（2026-11-19，本機 macOS、Herdr 0.9.5、codex 當 reviewer）：**`card review <id> --agent codex` 偶發回 inconclusive：「reviewer 在 30 秒內沒有就緒（狀態 done）」。同一個設定在 4 次中失敗 2 次、成功 2 次（卡片 `REQ-20261119-remote-fixer-live2` 第 1、2 輪失敗、第 3 輪成功；`REQ-20261119-remote-fixer-live` 第 3 輪成功）。每次失敗都消耗一輪 review（上限 3 輪），而 `card fix` 要求輪次小於 3，所以兩次 inconclusive 就讓該卡無法再走 `card fix`。
+
+**預期：**剛啟動的 reviewer／fixer 顯示 done 時與 Lead、Worker、profile pool 一樣視為就緒。
+
+**已確認根因（程式與設定）：**`src/agent-ready.ts` 的 `waitUntilReady` 只認 `idle`；Lead、Worker、profile pool、card 角色 session 都用 `doneAsReady` 把 `done` 轉成 `idle`，但 `card-review-flow.ts` 與 `card-fix-flow.ts` 直接傳未轉接的 port，所以 `done` 一律判失敗。`~/.codex/hooks.json` 的 Herdr 腳本（`herdr-agent-state.sh`）只處理 `SessionStart`、只回報 session 身分，不回報 working／idle／done；`Stop` 掛的是 Discord relay，不是 Herdr 狀態。所以 codex 的 `done`／`idle` 是 Herdr 由畫面推斷的，剛啟動時不穩定。**仍未確認：**為什麼同樣設定下有時剛啟動就顯示 done（失敗那兩次沒有記錄到 pane 畫面；成功那次的記錄是 `unknown`→約 5 秒後 `idle`→開始回覆）。手動在同一目錄開 codex 觀察 24 秒一直是 `idle`。這個偶發的原因沒有查明，只是讓就緒判斷不再因為它失敗。
+
+**修正（2026-11-19，不改其他行為）：**兩個 flow 只在「等待就緒」那一步用 `doneAsReady(deps.panePort)`；之後對 pane 狀態的檢查（含 `card-fix-flow` 的 live 比對）仍用原本的 port。
+
+**測試（2026-11-19，本機 macOS，只有自動化）：**`test/card-review-flow.test.ts`、`test/card-fix-flow.test.ts` 各新增 1 項（剛啟動就是 done 時照常 review／fix）；暫時還原原始碼，這兩項失敗（39 pass／2 fail），已還原；`npm test` 2152 項、2151 pass、0 fail、1 skipped；`npm run lint` 通過（264 個 TypeScript 檔）。
+
+**未驗證：**部署後的真實 `card review`／`card fix`；claude 當 reviewer 的兩次 inconclusive（第 1 輪是資料夾信任提示、第 2 輪啟動 3 秒就 blocked）是另一回事，原因未查，SPEC 本來就寫「Claude 當 reviewer 未實機驗證」。
+
 ## ISSUE-172：CI 偶發失敗：`F7: concurrent writers keep both entries`（remote agy 信任並行寫入）
 
 更新日期：2026-11-19。狀態：待調查（偶發，只出現一次；原因未確認）。
@@ -31,6 +47,8 @@
 **第 2 階段（2026-11-18，只有自動化測試）：**`machines[].cardReview.write`（布林、預設關閉，與 toolchain 同樣驗證並凍結進角色快照，`validateRoleSnapshot` 接受新欄位）；implement 加入 task 內可派到遠端的角色，沒開 write 的 machine 在撿卡前被拒絕「remote implement 不可用」、Lead 候選標 `available:false`；`startRemoteRole` 寫入模式：machine 要開放 write 且要有取回通道、派工前本機工作樹必須乾淨（`assertCleanBase`）、`afterTurn` 先確認本機 digest 未變，再取回、驗證、套用並 commit，失敗一律不採用且本機還原；`main.ts` 注入的 `sshRemoteFetch` 與 exec 一樣尊重手動斷線。測試：新增 `test/remote-write-role.test.ts` 5 項（真的 git 當本機 repo、pod 目錄是它的 clone）、`test/machines.test.ts` 的 write 驗證、`test/card-role-remote.test.ts` 的 preflight／候選／target／快照凍結；更新 4 個原本斷言「implement 一律被拒絕」的既有測試；全套 `npm test` 2134 項，2133 pass、0 fail、1 skipped，`npm run lint` 通過（2026-11-18）。破壞性驗證：拿掉「要開放 write」檢查與拿掉寫入模式的本機 digest 檢查，各有 1 項變紅，皆已還原。**未驗證：**沒有部署、沒有真的遠端（agy-pod／devbox）、`sshRemoteFetch` 沒對真的 ssh 跑過、Lead 實際會不會把 implement 派到遠端、遠端 agent 的實際行為；writer 的 `writeScope` 與驗收閘門是否與「bridge 在 afterTurn 才 commit」順序相容，只靠讀程式碼判斷（afterTurn 在 `onAssignmentDone` 之前執行）。
 
 **部署與真實 ssh 冒煙測試（2026-11-18，bridge main `5303286`，16:30 以 `scripts/run.sh -r` 重建並重啟，重啟前 active-streams 為 0）：**執行中的 bridge 已載入第 1、2 階段的程式；**使用者的 config 沒有開 `write`，所以行為沒有變化。**另外我用 `dist` 裡的 `sshRemoteExec`／`sshRemoteFetch`／`fetchRemoteResult`／`applyRemoteResult` 對**兩台真的機器（agy-pod、devbox，皆 Linux）各跑一次冒煙腳本**（遠端放 `/tmp` 下的隨機目錄、結束刪除，不含 agent 與卡片流程）：遠端建立基底並算出的 tree 等於本機 tree；遠端模擬修改（文字改動、新增、二進位檔、latin1 內容、刪除）後取回 patch（974 bytes）；本機套用後 tree 等於遠端回報、commit 的 parent 為派工前 HEAD、內容逐位元組正確、本機工作樹乾淨、遠端暫時 index 已刪除、遠端目錄已清除。兩台都是全部通過（第一次跑曾顯示 1 項 FAIL，是我的腳本預期檔案數寫錯，實際行為正確，改正後重跑通過）。**證明的：**真實 ssh 傳輸與遠端 shell／git 行為、patch 含二進位與非 UTF-8 內容的取回。**沒有證明的：**遠端 agent（codex／pi／agy）實際修改、卡片／task 流程、Lead 會不會派 implement、`write: true` 的設定路徑、writer 驗收閘門與 afterTurn 順序、取消與逾時。
+
+**第四次實機驗收（2026-11-19，PR 階段 fixer，agy-pod；未完成，受阻）：**環境同第三次，另外把 sandbox 專案暫時加進 `policy.yml`（L1，驗完要還原）、agy-pod 暫時 `write: true`（驗完要改回 false）。已走通：本機 task 完成卡片、`card pr` 能 push 到公開 sandbox（我在分支加了刻意有瑕疵的 commit 當測試素材）、`card attach-pr` 第一次實機成功（兩張卡各登記一個手動開的 PR）、codex 當 reviewer 兩次回 `changes_requested` 並指出刻意的瑕疵。**受阻：**(1) `card pr` push 後開 PR 失敗：`Resource not accessible by personal access token (createPullRequest)`，gh 用的是細粒度 token、對 sandbox repo 沒有 Pull requests 寫入權限，只好由使用者在瀏覽器開 PR 再 `attach-pr`；(2) reviewer 偶發 inconclusive（見 ISSUE-173）用掉輪次，兩張卡都在輪次 3 才拿到 `changes_requested`，`card fix` 拒絕（「已經 review 到第 3 輪（總上限 3 次）仍未通過，退回人工處理」）。**因此 fixer 本身（遠端 agy-pod 修正、bridge 取回並在本機 commit）仍未驗收。**下一步：部署 ISSUE-173 的修正後，用第三張卡再試；驗完還原 `policy.yml` 與 agy-pod 的 `write`、關掉 sandbox 的測試 PR 與分支。
 
 **適用範圍決定（使用者 2026-11-19）：**遠端 implement 的用途是把拆好的小工作交給別的 agent、以 patch 傳回本機 worktree 再 commit；大功能在規劃時拆成多張卡（一卡一 worktree、一 PR），所以「派工前工作樹乾淨」「遠端工作期間本機不能改動」兩個限制不需要放寬，也不做多遠端 writer 的合併。程式面已確認 coding task 只允許一個 writer（讀程式碼，見 `docs/remote-write-roles.md`「適用範圍」）；同一個遠端 target 在同 task 連續做第二次 implement 未驗證。
 

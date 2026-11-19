@@ -385,3 +385,12 @@ test("role sink failure does not change runCardFix result", async (t) => {
   if (result.ok) assert.equal(result.outcome.kind, "fixed");
   assert.deepEqual(errors, [["Role ledger write failed"]]);
 });
+
+test("an Agent that shows done instead of idle after start is treated as ready, so the fix goes on (ISSUE-173)", async () => {
+  const { deps } = setup({
+    start: () => fixer({ agent_status: "done" }),
+    listing: [[fixer({ agent_status: "done" })]],
+  });
+  const result = await runCardFix(deps, input());
+  assert.equal(result.ok && result.outcome.kind, "fixed");
+});

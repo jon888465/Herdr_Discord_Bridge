@@ -41,6 +41,7 @@ import {
 } from "./review-pane.js";
 import {
   BLOCKED_AT_START,
+  doneAsReady,
   waitUntilReady,
   type UpdateSkip,
 } from "./agent-ready.js";
@@ -321,7 +322,13 @@ async function reviewInPane(
         roleIdentity("reviewer", agent, { round: input.round }),
       ),
     );
-  const ready = await waitUntilReady(deps, run.pane, agent);
+  // 剛啟動的 codex 可能直接顯示 done 而不是 idle（codex 的 hook 只回報 session，狀態靠畫面判斷，ISSUE-173），
+  // 只在「等待就緒」這一步把 done 當 idle；後面對 pane 狀態的檢查仍用原本的 port。
+  const ready = await waitUntilReady(
+    { ...deps, panePort: doneAsReady(deps.panePort) },
+    run.pane,
+    agent,
+  );
   if (ready.updateSkip) run.skipped.value = ready.updateSkip;
   if (!ready.ok)
     return {
