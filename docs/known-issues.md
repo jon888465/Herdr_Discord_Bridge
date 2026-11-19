@@ -1,8 +1,24 @@
 # Known Issues
 
+## ISSUE-175：遠端 codex 當作者時，「獨立審查」因作者 session 身分不明而失敗，整個 task 被標 failed
+
+更新日期：2026-11-19。狀態：待調查（根因未確認，只有一個假設）。
+
+**使用者可見症狀（2026-11-19，第九次實機驗收，devbox 的 codex 當 implement 作者）：**implement 成功、正式驗收也通過，但 `review-independent-session` 失敗：「unknown author identity cannot establish an independent review」，task 整體 `failed`：「one or more Assignments failed; synthesis is partial; no passing review for the current version」。Lead 的收尾說「作者紀錄缺少 known session 身分，無法證明 reviewer 與作者為獨立 session」。
+
+**預期：**遠端 agent 當作者時，bridge 仍能判斷審查者與作者是否不同 session，或明確說明要怎麼補（例如要設什麼）。
+
+**重現／環境：**同第九次；devbox 的 machine 設定沒有 `hookSocket`，agy-pod 有（遠端 agent 沒有 `hookSocket` 時，bridge 用畫面剖析而不是 hook 取得資料，見 README）。
+
+**已確認：**上述訊息與 task 結果；devbox 的設定沒有 `hookSocket`。**未確認（假設）：**codex 的 session 身分是靠 hook 回報的（本機 codex 的 hook 只回報 session 身分），遠端沒有 hook 通道所以作者 session 不明，所以獨立審查無法成立。沒有驗證：設定 `hookSocket` 後是否就解決、agy-pod 的 agy 為什麼不受影響（先前 agy-pod 的 implement task 有跑到完成，細節我沒有重新確認）。
+
+**影響：**遠端 codex 當 implement 作者的 `--coding` task 目前會在審查閘門失敗，即使 implement 本身成功；本次驗收的 implement 與 fixer 成功路徑不受影響，但完整流程（到 review）在 devbox 上走不通。
+
+**下一步：**讀程式找出「作者 session 身分」的來源與判斷位置；確認是否與 `hookSocket` 有關；必要時為遠端 codex 補上取得 session 身分的辦法，或調整閘門對遠端作者的處理（要先決定標準，不能為了通過而降低獨立審查的要求）。
+
 ## ISSUE-174：遠端 codex 在新資料夾停在「信任資料夾」提示，遠端寫入與 reviewer 角色啟動不就緒
 
-更新日期：2026-11-19。狀態：已修正、待驗收（單元測試與真的 `sh` 測試通過；**尚未部署、尚未在 devbox 實機驗證**）。
+更新日期：2026-11-19。狀態：已驗收（codex 在 devbox 的 implement 與 fixer 成功路徑各一次，2026-11-19；**未驗收：pi、reviewer 路徑（`remote-checkout.ts` 的呼叫點）、失敗路徑**）。先前：已修正、待驗收。
 
 **使用者可見症狀（2026-11-19，devbox 寫入驗收第二次嘗試，codex 0.163.0）：**卡片 `implement: devbox:codex` 的 task 失敗：「遠端角色失敗：Worker 沒有就緒: Worker 卡在啟動提示（blocked）。常見原因：Agent 自己的更新提示或新資料夾的信任提示」。
 
@@ -18,7 +34,9 @@
 
 **測試（2026-11-19，本機 macOS，只有自動化）：**新增 `test/remote-codex-trust.test.ts` 9 項（TOML 編輯的新增／重複／往返還原／不是我們寫的就不移除／拒絕的格式；選擇器只認 agy 與 codex；真 `sh`：新增與移除逐位元組還原、保留檔案權限、備份 600 且只留 5 份、缺檔／符號連結／marker 不符／無法解析的格式都拒絕且原檔不變）。暫時破壞「移除時一併拿掉前面的空行」，2 項失敗，已還原。`npm test` 2162 項、2161 pass、0 fail、1 skipped；`npm run lint` 通過（266 個 TypeScript 檔）。
 
-**未驗證／下一步：**(1) 部署後在 devbox 重跑 implement 卡，確認 codex 不再停在信任提示、結束後信任被移除；(2) 接線（`remote-snapshot.ts`、`remote-checkout.ts` 的呼叫點）沒有 codex 專屬的單元測試，只有型別檢查、agy 既有測試不變與上述單元測試；(3) pi 的啟動提示沒有測過；(4) 更新提示偶發出現的原因；(5) 殘留的 `_probe` 條目。
+**未驗證／下一步：**(1) 已做，見下方「實機驗收」；(2) 接線（`remote-snapshot.ts`、`remote-checkout.ts` 的呼叫點）沒有 codex 專屬的單元測試，只有型別檢查、agy 既有測試不變與上述單元測試；(3) pi 的啟動提示沒有測過；(4) 更新提示偶發出現的原因；(5) 殘留的 `_probe` 條目。
+
+**實機驗收（2026-11-19，本機 macOS、Herdr 0.9.5、bridge main `3b952f1`＝#313，`scripts/run.sh -r` 部署後；devbox 的 codex 0.163.0；devbox 暫時 `write: true`、sandbox 暫時 L1，驗完已還原）：**同一張卡 `implement` 與 `fixer` 都宣告 `devbox:codex`。implement：遠端 codex 在 devbox 啟動、提示送出、沒有再停在信任提示，bridge 回報「implement 已套用 1 個檔案，commit `c97cd4d413b2`」。fixer：另外手寫了一筆 finding（見 ISSUE-171 第九次），`card fix` 回報「fixer 已套用 1 個檔案，commit `e71e2046051e`」、F1 標為 `fixed`。**我獨立確認的：**本機兩個 commit 的作者都是 `hdb-remote`、訊息為 `hdb remote implement (devbox)` 與 `hdb remote fixer (devbox)`、各只改 `hello.txt`，工作樹乾淨，最終內容是單行 `hello again from devbox` 加換行；devbox 上 root 底下只剩 `.hdb-codex-config-backups`（4 份備份，權限 600，各次加入與移除各一份）、`config.toml` 裡沒有這兩次的信任條目（只剩上面提到的 `_probe` 殘留）、遠端沒有留下 workspace。**沒有直接看到的：**執行中 `config.toml` 當下有那一條（我沒有在執行當下抓取；只從備份份數與事後內容推論有加入再移除），以及「不加這條就一定會停在提示」只有前面的探針證據，沒有對照組。**不在這次範圍：**pi；失敗路徑；PR 階段 reviewer 經 `remote-checkout.ts` 的信任呼叫點；`config.toml` 的備份目錄 `.hdb-codex-config-backups` 與我手動建的空 root 目錄仍留在 devbox（可手動刪）；`_probe` 殘留條目仍在，等你決定。
 
 ## ISSUE-173：card review／card fix 的 reviewer、fixer 剛啟動顯示 done 時被判「沒有就緒」
 
@@ -52,7 +70,7 @@
 
 ## ISSUE-171：遠端 machine 不能擔任 implement／fixer（寫入角色）
 
-更新日期：2026-11-19。狀態：已修正、待驗收（**部分已驗收：task 內 implement 的成功路徑（2026-11-18）與兩種失敗路徑（沒有任何改動、遠端產生符號連結，2026-11-19）都已在 agy-pod 實機驗收，見「第三次實機驗收」與「第二次實機驗收」**；**PR 階段 fixer 的成功路徑（修正後 agy-pod 實機一次）也已通過，見「第五次實機驗收」之後的「第六次實機驗收」**；**fixer 的「遠端產生符號連結」失敗路徑也已通過（第七次實機驗收，卡片是手動標 done、finding 是手寫的，見該段）**；**未驗收：取消／逾時／digest 不符等其他失敗、fixer 的其他失敗路徑（沒宣告修好、回覆不合格、卡住、逾時）、fixer 修正後 push 與第 2 輪 review、devbox 上的 codex／pi**；**新發現：失敗的卡片沒有自動寫入 `failed` 流程紀錄（見「第三次實機驗收」），原因未確認**；第 1～3 階段都已實作並有單元測試；設計與使用者的三項決定見 `docs/remote-write-roles.md`）。
+更新日期：2026-11-19。狀態：已修正、待驗收（**部分已驗收：task 內 implement 的成功路徑（2026-11-18）與兩種失敗路徑（沒有任何改動、遠端產生符號連結，2026-11-19）都已在 agy-pod 實機驗收，見「第三次實機驗收」與「第二次實機驗收」**；**PR 階段 fixer 的成功路徑（修正後 agy-pod 實機一次）也已通過，見「第五次實機驗收」之後的「第六次實機驗收」**；**fixer 的「遠端產生符號連結」失敗路徑也已通過（第七次實機驗收，卡片是手動標 done、finding 是手寫的，見該段）**；**未驗收：取消／逾時／digest 不符等其他失敗、fixer 的其他失敗路徑（沒宣告修好、回覆不合格、卡住、逾時）、fixer 修正後 push 與第 2 輪 review、devbox 上的 pi 與 codex 的失敗路徑**；**devbox 的 codex 的 implement 與 fixer 成功路徑也各通過一次（第九次實機驗收，2026-11-19，ISSUE-174 修正後）**；**新發現：失敗的卡片沒有自動寫入 `failed` 流程紀錄（見「第三次實機驗收」），原因未確認**；第 1～3 階段都已實作並有單元測試；設計與使用者的三項決定見 `docs/remote-write-roles.md`）。
 
 **使用者要求（2026-11-18）：**agy-pod（agy）與 devbox（codex、pi）要能擔任所有卡片角色；目前只有 reviewer 與 task 內 diagnose／review／verify（唯讀）可以在遠端，implement／fixer 在撿卡前被拒絕「remote 寫入尚未支援」（`src/card-role-assignment.ts`）。
 
@@ -76,7 +94,9 @@
 
 **第七次實機驗收（2026-11-19，fixer 失敗路徑「遠端產生符號連結」，通過；第四張卡 `REQ-20261119-remote-fixer-live4`）：**環境同第六次（bridge 含 #309、#310；sandbox 暫時 L1、agy-pod 暫時 `write: true`，驗完已還原並重啟）。**測試素材有兩處不是 bridge 判定的，要看清楚：**(1) 卡片的 task 在 claude opus worker（`w8K:p4`）跳出 Claude Code 的 auto mode 確認後被標成 `blocked`（bridge 記成兩個 question，沒有自動恢復，也找不到可接續的指令），我用 `team cancel` 取消，並**手動把卡片改成 `done`**；(2) F1 是**我手寫進卡片「Review 發現」的**（要求 agy 建立指向 `/etc/hostname` 的符號連結 `link.txt`），不是 reviewer 判的，因為 reviewer 的 finding 不受我控制；本機 worktree 的 `notes4.md` 是我 commit 的（`9ca1818e65e5`）。另外：沒有 PR（PAT 不能開 PR，我也沒請你開）卻能跑 `card fix`，所以 `card fix` 不要求卡片已登記 PR。結果：`card fix` 在 agy-pod 開新 workspace 並送出提示（1661 字元），bridge 回報「遠端改動不被接受: 新增或修改了符號連結」「這一圈沒有被採用」「沒有改動任何 finding 的狀態」「作者的 pane 已關閉」。我另外確認：本機 worktree 沒有新 commit（HEAD 仍是 `9ca1818`）、工作樹乾淨、沒有 `link.txt`；卡片 F1 維持 `open`；agy-pod 的 workspace 清單只剩預設的 `w2`。**沒檢查的：**遠端目錄是否被清掉（沒有 ssh 進去看，只看到訊息沒有 `cleanup_pending`）；為什麼 Lead 排了 claude opus worker 且它會跳 auto mode 確認（bridge 只帶 `--model opus`，`args` 是空的，沒有 permission mode 參數；確切原因沒查清楚，沒有抓到當時的畫面）。**附帶事件：**那次 `/auto-mode-setup` 把 `autoMode.environment` 寫進使用者全域的 `~/.claude/settings.json`（受信任 repo 只列 sandbox）；使用者要求後已還原，備份在 scratchpad。這是 Claude Code 的行為，不是 bridge 寫的，但 bridge 啟動的 worker 在 worktree 裡會碰到。
 
-**第八次實機驗收（2026-11-19，devbox 的 codex 寫入角色，未完成，受阻；設定：devbox 暫時 `write: true`、sandbox 暫時 L1，驗完要還原）：**第一次嘗試 implement 在啟動前失敗：「遠端角色失敗：marker 寫入失敗」。**根因（我用唯讀 SSH 查證）：**devbox 上的 `cardReview.root`（`<root>`）不存在，而建 checkout 目錄的腳本用不帶 `-p` 的 `mkdir`（`src/remote-snapshot.ts` 的 `MKDIR_SCRIPT`），父目錄不存在就失敗；agy-pod 的 root 本來就存在所以先前沒遇到。文件沒有說這個 root 要事先建立（文件缺口，也可能是程式缺口，沒決定）。我在你的 devbox 上建了這個空目錄（權限 700，可再刪除）。`codex`、`git`、`timeout`、`pi` 在 devbox 都有。第二次嘗試 implement 失敗於「Worker 卡在啟動提示（blocked）」，原因見 ISSUE-174（codex 對新資料夾的信任提示）。因此 **devbox 的寫入角色（codex、pi）仍未驗收**。下一步：ISSUE-174 的修正部署後重跑 implement 與 fixer 各一次。
+**第八次實機驗收（2026-11-19，devbox 的 codex 寫入角色，未完成，受阻；設定：devbox 暫時 `write: true`、sandbox 暫時 L1，驗完要還原）：**第一次嘗試 implement 在啟動前失敗：「遠端角色失敗：marker 寫入失敗」。**根因（我用唯讀 SSH 查證）：**devbox 上的 `cardReview.root`（`<root>`）不存在，而建 checkout 目錄的腳本用不帶 `-p` 的 `mkdir`（`src/remote-snapshot.ts` 的 `MKDIR_SCRIPT`），父目錄不存在就失敗；agy-pod 的 root 本來就存在所以先前沒遇到。文件沒有說這個 root 要事先建立（文件缺口，也可能是程式缺口，沒決定）。我在你的 devbox 上建了這個空目錄（權限 700，可再刪除）。`codex`、`git`、`timeout`、`pi` 在 devbox 都有。第二次嘗試 implement 失敗於「Worker 卡在啟動提示（blocked）」，原因見 ISSUE-174（codex 對新資料夾的信任提示）。因此 **當時 devbox 的寫入角色（codex、pi）仍未驗收**（後續見第九次）。下一步：ISSUE-174 的修正部署後重跑 implement 與 fixer 各一次。
+
+**第九次實機驗收（2026-11-19，devbox 的 codex 寫入角色，implement 與 fixer 成功路徑，通過；卡片 `REQ-20261119-wubuntu-write-codex3`）：**環境與細節見 ISSUE-174「實機驗收」。**測試素材有兩處不是 bridge 判定的：**(1) 這張 task 整體被標 `failed`（原因見 ISSUE-175），所以 fixer 是在卡片 `failed` 的狀態下跑的，`card fix` 沒有拒絕；(2) F1 是我手寫進卡片「Review 發現」的（要求把 `hello.txt` 改成 `hello again from devbox`），不是 reviewer 判的。implement 在 devbox 的 codex 成功（commit `c97cd4d413b2`，只新增 `hello.txt` 一行 `hello from devbox`），fixer 成功（commit `e71e2046051e`，只改 `hello.txt`）。這次沒有手動標卡片 `done`：卡片流程紀錄在 task 失敗時自動寫入了 `failed`（2026-11-19T07:00:13Z，`task_failed`），與先前 task 落在 `blocked` 而不寫入的情況不同。**沒驗到：**pi；devbox 上寫入角色的失敗路徑；修正後 `card pr` 推新 commit 與第 2 輪 review。
 
 **適用範圍決定（使用者 2026-11-19）：**遠端 implement 的用途是把拆好的小工作交給別的 agent、以 patch 傳回本機 worktree 再 commit；大功能在規劃時拆成多張卡（一卡一 worktree、一 PR），所以「派工前工作樹乾淨」「遠端工作期間本機不能改動」兩個限制不需要放寬，也不做多遠端 writer 的合併。程式面已確認 coding task 只允許一個 writer（讀程式碼，見 `docs/remote-write-roles.md`「適用範圍」）；同一個遠端 target 在同 task 連續做第二次 implement 未驗證。
 
