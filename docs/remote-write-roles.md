@@ -59,6 +59,20 @@ afterTurn（寫入模式）
 
 沿用現有 `RoleCleanupReason`：completed 之外（blocked／timeout／uncertain）保留遠端 workspace 與目錄並記 `cleanup_pending`。寫入模式額外規則：**取回前取消或逾時不採用任何遠端改動**，遠端目錄保留給人檢查。
 
+## 適用範圍：一張卡、一個 writer、小範圍（使用者 2026-11-19 的規劃原則）
+
+**原則：**遠端 implement 的價值是「把拆好的小工作交給別的 agent，改動以 patch 傳回本機 worktree 再 commit」，不是多個 agent 在同一個 feature 分支上同時寫。需要多人協作的大功能，應該在規劃時拆成多張卡（一卡一 worktree、一分支、一 PR），每張範圍小到單一功能就能讓 reviewer 驗證；這樣「派工前工作樹乾淨」與「遠端工作期間本機不能被改動」兩個限制不會造成損失，也就不需要做多遠端 writer 的合併機制（不做）。`cardReview.write` 管的是信任（遠端 agent 可寫任意內容），不是協作方式，維持預設關閉。
+
+**Lead 對多個 writer 的實際行為（2026-11-19 讀程式碼 `src/coding-workflow.ts`、`src/team-orchestration.ts`，只有讀取，沒有為此另做實機測試）：**
+
+- 一個 coding task 只允許**一個 writer**：`validateCodingRound` 把先前各輪與本輪所有 `access: write` 的 assignment 的 `workerPaneId` 收成集合，超過一個就整份計畫拒絕（「coding v1 allows only one writer」）。Lead 的規劃提示也明寫「Coding v1 allows one writer」。
+- writer 的身分就是 `workerPaneId`；遠端 writer 的 `workerPaneId` 是 target 字串（`remote:<machine>:implement:<profile>`）。所以同一個 target 在同一個 task 的不同輪、或同輪內依序執行的多個 implement 都算同一個 writer；**同一個 task 內另派第二個不同的 writer（例如本機 codex 加遠端 agy，或兩台遠端）會被拒絕**。
+- `implement` 一定是 `access: write` 且必須有非空的 `writeScope`；唯讀角色（diagnose、review、verify）不可有 `writeScope`。
+- 同一輪有 writer 時，其他 assignment 都必須直接 `dependsOn` 該 writer；同輪內第二個 write assignment 也一樣必須依賴第一個，所以同輪的寫入只能依序、不能並行。
+- `writeScope` 只在事後比對擷取到的 diff，不是作業系統層級的鎖，提示文字也不能隔離 writer（提示原文）。
+
+**沒有驗證的：**同一個遠端 target 在同一 task 內連續做第二次 implement 的實機行為（程式上第二次會用已含第一次 commit 的乾淨工作樹重新取快照，但只有這段推論，沒有實機或針對這個情境的單元測試證據）。
+
 ## 風險與限制（預先列出）
 
 - 遠端 agent 可寫任意檔案內容：靠路徑檢查、大小上限、敏感路徑回報與既有 review 擋；**不能防止內容本身惡意**，所以 `write: true` 預設關閉、只對信任的機器開。
