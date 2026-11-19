@@ -202,7 +202,7 @@ mapping 過期時，一律 fail closed。
 
 ### 啟動就緒與更新提示（ISSUE-118／141，2026-11-11）
 
-共用 `waitUntilReady` 用於 autopick 來源 Lead、worktree Lead、fresh role／單一 coding profile Worker；persistent profile pool 亦接入此等待。只有預期 CLI 已被辨識且 idle／done（呼叫端明確選用 doneAsReady）才就緒；pane／terminal／workspace／CLI 被替換即失敗。就緒不保證 Herdr 已登記 active named agent，首次 prompt 的有界 agent_not_ready 重試仍見 ISSUE-137。
+共用 `waitUntilReady` 用於 autopick 來源 Lead、worktree Lead、fresh role／單一 coding profile Worker；persistent profile pool 亦接入此等待。`card review` 的 reviewer 與 `card fix` 的 fixer 也用它，且只在等待就緒這一步把 `done` 當 `idle`（ISSUE-173，2026-11-19，已修正、待驗收；codex 的 hook 只回報 session，狀態由畫面推斷，剛啟動可能顯示 done）。只有預期 CLI 已被辨識且 idle／done（呼叫端明確選用 doneAsReady）才就緒；pane／terminal／workspace／CLI 被替換即失敗。就緒不保證 Herdr 已登記 active named agent，首次 prompt 的有界 agent_not_ready 重試仍見 ISSUE-137。
 
 僅在 blocked 且 visible 畫面完整符合觀察到的 Codex 更新選單時自動選 **`2. Skip`**。畫面須有 `Update available · <semver> → <semver>` 與依序精確選項 `1. Update now`、`2. Skip`、`3. Skip until next version`；容許空白、ANSI 樣式、`›` 選取標記、已知 release notes 網址、`enter continue · esc skip` 底列，以及既有觀察到的 brew 更新說明。任何額外文字、一般 question、approval、信任、權限、登入、缺選項、不同編號或其他 CLI 均 fail closed，不送按鍵。不得選 Update now 或 Skip until next version，也不改私人設定／policy。
 

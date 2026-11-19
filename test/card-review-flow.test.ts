@@ -491,3 +491,15 @@ test("role sink failure does not change runCardReview result", async (t) => {
   if (result.ok) assert.equal(result.batch.verdict, "pass");
   assert.deepEqual(errors, [["Role ledger write failed"]]);
 });
+
+test("an Agent that shows done instead of idle after start is treated as ready, so the review goes on (ISSUE-173)", async () => {
+  const { deps, log } = setup({
+    start: () => working("done"),
+    listing: [[working("done")]],
+  });
+  const result = await runCardReview(deps, input());
+  assert.ok(result.ok, result.ok ? "" : result.error);
+  assert.equal(result.ok && result.batch.verdict, "pass");
+  assert.ok(log.includes("runTurn"));
+  assert.ok(log.includes("pane.close"));
+});
