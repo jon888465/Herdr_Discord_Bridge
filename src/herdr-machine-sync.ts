@@ -39,17 +39,33 @@ export function settleHerdrOutput(
   throw error;
 }
 
+const DETAIL_LIMIT = 400;
+
+/** 給日誌看的單行說明：壓成一行、限制長度；Herdr 拒絕時的原因（例如 `machine add` 的 not ready）在 stderr／stdout，不在 Error.message。 */
+export function describeHerdrFailure(error: unknown): string {
+  const detail = (error as { herdrOutput?: unknown } | undefined)?.herdrOutput;
+  const text = typeof detail === "string" && detail.trim() ? detail : error instanceof Error ? error.message : String(error);
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  return oneLine.length > DETAIL_LIMIT ? `${oneLine.slice(0, DETAIL_LIMIT)}…` : oneLine;
+}
+
+function withHerdrOutput(error: unknown, stdout: string, stderr: string): unknown {
+  const output = [stderr, stdout].filter((part) => part?.trim()).join(" ");
+  if (error && typeof error === "object" && output) (error as { herdrOutput?: string }).herdrOutput = output;
+  return error;
+}
+
 const runHerdr: HerdrMachineRunner = (args, timeoutMs = HERDR_TIMEOUT_MS) =>
   new Promise((resolve, reject) =>
     execFile(
       "herdr",
       args,
       { encoding: "utf8", timeout: timeoutMs },
-      (error, stdout) => {
+      (error, stdout, stderr) => {
         try {
           resolve(settleHerdrOutput(args, error, stdout));
         } catch (thrown) {
-          reject(thrown);
+          reject(withHerdrOutput(thrown, stdout, stderr));
         }
       },
     ),
@@ -135,6 +151,18 @@ function parseReachable(output: string, id: string): boolean {
   );
 }
 
+/** `machine status` 裡該 profile 的狀態與錯誤文字，給日誌用；解析不了就回固定短句。 */
+function statusDetail(output: string, id: string): string {
+  try {
+    const value: unknown = JSON.parse(output);
+    const item = Array.isArray(value) ? value.find((entry) => entry && entry.id === id) : undefined;
+    if (!item) return "status 沒有這筆";
+    return describeHerdrFailure(`${item.status}：${item.error ?? "沒有錯誤文字"}`);
+  } catch {
+    return "status 輸出無法解析";
+  }
+}
+
 /**
  * 啟動時，bridge 設定是 `ssh` 別名加 `port`（不寫 host）時，Herdr 側邊欄若還存著同一別名、不同埠的 `ssh://別名:埠`，
  * 就換成新埠（ISSUE-170）：Herdr 無法修改既有 machine 的 target，所以做法是新增 → 確認 reachable → 移除舊的 → 改回原 label，
@@ -145,10 +173,13 @@ export async function reconcileHerdrPort(
   machine: MachineConfig | undefined,
   run: HerdrMachineRunner = runHerdr,
   wait: (ms: number) => Promise<void> = sleep,
+  log: (message: string) => void = console.error,
 ): Promise<string | undefined> {
   if (!machine?.ssh || machine.port === undefined || machine.host) return undefined;
   const expected = `ssh://${machine.ssh}:${machine.port}`;
+  const trace = (message: string): void => log(`Herdr machine ${machine.id} 換埠：${message}`);
   let created: HerdrProfile | undefined;
+  let step = "list";
   try {
     const profiles = parseHerdrProfiles(await run(["machine", "list", "--json"]));
     if (profiles.some((profile) => profile.target === expected)) return undefined;
@@ -158,39 +189,50 @@ export async function reconcileHerdrPort(
         herdrTargetHost(profile.target) === machine.ssh,
     );
     if (stale.length === 0) return undefined;
+    trace(`目標 ${expected}；Herdr 現有同別名 profile：${stale.map((p) => `${p.target}（${p.enabled ? "啟用" : "停用"}）`).join("、")}`);
     if (stale.length > 1) return "Herdr 有多個同別名不同埠的 machine，沒有更新埠";
     const [old] = stale;
     const temporary = `${old.label}-new`;
+    step = "add";
     await run(["machine", "add", expected, "--label", temporary], HERDR_ADD_TIMEOUT_MS);
+    trace("add 成功");
+    step = "list（確認新項目）";
     created = parseHerdrProfiles(await run(["machine", "list", "--json"])).find(
       (profile) => profile.label === temporary && profile.target === expected,
     );
     if (!created) throw new Error("new profile not found");
     let reachable = false;
+    step = "status";
     for (let attempt = 0; attempt < REACHABLE_ATTEMPTS && !reachable; attempt++) {
       if (attempt > 0) await wait(REACHABLE_INTERVAL_MS);
-      reachable = parseReachable(
-        await run(["machine", "status", "--json"], HERDR_STATUS_TIMEOUT_MS),
-        created.id,
-      );
+      const output = await run(["machine", "status", "--json"], HERDR_STATUS_TIMEOUT_MS);
+      reachable = parseReachable(output, created.id);
+      trace(`status 第 ${attempt + 1} 次：${reachable ? "reachable" : `未 reachable（${statusDetail(output, created.id)}）`}`);
     }
-    if (!reachable) throw new Error("new profile not reachable");
+    if (!reachable) throw new Error(`new profile not reachable after ${REACHABLE_ATTEMPTS} attempts`);
+    step = "remove";
     await run(["machine", "remove", old.id], HERDR_CHANGE_TIMEOUT_MS);
     const added = created;
     created = undefined; // 舊的已移除，之後失敗不能再移除新的
     try {
+      step = "rename";
       await run(["machine", "rename", added.id, "--label", old.label], HERDR_CHANGE_TIMEOUT_MS);
+      step = "disable";
       if (!old.enabled) await run(["machine", "disable", added.id], HERDR_CHANGE_TIMEOUT_MS);
-    } catch {
+    } catch (error) {
+      trace(`步驟 ${step} 失敗：${describeHerdrFailure(error)}`);
       return `Herdr 側邊欄已換到新埠，但改名或停用沒成功（目前標籤 ${temporary}）`;
     }
     return `Herdr 側邊欄已更新到埠 ${machine.port}`;
-  } catch {
+  } catch (error) {
+    trace(`步驟 ${step} 失敗：${describeHerdrFailure(error)}`);
     if (created) {
       try {
         await run(["machine", "remove", created.id], HERDR_CHANGE_TIMEOUT_MS);
-      } catch {
+        trace("已移除剛新增的項目");
+      } catch (removeError) {
         /* 復原失敗只留下多的一筆，呼叫者看到說明會知道 */
+        trace(`移除剛新增的項目也失敗：${describeHerdrFailure(removeError)}`);
       }
     }
     return "Herdr 側邊欄的埠沒有更新成功，保留原設定";
