@@ -8,7 +8,7 @@ import { runCardReview, type ReviewFlowDeps, type ReviewFlowInput, type ReviewFl
 import { BLOCKED_AT_START } from "./agent-ready.js";
 import { defaultExec } from "./github.js";
 import { sshTargetArgs, shellQuote, unsafeRemoteValue, type HerdrHub, type MachineConfig } from "./machines.js";
-import { editRemoteAgyTrust } from "./remote-agy-trust.js";
+import { remoteTrustEditor, type RemoteTrustEditor } from "./remote-agy-trust.js";
 
 export type RemoteExec = (
   argv: string[],
@@ -288,6 +288,8 @@ export async function reviewOnRemote(
   // 只移除本次新增或寫入狀態不明的信任；原本就在清單內的不碰。
   let trustAdded = false;
   let trustUncertain = false;
+  // 啟動時依 agent 種類決定（agy、codex 才有）；清理時用同一個編輯器移除。
+  let trustEditor: RemoteTrustEditor | undefined;
   const trustEvent = (action: "add" | "remove", result: "added" | "removed" | "unchanged" | "error") => {
     try {
       remote.onTrust?.({ cardId: input.card.id, machine: machineId, path: dir, action, result });
@@ -318,8 +320,8 @@ export async function reviewOnRemote(
       pending.push("workspace");
       console.error(`remote review ${machineId}: cleanup_pending workspace ${workspace} label ${label}: ${String(e)}`);
     });
-    if (trustAdded || trustUncertain)
-      await editRemoteAgyTrust(exec, { root, dir, cardHash: hash }, false).then(
+    if ((trustAdded || trustUncertain) && trustEditor)
+      await trustEditor(exec, { root, dir, cardHash: hash }, false).then(
         (changed) => {
           trustAdded = false;
           trustEvent("remove", changed ? "removed" : "unchanged");
@@ -375,9 +377,10 @@ export async function reviewOnRemote(
   };
   // 寫入信任：確定沒寫入不中止；狀態不明不啟動 reviewer。
   const startAgent: ReviewFlowDeps["startAgent"] = async (agent) => {
-    if (agent.kind === "agy")
+    trustEditor = remoteTrustEditor(agent.kind);
+    if (trustEditor)
       try {
-        const changed = await editRemoteAgyTrust(exec, { root, dir, cardHash: hash }, true);
+        const changed = await trustEditor(exec, { root, dir, cardHash: hash }, true);
         if (changed) trustAdded = true;
         trustEvent("add", changed ? "added" : "unchanged");
       } catch (error) {
@@ -387,7 +390,7 @@ export async function reviewOnRemote(
           trustUncertain = flowUncertain = true;
           throw error;
         }
-        console.error(`remote review ${machineId}: agy trust not added ${dir}: ${detail}`);
+        console.error(`remote review ${machineId}: ${agent.kind} trust not added ${dir}: ${detail}`);
       }
     return remote.startAgent(agent);
   };

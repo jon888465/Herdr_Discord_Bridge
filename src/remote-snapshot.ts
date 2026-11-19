@@ -10,7 +10,7 @@ import { doneAsReady, waitUntilReady } from "./agent-ready.js";
 import { assertFreshProfile } from "./card-role-assignment.js";
 import { assertReadyIdentity, type RoleCleanupReason } from "./card-role-session.js";
 import { captureCodingTree, digest } from "./coding-version.js";
-import { editRemoteAgyTrust } from "./remote-agy-trust.js";
+import { remoteTrustEditor } from "./remote-agy-trust.js";
 import { applyRemoteResult, assertCleanBase, fetchRemoteResult, type RemoteFetch } from "./remote-write-result.js";
 import { GIT, LONG_MS, MARKER_FILE, RemoteFailure, SHA, SHORT_MS, assertRemoteValue, cardHash, githubOriginRepo, markerContent, must } from "./remote-checkout.js";
 import { remoteCheckoutDir, remoteFingerprint, removeRemoteCheckout, verifyCheckoutPath, type RemoteExec, type RemoteReviewDeps } from "./remote-checkout.js";
@@ -153,6 +153,8 @@ export async function startRemoteRole(
   const label = `task-${hash}-${randomBytes(4).toString("hex")}`;
   const st = { owned: false, uncertain: false, attempted: false, workspace: "", trust: false, trustUnknown: false };
   const trust = { root, dir, cardHash: hash };
+  // agy 與 codex 在新資料夾都會停在「信任資料夾」提示（ISSUE-113、ISSUE-174）；其他種類不寫信任。
+  const editTrust = remoteTrustEditor(profile.kind);
   let cleaned: Promise<string> | undefined;
   const cleanup = (reason: RoleCleanupReason = "completed") =>
     (cleaned ??= (async () => {
@@ -172,7 +174,7 @@ export async function startRemoteRole(
       const close = st.workspace ? deps.closeWorkspace(id, st.workspace) : st.attempted ? byLabel() : undefined;
       await close?.catch(() => (closed = false));
       if (!closed) pending.push("workspace");
-      if (st.trust || st.trustUnknown) await editRemoteAgyTrust(exec, trust, false).catch(() => void pending.push("trust"));
+      if (editTrust && (st.trust || st.trustUnknown)) await editTrust(exec, trust, false).catch(() => void pending.push("trust"));
       if (st.trustUnknown && !pending.includes("trust")) pending.push("trust");
       if (st.owned && (st.uncertain || !closed)) pending.push("directory");
       else if (st.owned) await removeRemoteCheckout(exec, root, dir, hash).catch(() => void pending.push("directory"));
@@ -199,9 +201,9 @@ export async function startRemoteRole(
     const ws = await deps.createWorkspace(id, dir, label);
     if (![ws.workspaceId, ws.paneId].every((v) => v.startsWith(`${id}:`))) throw new RemoteFailure("workspace 失敗", "unprefixed id");
     st.workspace = ws.workspaceId;
-    if (profile.kind === "agy")
+    if (editTrust)
       try {
-        st.trust = await editRemoteAgyTrust(exec, trust, true);
+        st.trust = await editTrust(exec, trust, true);
       } catch (error) {
         st.trustUnknown = error instanceof RemoteFailure && error.uncertain;
         throw error;
