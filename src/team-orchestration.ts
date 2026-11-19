@@ -138,6 +138,8 @@ export interface TeamTaskInput {
   beforeTurnComplete?: () => Promise<void>;
   /** 見 `TeamTurnContext.hookFinal`（ISSUE-086）。 */
   hookFinal?: (agent: AgentRecord, since: number) => string | undefined;
+  /** 見 `TeamTurnContext.findCodexSession`（ISSUE-175）：依 worker 所在機器決定去哪裡找 codex 的 rollout。 */
+  findCodexSession?: (worker: AgentRecord, nonce: string, since: number) => Promise<{ kind: "id"; value: string } | undefined>;
   onQuestion?: (
     agent: AgentRecord,
     phase: "planning" | "assignment" | "synthesis",
@@ -707,6 +709,7 @@ async function runAssignment(
         beforeComplete: input.beforeTurnComplete,
         hookFinal: input.hookFinal,
         observeSession: input.coding === true || Boolean(input.onWorkerSession),
+        ...(input.findCodexSession ? { findCodexSession: (nonce: string, since: number) => input.findCodexSession!(worker, nonce, since) } : {}),
         beforePromptAttempt:
           input.roleSnapshot || cleanup
             ? async () => {

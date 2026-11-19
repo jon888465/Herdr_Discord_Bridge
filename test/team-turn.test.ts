@@ -247,6 +247,32 @@ const observing = {
 const runObserving = (agent: AgentRecord, waits: AgentRecord[]) =>
   runTeamTurn(agent, "work", fakePort(waits), 2_000, 20, observing);
 
+// ISSUE-175：遠端 codex 的 rollout 在遠端機器上，由呼叫端提供查詢方式；有提供時不會用本機的 rollout 搜尋。
+test("a codex Agent's session comes from the caller's finder when one is provided, and the finder gets this turn's nonce", async () => {
+  const codex = { ...base, agent: "codex" };
+  const seen: Array<{ nonce: string; since: number }> = [];
+  const result = await runTeamTurn(codex, "work", fakePort([{ ...codex }]), 2_000, 20, {
+    ...observing,
+    findCodexSession: async (nonce, since) => {
+      seen.push({ nonce, since });
+      return { kind: "id", value: "remote-session" };
+    },
+  });
+  assert.deepEqual(result.session, { kind: "id", value: "remote-session" });
+  assert.equal(seen.length > 0, true);
+  assert.match(seen[0]!.nonce, /^[a-f0-9]{16,}$/);
+  assert.equal(typeof seen[0]!.since, "number");
+});
+
+test("a codex Agent's session stays unknown when the provided finder finds none", async () => {
+  const codex = { ...base, agent: "codex" };
+  const result = await runTeamTurn(codex, "work", fakePort([{ ...codex }]), 2_000, 20, {
+    ...observing,
+    findCodexSession: async () => undefined,
+  });
+  assert.equal(result.session, undefined);
+});
+
 test("a non-codex Agent's session first seen during the turn is returned when the caller asks to observe it", async () => {
   const result = await runObserving(base, [
     { ...base, agent_session: session("s1") },
