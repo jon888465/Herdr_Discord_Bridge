@@ -1,5 +1,19 @@
 # Known Issues
 
+## ISSUE-176：遠端 pi 當 fixer 時，提示貼進輸入框但沒有送出，等到逾時才失敗（偶發，2 次中 1 次）
+
+更新日期：2026-11-19。狀態：待調查（根因未確認）。
+
+**使用者可見症狀（2026-11-19，第十次實機驗收，devbox 的 pi 1.5.2）：**`card fix` 第一次嘗試把提示（1877 字元）送進遠端 pi 的 pane 後，pi 一直是 `idle`、費用 `$0.000`，整段提示留在 pi 的輸入框裡，**沒有開始工作**。bridge 等滿 15 分鐘才回報「作者沒有回覆：Timed out waiting for current response from <pane> (last state: idle); no verified completion」；本輪沒有被採用、finding 狀態沒改，遠端 workspace 與目錄依設計保留並記 `cleanup_pending`。
+
+**預期：**提示被送出、pi 開始工作；或 bridge 較早發現「提示沒送出」而不是空等 15 分鐘。
+
+**重現／環境與證據：**本機 macOS、Herdr 0.9.5、bridge main 含 #316；devbox 的 pi 1.5.2。我在保留的現場確認：pi pane 狀態 `idle`、輸入框裡有完整提示、費用 `$0.000`、遠端目錄 `git status` 乾淨、本機 worktree 沒動；對這個現場我沒有按 Enter（避免證據失真）。我手動關掉保留的 workspace、刪掉保留的目錄後重跑，**第二次在約 1 分鐘內成功**（fixer 套用 1 個檔案、commit `4a279389989b`）。同一張卡的 implement 在同一個 pi 上第一次就成功。所以不是 pi 完全不能用，是偶發；樣本只有 pi fixer 2 次中 1 次。
+
+**已確認：**上述現象與 bridge 的逾時處理符合設計（逾時路徑：不取回改動、finding 不變、保留現場、記 `cleanup_pending`）。**未確認（沒有任何證據的猜測，僅供下一步參考）：**提示在 pi 還在載入擴充套件時就貼入、Enter 被吃掉的時序問題；也可能是 pi 特有的行為。沒有驗證。
+
+**下一步：**多收幾次樣本（含 implement 路徑是否也會發生）；讀 `agent.prompt` 送給 pi 的方式與 pi 的「就緒」判斷（pi 載入擴充套件期間是否已算就緒）；評估是否在 `idle` 且提示仍在輸入框時提早判定並重送一次（要先決定標準，避免重複送出）。
+
 ## ISSUE-175：遠端 codex 當作者時，「獨立審查」因作者 session 身分不明而失敗，整個 task 被標 failed
 
 更新日期：2026-11-19。狀態：已驗收（2026-11-19，devbox 的 codex 當 implement 作者，獨立審查閘門通過一次；**未驗收：遠端 codex 當 reviewer、其他機器與其他種類**）。先前：已修正、待驗收。根因已由讀碼與 devbox 唯讀檢查確認，沒有另外做實機重現。
@@ -88,7 +102,7 @@
 
 ## ISSUE-171：遠端 machine 不能擔任 implement／fixer（寫入角色）
 
-更新日期：2026-11-19。狀態：已修正、待驗收（**部分已驗收：task 內 implement 的成功路徑（2026-11-18）與兩種失敗路徑（沒有任何改動、遠端產生符號連結，2026-11-19）都已在 agy-pod 實機驗收，見「第三次實機驗收」與「第二次實機驗收」**；**PR 階段 fixer 的成功路徑（修正後 agy-pod 實機一次）也已通過，見「第五次實機驗收」之後的「第六次實機驗收」**；**fixer 的「遠端產生符號連結」失敗路徑也已通過（第七次實機驗收，卡片是手動標 done、finding 是手寫的，見該段）**；**未驗收：取消／逾時／digest 不符等其他失敗、fixer 的其他失敗路徑（沒宣告修好、回覆不合格、卡住、逾時）、fixer 修正後 push 與第 2 輪 review、devbox 上的 pi 與 codex 的失敗路徑**；**devbox 的 codex 的 implement 與 fixer 成功路徑也各通過一次（第九次實機驗收，2026-11-19，ISSUE-174 修正後）**；**新發現：失敗的卡片沒有自動寫入 `failed` 流程紀錄（見「第三次實機驗收」），原因未確認**；第 1～3 階段都已實作並有單元測試；設計與使用者的三項決定見 `docs/remote-write-roles.md`）。
+更新日期：2026-11-19。狀態：已修正、待驗收（**部分已驗收：task 內 implement 的成功路徑（2026-11-18）與兩種失敗路徑（沒有任何改動、遠端產生符號連結，2026-11-19）都已在 agy-pod 實機驗收，見「第三次實機驗收」與「第二次實機驗收」**；**PR 階段 fixer 的成功路徑（修正後 agy-pod 實機一次）也已通過，見「第五次實機驗收」之後的「第六次實機驗收」**；**fixer 的「遠端產生符號連結」失敗路徑也已通過（第七次實機驗收，卡片是手動標 done、finding 是手寫的，見該段）**；**未驗收：取消／逾時／digest 不符等其他失敗、fixer 的其他失敗路徑（沒宣告修好、回覆不合格、卡住、逾時）、fixer 修正後 push 與第 2 輪 review、devbox 上 pi 與 codex 的失敗路徑（fixer 逾時路徑除外）**；**devbox 的 codex 的 implement 與 fixer 成功路徑也各通過一次（第九次實機驗收，2026-11-19，ISSUE-174 修正後）**；**devbox 的 pi 的 implement 與 fixer 成功路徑也各通過一次，fixer 的逾時路徑意外驗到一次（第十次實機驗收，2026-11-19；pi 當 fixer 偶發提示沒送出，見 ISSUE-176）**；**新發現：失敗的卡片沒有自動寫入 `failed` 流程紀錄（見「第三次實機驗收」），原因未確認**；第 1～3 階段都已實作並有單元測試；設計與使用者的三項決定見 `docs/remote-write-roles.md`）。
 
 **使用者要求（2026-11-18）：**agy-pod（agy）與 devbox（codex、pi）要能擔任所有卡片角色；目前只有 reviewer 與 task 內 diagnose／review／verify（唯讀）可以在遠端，implement／fixer 在撿卡前被拒絕「remote 寫入尚未支援」（`src/card-role-assignment.ts`）。
 
@@ -115,6 +129,8 @@
 **第八次實機驗收（2026-11-19，devbox 的 codex 寫入角色，未完成，受阻；設定：devbox 暫時 `write: true`、sandbox 暫時 L1，驗完要還原）：**第一次嘗試 implement 在啟動前失敗：「遠端角色失敗：marker 寫入失敗」。**根因（我用唯讀 SSH 查證）：**devbox 上的 `cardReview.root`（`<root>`）不存在，而建 checkout 目錄的腳本用不帶 `-p` 的 `mkdir`（`src/remote-snapshot.ts` 的 `MKDIR_SCRIPT`），父目錄不存在就失敗；agy-pod 的 root 本來就存在所以先前沒遇到。文件沒有說這個 root 要事先建立（文件缺口，也可能是程式缺口，沒決定）。我在你的 devbox 上建了這個空目錄（權限 700，可再刪除）。`codex`、`git`、`timeout`、`pi` 在 devbox 都有。第二次嘗試 implement 失敗於「Worker 卡在啟動提示（blocked）」，原因見 ISSUE-174（codex 對新資料夾的信任提示）。因此 **當時 devbox 的寫入角色（codex、pi）仍未驗收**（後續見第九次）。下一步：ISSUE-174 的修正部署後重跑 implement 與 fixer 各一次。
 
 **第九次實機驗收（2026-11-19，devbox 的 codex 寫入角色，implement 與 fixer 成功路徑，通過；卡片 id 含機器名，略）：**環境與細節見 ISSUE-174「實機驗收」。**測試素材有兩處不是 bridge 判定的：**(1) 這張 task 整體被標 `failed`（原因見 ISSUE-175），所以 fixer 是在卡片 `failed` 的狀態下跑的，`card fix` 沒有拒絕；(2) F1 是我手寫進卡片「Review 發現」的（要求把 `hello.txt` 改成 `hello again from devbox`），不是 reviewer 判的。implement 在 devbox 的 codex 成功（commit `c97cd4d413b2`，只新增 `hello.txt` 一行 `hello from devbox`），fixer 成功（commit `e71e2046051e`，只改 `hello.txt`）。這次沒有手動標卡片 `done`：卡片流程紀錄在 task 失敗時自動寫入了 `failed`（2026-11-19T07:00:13Z，`task_failed`），與先前 task 落在 `blocked` 而不寫入的情況不同。**沒驗到：**pi；devbox 上寫入角色的失敗路徑；修正後 `card pr` 推新 commit 與第 2 輪 review。
+
+**第十次實機驗收（2026-11-19，devbox 的 pi 寫入角色，implement 與 fixer 成功路徑通過，fixer 逾時路徑意外驗到；卡片 `REQ-20261119-remote-pi-write`）：**環境：本機 macOS、Herdr 0.9.5、bridge main 含 #316；devbox 的 pi 1.5.2；暫時設定：devbox `write: true`、sandbox L1、把原本註解掉的 `pi` profile 打開（驗完全部還原並重啟）。**探針（唯讀）：**在 devbox 的新資料夾直接開 `pi`，狀態 `idle`、畫面是正常輸入框，沒有信任或更新提示，所以 pi 不需要像 codex 那樣預先信任（ISSUE-174）。**implement 成功：**task `completed`（08:44:29Z）；遠端 pi 的 commit `a5ed0df9599a`（`hdb-remote`、`hdb remote implement (devbox)`），只新增 `pi.txt`（一行 `hello from pi`），工作樹乾淨；devbox 沒有殘留 workspace、root 底下只剩備份目錄；獨立 review（本機 codex）pass、無 findings，所以**遠端 pi 當作者時獨立審查閘門沒有失敗**（pi 的 session 身分可辨識，原因我沒有查）。**fixer：**finding 是我手寫進卡片的（要求把 `pi.txt` 改成 `hello again from pi`），不是 reviewer 判的。第一次嘗試提示沒送出而逾時（ISSUE-176）：bridge 回報「作者沒有回覆：Timed out waiting for current response … (last state: idle); no verified completion」、finding 不變、遠端 workspace 與目錄保留並記 `cleanup_pending`，**這同時是 fixer 逾時路徑的一次實機驗證**（本機沒有新 commit、遠端目錄沒有改動）。我手動清掉保留的現場後重跑，第二次成功：commit `4a279389989b`（`hdb-remote`、`hdb remote fixer (devbox)`），只改 `pi.txt`（`hello again from pi`），F1 `fixed`，工作樹乾淨，devbox 沒有殘留。**沒驗到：**其他失敗路徑（沒宣告修好、回覆不合格、取消、digest 不符）；pi 當 reviewer；修正後 push 與第 2 輪 review；Lead 這次把 review 與 verify 都排在本機 codex，沒有遠端 pi 當 reviewer 或 verifier。
 
 **適用範圍決定（使用者 2026-11-19）：**遠端 implement 的用途是把拆好的小工作交給別的 agent、以 patch 傳回本機 worktree 再 commit；大功能在規劃時拆成多張卡（一卡一 worktree、一 PR），所以「派工前工作樹乾淨」「遠端工作期間本機不能改動」兩個限制不需要放寬，也不做多遠端 writer 的合併。程式面已確認 coding task 只允許一個 writer（讀程式碼，見 `docs/remote-write-roles.md`「適用範圍」）；同一個遠端 target 在同 task 連續做第二次 implement 未驗證。
 
