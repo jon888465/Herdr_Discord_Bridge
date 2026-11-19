@@ -150,3 +150,40 @@ test("list 失敗：回固定說明，不丟錯", async () => {
     "Herdr 側邊欄的埠沒有更新成功，保留原設定",
   );
 });
+
+test("換埠失敗時日誌記下失敗的步驟與 Herdr 回的原因（ISSUE-170 追查用）", async () => {
+  const h = fakeHerdr([old("ssh://devbox:49233")]);
+  const logs: string[] = [];
+  const notReady = "error: remote server is not ready for saved machines; machine was not saved";
+  const run = async (args: string[], timeoutMs?: number): Promise<string> => {
+    if (args[1] === "add")
+      throw Object.assign(new Error("Command failed: herdr machine add"), { herdrOutput: `remote herdr server is still running v0.9.5\n${notReady}\n` });
+    return h.run(args, timeoutMs);
+  };
+  await reconcileHerdrPort(machine, run, noWait, (line) => logs.push(line));
+  const joined = logs.join("\n");
+  assert.match(joined, /目標 ssh:\/\/devbox:50123/);
+  assert.match(joined, /ssh:\/\/devbox:49233（啟用）/);
+  assert.match(joined, /步驟 add 失敗：.*not ready for saved machines/);
+  assert.ok(logs.every((l) => !l.includes("\n")), "每筆日誌單行");
+});
+
+test("新的連不上時日誌記下 status 對該筆的狀態與錯誤文字", async () => {
+  const h = fakeHerdr([old("ssh://devbox:49233")], { reachable: false });
+  const logs: string[] = [];
+  await reconcileHerdrPort(machine, h.run, noWait, (line) => logs.push(line));
+  const joined = logs.join("\n");
+  assert.match(joined, /status 第 1 次：未 reachable（error：/);
+  assert.match(joined, /步驟 status 失敗：.*not reachable after 5 attempts/);
+  assert.match(joined, /已移除剛新增的項目/);
+});
+
+test("成功時日誌依序記 add 成功、status reachable，沒有失敗行", async () => {
+  const h = fakeHerdr([old("ssh://devbox:49233")]);
+  const logs: string[] = [];
+  await reconcileHerdrPort(machine, h.run, noWait, (line) => logs.push(line));
+  const joined = logs.join("\n");
+  assert.match(joined, /add 成功/);
+  assert.match(joined, /status 第 1 次：reachable/);
+  assert.ok(!joined.includes("失敗"));
+});
