@@ -294,8 +294,26 @@ test("F7: concurrent writers keep both entries", async (t) => {
   const names = [NAME, `acme__repo__${"b".repeat(10)}`];
   const { root, file, exec, ok: usable } = await shPod(t, names);
   if (!usable) return;
-  await Promise.all(names.map((n) => editRemoteAgyTrust(exec, { root, dir: join(root, n), cardHash: HASH }, true)));
-  eq((JSON.parse(await readFile(file, "utf8")).trustedWorkspaces as string[]).slice(1).sort(), names.map((n) => join(root, n)).sort());
+  // ISSUE-172：CI（ubuntu）曾偶發漏掉其中一筆且無法重現；失敗時要留下足以判斷的線索（每次呼叫的種類、起訖時間、結束碼、檔案雜湊），而不只是 deepEqual 的差異。
+  const trace: string[] = [];
+  const t0 = Date.now();
+  const traced = (label: string): RemoteExec => async (argv, timeoutMs) => {
+    const kind = argv[2] === TRUST_WRITE_SCRIPT ? `write(expect=${String(argv[9]).slice(0, 8)})` : "read";
+    const start = Date.now() - t0;
+    const result = await exec(argv, timeoutMs);
+    trace.push(`${label} ${kind} +${start}ms..+${Date.now() - t0}ms code=${result.code}${kind === "read" ? ` hash=${result.stdout.slice(0, 8)}` : ""}`);
+    return result;
+  };
+  const results = await Promise.all(names.map((n, i) => editRemoteAgyTrust(traced(`w${i}`), { root, dir: join(root, n), cardHash: HASH }, true)));
+  const after = await readFile(file, "utf8");
+  const backups = await readdir(join(root, ".hdb-agy-settings-backups")).catch(() => ["(none)"]);
+  const actual = (JSON.parse(after).trustedWorkspaces as string[]).slice(1).sort();
+  const expected = names.map((n) => join(root, n)).sort();
+  eq(
+    actual,
+    expected,
+    `trustedWorkspaces 少了項目\n[ISSUE-172 diagnostic] results=${JSON.stringify(results)} actual=${JSON.stringify(actual)} expected=${JSON.stringify(expected)} fileHash=${sha(after).slice(0, 8)} backups=${JSON.stringify(backups)}\n${trace.join("\n")}\n${after}`,
+  );
   await lockGone(root);
 });
 
