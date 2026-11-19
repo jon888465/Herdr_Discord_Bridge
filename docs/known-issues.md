@@ -1,5 +1,17 @@
 # Known Issues
 
+## ISSUE-172：CI 偶發失敗：`F7: concurrent writers keep both entries`（remote agy 信任並行寫入）
+
+更新日期：2026-11-19。狀態：待調查（偶發，只出現一次；原因未確認）。
+
+**症狀（2026-11-19，GitHub Actions，ubuntu-latest、Node 22）：**純文件 PR 的 CI 在 `test/remote-agy-trust.test.ts` 的 `F7: concurrent writers keep both entries` 失敗：兩個並行的 `editRemoteAgyTrust`（用真的 sh 與 `mkdir` 鎖）寫入後，設定檔的 `trustedWorkspaces` 只剩一筆（預期兩筆，少了其中一個目錄），斷言 `deepStrictEqual`。同一次執行的 macOS 通過。最近 30 次 CI 只有這一次不是成功，所以是偶發。該 PR 只改文件，與這次的程式無關。
+
+**預期：**並行寫入兩個不同目錄，兩筆都保留（見 ISSUE-143 F7）。
+
+**已知相關：**ISSUE-143 的 F9（兩個等待者毫秒級同時判定同一把鎖過期並回收，可能互相覆蓋）是已知且未採納的限制；但這個測試**沒有**製造過期的鎖，所以這次是否就是 F9、是腳本的鎖有漏洞，還是測試在 Linux 的時序問題，**未確認**。**因此不能預設「重跑就好」而當成沒事**：若是腳本的真缺陷，pod 上同時有兩張卡寫信任設定時可能漏掉其中一筆。
+
+**目前沒有修正、沒有重現。**重跑 CI 的權限（個人存取權杖）不夠，改以推新 commit 觸發。**下一步：**在 ubuntu 上連續重跑該測試（例如 200 次）看失敗率；失敗時印出設定檔內容與鎖目錄狀態；確認是 F9 還是別的原因，再決定修腳本或調測試。
+
 ## ISSUE-171：遠端 machine 不能擔任 implement／fixer（寫入角色）
 
 更新日期：2026-11-19。狀態：已修正、待驗收（**部分已驗收：task 內 implement 的成功路徑（2026-11-18）與兩種失敗路徑（沒有任何改動、遠端產生符號連結，2026-11-19）都已在 agy-pod 實機驗收，見「第三次實機驗收」與「第二次實機驗收」**；**未驗收：取消／逾時／digest 不符等其他失敗、PR 階段 fixer、devbox 上的 codex／pi**；**新發現：失敗的卡片沒有自動寫入 `failed` 流程紀錄（見「第三次實機驗收」），原因未確認**；第 1～3 階段都已實作並有單元測試，第 3 階段 fixer 已部署但沒有實機執行過；設計與使用者的三項決定見 `docs/remote-write-roles.md`）。
