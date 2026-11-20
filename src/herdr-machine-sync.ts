@@ -66,7 +66,7 @@ function withHerdrOutput(error: unknown, stdout: string, stderr: string): unknow
   return error;
 }
 
-const runHerdr: HerdrMachineRunner = (args, timeoutMs = HERDR_TIMEOUT_MS) =>
+export const runHerdr: HerdrMachineRunner = (args, timeoutMs = HERDR_TIMEOUT_MS) =>
   new Promise((resolve, reject) =>
     execFile(
       "herdr",
