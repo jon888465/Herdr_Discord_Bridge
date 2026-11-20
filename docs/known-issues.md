@@ -46,6 +46,11 @@
 另：2026-11-20 08:14 讀畫面，修正卡 worktree 在我預先信任該路徑後，codex 停在正常輸入列（YOLO mode），所以**目前無法分辨**是預先信任生效，還是這個路徑本來就不會跳信任。
 **下一步（更新）：**先做 linked-worktree 對照探針與「更新提示是否真的被跳過」的探針，再決定修法；在此之前不要把本 issue 的根因寫成已確認。
 
+**探針 1 結果（2026-11-20，本機 macOS，codex 0.170.0；探針不是 bridge 自己的 log）：linked worktree 不會跳信任提示。**從主 repo 用 `git worktree add --detach` 建一個 linked worktree 到 `~/.herdr/worktrees/` 下，用 Herdr 開 workspace 啟動 `codex`：先出現更新選單（我送一次 `2` 跳過），之後**直接進到正常輸入列，沒有 `Trust this folder?`**，狀態 `done`。探針沒有選任何信任；結束後 workspace 與 worktree 已移除，`~/.codex/config.toml` 與探針前備份逐位元組相同。對照：同樣在 `~/.herdr/worktrees/` 下，但是全新 `git init` 資料夾（先前的探針）會跳信任。
+結論（限於這次觀察）：「新路徑就會跳信任」**不成立**；信任似乎由已被信任的主 repo 繼承給 linked worktree，所以先前「新 `git init` 資料夾跳信任」不能代表卡片 worktree 的情況，假設 (b) 得到支持。**因此修正卡 `REQ-20261120-local-worktree-codex-trust`（預先信任本機卡片 worktree）很可能修錯東西，已改回 `draft` 暫不重跑。**
+**這次探針的限制：**只測了一個 linked worktree、一個 codex 版本；**沒有直接驗證 bridge 建的卡片 worktree 是否為 linked worktree**（依 `git worktree` 的建立方式推論）；探針是我手動送 `2`，**不是** bridge 的 `waitUntilReady` 在處理，所以假設 (a)（更新選單被判沒就緒）**尚未驗證**，也就是 `REQ-20261120-team-discuss` 第一次 verify 為何失敗仍未解釋。
+**下一步：**探針 2（觀察 bridge 對更新選單的等待與跳過行為，見 ISSUE-181），再決定是否需要任何程式修正。
+
 **修正方向（尚未實作）：**卡片 worktree 建好後，對本機 codex 預先寫入信任（沿用 `src/codex-project-trust.ts` 與 ISSUE-174 的寫入／還原流程），卡片結束後移除。需要使用者決定是否沿用 ISSUE-174 的原則。
 
 **測試與驗收：**無（尚未修正）。同一張卡的實作在 worktree 本機跑過：`npm run typecheck`、`npm run lint` 通過，`npm test` 2246 項、通過 2245、失敗 0、略過 1（2026-11-20）；這只代表那份實作的自動化檢查，與本 issue 的修正無關。
