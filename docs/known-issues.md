@@ -1,5 +1,17 @@
 # Known Issues
 
+## ISSUE-183：worktree Lead 啟動回傳時狀態還是 `unknown`，被直接判「Lead 尚未就緒」，任務沒有啟動
+
+更新日期：2026-11-20。狀態：已修正、待驗收（原始碼與自動化測試通過；**尚未部署重跑、未實機驗收**；**根因是依取樣推論，沒有直接量到 `agent.start` 的回傳狀態**）。
+
+**使用者可見症狀（2026-11-20 08:55 UTC，`REQ-20261120-team-discuss`，ISSUE-181 修正部署後第一次重跑）：**autopick 的 Lead 與卡片 worktree 的 Lead（都是 codex）都成功跳過更新選單、現在都停在正常輸入列（`idle`），但卡片在 assign 步驟以「Lead 尚未就緒，任務沒有啟動，卡片仍是 ready」停下，worktree（`w97`）已建、任務沒有開始。
+
+**預期：**Lead 只是還在啟動時，要等到就緒再開始任務，不是立刻放棄。
+
+**已確認（讀碼）：**`prepareCardWorktree`（`src/card-worktree-flow.ts`）在 `agent.start` 回來後，只有狀態是 `working` 或 `blocked` 才呼叫 `awaitReady`；其他狀態直接算未就緒（`agentReady` 只認 `idle`／`done`）。**推論（未直接驗證）：**2026-11-20 對 codex 的 100 ms 取樣顯示啟動後前約 3.7 秒狀態是 `unknown`，之後才變 `blocked`（更新選單）；若 `agent.start` 在 `unknown` 時回傳，就會跳過等待而判失敗。這次沒有紀錄 `agent.start` 實際回傳的狀態。為什麼更早的 codex 卡沒踩到：未確認。
+
+**修正（2026-11-20）：**改成「不是 `idle`／`done` 就等」。回歸測試：`agent_status: "unknown"` 回傳時必須呼叫 `awaitReady`，修正前失敗、修正後通過。`card-worktree-flow.test.ts`＋`agent-ready.test.ts` 共 49 項全過；完整 `npm test` 2226 項、通過 2225、失敗 0、略過 1；typecheck、lint 通過（2026-11-20，本機 macOS，worktree）。**未驗證：**真實 bridge 部署重啟後，codex 當 worktree Lead 的卡能否繼續執行；其他呼叫端（例如 `src/main.ts`、`team-task-engine.ts` 中類似的 `working`／`blocked` 判斷語意不同，本次沒改）。
+
 ## ISSUE-180：沒指定 roles 的卡，自動開出 claude opus Worker，並跳出「switch to opus」確認
 
 更新日期：2026-11-20。狀態：已處置設定、待重啟生效（**未驗收**）。

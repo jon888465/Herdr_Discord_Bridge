@@ -204,6 +204,8 @@ mapping 過期時，一律 fail closed。
 
 共用 `waitUntilReady` 用於 autopick 來源 Lead、worktree Lead、fresh role／單一 coding profile Worker；persistent profile pool 亦接入此等待。`card review` 的 reviewer 與 `card fix` 的 fixer 也用它，且只在等待就緒這一步把 `done` 當 `idle`（ISSUE-173，2026-11-19，已修正、待驗收；codex 的 hook 只回報 session，狀態由畫面推斷，剛啟動可能顯示 done）。只有預期 CLI 已被辨識且 idle／done（呼叫端明確選用 doneAsReady）才就緒；pane／terminal／workspace／CLI 被替換即失敗。就緒不保證 Herdr 已登記 active named agent，首次 prompt 的有界 agent_not_ready 重試仍見 ISSUE-137。
 
+卡片 worktree 的 Lead 在 `agent.start` 回傳時只要不是 `idle`／`done`（含 `working`、`blocked`、啟動初期的 `unknown`）就先等就緒再判斷，不直接判未就緒（ISSUE-183，2026-11-20，已修正、待驗收）。
+
 僅在 blocked 且 visible 畫面完整符合觀察到的 Codex 更新選單時自動選 **`2. Skip`**。畫面須有 `Update available · <semver> → <semver>` 與依序精確選項 `1. Update now`、`2. Skip`、`3. Skip until next version`；容許空白、ANSI 樣式、`›` 選取標記、已知 release notes 網址、`enter continue · esc skip` 底列，以及既有觀察到的 brew 更新說明。任何額外文字、一般 question、approval、信任、權限、登入、缺選項、不同編號或其他 CLI 均 fail closed，不送按鍵。不得選 Update now 或 Skip until next version，也不改私人設定／policy。
 
 送鍵前重查 blocked 及 pane／terminal／workspace／CLI／已知 session。使用 `pane.send_keys`、`keys: ["2"]`、`retries: 0`，不附 Enter；同底層 port／pane（含 doneAsReady、並行及重入）最多一次，不確定送達不重試。送後 visible 讀取失敗，或畫面上**整組**更新選單字樣（`Update available`、`1. Update now`、`2. Skip`、`3. Skip until next version` 全部都在）仍在即失敗，否則繼續輪詢就緒。只剩其中一句不算選單還在：跳過後 Codex 會在畫面頂端留下「✨ Update available!」橫幅，不能因此判失敗（ISSUE-181，2026-11-20，已修正、待驗收）。Skip 的送出與 updateSkip 紀錄不代表 readiness、assignment 或 task 成功。未知／blocked fresh Worker 保留現場，pool 保持 uncertain 且不寫成功 binding；失敗不能新增 coding pass artifact 或將卡片設 done。Lead 來源啟動失敗沿用關閉本次新 workspace，worktree Lead blocked 沿用保留 worktree、卡片 ready 且不建立 task；已建立 task 的 Worker 失敗保留 task/card 關聯及 in_progress 狀態。
