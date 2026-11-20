@@ -1,5 +1,19 @@
 # Known Issues
 
+## ISSUE-184：跳過更新選單後，Herdr 的 agent_status 還停在 `blocked`，下一輪輪詢又被判「卡在啟動提示」（Worker 池）
+
+更新日期：2026-11-20。狀態：已修正、待驗收（原始碼與自動化測試通過；**尚未部署重跑、未實機驗收**；**根因是依時序推論，沒有在 bridge 內直接量到那一輪輪詢看到的狀態**）。
+
+**使用者可見症狀（2026-11-20 09:05 UTC，`REQ-20261120-team-discuss` 第三次嘗試，ISSUE-181／183 已部署）：**Lead（codex）起來、任務開始，但實作指派 `implement-discuss`（`profile:helper`，codex）以「Worker 卡在啟動提示（blocked）」失敗，review、verify 因依賴它而失敗。bridge 日誌有 `已自動跳過 codex 的更新提示（pane …、按鍵 2）`，事後讀 pane：正常輸入列、YOLO mode、`idle`。
+
+**時序證據（task 事件）：**計畫通過 09:05:28.769 → `assignment_failed` 09:05:34.374，約 5.6 秒，約等於啟動 1 秒 + 狀態變 `blocked` 約 3.9 秒 + 送鍵後約 0.6 秒，也就是失敗發生在跳過鍵送出之後不久。
+
+**實機量測（2026-11-20，本機 macOS，codex 0.170.0，帶 helper 的 `--dangerously-bypass-approvals-and-sandbox`，3 次，探針不是 bridge 日誌）：**送鍵後 11 至 13 ms 畫面已不是選單（排除「立刻重讀還看到選單」）；`agent_status` 在送鍵後約 0.24 至 0.25 秒才從 `blocked` 變 `idle`。Worker 池的輪詢間隔是 300 ms（`src/agent-pool.ts` 的 `readyPollMs`），餘裕只有約 50 ms。
+
+**推論的根因：**`waitUntilReady` 輪詢迴圈在狀態仍是 `blocked` 時再次呼叫 `skipKnownUpdate`；該 pane 已送過鍵（同 pane 只送一次，不重試），函式直接回傳 `proceed: false`，被判成卡在啟動提示。bridge 忙碌時狀態落後更久就會觸發。**未確認：**那一輪輪詢實際看到的狀態；為什麼 autopick Lead 與 worktree Lead 這次沒踩到（輪詢間隔與路徑不同，沒有驗證）。
+
+**修正（2026-11-20）：**跳過後若確認畫面已不是整組選單，記下時間，之後 5 秒內該 pane 再看到 `blocked` 視為狀態落後、繼續輪詢；超過 5 秒仍 `blocked` 照舊失敗（接著跳出的信任提示等仍會失敗，只是最多晚約 5 秒），沒送過鍵或選單還在時行為不變。**測試（2026-11-20，本機 macOS，worktree）：**新增 2 項（狀態落後 2 輪後 idle 應成功，修正前失敗、修正後通過；狀態超過寬限期仍 blocked 應失敗）；`agent-ready.test.ts`＋`card-worktree-flow.test.ts`＋`update-prompts.test.ts` 共 55 項全過；完整 `npm test` 2228 項、通過 2227、失敗 0、略過 1；typecheck、lint 通過。**未驗證：**部署重啟後 helper／reviewer／claude Worker 的實際啟動；5 秒寬限期是否足夠。
+
 ## ISSUE-183：worktree Lead 啟動回傳時狀態還是 `unknown`，被直接判「Lead 尚未就緒」，任務沒有啟動
 
 更新日期：2026-11-20。狀態：已修正、待驗收（原始碼與自動化測試通過；**尚未部署重跑、未實機驗收**；**根因是依取樣推論，沒有直接量到 `agent.start` 的回傳狀態**）。
