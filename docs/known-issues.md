@@ -2,7 +2,7 @@
 
 ## ISSUE-177：Machine 看板連線時，遠端 Herdr server 需要重啟卻沒有確認提示，遠端 bridge 也不會跟著重開
 
-更新日期：2026-11-20。狀態：階段 1、階段 2 都已實作並部署（2026-11-20，`scripts/run.sh -r`，階段 1 在 main `9f1f28a`、階段 2 在 `0faadd2`），待實機驗收；使用者 2026-11-20 回報在 devbox 測過「看起來 OK」（口頭回報，沒有留下輸出或畫面），預計下週再測，**所以仍不算已驗收**。
+更新日期：2026-11-20。狀態：階段 1、階段 2 都已實作並部署（2026-11-20，`scripts/run.sh -r`，階段 1 在 main `9f1f28a`、階段 2 在 `0faadd2`），待實機驗收；使用者 2026-11-20 回報在 devbox 測過「看起來 OK」（口頭回報，沒有留下輸出或畫面），預計下週再測；**之後又決定暫不再驗收**（devbox 已改走 tailnet 固定位址，不再有會換埠的轉發，見下方「暫不驗收的決定」），**所以仍不算已驗收**，狀態維持「已部署、待驗收」。
 
 **使用者要求（2026-11-20）：**「TUI 上在連線時要提示是否確認要重啟該遠端機器的 herdr server，遠端 devbox 如果有 bridge 要重開」。
 
@@ -31,6 +31,8 @@
 **階段 2 的限制與未驗證：**(a) **沒有實機驗證**：我沒有在真的遠端 bridge 上跑過偵測或重開；遠端 bridge pane 的標題是 `Discord bridge` 這點只有本機 bridge pane 的標題與 plugin manifest 的 `title` 為證，沒有在遠端看過；`plugin pane open` 在遠端實際會不會成功、開出來的 bridge 設定是否正確，都沒有驗證；(b) 偵測只看 pane 標題，遠端若有人手動跑了 bridge 但不是 plugin pane 就偵測不到；(c) 開出來的 bridge 是否用了正確的設定與 bot 由遠端自己的設定決定，bridge 不檢查；(d) 重開後的位置（split）可能與原本不同，沒有像 `run.sh` 那樣搬到第一個 tab；(e) 只在 macOS 開發與測試。
 
 **階段 2 部署與使用者回報（2026-11-20）：**階段 2 以 `scripts/run.sh -r` 部署（部署前先與 GitHub 同步，main `0faadd2`，active-streams 為空，`dist` 含 `reopenRemoteBridge`，兩台機器 `connected`；agy-pod 在重啟後第一次讀狀態時一度 `unreachable`，約 20 秒後恢復，判斷是隧道重連的延遲，沒有查更深）。之後**使用者回報在 devbox 測過，「看起來 OK」，預計下週再測一次**。這是口頭回報：我沒有看到當時的看板畫面、狀態檔、遠端 server 是否真的被重啟、遠端 bridge 是否被偵測與重開，也不知道測的是階段 1 的確認流程、階段 2 的重開，還是只有其中一部分，所以不能記成已驗收。**下週再測時請順便留下的證據：**看板 `o` 的確認提示畫面；`machine-remote-restart.json` 的 `pending` 與 `status` 變化；bridge 日誌裡「Herdr machine … 重開遠端 bridge」的幾行；遠端 `herdr pane list` 看 `Discord bridge` pane 是否出現（一個，不是兩個）；`herdr machine list` 的 target 是否是新埠。
+
+**暫不驗收的決定（使用者 2026-11-20）：**使用者決定這條先不用測了，理由是 devbox 現在**走 tailnet 的固定位址，不再走會換埠的轉發**。**依程式與目前設定判斷（讀碼，不是執行期測試）：**換埠偵測與確認流程只會在 `ssh` 別名搭配 `port`、且沒有 `host` 的 machine 上觸發（`reconcileHerdrPortOutcome` 對其他形式一律回傳空結果）；目前 devbox 改用結構化的 `host`＋`user`（不寫 `ssh`、不寫 `port`），另一台 machine 是只有 `ssh` 別名、沒有 `port`，所以**目前沒有任何 machine 會走到這條路徑**。程式碼仍留在 main 並已部署（#323、#324），bridge 仍在跑它；階段 1、階段 2 都**沒有實機驗證**，包括遠端 bridge 的偵測與重開。**什麼時候該回來驗收：**之後如果又有 machine 改回「別名加會變動的埠」（例如手動埠轉發），而且 Herdr 要求重啟遠端 server，才會用到；到時再依上面的清單驗收，並補上實機證據。**也要知道：**因為沒驗收，這段功能的程式與文件仍要視為「已實作、未驗證」，不能當成已可依賴的行為；若確定不會再用到，可以日後再決定是否移除。
 
 **階段 1 的限制與未驗證：**(a) 沒有實機驗收：要在真的需要重啟的遠端機器上跑一次（會中斷那台上的行程）；(b) 階段 1 不重開遠端的 bridge（階段 2 已實作，見上）；(c) 只在 macOS 實測 Python pty，Linux 沒有實機；(d) 只有 bridge 啟動時的換埠失敗會標 `pending`，bridge 執行中才發現的情況不會；(e) 進度只在看板顯示，沒有其他通知；(f) `main.ts` 的接線沒有單元測試。
 
@@ -184,7 +186,7 @@
 
 ## ISSUE-170：看板改 machine 的 port 後，Herdr 側邊欄還連舊埠
 
-更新日期：2026-11-20。狀態：重新開啟／部分處理（根因已由 Herdr 自己的提示確認：遠端 server 不是 Herdr 準備流程啟動的，要先重啟；2026-11-20 已手動處理並讓側邊欄恢復；**bridge 的自動換埠在這種情況下仍然做不到，程式尚未改**，見下方「根因確認與手動處理」）。
+更新日期：2026-11-20。狀態：重新開啟／部分處理（根因已由 Herdr 自己的提示確認：遠端 server 不是 Herdr 準備流程啟動的，要先重啟；2026-11-20 已手動處理並讓側邊欄恢復；**bridge 的自動換埠在這種情況下仍然做不到，程式尚未改**，見下方「根因確認與手動處理」）。2026-11-20 之後 devbox 已改走 tailnet 固定位址（結構化 `host`），不再換埠，**自動換埠這條路徑目前沒有 machine 在使用**（讀碼判斷，ISSUE-177 的確認流程也因此暫不驗收）。
 
 **再次發生（2026-11-20，本機 macOS＋Herdr 0.9.5，bridge 含 #302 的換埠日誌；這是日誌第一次在真實失敗中記到內容）：**使用者在 machine 停用的狀態下把 bridge 設定的埠由舊埠改成新埠，重啟 bridge 並按 `o` 開 Herdr，側邊欄的 devbox 仍顯示 `reconnecting`。**我讀到的事實（唯讀，沒有改任何東西）：**(1) bridge 自己的連線是 `connected`（它用自己的 `ssh -L` 與新埠）；(2) `herdr machine list` 裡該 machine 的 target 仍是舊埠、`enabled`，`herdr machine status` 是 `error`：「remote platform detection failed: ssh: connect to host 127.0.0.1 port <舊埠>: Connection refused」；(3) 換埠日誌：「步驟 add 失敗：remote herdr server on ssh://<別名>:<新埠> (session default) is still running v0.9.5; it will use 0.9.5 after it restarts. error: remote server is not ready for saved machines; machine was not saved」，之後「Herdr 側邊欄的埠沒有更新成功，保留原設定」。也就是 Herdr 的 `machine add` 拒絕了新埠，bridge 依設計保留舊設定。
 
