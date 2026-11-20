@@ -256,7 +256,7 @@ Agent。`current` 顯示有效 mapping，並回報過期的 agent/pane 資料。
 作為 active target，但不送出 prompt。Thread 有 active target 時，普通 user
 message 會直接送給該 Agent，並套用與 `assign` 相同的 allowlist、過期 mapping
 與 busy 檢查。`target` 是向後相容的 alias。`ask` 對指定 Agent 發送一次性
-prompt，並將該 Agent 記錄到 thread，但不改變 active target。`team list` 列出所有 workspace Teams；`team add`、`team remove` 與 `team ask` 操作目前 workspace 的 Team。Team mapping 會持久化，Discord thread 不是 Team scope；
+prompt，並將該 Agent 記錄到 thread，但不改變 active target。`team list` 列出仍存在的本機 workspace Teams；已不存在的本機 workspace（包括過期 active route）不顯示，但不刪持久化 mapping。存活 workspace 的離線成員仍顯示 stale；遠端 Team 因清單可能快取或斷線，保守保留，不以缺席推斷刪除。workspace 查詢失敗時回報錯誤，不當成空清單（ISSUE-178）；`team add`、`team remove` 與 `team ask` 操作目前 workspace 的 Team。Team mapping 會持久化，Discord thread 不是 Team scope；
 `team remove` 管理 workspace Team 成員；`team ask` 會以目前 thread 的
 active Agent 作為 Lead，先要求 Lead 產生受驗證的 Assignment plan，再透過 Herdr
 將 bounded 子任務送給同 workspace Workers，收集報告後讓 Lead 決定後續 Assignment，空計畫才進入直接處理／驗證／synthesis；失敗或 blocked 則只做 partial synthesis。它

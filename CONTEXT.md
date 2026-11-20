@@ -32,7 +32,7 @@
 
 - A Team belongs to exactly one Herdr workspace and may be used from multiple Discord delivery contexts.
 - Team members must belong to the Team workspace; Agents from different workspaces are different Teams.
-- Team membership mappings persist across bridge restarts; unavailable panes remain stale and are not dispatchable until Herdr reports them again.
+- Team membership mappings persist across bridge restarts; unavailable panes remain stale and are not dispatchable until Herdr reports them again. `team list` hides missing local workspaces without deleting mappings; remote Teams remain visible conservatively because remote snapshots may be cached or unavailable (ISSUE-178).
 - A Team Task has exactly one Lead and zero or more Participants.
 - The Lead is selected from the active Agent mapping when the task begins.
 - A Team Task never silently changes its Lead or Roster while running.
