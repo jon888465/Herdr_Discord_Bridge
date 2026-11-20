@@ -75,6 +75,29 @@ test("known update is skipped once and then readiness succeeds", async (t) => {
   assert.equal(calls.filter((c) => c.method === "agent.read").length, 2);
 });
 
+// ISSUE-181：2026-11-20 實機畫面。跳過選單後 codex 會在頂端顯示「✨ Update available!」橫幅，不能被當成選單還在。
+const bannerAfterSkip = [
+  "╭─────────────────────────────────────────────────╮",
+  "│ ✨ Update available! 0.170.0 -> 0.171.0         │",
+  "│ Run brew upgrade --cask codex to update.        │",
+  "│                                                 │",
+  "│ See full release notes:                         │",
+  "│ https://github.com/openai/codex/releases/latest │",
+  "╰─────────────────────────────────────────────────╯",
+  "  >_ OpenAI Codex (v0.170.0)",
+  "› Ask Codex to do anything",
+].join("\n");
+
+test("the update banner shown after the skip does not count as the menu still being there", async (t) => {
+  quiet(t);
+  const { deps } = fixture([
+    { read: { text: update } },
+    { read: { text: bannerAfterSkip } },
+  ]);
+  const result = await waitUntilReady(deps, pane, agent());
+  assert.equal(result.ok, true);
+});
+
 const blockedReason =
   "reviewer 卡在啟動提示（blocked）。常見原因：Agent 自己的更新提示或新資料夾的信任提示；bridge 不會替人確認，請先在要用的種類上處理一次";
 
