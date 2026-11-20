@@ -12,7 +12,7 @@
 
 修正與根因確認（2026-11-20）：新增 `test/team-list-main.test.ts` 經真實 `handleCommand` 重現，修正前 4 項中 3 項失敗（刪除 workspace 仍顯示、全刪時未顯示空清單、workspace 查詢失敗未回報）。原因為清單直接列持久化 ID，沒有查 workspace 存續；現場清理是否另有遺漏尚未驗證。`teamList` 現查詢 workspace 清單，隱藏已不存在的本機 workspace（包含過期 active route），不刪 mapping／任務／session；仍存在 workspace 的 stale 成員保留。遠端因 HerdrHub 使用快取且手動斷線會省略，所有遠端 Team 保守保留，遠端刪除殘留不在本輪修正範圍。查詢錯誤向上傳遞，不把不可達當刪除。
 
-驗證（2026-11-20，本機 Linux）：`npm run typecheck`、`npm run lint`（278 TypeScript files）、`npm run build` 通過；`node --test dist/test/team-list-main.test.js` 4／4 通過。首次 `npm test` 被 120 秒工具上限中止；以較長上限重跑 2224 項、2178 pass、23 fail、23 cancelled（多個有界等待／啟動／socket 測試失敗），不能宣稱完整通過。`node --test --test-concurrency=1 dist/test/*.test.js`：2224 項、2223 pass、1 fail、0 cancelled；唯一失敗為未修改的 run-sh-args「Core readiness 等待有界」預期 within 10 seconds，實得 Core status failed or timed out。該檔單跑 56 項、55 pass、1 fail，仍相同；根因未確認，不為本修正放寬測試。下一步以 PR CI 判定是否可 merge，若紅燈不合併。未重啟或部署 bridge，Discord／Herdr 實機驗收未完成；舊 mapping 刻意保留，不補送舊訊息。
+驗證（2026-11-20，本機 Linux）：`npm run typecheck`、`npm run lint`（278 TypeScript files）、`npm run build` 通過；`node --test dist/test/team-list-main.test.js` 4／4 通過。首次 `npm test` 被 120 秒工具上限中止；以較長上限重跑 2224 項、2178 pass、23 fail、23 cancelled（多個有界等待／啟動／socket 測試失敗），不能宣稱完整通過。`node --test --test-concurrency=1 dist/test/*.test.js`：2224 項、2223 pass、1 fail、0 cancelled；唯一失敗為未修改的 run-sh-args「Core readiness 等待有界」預期 within 10 seconds，實得 Core status failed or timed out。該檔單跑 56 項、55 pass、1 fail，仍相同；根因未確認，不為本修正放寬測試。PR #327 首輪 GitHub CI（2026-11-20，run 44691356036）Ubuntu／macOS Node 22 全部通過；本機失敗保留紀錄，不視為實機驗收。合併仍須最後版本 CI 全綠。未重啟或部署 bridge，Discord／Herdr 實機驗收未完成；舊 mapping 刻意保留，不補送舊訊息。
 
 ## ISSUE-177：Machine 看板連線時，遠端 Herdr server 需要重啟卻沒有確認提示，遠端 bridge 也不會跟著重開
 
