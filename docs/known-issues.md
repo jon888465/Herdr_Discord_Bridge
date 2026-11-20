@@ -6,6 +6,8 @@
 
 **使用者可見症狀（2026-11-20，卡片 `REQ-20261120-local-worktree-codex-trust`）：**使用者回報「剛開卡的 claude 也會跳 switch opus 確認」。卡片沒有 `roles` 或 `model` 欄位，但 task 紀錄 `d1-code-map` 為「claude（opus）」，`profile=claude`。
 
+**更正（2026-11-20 同日稍晚）：下面「根因」只對 Worker 成立，對 Lead 是錯的。**第二次嘗試時 Lead（claude）停在 `Fable 5.1 now uses usage credits … ❯ Switch to Opus 5.5 and continue`：Lead 啟動只傳 `kind`、沒有 `args` 或 `model`（`src/autopick-wiring.ts` 的 `startAgentInPane`），`~/.claude/settings.json` 也沒有 `model`，所以落在帳號預設 Fable 5.1，需要 usage credits。拿掉 profile 的 `model` 沒有解決這個提示，還讓 Worker 也落回 Fable 5.1，所以同日改為 profile 固定 `sonnet`（只管 Worker／reviewer／fixer，不管 Lead）。**Lead 的 model 目前無法在 bridge 設定指定**；暫時辦法是把 `autopick_lead` 的順序改成 `codex` 優先（政策檔，不在 repo）。是否新增「Lead 可指定 model」功能待使用者決定。我沒有按那個提示的任何鍵。
+
 **根因（已確認，讀設定與 task 紀錄）：**使用者機器上 bridge 設定檔的 claude profile 有固定 `model: opus`（2026-11-11 使用者決定，為了讓卡片 `roles` 的 model 指定通過允許清單）。沒指定 roles 的卡由 Lead 規劃，開 profile Worker 時一律用這個 model，因此用量較大的 opus 被自動使用，並可能跳出模型切換確認而讓 Worker 卡住。放行這張卡前沒有檢查用量，這是操作疏漏。
 
 **處置（2026-11-20，使用者決定，不在 repo 內）：**把該 profile 的 `model` 設定註解掉（改用 CLI 預設），寫明日期與還原方式。**bridge 需要重啟才會重讀設定**，使用者指示在這張卡結束後重啟；寫本條時尚未重啟。
@@ -14,9 +16,23 @@
 
 **驗收：**重啟後，開一張沒指定 roles 的卡，確認新開的 claude Worker 不再要求 opus、也不跳模型確認；記錄日期、環境與結果。
 
+## ISSUE-182：先關掉卡片的 workspace，`card cleanup` 就無法移除 worktree，之後重跑被「已有作用中的 worktree」擋住
+
+更新日期：2026-11-20。狀態：待調查（現象已在實機遇到，**尚未修正**，修法待決定）。
+
+**使用者可見症狀（2026-11-20，`REQ-20261120-team-discuss`）：**取消卡片 task 後我先關了它的 Lead workspace，再執行 `card cleanup`，回 `❌ herdr worktree.remove: workspace_not_found workspace w92 not found`；worktree 目錄還在、store 仍標作用中。`card cleanup` 一向不強制，有未提交改動就保留；沒有未提交改動時也要靠該 workspace 還在才能移除。
+
+**預期：**workspace 已被關閉時，仍可清理乾淨的 worktree 並把 store 標為已移除，不需要手動改狀態檔、也不需要重啟 bridge。
+
+**已確認：**`cleanupCardWorktree`（`src/card-worktree-flow.ts`）只用 `entry.workspaceId` 呼叫 `removeWorktree`，失敗即回傳；`CardWorktreeStore` 在建構時把檔案讀進記憶體、只有自己的 mutation 才寫檔，所以手動改檔案要重啟 bridge 才會被重讀。**未確認：**Herdr 在 workspace 已關閉時有沒有別的移除 worktree 的方式。
+
+**本次的手動收尾（不是修正）：**`git worktree remove`（不強制）、`git branch -d` 空分支、在 `card-worktrees.json` 把該筆標 `removedAt`（備份 `card-worktrees.json.bak-20261120`）並重啟 bridge。
+
+**下一步：**決定修法（找不到 workspace 時改走 git 直接移除，或在關閉 workspace 時一併處理 store），開卡實作；在此之前收尾順序要先 `card cleanup` 再關 workspace。
+
 ## ISSUE-181：Worker 啟動被判「卡在啟動提示」後，卡片沒有及時失敗，等到逾時才結束（使用者回報）
 
-更新日期：2026-11-20。狀態：待調查（現象來自使用者回報與一次 task 紀錄，**原因未確認**）。
+更新日期：2026-11-20。狀態：已修正、待驗收（2026-11-20：根因已確認並修正，原始碼與自動化測試通過；**尚未部署重跑、未實機驗收**）。先前：待調查。
 
 **使用者可見症狀（2026-11-20，卡片 `REQ-20261120-local-worktree-codex-trust`）：**使用者回報「沒有指派成功，卡片只有等 timeout 一途」。task 紀錄顯示 `d2-why-not-blocked`（`profile:helper`，codex）08:08:52 開始、約 1 秒後 08:08:54 標 failed，blocker 為「Worker 卡在啟動提示（blocked）」；task 之後仍繼續（`synthesizing`），08:13:52 才整體 failed（「no passing review／no successful verification for the current version」）。
 
@@ -30,7 +46,10 @@
 3. 啟動時間線（每 100 ms 取樣，約 9 秒）：+0.1 s 畫面是 codex 歡迎框（21 行）、尚無 agent 記錄；+0.4 s agent 記錄出現、狀態 `unknown`；+0.5 s 畫面已是更新選單（6 行），但狀態仍是 `unknown`；**+3.7 s 狀態才變 `blocked`**。也就是說**沒有**出現「狀態已是 blocked、畫面卻還不是選單」的時間窗，`waitUntilReady` 「blocked 且比對不到就立刻放棄、不重讀」（`src/agent-ready.ts` 165 至 169 行）這條路徑在這次取樣裡沒被觸發。
 **這個探針沒有解釋 `d2` 的失敗：**`d2` 從開始（08:08:52）到失敗（08:08:54）約 1 秒，而且中間有 `turn_dispatched`（08:08:53.942），失敗在它之後約 0.13 秒；探針裡 blocked 要到啟動後約 3.7 秒才出現。所以「`d2` 是啟動等待時因更新選單失敗」與時序**對不上**，失敗更可能來自另一條路徑，原因**未確認**。bridge 重啟前的 console 日誌沒有持久化，查不到 08:08 當時有沒有送過跳過鍵。
 **限制：**只測了一個 codex 版本、一個啟動情境；沒有走 bridge 的 `agent.start`／`waitUntilReady` 實際流程；探針的 pane 是我手動建立，不是 Worker 指派流程。
-**下一步：**(1) 查 `d2`（`profile:helper`）的指派流程：失敗訊息「started Agent does not match requested profile/workspace or is not ready」是在哪個檢查產生、為何在 `turn_dispatched` 之後；(2) 若要重現，需要走 bridge 真實流程的重跑（bridge 現在已重啟、日誌可看）；在這之前不修程式。
+**根因（2026-11-20 已確認，用 bridge 編譯出的程式碼在真實畫面上重現）：**bridge 日誌顯示 Lead（codex）啟動時**有**送出跳過鍵（`已自動跳過 codex 的更新提示（pane …、按鍵 2）`），但 Lead 仍以「Lead 卡在啟動提示（blocked）」失敗（08:45:04 UTC，撿卡後 5 秒）。原因在 `src/agent-ready.ts` `skipKnownUpdate` 送鍵後的檢查：`!entry.match.some((text) => after.includes(text))`。跳過選單後，codex 0.170.0 會在畫面頂端顯示橫幅 `✨ Update available! 0.170.0 -> 0.171.0`，而 `entry.match` 的第一項 `"Update available"` 在橫幅裡也成立，於是被判成「選單還在」，`proceed=false`，回傳卡在啟動提示；實際上 codex 已就緒（手動重現：同一個 pane 5 秒內進到正常輸入列、狀態 `done`）。用真實的跳過後畫面套用 bridge 自己的判斷：`"Update available"` 為 true、其餘三句為 false，整體判成失敗。
+**這個根因同時解釋** `REQ-20261120-team-discuss` 第一次 verify（本機 `reviewer`，codex）、`d2-why-not-blocked`（`helper`，codex）與第二次嘗試的 Lead（codex）三次失敗：全是 codex 且全是同一個啟動路徑；`d1`（claude）不受影響，也與 claude 沒有這個橫幅一致。先前「race／畫面還沒畫出來」的懷疑被排除：送鍵後 12 ms 選單就消失。為什麼更早的 codex 卡沒踩到：未確認，推論是更新 0.171.0 剛釋出、橫幅才開始出現，沒有驗證。
+**修正（2026-11-20，PR 待開）：**選單要「整組字樣都在」才算還在（`some` 改 `every`），並加回歸測試（用真實的跳過後畫面）。**測試（2026-11-20，本機 macOS，worktree）：**新增測試修正前失敗、修正後通過（`agent-ready.test.ts`＋`update-prompts.test.ts` 共 31 項全過）；完整 `npm test` 2225 項、通過 2224、失敗 0、略過 1；typecheck、lint 通過。**未驗證：**真實 bridge 重跑 codex 當 Lead／helper／reviewer 的卡；其他 CLI 的跳過後畫面；codex 之後若又改畫面，`every` 仍可能不夠，只是不再被單句誤判。
+**（舊）下一步：**(1) 查 `d2`（`profile:helper`）的指派流程：失敗訊息「started Agent does not match requested profile/workspace or is not ready」是在哪個檢查產生、為何在 `turn_dispatched` 之後；(2) 若要重現，需要走 bridge 真實流程的重跑（bridge 現在已重啟、日誌可看）；在這之前不修程式。
 
 ## ISSUE-179：本機 codex 在新的卡片 worktree 停在「信任資料夾」提示，verify／reviewer 角色啟動不就緒
 
@@ -55,6 +74,7 @@
 **探針 1 結果（2026-11-20，本機 macOS，codex 0.170.0；探針不是 bridge 自己的 log）：linked worktree 不會跳信任提示。**從主 repo 用 `git worktree add --detach` 建一個 linked worktree 到 `~/.herdr/worktrees/` 下，用 Herdr 開 workspace 啟動 `codex`：先出現更新選單（我送一次 `2` 跳過），之後**直接進到正常輸入列，沒有 `Trust this folder?`**，狀態 `done`。探針沒有選任何信任；結束後 workspace 與 worktree 已移除，`~/.codex/config.toml` 與探針前備份逐位元組相同。對照：同樣在 `~/.herdr/worktrees/` 下，但是全新 `git init` 資料夾（先前的探針）會跳信任。
 結論（限於這次觀察）：「新路徑就會跳信任」**不成立**；信任似乎由已被信任的主 repo 繼承給 linked worktree，所以先前「新 `git init` 資料夾跳信任」不能代表卡片 worktree 的情況，假設 (b) 得到支持。**因此修正卡 `REQ-20261120-local-worktree-codex-trust`（預先信任本機卡片 worktree）很可能修錯東西，已改回 `draft` 暫不重跑。**
 **這次探針的限制：**只測了一個 linked worktree、一個 codex 版本；**沒有直接驗證 bridge 建的卡片 worktree 是否為 linked worktree**（依 `git worktree` 的建立方式推論）；探針是我手動送 `2`，**不是** bridge 的 `waitUntilReady` 在處理，所以假設 (a)（更新選單被判沒就緒）**尚未驗證**，也就是 `REQ-20261120-team-discuss` 第一次 verify 為何失敗仍未解釋。
+**2026-11-20 更正（同日稍晚）：**假設 (a) 是真正的原因，但機制與我當時的推測不同：不是「選單沒被跳過」，而是跳過後的「Update available!」橫幅被誤判成選單還在，詳見 ISSUE-181。**信任提示不是這幾次失敗的原因**（linked worktree 不跳信任，探針 1）；修正卡 `REQ-20261120-local-worktree-codex-trust` 修的是不存在的問題，狀態維持 `draft`，建議不要做，本 issue 待使用者決定是否關閉。
 **探針 2（同日）：**更新選單的比對與跳過在穩定啟動下看起來正常，但沒有解釋 `d2` 的 1 秒失敗，細節與限制見 ISSUE-181。**下一步：**查 `d2` 的失敗路徑；在此之前不修程式，修正卡維持 `draft`。
 
 **修正方向（尚未實作）：**卡片 worktree 建好後，對本機 codex 預先寫入信任（沿用 `src/codex-project-trust.ts` 與 ISSUE-174 的寫入／還原流程），卡片結束後移除。需要使用者決定是否沿用 ISSUE-174 的原則。

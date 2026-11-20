@@ -125,10 +125,12 @@ async function skipKnownUpdate(
     );
     skip = { kind: entry.kind, paneId, key: entry.skipKey };
     const after = await readScreen();
+    // 選單要「整組字樣都還在」才算沒消失：跳過後 codex 會在頂端留下「Update available!」橫幅，
+    // 只比對其中一句會把已經就緒的 Agent 誤判成還卡在選單（ISSUE-181）。
     return {
       proceed:
         after !== undefined &&
-        !entry.match.some((text) => after.includes(text)),
+        !entry.match.every((text) => after.includes(text)),
       skip,
     };
   } catch {
