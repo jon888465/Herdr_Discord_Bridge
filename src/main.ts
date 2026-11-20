@@ -4,7 +4,8 @@ import {
   trackRemoteRole,
 } from "./machine-busy.js";
 import { defaultProjectDir, requestBridgeRestart } from "./bridge-restart.js";
-import { reconcileHerdrPort, syncHerdrMachine } from "./herdr-machine-sync.js";
+import { reconcileHerdrPortOutcome, syncHerdrMachine } from "./herdr-machine-sync.js";
+import { loadRemoteRestart, remoteRestartFile, setRemoteRestartPending, startRemoteRestart } from "./machine-remote-restart.js";
 import { loadDisconnectedMachines, machineDisconnectedFile, saveDisconnectedMachines } from "./machine-disconnected-store.js";
 import { runWithCleanupOnFailure, startMachineControlServerSafely } from "./machine-control-channel.js";
 import {
@@ -304,9 +305,12 @@ async function startBridge(
   herdr.setDisconnectedPersistence((ids) => void saveDisconnectedMachines(disconnectedFile, ids));
   herdr.startTunnels();
   // 換過埠的 `ssh`＋`port` machine：Herdr 側邊欄存的舊埠也換掉（ISSUE-170）；背景執行，不擋啟動，結果只記一行。
+  // Herdr 要求先重啟遠端 server 才肯存新埠時（需要使用者確認，ISSUE-177），記下來，等看板按 `o` 時請使用者確認。
+  const restartFile = remoteRestartFile();
   for (const id of herdr.machineIds())
-    void reconcileHerdrPort(herdr.machineConfig(id)).then((note) => {
-      if (note) console.error(`Herdr machine ${id}：${note}`);
+    void reconcileHerdrPortOutcome(herdr.machineConfig(id)).then((outcome) => {
+      if (outcome.note) console.error(`Herdr machine ${id}：${outcome.note}`);
+      setRemoteRestartPending(restartFile, id, outcome.needsRemoteRestart === true);
     });
   const stopMachineStatus = startMachineStatusWriter(
     herdr,
@@ -321,11 +325,22 @@ async function startBridge(
         activeStreams: () => streamResume.list().length,
         projectDir: defaultProjectDir(),
       }),
-    afterControl: (command, result) =>
-      syncHerdrMachine(
-        herdr.machineConfig(command.machineId),
-        result.ok && result.status === "connected",
-      ),
+    afterControl: async (command, result) => {
+      const machine = herdr.machineConfig(command.machineId);
+      const connected = result.ok && result.status === "connected";
+      // 使用者在看板確認後：背景重啟遠端 Herdr server 並更新側邊欄的埠，立刻回應（控制通道只有 5 秒）。
+      if (command.action === "connect" && command.restartRemote) {
+        const started = startRemoteRestart(machine, {
+          file: restartFile,
+          reconcile: (target) => reconcileHerdrPortOutcome(target, undefined, undefined, undefined, { approveRestart: true }),
+        });
+        return { herdr: started.started ? "已開始重啟遠端 Herdr server，請稍候，進度會顯示在看板" : started.reason };
+      }
+      const herdrNote = await syncHerdrMachine(machine, connected);
+      const needsRemoteRestart =
+        command.action === "connect" && connected && loadRemoteRestart(restartFile, herdr.machineIds()).pending.includes(command.machineId);
+      return { ...(herdrNote ? { herdr: herdrNote } : {}), ...(needsRemoteRestart ? { needsRemoteRestart: true } : {}) };
+    },
   });
   stopMachineControlOnFailure = stopMachineControl;
   const routing = new RoutingStore(

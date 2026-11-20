@@ -2,7 +2,7 @@
 
 ## ISSUE-177：Machine 看板連線時，遠端 Herdr server 需要重啟卻沒有確認提示，遠端 bridge 也不會跟著重開
 
-更新日期：2026-11-20。狀態：待實作（需求與設計已決定，**尚未實作、尚未驗證任何一步**；這一條是功能需求，不是已存在的行為）。
+更新日期：2026-11-20。狀態：階段 1 已實作、待驗收（單元測試與真的 Python pty 測試通過；**尚未部署、尚未實機驗證**）；階段 2（遠端 bridge 的偵測與重開）尚未實作。
 
 **使用者要求（2026-11-20）：**「TUI 上在連線時要提示是否確認要重啟該遠端機器的 herdr server，遠端 devbox 如果有 bridge 要重開」。
 
@@ -17,6 +17,12 @@
 4. 遠端 bridge：重啟前先偵測該機器上有沒有 bridge（做法待設計，例如該機器的 plugin 狀態或行程）；重啟後用該機器的 Herdr 重新開啟 bridge pane。**不能直接拿 `scripts/run.sh` 重開**：`run.sh` 可能就是把遠端 server 起成「不可存活」狀態的原因（ISSUE-170 的行程與 log 證據加 Herdr 的說明支持這個方向，但沒有看過是誰實際下的指令，是推測），重開後會再次落入同一個狀態。
 
 **驗收（實作後）：**(a) 遠端 server 需要重啟時，`o` 先顯示確認、不確認就不重啟；(b) 確認後換埠成功、`herdr machine list` 的 target 是新埠；(c) 該機器上若有 bridge，重啟後自動回來，沒有就不動；(d) 任何一步失敗都保留舊設定並明確回報；(e) 對沒有要求重啟的機器行為完全不變。
+
+**階段 1 實作（2026-11-20，已實作、尚未部署）：**(1) `src/herdr-machine-sync.ts`：`reconcileHerdrPortOutcome` 回傳 `{ note, needsRemoteRestart }`；換埠在 `add` 那一步被 Herdr 以「not ready for saved machines」或重啟提示拒絕時標 `needsRemoteRestart`，既有的 `reconcileHerdrPort` 行為不變；使用者確認後 `add` 改走互動式。(2) `src/herdr-pty.ts`：在 pty 裡執行指令並**只在看到 Herdr 的重啟提示時回答一次 `y`**；其他提示一律不回答。**實作時發現的限制：**一開始用 `script`，但 macOS 的 `script` 不接受 Node 的 pipe（socketpair）或 FIFO 當 stdin（「tcgetattr/ioctl: Operation not supported on socket」），所以改用 Python 內建的 `pty` 模組（固定的程式碼，提示、回答與指令只走 argv），**需要 `python3`**，找不到會明確回報；只在 macOS 實測過 Python 路徑，Linux 只有 CI 的 ubuntu 單元測試。(3) `src/machine-remote-restart.ts`：狀態檔 `machine-remote-restart.json`（`pending`＝bridge 自己換埠時發現需要重啟的 machine、`status`＝背景重啟的進度）與背景工作 `startRemoteRestart`；**只有被標成 `pending` 的 machine 才能被確認重啟**（不能用來重啟任意遠端）、同一台同時只跑一個、失敗保留 `pending` 與舊設定、成功清掉。(4) 控制通道：請求多一個 `restartRemote`（只接受 connect 搭配布林值）、結果多一個結構化的 `needsRemoteRestart`；`afterControl` 可回結構化結果。(5) 看板：`o` 連線若結果帶 `needsRemoteRestart`，顯示「會中斷該機器上所有 pane 的行程、遠端若跑著 bridge 也會停止需自行重開」並要求**緊接著對同一台再按 `o`**；換一台、按別的鍵都取消；確認後立刻回應「已開始重啟」，進度（重啟中／完成／失敗）從狀態檔顯示在訊息列。(6) `main.ts`：啟動時換埠的結果寫入 `pending`；`o` 連線時查 `pending` 決定要不要要求確認。
+
+**測試（2026-11-20，本機 macOS，只有自動化）：**新增 `test/herdr-pty.test.ts` 8 項（真的 Python pty：等到提示才回答、提示很晚出現也不提早回答、不是預期提示就不回答、失敗丟錯且帶輸出、沒有 python3 與不支援平台的拒絕）、`test/herdr-remote-restart.test.ts` 8 項（偵測、不誤判其他失敗、確認後走有核准路徑、沒確認絕不走、確認後失敗不再要求確認）、`test/machine-remote-restart.test.ts` 7 項（狀態檔、只有 `pending` 才執行、不重複執行、失敗可重試）、`test/remote-restart-confirm.test.ts` 9 項（請求驗證、結果正規化、控制通道往返、看板兩步確認與取消、進度訊息）。暫時拿掉三個保護（只有 `pending` 才執行、看板只對同一台確認、等到提示才回答），共 6 項失敗，已還原。`npm test` 2204 項、2203 pass、0 fail、1 skipped；`npm run lint` 通過（274 個 TypeScript 檔）。
+
+**階段 1 的限制與未驗證：**(a) 沒有實機驗收：要在真的需要重啟的遠端機器上跑一次（會中斷那台上的行程）；(b) 階段 1 **不會**重開遠端的 bridge，確認提示已明寫要自行重開；(c) 只在 macOS 實測 Python pty，Linux 沒有實機；(d) 只有 bridge 啟動時的換埠失敗會標 `pending`，bridge 執行中才發現的情況不會；(e) 進度只在看板顯示，沒有其他通知；(f) `main.ts` 的接線沒有單元測試。
 
 **風險與未驗證：**pty 的時序與跨平台；重開遠端 bridge 的可靠做法；`machine add` 在 server 停掉時的行為；確認文字必須讓使用者清楚知道會中斷哪些東西。**建議分階段：**階段 1 偵測與兩步確認加背景執行（先不處理遠端 bridge）；階段 2 遠端 bridge 的偵測與重開。
 

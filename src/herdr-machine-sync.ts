@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { HERDR_RESTART_APPROVAL, runWithPtyApproval } from "./herdr-pty.js";
 import type { MachineConfig } from "./machines.js";
 
 /** Herdr 自己存的 SSH machine（`herdr machine list --json` 的一筆）。 */
@@ -14,6 +15,8 @@ export type HerdrMachineRunner = (args: string[], timeoutMs?: number) => Promise
 const HERDR_TIMEOUT_MS = 2000;
 /** `machine add` 會準備遠端伺服器，比一般指令久。 */
 const HERDR_ADD_TIMEOUT_MS = 60_000;
+/** 確認重啟遠端 server 後的 `machine add`：要先重啟遠端再準備，比一般 add 久。 */
+const HERDR_APPROVED_ADD_TIMEOUT_MS = 120_000;
 /** `machine status` 會實際探測遠端，實測約 4 秒，超過預設 2 秒（ISSUE-170 實機失敗的原因）。 */
 const HERDR_STATUS_TIMEOUT_MS = 20_000;
 /** remove／rename／disable 只改本機設定，但給寬鬆一點。 */
@@ -47,6 +50,14 @@ export function describeHerdrFailure(error: unknown): string {
   const text = typeof detail === "string" && detail.trim() ? detail : error instanceof Error ? error.message : String(error);
   const oneLine = text.replace(/\s+/g, " ").trim();
   return oneLine.length > DETAIL_LIMIT ? `${oneLine.slice(0, DETAIL_LIMIT)}…` : oneLine;
+}
+
+/**
+ * Herdr 的 `machine add` 在遠端 server 不是 Herdr 準備流程啟動的時候，要求互動式同意重啟它（會中斷遠端所有 pane 的行程）；
+ * 沒有 TTY 時被當成取消，輸出含「remote server is not ready for saved machines」或重啟提示（ISSUE-170、ISSUE-177）。
+ */
+export function isRemoteRestartRequired(error: unknown): boolean {
+  return /not ready for saved machines|restart the remote server/i.test(describeHerdrFailure(error));
 }
 
 function withHerdrOutput(error: unknown, stdout: string, stderr: string): unknown {
@@ -169,32 +180,65 @@ function statusDetail(output: string, id: string): string {
  * 原本停用的維持停用。任何一步失敗都復原（移除剛新增的），舊的保持不動；只認唯一一筆不同埠的舊 profile，多筆不猜。
  * 已有 target 完全相同的 profile、或沒有舊 profile，什麼都不做（回傳 undefined）。
  */
+export interface HerdrPortOutcome {
+  /** 給使用者看的一行說明；沒有要做的事是 undefined。 */
+  note?: string;
+  /** 換埠失敗在 `add` 那一步，而且 Herdr 要求先重啟遠端 server（需要使用者確認，ISSUE-177）。 */
+  needsRemoteRestart?: boolean;
+}
+
+export interface HerdrPortOptions {
+  /** 使用者已確認可以重啟遠端 server：`add` 改走 pty，只在 Herdr 的重啟提示出現時回答 y。 */
+  approveRestart?: boolean;
+  /** 測試用：取代真的 pty 執行。 */
+  runApproved?: HerdrMachineRunner;
+}
+
+const approvedAdd: HerdrMachineRunner = (args, timeoutMs = HERDR_APPROVED_ADD_TIMEOUT_MS) =>
+  runWithPtyApproval("herdr", args, HERDR_RESTART_APPROVAL, timeoutMs);
+
+/** 同 `reconcileHerdrPortOutcome`，只回說明（給既有呼叫者與測試）。 */
 export async function reconcileHerdrPort(
   machine: MachineConfig | undefined,
   run: HerdrMachineRunner = runHerdr,
   wait: (ms: number) => Promise<void> = sleep,
   log: (message: string) => void = console.error,
 ): Promise<string | undefined> {
-  if (!machine?.ssh || machine.port === undefined || machine.host) return undefined;
+  return (await reconcileHerdrPortOutcome(machine, run, wait, log)).note;
+}
+
+export async function reconcileHerdrPortOutcome(
+  machine: MachineConfig | undefined,
+  run: HerdrMachineRunner = runHerdr,
+  wait: (ms: number) => Promise<void> = sleep,
+  log: (message: string) => void = console.error,
+  options: HerdrPortOptions = {},
+): Promise<HerdrPortOutcome> {
+  if (!machine?.ssh || machine.port === undefined || machine.host) return {};
   const expected = `ssh://${machine.ssh}:${machine.port}`;
   const trace = (message: string): void => log(`Herdr machine ${machine.id} 換埠：${message}`);
   let created: HerdrProfile | undefined;
   let step = "list";
   try {
     const profiles = parseHerdrProfiles(await run(["machine", "list", "--json"]));
-    if (profiles.some((profile) => profile.target === expected)) return undefined;
+    if (profiles.some((profile) => profile.target === expected)) return {};
     const stale = profiles.filter(
       (profile) =>
         profile.target.startsWith("ssh://") &&
         herdrTargetHost(profile.target) === machine.ssh,
     );
-    if (stale.length === 0) return undefined;
+    if (stale.length === 0) return {};
     trace(`目標 ${expected}；Herdr 現有同別名 profile：${stale.map((p) => `${p.target}（${p.enabled ? "啟用" : "停用"}）`).join("、")}`);
-    if (stale.length > 1) return "Herdr 有多個同別名不同埠的 machine，沒有更新埠";
+    if (stale.length > 1) return { note: "Herdr 有多個同別名不同埠的 machine，沒有更新埠" };
     const [old] = stale;
     const temporary = `${old.label}-new`;
     step = "add";
-    await run(["machine", "add", expected, "--label", temporary], HERDR_ADD_TIMEOUT_MS);
+    if (options.approveRestart) {
+      trace("使用者已確認重啟遠端 server：add 改走互動式（只回答 Herdr 的重啟提示）");
+      await (options.runApproved ?? approvedAdd)(["machine", "add", expected, "--label", temporary], HERDR_APPROVED_ADD_TIMEOUT_MS);
+    } else {
+      await run(["machine", "add", expected, "--label", temporary], HERDR_ADD_TIMEOUT_MS);
+    }
     trace("add 成功");
     step = "list（確認新項目）";
     created = parseHerdrProfiles(await run(["machine", "list", "--json"])).find(
@@ -221,11 +265,12 @@ export async function reconcileHerdrPort(
       if (!old.enabled) await run(["machine", "disable", added.id], HERDR_CHANGE_TIMEOUT_MS);
     } catch (error) {
       trace(`步驟 ${step} 失敗：${describeHerdrFailure(error)}`);
-      return `Herdr 側邊欄已換到新埠，但改名或停用沒成功（目前標籤 ${temporary}）`;
+      return { note: `Herdr 側邊欄已換到新埠，但改名或停用沒成功（目前標籤 ${temporary}）` };
     }
-    return `Herdr 側邊欄已更新到埠 ${machine.port}`;
+    return { note: `Herdr 側邊欄已更新到埠 ${machine.port}` };
   } catch (error) {
     trace(`步驟 ${step} 失敗：${describeHerdrFailure(error)}`);
+    const needsRemoteRestart = step === "add" && !options.approveRestart && isRemoteRestartRequired(error);
     if (created) {
       try {
         await run(["machine", "remove", created.id], HERDR_CHANGE_TIMEOUT_MS);
@@ -235,6 +280,9 @@ export async function reconcileHerdrPort(
         trace(`移除剛新增的項目也失敗：${describeHerdrFailure(removeError)}`);
       }
     }
-    return "Herdr 側邊欄的埠沒有更新成功，保留原設定";
+    return {
+      note: "Herdr 側邊欄的埠沒有更新成功，保留原設定",
+      ...(needsRemoteRestart ? { needsRemoteRestart: true } : {}),
+    };
   }
 }
