@@ -24,7 +24,13 @@
 
 **已確認：**上述時序來自 task 紀錄。**未確認：**(1) 1 秒內判定失敗的是哪一個檢查（`waitUntilReady` 是否在送出跳過鍵之前就放棄）；(2) 那個 Worker 之後在 pane 上實際已到正常輸入列（2026-11-20 08:14 讀畫面：`w8X:p3` codex 停在輸入列、YOLO mode、無信任提示），也就是失敗判定與 pane 最終狀態不一致，原因不明；(3) 「只能等逾時」是使用者的說法，我沒有量到逾時等待時間。
 
-**下一步：**重現並量測 `waitUntilReady` 的行為（blocked 的判定時機、跳過鍵是否真的送出），再決定修法。
+**探針 2 結果（2026-11-20，本機 macOS，codex 0.170.0；探針不是 bridge 自己的 log，只是用 Herdr CLI 對一個暫時的 pane 取樣；結束後 workspace 與資料夾已移除、`~/.codex/config.toml` 與探針前備份相同）：**
+1. 用 helper／reviewer profile 的真實參數 `--dangerously-bypass-approvals-and-sandbox` 啟動 codex，更新選單畫面與不帶參數時**完全相同**（6 行，沒有多出任何文字）。用 bridge 實際編譯出的 `matchUpdatePrompt('codex', 畫面)` 比對：**命中**（跳過鍵 `2`），`SENSITIVE_SCREEN` **未命中**。「啟動參數含 `approvals` 被誤判成敏感畫面」這個懷疑**已排除**。
+2. Herdr 對該 pane 回報 `agent=codex`、`agent_status=blocked`，所以 `kind` 傳 `codex` 是對的。
+3. 啟動時間線（每 100 ms 取樣，約 9 秒）：+0.1 s 畫面是 codex 歡迎框（21 行）、尚無 agent 記錄；+0.4 s agent 記錄出現、狀態 `unknown`；+0.5 s 畫面已是更新選單（6 行），但狀態仍是 `unknown`；**+3.7 s 狀態才變 `blocked`**。也就是說**沒有**出現「狀態已是 blocked、畫面卻還不是選單」的時間窗，`waitUntilReady` 「blocked 且比對不到就立刻放棄、不重讀」（`src/agent-ready.ts` 165 至 169 行）這條路徑在這次取樣裡沒被觸發。
+**這個探針沒有解釋 `d2` 的失敗：**`d2` 從開始（08:08:52）到失敗（08:08:54）約 1 秒，而且中間有 `turn_dispatched`（08:08:53.942），失敗在它之後約 0.13 秒；探針裡 blocked 要到啟動後約 3.7 秒才出現。所以「`d2` 是啟動等待時因更新選單失敗」與時序**對不上**，失敗更可能來自另一條路徑，原因**未確認**。bridge 重啟前的 console 日誌沒有持久化，查不到 08:08 當時有沒有送過跳過鍵。
+**限制：**只測了一個 codex 版本、一個啟動情境；沒有走 bridge 的 `agent.start`／`waitUntilReady` 實際流程；探針的 pane 是我手動建立，不是 Worker 指派流程。
+**下一步：**(1) 查 `d2`（`profile:helper`）的指派流程：失敗訊息「started Agent does not match requested profile/workspace or is not ready」是在哪個檢查產生、為何在 `turn_dispatched` 之後；(2) 若要重現，需要走 bridge 真實流程的重跑（bridge 現在已重啟、日誌可看）；在這之前不修程式。
 
 ## ISSUE-179：本機 codex 在新的卡片 worktree 停在「信任資料夾」提示，verify／reviewer 角色啟動不就緒
 
@@ -45,6 +51,11 @@
 (b) **探針有缺陷**：我用的是全新 `git init` 資料夾，不是主 repo 的 linked worktree；主 repo 已被信任，codex 可能透過主 repo 解析 linked worktree 的信任，這也能解釋為何過去其他卡沒被擋（由修正卡 Worker 的報告指出，我認為成立，但尚未做對照探針）。
 另：2026-11-20 08:14 讀畫面，修正卡 worktree 在我預先信任該路徑後，codex 停在正常輸入列（YOLO mode），所以**目前無法分辨**是預先信任生效，還是這個路徑本來就不會跳信任。
 **下一步（更新）：**先做 linked-worktree 對照探針與「更新提示是否真的被跳過」的探針，再決定修法；在此之前不要把本 issue 的根因寫成已確認。
+
+**探針 1 結果（2026-11-20，本機 macOS，codex 0.170.0；探針不是 bridge 自己的 log）：linked worktree 不會跳信任提示。**從主 repo 用 `git worktree add --detach` 建一個 linked worktree 到 `~/.herdr/worktrees/` 下，用 Herdr 開 workspace 啟動 `codex`：先出現更新選單（我送一次 `2` 跳過），之後**直接進到正常輸入列，沒有 `Trust this folder?`**，狀態 `done`。探針沒有選任何信任；結束後 workspace 與 worktree 已移除，`~/.codex/config.toml` 與探針前備份逐位元組相同。對照：同樣在 `~/.herdr/worktrees/` 下，但是全新 `git init` 資料夾（先前的探針）會跳信任。
+結論（限於這次觀察）：「新路徑就會跳信任」**不成立**；信任似乎由已被信任的主 repo 繼承給 linked worktree，所以先前「新 `git init` 資料夾跳信任」不能代表卡片 worktree 的情況，假設 (b) 得到支持。**因此修正卡 `REQ-20261120-local-worktree-codex-trust`（預先信任本機卡片 worktree）很可能修錯東西，已改回 `draft` 暫不重跑。**
+**這次探針的限制：**只測了一個 linked worktree、一個 codex 版本；**沒有直接驗證 bridge 建的卡片 worktree 是否為 linked worktree**（依 `git worktree` 的建立方式推論）；探針是我手動送 `2`，**不是** bridge 的 `waitUntilReady` 在處理，所以假設 (a)（更新選單被判沒就緒）**尚未驗證**，也就是 `REQ-20261120-team-discuss` 第一次 verify 為何失敗仍未解釋。
+**探針 2（同日）：**更新選單的比對與跳過在穩定啟動下看起來正常，但沒有解釋 `d2` 的 1 秒失敗，細節與限制見 ISSUE-181。**下一步：**查 `d2` 的失敗路徑；在此之前不修程式，修正卡維持 `draft`。
 
 **修正方向（尚未實作）：**卡片 worktree 建好後，對本機 codex 預先寫入信任（沿用 `src/codex-project-trust.ts` 與 ISSUE-174 的寫入／還原流程），卡片結束後移除。需要使用者決定是否沿用 ISSUE-174 的原則。
 
