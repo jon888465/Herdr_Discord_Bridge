@@ -2,7 +2,7 @@
 
 ## ISSUE-177：Machine 看板連線時，遠端 Herdr server 需要重啟卻沒有確認提示，遠端 bridge 也不會跟著重開
 
-更新日期：2026-11-20。狀態：階段 1 已實作、待驗收（單元測試與真的 Python pty 測試通過；**尚未部署、尚未實機驗證**）；階段 2（遠端 bridge 的偵測與重開）尚未實作。
+更新日期：2026-11-20。狀態：階段 1 已實作並部署（2026-11-20，`scripts/run.sh -r`，main `9f1f28a`）、待實機驗收；階段 2（遠端 bridge 的偵測與重開）已實作、尚未部署、尚未實機驗證。
 
 **使用者要求（2026-11-20）：**「TUI 上在連線時要提示是否確認要重啟該遠端機器的 herdr server，遠端 devbox 如果有 bridge 要重開」。
 
@@ -22,7 +22,15 @@
 
 **測試（2026-11-20，本機 macOS，只有自動化）：**新增 `test/herdr-pty.test.ts` 8 項（真的 Python pty：等到提示才回答、提示很晚出現也不提早回答、不是預期提示就不回答、失敗丟錯且帶輸出、沒有 python3 與不支援平台的拒絕）、`test/herdr-remote-restart.test.ts` 8 項（偵測、不誤判其他失敗、確認後走有核准路徑、沒確認絕不走、確認後失敗不再要求確認）、`test/machine-remote-restart.test.ts` 7 項（狀態檔、只有 `pending` 才執行、不重複執行、失敗可重試）、`test/remote-restart-confirm.test.ts` 9 項（請求驗證、結果正規化、控制通道往返、看板兩步確認與取消、進度訊息）。暫時拿掉三個保護（只有 `pending` 才執行、看板只對同一台確認、等到提示才回答），共 6 項失敗，已還原。`npm test` 2204 項、2203 pass、0 fail、1 skipped；`npm run lint` 通過（274 個 TypeScript 檔）。
 
-**階段 1 的限制與未驗證：**(a) 沒有實機驗收：要在真的需要重啟的遠端機器上跑一次（會中斷那台上的行程）；(b) 階段 1 **不會**重開遠端的 bridge，確認提示已明寫要自行重開；(c) 只在 macOS 實測 Python pty，Linux 沒有實機；(d) 只有 bridge 啟動時的換埠失敗會標 `pending`，bridge 執行中才發現的情況不會；(e) 進度只在看板顯示，沒有其他通知；(f) `main.ts` 的接線沒有單元測試。
+**階段 1 部署（2026-11-20）：**重啟前 active-streams 為空；部署後 `dist` 含 `startRemoteRestart` 與兩個新模組，bridge 兩台機器都 `connected`；啟動時沒有誤標任何機器（狀態檔不存在、沒有「Herdr machine …」換埠日誌）。這只代表程式在跑，確認流程本身仍未實機驗收。
+
+**階段 2 實作（2026-11-20，已實作、尚未部署）：**確認後，遠端若跑著 bridge 會在換埠成功後一併重開。(1) `src/remote-bridge-restart.ts`：重啟前用**bridge 自己對遠端的連線**問 `pane.list`，有標題是 `Discord bridge` 的 pane 就視為遠端有 bridge（查詢失敗一律當作沒有，不影響重啟）；(2) 換埠成功後，用**已經換到新埠的 Herdr machine** 跑 `herdr --machine <id> plugin pane open --plugin herdr-discord-bridge --entrypoint bridge`（旗標來自 `herdr plugin pane open --help`）：先等遠端 server 回來（最多約 1 分鐘）、遠端已經有 bridge 就不再開（避免兩個）、開了之後確認 pane 真的出現；(3) 背景工作的順序是「偵測 → 重啟並換埠 → 重開」；換埠沒成功就不重開，說明提醒遠端 bridge 若停了要自行重開；埠換成功但重開失敗，狀態是 `failed`，說明寫明「側邊欄已更新；重開失敗，請自行重開」；(4) 看板確認提示改成「遠端若跑著 bridge，換埠成功後會一併重開」。**不用 `scripts/run.sh` 重開**：它可能就是把遠端 server 起成「不可存活」狀態的原因，重開後會再落入同一個狀態（推測）。
+
+**階段 2 測試（2026-11-20，本機 macOS，只有自動化）：**新增 `test/remote-bridge-restart.test.ts` 9 項（pane 標題判斷、偵測失敗回 false、重開的指令與參數、已有 bridge 不再開、server 還沒回來會重試、一直沒回來不開、open 失敗或 pane 沒出現都回報失敗、找不到或有多個對應 machine 不開、同別名有舊埠與新埠時選新埠）與 `test/machine-remote-restart-bridge.test.ts` 7 項（偵測與重開的順序、重開失敗與丟錯、沒有 bridge 不重開、偵測丟錯當沒有、換埠失敗不重開、沒提供偵測與重開時與階段 1 完全相同）。暫時拿掉「已有 bridge 就不再開」與「換埠失敗不重開」兩個保護，各有測試失敗，已還原。`npm test` 2220 項、2219 pass、0 fail、1 skipped；`npm run lint` 通過（277 個 TypeScript 檔）。
+
+**階段 2 的限制與未驗證：**(a) **沒有實機驗證**：我沒有在真的遠端 bridge 上跑過偵測或重開；遠端 bridge pane 的標題是 `Discord bridge` 這點只有本機 bridge pane 的標題與 plugin manifest 的 `title` 為證，沒有在遠端看過；`plugin pane open` 在遠端實際會不會成功、開出來的 bridge 設定是否正確，都沒有驗證；(b) 偵測只看 pane 標題，遠端若有人手動跑了 bridge 但不是 plugin pane 就偵測不到；(c) 開出來的 bridge 是否用了正確的設定與 bot 由遠端自己的設定決定，bridge 不檢查；(d) 重開後的位置（split）可能與原本不同，沒有像 `run.sh` 那樣搬到第一個 tab；(e) 只在 macOS 開發與測試。
+
+**階段 1 的限制與未驗證：**(a) 沒有實機驗收：要在真的需要重啟的遠端機器上跑一次（會中斷那台上的行程）；(b) 階段 1 不重開遠端的 bridge（階段 2 已實作，見上）；(c) 只在 macOS 實測 Python pty，Linux 沒有實機；(d) 只有 bridge 啟動時的換埠失敗會標 `pending`，bridge 執行中才發現的情況不會；(e) 進度只在看板顯示，沒有其他通知；(f) `main.ts` 的接線沒有單元測試。
 
 **風險與未驗證：**pty 的時序與跨平台；重開遠端 bridge 的可靠做法；`machine add` 在 server 停掉時的行為；確認文字必須讓使用者清楚知道會中斷哪些東西。**建議分階段：**階段 1 偵測與兩步確認加背景執行（先不處理遠端 bridge）；階段 2 遠端 bridge 的偵測與重開。
 

@@ -4,7 +4,8 @@ import {
   trackRemoteRole,
 } from "./machine-busy.js";
 import { defaultProjectDir, requestBridgeRestart } from "./bridge-restart.js";
-import { reconcileHerdrPortOutcome, syncHerdrMachine } from "./herdr-machine-sync.js";
+import { reconcileHerdrPortOutcome, runHerdr, syncHerdrMachine } from "./herdr-machine-sync.js";
+import { detectRemoteBridge, reopenRemoteBridge } from "./remote-bridge-restart.js";
 import { loadRemoteRestart, remoteRestartFile, setRemoteRestartPending, startRemoteRestart } from "./machine-remote-restart.js";
 import { loadDisconnectedMachines, machineDisconnectedFile, saveDisconnectedMachines } from "./machine-disconnected-store.js";
 import { runWithCleanupOnFailure, startMachineControlServerSafely } from "./machine-control-channel.js";
@@ -333,6 +334,9 @@ async function startBridge(
         const started = startRemoteRestart(machine, {
           file: restartFile,
           reconcile: (target) => reconcileHerdrPortOutcome(target, undefined, undefined, undefined, { approveRestart: true }),
+          // 階段 2：重啟前偵測遠端有沒有 bridge（用 bridge 自己對遠端的連線），換埠成功後用新埠的 Herdr machine 重開。
+          detectBridge: (target) => detectRemoteBridge(() => herdr.requestOn(target.id, "pane.list", {}, { timeoutMs: 10_000, retries: 0 })),
+          reopenBridge: (target) => reopenRemoteBridge(target, runHerdr),
         });
         return { herdr: started.started ? "已開始重啟遠端 Herdr server，請稍候，進度會顯示在看板" : started.reason };
       }

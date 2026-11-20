@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { stateDirectory } from "./config.js";
 import type { HerdrPortOutcome } from "./herdr-machine-sync.js";
 import type { MachineConfig } from "./machines.js";
+import type { ReopenResult } from "./remote-bridge-restart.js";
 
 export function remoteRestartFile(): string {
   return path.join(stateDirectory(), "machine-remote-restart.json");
@@ -87,6 +88,10 @@ export interface RemoteRestartDeps {
   file: string;
   /** 使用者已確認：執行換埠（add 走有核准的互動路徑）。 */
   reconcile: (machine: MachineConfig) => Promise<HerdrPortOutcome>;
+  /** 重啟前偵測遠端有沒有 bridge（階段 2）；沒提供就不偵測、不重開。查不到要回 false，不要丟錯。 */
+  detectBridge?: (machine: MachineConfig) => Promise<boolean>;
+  /** 換埠成功後重開遠端 bridge（階段 2）；只有偵測到遠端原本有 bridge 才會呼叫。 */
+  reopenBridge?: (machine: MachineConfig) => Promise<ReopenResult>;
   now?: () => number;
   log?: (message: string) => void;
 }
@@ -109,21 +114,32 @@ export function startRemoteRestart(machine: MachineConfig | undefined, deps: Rem
   running.add(machine.id);
   setRemoteRestartStatus(file, { machineId: machine.id, state: "running", note: "重啟遠端 Herdr server 中，請稍候", updatedAt: now() });
   log(`Herdr machine ${machine.id}：使用者已確認，開始重啟遠端 Herdr server 並更新埠`);
-  void deps
-    .reconcile(machine)
-    .then((outcome) => {
-      const ok = portReconcileSucceeded(outcome);
-      if (ok) setRemoteRestartPending(file, machine.id, false);
-      setRemoteRestartStatus(file, {
-        machineId: machine.id,
-        state: ok ? "done" : "failed",
-        note: ok ? "遠端 Herdr server 已重啟，側邊欄已更新" : "重啟遠端 server 沒有成功，側邊欄保留原設定（詳見 bridge 日誌）",
-        updatedAt: now(),
-      });
-    })
-    .catch(() => {
-      setRemoteRestartStatus(file, { machineId: machine.id, state: "failed", note: "重啟遠端 server 失敗（詳見 bridge 日誌）", updatedAt: now() });
-    })
+  const status = (state: RemoteRestartStatus["state"], note: string): void =>
+    setRemoteRestartStatus(file, { machineId: machine.id, state, note, updatedAt: now() });
+  void (async () => {
+    // 重啟遠端 server 會停掉遠端的 bridge，所以要在重啟前先偵測（階段 2）。
+    let hadBridge = false;
+    try {
+      hadBridge = (await deps.detectBridge?.(machine)) === true;
+    } catch {
+      hadBridge = false;
+    }
+    if (hadBridge) log(`Herdr machine ${machine.id}：偵測到遠端有 bridge，換埠成功後會重開`);
+    const outcome = await deps.reconcile(machine);
+    if (!portReconcileSucceeded(outcome)) {
+      status("failed", `重啟遠端 server 沒有成功，側邊欄保留原設定（詳見 bridge 日誌）${hadBridge ? "；若遠端 bridge 停了請自行重開" : ""}`);
+      return;
+    }
+    setRemoteRestartPending(file, machine.id, false);
+    if (!hadBridge || !deps.reopenBridge) {
+      status("done", `遠端 Herdr server 已重啟，側邊欄已更新${deps.detectBridge ? "（沒有偵測到遠端 bridge）" : ""}`);
+      return;
+    }
+    status("running", "遠端 Herdr server 已重啟，重開遠端 bridge 中");
+    const reopened = await deps.reopenBridge(machine).catch((): ReopenResult => ({ ok: false, note: "重開遠端 bridge 失敗，請自行重開" }));
+    status(reopened.ok ? "done" : "failed", `遠端 Herdr server 已重啟，側邊欄已更新；${reopened.note}`);
+  })()
+    .catch(() => status("failed", "重啟遠端 server 失敗（詳見 bridge 日誌）"))
     .finally(() => running.delete(machine.id));
   return { started: true };
 }

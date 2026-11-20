@@ -23,6 +23,10 @@ function deferred<T>() {
   return { promise, resolve };
 }
 const tick = (): Promise<void> => new Promise((r) => setImmediate(r));
+/** 背景工作現在先 await 偵測才呼叫 reconcile（階段 2），所以要多等幾輪才看得到結果。 */
+const settle = async (): Promise<void> => {
+  for (let i = 0; i < 8; i++) await tick();
+};
 
 test("狀態檔往返、權限 0600；壞掉或版本不認得都當成沒有", () => {
   const file = tmp();
@@ -76,9 +80,9 @@ test("確認後立刻回傳 started，狀態是 running；成功後清掉 pendin
   assert.deepEqual(result, { started: true });
   assert.deepEqual(loadRemoteRestart(file).status, { machineId: "devbox", state: "running", note: "重啟遠端 Herdr server 中，請稍候", updatedAt: 42 });
   assert.deepEqual(loadRemoteRestart(file).pending, ["devbox"]);
+  await settle();
   gate.resolve({ note: "Herdr 側邊欄已更新到埠 50123" });
-  await tick();
-  await tick();
+  await settle();
   assert.equal(loadRemoteRestart(file).status?.state, "done");
   assert.deepEqual(loadRemoteRestart(file).pending, []);
   assert.deepEqual(seen, [machine]);
@@ -92,10 +96,10 @@ test("同一台重啟進行中，再確認一次會被拒絕，不會跑第二�
   const deps = { file, reconcile: () => (calls++, gate.promise), log: quiet };
   assert.deepEqual(startRemoteRestart(machine, deps), { started: true });
   assert.deepEqual(startRemoteRestart(machine, deps), { started: false, reason: "已在重啟中" });
+  await settle();
   assert.equal(calls, 1);
   gate.resolve({ note: "Herdr 側邊欄已更新到埠 1" });
-  await tick();
-  await tick();
+  await settle();
 });
 
 test("失敗（沒換到、或丟錯）：狀態 failed，pending 保留，之後可以再確認", async () => {
@@ -103,12 +107,10 @@ test("失敗（沒換到、或丟錯）：狀態 failed，pending 保留，之�
     const file = tmp();
     setRemoteRestartPending(file, "devbox", true);
     assert.deepEqual(startRemoteRestart(machine, { file, reconcile, log: quiet }), { started: true });
-    await tick();
-    await tick();
+    await settle();
     assert.equal(loadRemoteRestart(file).status?.state, "failed");
     assert.deepEqual(loadRemoteRestart(file).pending, ["devbox"]);
     assert.deepEqual(startRemoteRestart(machine, { file, reconcile: async () => ({ note: "Herdr 側邊欄已更新到埠 1" }), log: quiet }), { started: true });
-    await tick();
-    await tick();
+    await settle();
   }
 });

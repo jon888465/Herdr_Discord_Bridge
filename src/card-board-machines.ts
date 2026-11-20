@@ -316,9 +316,9 @@ export interface MachineControlUi {
   remoteRestartFor?: string;
 }
 
-/** 要求使用者確認重啟遠端 Herdr server 的提示：寫清楚會中斷什麼，也寫清楚階段 1 不會幫你重開遠端的 bridge。 */
+/** 要求使用者確認重啟遠端 Herdr server 的提示：寫清楚會中斷什麼，以及遠端的 bridge 會一併重開（階段 2）。 */
 export const REMOTE_RESTART_CONFIRM =
-  "Herdr 要求先重啟這台的遠端 server 才能更新側邊欄的埠；這會中斷它上面所有 pane 的行程（shell、agent、測試），遠端若跑著 bridge 也會停止，需要自行重開。再按一次 o 確認重啟（其他鍵取消）";
+  "Herdr 要求先重啟這台的遠端 server 才能更新側邊欄的埠；這會中斷它上面所有 pane 的行程（shell、agent、測試）；遠端若跑著 bridge，換埠成功後會一併重開。再按一次 o 確認重啟（其他鍵取消）";
 
 export const BRIDGE_RESTART_CONFIRM = "再按一次 R 確認重啟 bridge（其他鍵取消）";
 
