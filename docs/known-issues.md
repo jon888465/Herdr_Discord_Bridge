@@ -1,8 +1,34 @@
 # Known Issues
 
+## ISSUE-180：沒指定 roles 的卡，自動開出 claude opus Worker，並跳出「switch to opus」確認
+
+更新日期：2026-11-20。狀態：已處置設定、待重啟生效（**未驗收**）。
+
+**使用者可見症狀（2026-11-20，卡片 `REQ-20261120-local-worktree-codex-trust`）：**使用者回報「剛開卡的 claude 也會跳 switch opus 確認」。卡片沒有 `roles` 或 `model` 欄位，但 task 紀錄 `d1-code-map` 為「claude（opus）」，`profile=claude`。
+
+**根因（已確認，讀設定與 task 紀錄）：**使用者機器上 bridge 設定檔的 claude profile 有固定 `model: opus`（2026-11-11 使用者決定，為了讓卡片 `roles` 的 model 指定通過允許清單）。沒指定 roles 的卡由 Lead 規劃，開 profile Worker 時一律用這個 model，因此用量較大的 opus 被自動使用，並可能跳出模型切換確認而讓 Worker 卡住。放行這張卡前沒有檢查用量，這是操作疏漏。
+
+**處置（2026-11-20，使用者決定，不在 repo 內）：**把該 profile 的 `model` 設定註解掉（改用 CLI 預設），寫明日期與還原方式。**bridge 需要重啟才會重讀設定**，使用者指示在這張卡結束後重啟；寫本條時尚未重啟。
+
+**未驗證／風險：**(1) 重啟前，執行中的 bridge 仍用舊設定；(2) 拿掉後卡片 `roles` 的 `claude:opus` 指定可能被 model 允許清單拒絕，未測；(3) CLI 預設 model 實際是哪個，未查；(4) 「自動撿卡放行前不檢查用量」是否要列為功能需求，待使用者決定。
+
+**驗收：**重啟後，開一張沒指定 roles 的卡，確認新開的 claude Worker 不再要求 opus、也不跳模型確認；記錄日期、環境與結果。
+
+## ISSUE-181：Worker 啟動被判「卡在啟動提示」後，卡片沒有及時失敗，等到逾時才結束（使用者回報）
+
+更新日期：2026-11-20。狀態：待調查（現象來自使用者回報與一次 task 紀錄，**原因未確認**）。
+
+**使用者可見症狀（2026-11-20，卡片 `REQ-20261120-local-worktree-codex-trust`）：**使用者回報「沒有指派成功，卡片只有等 timeout 一途」。task 紀錄顯示 `d2-why-not-blocked`（`profile:helper`，codex）08:08:52 開始、約 1 秒後 08:08:54 標 failed，blocker 為「Worker 卡在啟動提示（blocked）」；task 之後仍繼續（`synthesizing`），08:13:52 才整體 failed（「no passing review／no successful verification for the current version」）。
+
+**預期：**指派失敗時要明確、及時地讓 Lead 與使用者知道失敗原因與下一步，不要讓人只能等逾時。
+
+**已確認：**上述時序來自 task 紀錄。**未確認：**(1) 1 秒內判定失敗的是哪一個檢查（`waitUntilReady` 是否在送出跳過鍵之前就放棄）；(2) 那個 Worker 之後在 pane 上實際已到正常輸入列（2026-11-20 08:14 讀畫面：`w8X:p3` codex 停在輸入列、YOLO mode、無信任提示），也就是失敗判定與 pane 最終狀態不一致，原因不明；(3) 「只能等逾時」是使用者的說法，我沒有量到逾時等待時間。
+
+**下一步：**重現並量測 `waitUntilReady` 的行為（blocked 的判定時機、跳過鍵是否真的送出），再決定修法。
+
 ## ISSUE-179：本機 codex 在新的卡片 worktree 停在「信任資料夾」提示，verify／reviewer 角色啟動不就緒
 
-更新日期：2026-11-20。狀態：待調查（症狀與重現已確認，**尚未修正**）。
+更新日期：2026-11-20。狀態：重新開啟／待調查（2026-11-20：症狀與重現已確認，**根因未確認**，見下方重新評估；**尚未修正**）。
 
 **使用者可見症狀（2026-11-20，卡片 `REQ-20261120-team-discuss`，L2 自動撿卡）：**implement 完成後，本機 `reviewer` profile（kind codex）的 `verify-discuss` 在實作完成 7 秒後失敗，blocker 為「Worker 卡在啟動提示（blocked）」；task 最後以「no passing review for the current version」失敗，卡片 worktree 的改動（約 10 個檔案）未 commit，也沒有 PR。
 
@@ -13,6 +39,12 @@
 **已確認：**本機 `~/.codex/config.toml` 沒有該卡片 worktree 路徑的信任條目；新路徑的 codex 會跳信任提示。
 
 **未確認（不可寫成根因）：**(1) 這次 task 的失敗畫面我沒看到（pane 已被清掉），blocker 只寫「啟動提示」，所以「就是信任提示」是依重現推論；(2) 為什麼過去其他卡的本機 codex 沒被擋（可能是 codex 版本改了信任判斷，或舊路徑被父目錄信任涵蓋），沒有查；(3) 沒有驗證 bridge 實際有送 `2`。
+
+**2026-11-20 重新評估（同日稍後，修正卡 `REQ-20261120-local-worktree-codex-trust` 的觀察）：**上面「根因很可能是信任提示」**不可視為已確認**，有兩個沒排除的對手假設：
+(a) **更新選單被判沒就緒**：codex 啟動時最先出現的是更新選單；我探針只用規則比對推論「bridge 會送跳過鍵」，**沒有驗證 bridge 真的有送**。修正卡的 `d2` 在約 1 秒內被判失敗，時序與此相符（見 ISSUE-181）。
+(b) **探針有缺陷**：我用的是全新 `git init` 資料夾，不是主 repo 的 linked worktree；主 repo 已被信任，codex 可能透過主 repo 解析 linked worktree 的信任，這也能解釋為何過去其他卡沒被擋（由修正卡 Worker 的報告指出，我認為成立，但尚未做對照探針）。
+另：2026-11-20 08:14 讀畫面，修正卡 worktree 在我預先信任該路徑後，codex 停在正常輸入列（YOLO mode），所以**目前無法分辨**是預先信任生效，還是這個路徑本來就不會跳信任。
+**下一步（更新）：**先做 linked-worktree 對照探針與「更新提示是否真的被跳過」的探針，再決定修法；在此之前不要把本 issue 的根因寫成已確認。
 
 **修正方向（尚未實作）：**卡片 worktree 建好後，對本機 codex 預先寫入信任（沿用 `src/codex-project-trust.ts` 與 ISSUE-174 的寫入／還原流程），卡片結束後移除。需要使用者決定是否沿用 ISSUE-174 的原則。
 
