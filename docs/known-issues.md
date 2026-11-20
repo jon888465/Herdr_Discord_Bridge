@@ -1,5 +1,25 @@
 # Known Issues
 
+## ISSUE-177：Machine 看板連線時，遠端 Herdr server 需要重啟卻沒有確認提示，遠端 bridge 也不會跟著重開
+
+更新日期：2026-11-20。狀態：待實作（需求與設計已決定，**尚未實作、尚未驗證任何一步**；這一條是功能需求，不是已存在的行為）。
+
+**使用者要求（2026-11-20）：**「TUI 上在連線時要提示是否確認要重啟該遠端機器的 herdr server，遠端 devbox 如果有 bridge 要重開」。
+
+**背景：**ISSUE-170 的根因已由 Herdr 自己的提示確認：遠端 Herdr server 不是 Herdr 的準備流程啟動時，`herdr machine add` 要求互動式同意重啟它（會中斷該機器上所有 pane 的行程：shell、agent、dev server、測試）。bridge 的換埠是非互動執行，沒有 TTY 就被當成取消，只在日誌留下一行「沒有更新成功，保留原設定」，使用者要自己發現並手動處理；而且重啟後，遠端機器上若跑著獨立的 bridge 也會一併停掉，不會自己回來。
+
+**預期行為（使用者 2026-11-20 的決定）：**(1) 只在 Machine 看板按 `o` 連線時確認：bridge 發現 Herdr 要求重啟遠端 server 時，TUI 顯示「會中斷該機器上所有 pane 的行程（shell、agent、測試）」並要求再按一次 `o` 才真的重啟，沿用 `x` 斷線的兩步確認模式；(2) 確認後自動重開該機器上的 bridge（若有）：確認提示要寫明會一併重開，重啟後經該機器的 Herdr 重新開啟 bridge pane，並回報成功或失敗。不做：bridge 啟動時自動重啟遠端、bridge 在沒有人確認時自行回答 `y`。
+
+**設計草案（尚未驗證）：**
+1. 偵測：把 `herdr machine add` 非互動輸出中的「restart the remote server now? [y/N]」／「not ready for saved machines」轉成結構化結果（類似現有的 `needsForce`），例如 `needsRemoteRestart: true`。
+2. 控制通道的總期限只有 5 秒（`MACHINE_CONTROL_TIMEOUT_MS`），遠端重啟要數十秒，所以拆成兩步：「請求確認」是即時的；確認後的「執行」改為背景工作，TUI 用狀態檔顯示進度（沿用 `machine-status.json` 的模式），不放在同一個請求裡等。
+3. 執行：在 pty 裡執行 `herdr machine add`，**等提示出現才回答 `y`**（我 2026-11-20 實測過：提示出現前就送 `y` 會被當成取消）；成功後 `machine remove` 舊的、`machine rename` 回原標籤；任何一步失敗都保留舊設定。Node 沒有內建 pty，需要用 `script` 之類，macOS 與 Linux 的用法不同，兩邊都要驗證。另一條路是先停遠端 server 再讓 `machine add` 自己準備，但**我沒有驗證** `machine add` 在遠端 server 沒在跑時會不會自己啟動它（驗證會中斷遠端，所以沒做）。
+4. 遠端 bridge：重啟前先偵測該機器上有沒有 bridge（做法待設計，例如該機器的 plugin 狀態或行程）；重啟後用該機器的 Herdr 重新開啟 bridge pane。**不能直接拿 `scripts/run.sh` 重開**：`run.sh` 可能就是把遠端 server 起成「不可存活」狀態的原因（ISSUE-170 的行程與 log 證據加 Herdr 的說明支持這個方向，但沒有看過是誰實際下的指令，是推測），重開後會再次落入同一個狀態。
+
+**驗收（實作後）：**(a) 遠端 server 需要重啟時，`o` 先顯示確認、不確認就不重啟；(b) 確認後換埠成功、`herdr machine list` 的 target 是新埠；(c) 該機器上若有 bridge，重啟後自動回來，沒有就不動；(d) 任何一步失敗都保留舊設定並明確回報；(e) 對沒有要求重啟的機器行為完全不變。
+
+**風險與未驗證：**pty 的時序與跨平台；重開遠端 bridge 的可靠做法；`machine add` 在 server 停掉時的行為；確認文字必須讓使用者清楚知道會中斷哪些東西。**建議分階段：**階段 1 偵測與兩步確認加背景執行（先不處理遠端 bridge）；階段 2 遠端 bridge 的偵測與重開。
+
 ## ISSUE-176：遠端 pi 當 fixer 時，提示貼進輸入框但沒有送出，等到逾時才失敗（偶發，2 次中 1 次）
 
 更新日期：2026-11-19。狀態：待調查（根因未確認）。
