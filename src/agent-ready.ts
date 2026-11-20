@@ -11,6 +11,9 @@ export interface ReadyDeps {
   /** 啟動後等 Agent 變成 idle 的上限（預設 30 秒）與輪詢間隔（預設 1 秒）。 */
   readyTimeoutMs?: number;
   readyPollMs?: number;
+  /** 送出更新選單的跳過鍵後，等畫面不再是選單的上限（預設 3 秒）與重讀間隔（預設 100 毫秒）。 */
+  skipConfirmMs?: number;
+  skipConfirmPollMs?: number;
   /** 訊息裡稱呼被等的 Agent（預設 reviewer；autopick 的 Lead 用 Lead）。 */
   role?: string;
   /** Startup must observe this kind before reporting ready (profile detection can lag). */
@@ -34,6 +37,8 @@ const skippedPanes = new WeakMap<AgentStartPort, Set<string>>();
 // 這段期間下一輪輪詢看到 blocked 不能當成又卡住；只在寬限期內放行，之後的 blocked（例如接著跳出的信任提示）照舊失敗。
 const dismissedPanes = new WeakMap<AgentStartPort, Map<string, number>>();
 const SKIP_STATUS_GRACE_MS = 5_000;
+const SKIP_CONFIRM_MS = 3_000;
+const SKIP_CONFIRM_POLL_MS = 100;
 
 const sourcePorts = new WeakMap<AgentStartPort, AgentStartPort>();
 
@@ -136,7 +141,19 @@ async function skipKnownUpdate(
       `已自動跳過 ${entry.kind} 的更新提示（pane ${paneId}、按鍵 ${entry.skipKey}）`,
     );
     skip = { kind: entry.kind, paneId, key: entry.skipKey };
-    const after = await readScreen();
+    // 送鍵後立即重讀可能還是舊畫面：多個 codex 同時啟動時，重畫要幾百毫秒（ISSUE-184，2026-11-20 實測 6 個同時啟動有 5 個
+    // 立即重讀仍是選單）。在確認窗口內持續重讀，選單消失就繼續；窗口結束仍在才算沒跳過。讀取失敗照舊直接失敗。
+    const confirmDeadline = Date.now() + (deps.skipConfirmMs ?? SKIP_CONFIRM_MS);
+    const confirmPollMs = deps.skipConfirmPollMs ?? SKIP_CONFIRM_POLL_MS;
+    let after = await readScreen();
+    while (
+      after !== undefined &&
+      entry.match.every((text) => after!.includes(text)) &&
+      Date.now() < confirmDeadline
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, confirmPollMs));
+      after = await readScreen();
+    }
     // 選單要「整組字樣都還在」才算沒消失：跳過後 codex 會在頂端留下「Update available!」橫幅，
     // 只比對其中一句會把已經就緒的 Agent 誤判成還卡在選單（ISSUE-181）。
     const proceed =

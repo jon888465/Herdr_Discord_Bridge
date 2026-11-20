@@ -45,7 +45,13 @@ function fixture(screens: unknown[], statuses = [agent("codex", "idle")]) {
         : statuses,
   };
   return {
-    deps: { panePort: port, readyPollMs: 1, readyTimeoutMs: 1000 },
+    deps: {
+      panePort: port,
+      readyPollMs: 1,
+      readyTimeoutMs: 1000,
+      skipConfirmMs: 30,
+      skipConfirmPollMs: 1,
+    },
     calls,
   };
 }
@@ -132,6 +138,30 @@ test("a status that stays blocked well after the skip still fails as blocked", a
   assert.equal(calls.filter((c) => c.method === "pane.send_keys").length, 1);
 });
 
+// ISSUE-184：2026-11-20 實測，多個 codex 同時啟動時，送鍵後「立即重讀」仍可能讀到舊選單（重畫要幾百毫秒），
+// 單一次重讀會把已經成功跳過的 Agent 判成還卡在選單。送鍵後要在確認窗口內持續重讀。
+test("a stale menu on the first re-reads after the skip key is polled until the screen changes", async (t) => {
+  quiet(t);
+  const { deps, calls } = fixture([
+    { read: { text: update } },
+    { read: { text: update } },
+    { read: { text: update } },
+    { read: { text: bannerAfterSkip } },
+  ]);
+  const result = await waitUntilReady(deps, pane, agent("codex", "blocked"));
+  assert.equal(result.ok, true);
+  assert.equal(calls.filter((c) => c.method === "pane.send_keys").length, 1);
+});
+
+test("a menu that never goes away within the confirm window still fails and never sends a second key", async (t) => {
+  quiet(t);
+  const { deps, calls } = fixture([{ read: { text: update } }]);
+  const result = await waitUntilReady(deps, pane, agent("codex", "blocked"));
+  assert.equal(result.ok, false);
+  assert.equal(!result.ok && result.reason, blockedReason);
+  assert.equal(calls.filter((c) => c.method === "pane.send_keys").length, 1);
+});
+
 const blockedReason =
   "reviewer 卡在啟動提示（blocked）。常見原因：Agent 自己的更新提示或新資料夾的信任提示；bridge 不會替人確認，請先在要用的種類上處理一次";
 
@@ -148,7 +178,8 @@ test("persistent update fails blocked and never sends again for that pane", asyn
     reason: blockedReason,
   });
   assert.equal(calls.filter((c) => c.method === "pane.send_keys").length, 1);
-  assert.equal(calls.filter((c) => c.method === "agent.read").length, 2);
+  // 送鍵後會在確認窗口內重讀畫面（ISSUE-184），選單一直在就讀到窗口結束；第二次等待不會再讀。
+  assert.ok(calls.filter((c) => c.method === "agent.read").length >= 2);
   assert.ok(
     calls.every((c) => ["agent.read", "pane.send_keys"].includes(c.method)),
   );

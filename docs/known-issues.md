@@ -2,7 +2,7 @@
 
 ## ISSUE-184：跳過更新選單後，Herdr 的 agent_status 還停在 `blocked`，下一輪輪詢又被判「卡在啟動提示」（Worker 池）
 
-更新日期：2026-11-20。狀態：已修正、待驗收（原始碼與自動化測試通過；**尚未部署重跑、未實機驗收**；**根因是依時序推論，沒有在 bridge 內直接量到那一輪輪詢看到的狀態**）。
+更新日期：2026-11-20。狀態：已修正、待驗收（2026-11-20 稍晚：**根因已直接重現並確認**；原始碼、自動化測試與壓力探針通過；**尚未部署重跑 team discuss、未實機驗收**）。先前（同日）的狀態與推論見下方各段，其中「輪詢時狀態落後」只是次要因素。
 
 **使用者可見症狀（2026-11-20 09:05 UTC，`REQ-20261120-team-discuss` 第三次嘗試，ISSUE-181／183 已部署）：**Lead（codex）起來、任務開始，但實作指派 `implement-discuss`（`profile:helper`，codex）以「Worker 卡在啟動提示（blocked）」失敗，review、verify 因依賴它而失敗。bridge 日誌有 `已自動跳過 codex 的更新提示（pane …、按鍵 2）`，事後讀 pane：正常輸入列、YOLO mode、`idle`。
 
@@ -15,6 +15,8 @@
 **第四次嘗試（2026-11-20 09:14 UTC，ISSUE-184 修正已部署）：**worktree 的 Lead（codex）在 assign 步驟又以「Lead 尚未就緒，任務沒有啟動，卡片仍是 ready」停下；日誌有兩行跳過更新選單（autopick Lead 與 worktree Lead），事後兩個 Lead 都是 `done`。task 沒有建立，所以**這次沒有驗證到 Worker 路徑，ISSUE-184 的修正尚未被實機驗證**。同樣的程式碼第三次嘗試成功、第四次失敗，是不穩定的。
 **隔離量測（探針，不是 bridge 日誌）：**用 bridge 編譯出的 `waitUntilReady`／`doneAsReady`（預設逾時與輪詢間隔）接真實 codex（傳輸層用 Herdr CLI），4 次都 `ok=true`（5 至 6 秒、有送跳過鍵），所以這個函式本身在隔離下沒問題。用 production 的 `startAgentInPane` 完整重現失敗：Herdr CLI 的 `agent start` 遇到更新選單會直接回 `agent_not_ready`，與 bridge 的 RPC 行為不等價，**沒有重現成功**。
 **目前的缺口：**bridge 沒有記錄「為什麼未就緒」（`awaitReady` 失敗只回 `undefined`，使用者只看到泛用訊息）。已加日誌（只寫 bridge console，不改行為，無自動化測試）：失敗時寫出 pane、啟動回傳狀態與 `reason`；同時把等待用的 role 標成 Lead（原本預設 reviewer，日誌訊息會誤導）。部署重啟後再重跑一次即可看到原因。
+**真正的根因（2026-11-20 稍晚，已直接重現）：**bridge 診斷日誌（#334）第五次嘗試拿到：`卡片 worktree Lead（pane w9T:p1、啟動回傳狀態 blocked）沒有就緒：Lead 卡在啟動提示（blocked）…（已送過更新選單跳過鍵）`——跳過鍵已送出、之後仍判失敗，而 Lead 事後是 `idle`。四次嘗試中 autopick 的 Lead 每次都過、worktree 的 Lead 每次都失敗：後者是在前一個 codex 還在啟動時才啟動，CPU 較忙。用 bridge 編譯出的 `HerdrClient`＋`startAgentInPane`＋`waitUntilReady`（production 的物件）直接打 Herdr socket：**單獨跑一次成功**（送鍵後約 1 ms 重讀畫面已換）；**同時啟動 6 個，5 個在送鍵後的立即重讀仍讀到舊選單**（`menu=true`），`waitUntilReady` 約 110 ms 內回 `ok=false`、`(skip sent)`，與 production 症狀完全一致。也就是 `skipKnownUpdate` 送鍵後只重讀一次，重畫較慢時會把已成功跳過的 Agent 判成沒跳過。這解釋了先前所有隔離探針（單獨跑、重畫夠快）為何抓不到。
+**修正二（2026-11-20）：**送鍵後在確認窗口（預設 3 秒、每 100 毫秒）內持續重讀，選單消失就繼續；窗口結束仍在、或讀取失敗照舊直接失敗，不會再送第二次鍵。窗口與間隔可由 `ReadyDeps.skipConfirmMs`／`skipConfirmPollMs` 調整（測試用）。**測試（2026-11-20，本機 macOS，worktree）：**新增 2 項（前幾次重讀仍是舊選單、之後換畫面應成功，修正前失敗、修正後通過；選單一直在窗口內不消失仍失敗且只送一次鍵）；既有「持續選單」測試的讀取次數斷言由「剛好 2 次」改為「至少 2 次」（行為改變：送鍵後會多讀）；`agent-ready`／`card-worktree-flow`／`update-prompts` 共 57 項全過；完整 `npm test` 2230 項、通過 2229、失敗 0、略過 1；typecheck、lint 通過。**壓力探針（不是 bridge 日誌）：**同樣的 6 個同時啟動，修正後 6/6 `ok=true`，其中 5 個有吸收到「送鍵後仍是舊選單」的重讀。**未驗證：**部署重啟後重跑 team discuss（worktree Lead、Worker、reviewer 的實機啟動）；3 秒窗口在更重的負載下是否足夠。
 **修正（2026-11-20）：**跳過後若確認畫面已不是整組選單，記下時間，之後 5 秒內該 pane 再看到 `blocked` 視為狀態落後、繼續輪詢；超過 5 秒仍 `blocked` 照舊失敗（接著跳出的信任提示等仍會失敗，只是最多晚約 5 秒），沒送過鍵或選單還在時行為不變。**測試（2026-11-20，本機 macOS，worktree）：**新增 2 項（狀態落後 2 輪後 idle 應成功，修正前失敗、修正後通過；狀態超過寬限期仍 blocked 應失敗）；`agent-ready.test.ts`＋`card-worktree-flow.test.ts`＋`update-prompts.test.ts` 共 55 項全過；完整 `npm test` 2228 項、通過 2227、失敗 0、略過 1；typecheck、lint 通過。**未驗證：**部署重啟後 helper／reviewer／claude Worker 的實際啟動；5 秒寬限期是否足夠。
 
 ## ISSUE-183：worktree Lead 啟動回傳時狀態還是 `unknown`，被直接判「Lead 尚未就緒」，任務沒有啟動
