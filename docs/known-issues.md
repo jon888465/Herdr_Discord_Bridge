@@ -12,6 +12,9 @@
 
 **推論的根因：**`waitUntilReady` 輪詢迴圈在狀態仍是 `blocked` 時再次呼叫 `skipKnownUpdate`；該 pane 已送過鍵（同 pane 只送一次，不重試），函式直接回傳 `proceed: false`，被判成卡在啟動提示。bridge 忙碌時狀態落後更久就會觸發。**未確認：**那一輪輪詢實際看到的狀態；為什麼 autopick Lead 與 worktree Lead 這次沒踩到（輪詢間隔與路徑不同，沒有驗證）。
 
+**第四次嘗試（2026-11-20 09:14 UTC，ISSUE-184 修正已部署）：**worktree 的 Lead（codex）在 assign 步驟又以「Lead 尚未就緒，任務沒有啟動，卡片仍是 ready」停下；日誌有兩行跳過更新選單（autopick Lead 與 worktree Lead），事後兩個 Lead 都是 `done`。task 沒有建立，所以**這次沒有驗證到 Worker 路徑，ISSUE-184 的修正尚未被實機驗證**。同樣的程式碼第三次嘗試成功、第四次失敗，是不穩定的。
+**隔離量測（探針，不是 bridge 日誌）：**用 bridge 編譯出的 `waitUntilReady`／`doneAsReady`（預設逾時與輪詢間隔）接真實 codex（傳輸層用 Herdr CLI），4 次都 `ok=true`（5 至 6 秒、有送跳過鍵），所以這個函式本身在隔離下沒問題。用 production 的 `startAgentInPane` 完整重現失敗：Herdr CLI 的 `agent start` 遇到更新選單會直接回 `agent_not_ready`，與 bridge 的 RPC 行為不等價，**沒有重現成功**。
+**目前的缺口：**bridge 沒有記錄「為什麼未就緒」（`awaitReady` 失敗只回 `undefined`，使用者只看到泛用訊息）。已加日誌（只寫 bridge console，不改行為，無自動化測試）：失敗時寫出 pane、啟動回傳狀態與 `reason`；同時把等待用的 role 標成 Lead（原本預設 reviewer，日誌訊息會誤導）。部署重啟後再重跑一次即可看到原因。
 **修正（2026-11-20）：**跳過後若確認畫面已不是整組選單，記下時間，之後 5 秒內該 pane 再看到 `blocked` 視為狀態落後、繼續輪詢；超過 5 秒仍 `blocked` 照舊失敗（接著跳出的信任提示等仍會失敗，只是最多晚約 5 秒），沒送過鍵或選單還在時行為不變。**測試（2026-11-20，本機 macOS，worktree）：**新增 2 項（狀態落後 2 輪後 idle 應成功，修正前失敗、修正後通過；狀態超過寬限期仍 blocked 應失敗）；`agent-ready.test.ts`＋`card-worktree-flow.test.ts`＋`update-prompts.test.ts` 共 55 項全過；完整 `npm test` 2228 項、通過 2227、失敗 0、略過 1；typecheck、lint 通過。**未驗證：**部署重啟後 helper／reviewer／claude Worker 的實際啟動；5 秒寬限期是否足夠。
 
 ## ISSUE-183：worktree Lead 啟動回傳時狀態還是 `unknown`，被直接判「Lead 尚未就緒」，任務沒有啟動
@@ -24,6 +27,7 @@
 
 **已確認（讀碼）：**`prepareCardWorktree`（`src/card-worktree-flow.ts`）在 `agent.start` 回來後，只有狀態是 `working` 或 `blocked` 才呼叫 `awaitReady`；其他狀態直接算未就緒（`agentReady` 只認 `idle`／`done`）。**推論（未直接驗證）：**2026-11-20 對 codex 的 100 ms 取樣顯示啟動後前約 3.7 秒狀態是 `unknown`，之後才變 `blocked`（更新選單）；若 `agent.start` 在 `unknown` 時回傳，就會跳過等待而判失敗。這次沒有紀錄 `agent.start` 實際回傳的狀態。為什麼更早的 codex 卡沒踩到：未確認。
 
+**更正（2026-11-20 稍晚）：**上面「`agent.start` 回傳時狀態是 `unknown`」的推論**不適用於 production**。`startAgentInPane`（`src/agent-start.ts`）在 `agent.start` 回來後會自己輪詢到狀態離開 `unknown`（最多 30 秒）才回傳，所以 production 的 `started` 不會是 `unknown`；我當時的取樣腳本繞過了這一步才看到 `unknown`。這個修正無害（不是 idle／done 就等），但**不能說它解決了「Lead 尚未就緒」**；第四次嘗試同樣的症狀又出現（見 ISSUE-184）。
 **修正（2026-11-20）：**改成「不是 `idle`／`done` 就等」。回歸測試：`agent_status: "unknown"` 回傳時必須呼叫 `awaitReady`，修正前失敗、修正後通過。`card-worktree-flow.test.ts`＋`agent-ready.test.ts` 共 49 項全過；完整 `npm test` 2226 項、通過 2225、失敗 0、略過 1；typecheck、lint 通過（2026-11-20，本機 macOS，worktree）。**未驗證：**真實 bridge 部署重啟後，codex 當 worktree Lead 的卡能否繼續執行；其他呼叫端（例如 `src/main.ts`、`team-task-engine.ts` 中類似的 `working`／`blocked` 判斷語意不同，本次沒改）。
 
 ## ISSUE-180：沒指定 roles 的卡，自動開出 claude opus Worker，並跳出「switch to opus」確認

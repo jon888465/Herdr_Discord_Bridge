@@ -1211,10 +1211,15 @@ export async function handleCommand(
               startAgent: (input) => startAgentInPane(runtime.herdr, input),
               awaitReady: async (agent) => {
                 const ready = await waitUntilReady(
-                  { panePort: doneAsReady(runtime.herdr) },
+                  { panePort: doneAsReady(runtime.herdr), role: "Lead" },
                   { paneId: agent.pane_id, terminalId: agent.terminal_id },
                   agent,
                 );
+                // ISSUE-184：「Lead 尚未就緒」只告訴使用者結果；原因只寫在 bridge 日誌，方便對照時序。
+                if (!ready.ok)
+                  console.warn(
+                    `卡片 worktree Lead（pane ${agent.pane_id}、啟動回傳狀態 ${agent.agent_status}）沒有就緒：${ready.reason}${ready.updateSkip ? "（已送過更新選單跳過鍵）" : ""}`,
+                  );
                 return ready.ok ? ready.agent : undefined;
               },
               worktrees: lazyCardWorktrees(),
