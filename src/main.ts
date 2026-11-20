@@ -2027,6 +2027,9 @@ async function teamList(
 ): Promise<void> {
   const agents = await runtime.herdr.listAgentsWithWorkspaceNames();
   const active = runtime.routing.resolve(context.routing)?.paneId;
+  const liveWorkspaces = new Set(
+    (await runtime.herdr.listWorkspaces()).map((workspace) => workspace.workspace_id),
+  );
   const workspaceIds = [
     ...new Set([
       ...runtime.routing.workspaceTeamIds(),
@@ -2036,8 +2039,11 @@ async function teamList(
     ]),
   ].filter(
     (id) =>
-      !runtime.config.allowedWorkspaceIds.length ||
-      runtime.config.allowedWorkspaceIds.includes(id),
+      // Remote snapshots may be cached or absent while disconnected. Only
+      // local workspace absence is authoritative; never delete saved mappings.
+      (id.includes(":") || liveWorkspaces.has(id)) &&
+      (!runtime.config.allowedWorkspaceIds.length ||
+        runtime.config.allowedWorkspaceIds.includes(id)),
   );
   if (workspaceIds.length === 0) {
     await runtime.discord.reply(

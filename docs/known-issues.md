@@ -1,5 +1,19 @@
 # Known Issues
 
+## ISSUE-178：卡片 workspace 清除後，team list 仍列出舊 Team
+
+更新日期：2026-11-20。狀態：已修正、待驗收（本機清單；遠端保守保留）。
+
+使用者可見症狀：使用者回報 `bridge team list` 列出許多做卡片時建立、已清除的 Team。預期：已刪除 workspace 不應繼續佔據一般 Team 清單；仍存在 workspace 的暫時離線 pane 不應因此被誤刪。
+
+重現／環境：使用者現場回報，尚未取得具體 workspace ID、清理方式與執行中 bridge 版本，未執行現場重現。
+
+已確認事實：原始碼 `src/main.ts` 的 `teamList` 從 `routing.workspaceTeamIds()` 取得持久化 Team ID，僅過濾 workspace allowlist，沒有向即時 workspace 清單確認是否仍存在；找不到 Agent 時顯示 `stale`。此為靜態檢查，不代表已確認這次現場殘留的完整根因；清理路徑是否移除 mapping 尚待追查。
+
+修正與根因確認（2026-11-20）：新增 `test/team-list-main.test.ts` 經真實 `handleCommand` 重現，修正前 4 項中 3 項失敗（刪除 workspace 仍顯示、全刪時未顯示空清單、workspace 查詢失敗未回報）。原因為清單直接列持久化 ID，沒有查 workspace 存續；現場清理是否另有遺漏尚未驗證。`teamList` 現查詢 workspace 清單，隱藏已不存在的本機 workspace（包含過期 active route），不刪 mapping／任務／session；仍存在 workspace 的 stale 成員保留。遠端因 HerdrHub 使用快取且手動斷線會省略，所有遠端 Team 保守保留，遠端刪除殘留不在本輪修正範圍。查詢錯誤向上傳遞，不把不可達當刪除。
+
+驗證（2026-11-20，本機 Linux）：`npm run typecheck`、`npm run lint`（278 TypeScript files）、`npm run build` 通過；`node --test dist/test/team-list-main.test.js` 4／4 通過。首次 `npm test` 被 120 秒工具上限中止；以較長上限重跑 2224 項、2178 pass、23 fail、23 cancelled（多個有界等待／啟動／socket 測試失敗），不能宣稱完整通過。`node --test --test-concurrency=1 dist/test/*.test.js`：2224 項、2223 pass、1 fail、0 cancelled；唯一失敗為未修改的 run-sh-args「Core readiness 等待有界」預期 within 10 seconds，實得 Core status failed or timed out。該檔單跑 56 項、55 pass、1 fail，仍相同；根因未確認，不為本修正放寬測試。PR #327 首輪 GitHub CI（2026-11-20，run 44691356036）Ubuntu／macOS Node 22 全部通過；本機失敗保留紀錄，不視為實機驗收。合併仍須最後版本 CI 全綠。未重啟或部署 bridge，Discord／Herdr 實機驗收未完成；舊 mapping 刻意保留，不補送舊訊息。
+
 ## ISSUE-177：Machine 看板連線時，遠端 Herdr server 需要重啟卻沒有確認提示，遠端 bridge 也不會跟著重開
 
 更新日期：2026-11-20。狀態：階段 1、階段 2 都已實作並部署（2026-11-20，`scripts/run.sh -r`，階段 1 在 main `9f1f28a`、階段 2 在 `0faadd2`），待實機驗收；使用者 2026-11-20 回報在 devbox 測過「看起來 OK」（口頭回報，沒有留下輸出或畫面），預計下週再測；**之後又決定暫不再驗收**（devbox 已改走 tailnet 固定位址，不再有會換埠的轉發，見下方「暫不驗收的決定」），**所以仍不算已驗收**，狀態維持「已部署、待驗收」。
