@@ -30,6 +30,11 @@ export type ReadyResult =
 
 const skippedPanes = new WeakMap<AgentStartPort, Set<string>>();
 
+// 跳過後「確認選單已消失」的時間。Herdr 的 agent_status 翻回 idle 會落後一小段（ISSUE-184，實測約 0.25 秒），
+// 這段期間下一輪輪詢看到 blocked 不能當成又卡住；只在寬限期內放行，之後的 blocked（例如接著跳出的信任提示）照舊失敗。
+const dismissedPanes = new WeakMap<AgentStartPort, Map<string, number>>();
+const SKIP_STATUS_GRACE_MS = 5_000;
+
 const sourcePorts = new WeakMap<AgentStartPort, AgentStartPort>();
 
 const settledPorts = new WeakMap<AgentStartPort, AgentStartPort>();
@@ -74,7 +79,14 @@ async function skipKnownUpdate(
   const kind = expected.agent;
   const sourcePort = sourcePorts.get(deps.panePort) ?? deps.panePort;
   let sent = skippedPanes.get(sourcePort);
-  if (sent?.has(paneId)) return { proceed: false };
+  if (sent?.has(paneId)) {
+    const dismissedAt = dismissedPanes.get(sourcePort)?.get(paneId);
+    return {
+      proceed:
+        dismissedAt !== undefined &&
+        Date.now() - dismissedAt < SKIP_STATUS_GRACE_MS,
+    };
+  }
   const readScreen = async (): Promise<string | undefined> => {
     const result = await deps.panePort.request("agent.read", {
       target: paneId,
@@ -127,12 +139,17 @@ async function skipKnownUpdate(
     const after = await readScreen();
     // 選單要「整組字樣都還在」才算沒消失：跳過後 codex 會在頂端留下「Update available!」橫幅，
     // 只比對其中一句會把已經就緒的 Agent 誤判成還卡在選單（ISSUE-181）。
-    return {
-      proceed:
-        after !== undefined &&
-        !entry.match.every((text) => after.includes(text)),
-      skip,
-    };
+    const proceed =
+      after !== undefined && !entry.match.every((text) => after.includes(text));
+    if (proceed) {
+      let dismissed = dismissedPanes.get(sourcePort);
+      if (!dismissed) {
+        dismissed = new Map<string, number>();
+        dismissedPanes.set(sourcePort, dismissed);
+      }
+      dismissed.set(paneId, Date.now());
+    }
+    return { proceed, skip };
   } catch {
     return { proceed: false, ...(skip ? { skip } : {}) };
   }

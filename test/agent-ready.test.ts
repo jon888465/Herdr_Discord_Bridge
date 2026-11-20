@@ -98,6 +98,40 @@ test("the update banner shown after the skip does not count as the menu still be
   assert.equal(result.ok, true);
 });
 
+// ISSUE-184：選單已被跳過、畫面已不是選單，但 Herdr 的 agent_status 還停在 blocked 一小段時間（實測約 0.25 秒，
+// 而 Worker 池的輪詢間隔是 300 ms）。這段落後不能被當成「又卡在啟動提示」。
+test("a status that lags at blocked right after a successful skip is polled again instead of failing", async (t) => {
+  quiet(t);
+  const { deps, calls } = fixture([
+    { read: { text: update } },
+    { read: { text: bannerAfterSkip } },
+  ]);
+  let polls = 0;
+  deps.panePort.listAgentsWithWorkspaceNames = async () => [
+    agent("codex", ++polls <= 2 ? "blocked" : "idle"),
+  ];
+  const result = await waitUntilReady(deps, pane, agent("codex", "blocked"));
+  assert.equal(result.ok, true);
+  assert.equal(calls.filter((c) => c.method === "pane.send_keys").length, 1);
+});
+
+test("a status that stays blocked well after the skip still fails as blocked", async (t) => {
+  quiet(t);
+  t.mock.timers.enable({ apis: ["Date"] });
+  const { deps, calls } = fixture([
+    { read: { text: update } },
+    { read: { text: bannerAfterSkip } },
+  ]);
+  deps.panePort.listAgentsWithWorkspaceNames = async () => {
+    t.mock.timers.tick(6_000);
+    return [agent("codex", "blocked")];
+  };
+  const result = await waitUntilReady(deps, pane, agent("codex", "blocked"));
+  assert.equal(result.ok, false);
+  assert.equal(!result.ok && result.reason, blockedReason);
+  assert.equal(calls.filter((c) => c.method === "pane.send_keys").length, 1);
+});
+
 const blockedReason =
   "reviewer 卡在啟動提示（blocked）。常見原因：Agent 自己的更新提示或新資料夾的信任提示；bridge 不會替人確認，請先在要用的種類上處理一次";
 
