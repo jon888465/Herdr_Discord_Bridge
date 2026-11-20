@@ -1,5 +1,25 @@
 # Known Issues
 
+## ISSUE-179：本機 codex 在新的卡片 worktree 停在「信任資料夾」提示，verify／reviewer 角色啟動不就緒
+
+更新日期：2026-11-20。狀態：待調查（症狀與重現已確認，**尚未修正**）。
+
+**使用者可見症狀（2026-11-20，卡片 `REQ-20261120-team-discuss`，L2 自動撿卡）：**implement 完成後，本機 `reviewer` profile（kind codex）的 `verify-discuss` 在實作完成 7 秒後失敗，blocker 為「Worker 卡在啟動提示（blocked）」；task 最後以「no passing review for the current version」失敗，卡片 worktree 的改動（約 10 個檔案）未 commit，也沒有 PR。
+
+**預期：**本機卡片 worktree 是 bridge 自己建立的路徑，應比照 ISSUE-174（遠端）預先信任、結束後移除；不應讓 verify／reviewer 因為新路徑停在信任提示。
+
+**重現（2026-11-20，本機 macOS，codex 0.170.0；探針不是 bridge 自己的 log）：**在 `~/.herdr/worktrees/` 下建一個新的 git 資料夾，用 Herdr 開 workspace 後執行 `codex`。畫面先是更新提示（0.170.0 → 0.171.0，ISSUE-118 的比對規則逐行相符、無敏感字樣，應會自動送 `2`），跳過後接著出現 `Folder access … Trust this folder? 1. Trust and continue / 2. Back to Agent Command Center`，pane 狀態 `blocked`。探針只送過一次 `2`（跳過更新），沒有選信任；探針 workspace 與資料夾已移除，`~/.codex/config.toml` 沒有新增條目（已確認）。
+
+**已確認：**本機 `~/.codex/config.toml` 沒有該卡片 worktree 路徑的信任條目；新路徑的 codex 會跳信任提示。
+
+**未確認（不可寫成根因）：**(1) 這次 task 的失敗畫面我沒看到（pane 已被清掉），blocker 只寫「啟動提示」，所以「就是信任提示」是依重現推論；(2) 為什麼過去其他卡的本機 codex 沒被擋（可能是 codex 版本改了信任判斷，或舊路徑被父目錄信任涵蓋），沒有查；(3) 沒有驗證 bridge 實際有送 `2`。
+
+**修正方向（尚未實作）：**卡片 worktree 建好後，對本機 codex 預先寫入信任（沿用 `src/codex-project-trust.ts` 與 ISSUE-174 的寫入／還原流程），卡片結束後移除。需要使用者決定是否沿用 ISSUE-174 的原則。
+
+**測試與驗收：**無（尚未修正）。同一張卡的實作在 worktree 本機跑過：`npm run typecheck`、`npm run lint` 通過，`npm test` 2246 項、通過 2245、失敗 0、略過 1（2026-11-20）；這只代表那份實作的自動化檢查，與本 issue 的修正無關。
+
+**下一步：**確認並實作本機卡片 worktree 的預先信任；修好後重跑 `REQ-20261120-team-discuss`，並做實機驗收。
+
 ## ISSUE-178：卡片 workspace 清除後，team list 仍列出舊 Team
 
 更新日期：2026-11-20。狀態：已修正、待驗收（本機清單；遠端保守保留）。
