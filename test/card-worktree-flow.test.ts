@@ -436,6 +436,24 @@ test("an Agent that starts blocked on a skippable prompt is awaited the same way
   assert.equal(result.agentReady, true);
 });
 
+// ISSUE-183：codex 啟動後前幾秒狀態是 unknown（之後才變 blocked 的更新選單），回傳當下是 unknown 也要等，不能直接判未就緒。
+test("an Agent whose status is still unknown at start is awaited too", async () => {
+  const unknown = { ...started, agent_status: "unknown" };
+  const ready = { ...started, agent_status: "idle" };
+  const seen: string[] = [];
+  const { deps } = setup({
+    startAgent: async () => unknown,
+    awaitReady: async (agent) => {
+      seen.push(agent.agent_status);
+      return ready;
+    },
+  });
+  const result = await prepareCardWorktree(deps, CARD);
+  assert.deepEqual(seen, ["unknown"]);
+  assert.equal(result.agentReady, true);
+  assert.equal(result.agent, ready);
+});
+
 import { doneAsReady, waitUntilReady } from "../src/agent-ready.js";
 
 test("update prompt skipped before agentReady", async (t) => {

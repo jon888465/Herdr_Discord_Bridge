@@ -133,7 +133,8 @@ export async function prepareCardWorktree(
       created.path,
     );
   }
-  if (["working", "blocked"].includes(agent.agent_status) && deps.awaitReady) {
+  // 不是 idle／done 就等：codex 啟動後前幾秒是 unknown，之後才變 blocked 的更新選單（ISSUE-183）。
+  if (!["idle", "done"].includes(agent.agent_status) && deps.awaitReady) {
     try {
       agent = (await deps.awaitReady(agent)) ?? agent;
     } catch {
