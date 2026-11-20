@@ -312,7 +312,13 @@ export interface MachineControlUi {
   confirmFor?: string;
   /** 已按過一次 R；緊接著再按 R 才送出重啟（任何其他按鍵都取消）。 */
   restartConfirm?: boolean;
+  /** 上一個結果帶結構化 needsRemoteRestart:true 的 machine；只有緊接著對同一台再按 o 才送出「重啟遠端 server」（ISSUE-177）。 */
+  remoteRestartFor?: string;
 }
+
+/** 要求使用者確認重啟遠端 Herdr server 的提示：寫清楚會中斷什麼，也寫清楚階段 1 不會幫你重開遠端的 bridge。 */
+export const REMOTE_RESTART_CONFIRM =
+  "Herdr 要求先重啟這台的遠端 server 才能更新側邊欄的埠；這會中斷它上面所有 pane 的行程（shell、agent、測試），遠端若跑著 bridge 也會停止，需要自行重開。再按一次 o 確認重啟（其他鍵取消）";
 
 export const BRIDGE_RESTART_CONFIRM = "再按一次 R 確認重啟 bridge（其他鍵取消）";
 
@@ -360,6 +366,7 @@ export function machineControlKey(
       outcome: { kind: "message", message: MACHINE_CONTROL_NO_SELECTION },
     };
   const force = key === "x" && ui.confirmFor === selectedId;
+  const restartRemote = key === "o" && ui.remoteRestartFor === selectedId;
   return {
     ui: { pending: true },
     outcome: {
@@ -368,6 +375,7 @@ export function machineControlKey(
         action: key === "o" ? "connect" : "disconnect",
         machineId: selectedId,
         ...(force ? { force: true } : {}),
+        ...(restartRemote ? { restartRemote: true } : {}),
       },
       message: MACHINE_CONTROL_PENDING,
     },
@@ -411,6 +419,12 @@ export function machineControlResult(
     };
   const note = result.note ? sanitizeForTerminal(result.note) : undefined;
   const herdr = result.herdr ? `；${sanitizeForTerminal(result.herdr)}` : "";
+  // 只依結構化的 needsRemoteRestart:true：連線本身成功，但要使用者確認才重啟遠端 server（ISSUE-177）。
+  if (result.needsRemoteRestart === true)
+    return {
+      ui: { pending: false, remoteRestartFor: machineId },
+      message: `${label}：${note ?? "已開始連線"}${herdr}；${REMOTE_RESTART_CONFIRM}`,
+    };
   return {
     ui: { pending: false },
     message: `${label}：${note ?? (result.status === "disconnected" ? "已斷線" : "已開始連線")}${herdr}`,
@@ -425,6 +439,25 @@ export function machineControlResult(
           },
         }),
   };
+}
+
+/** 背景重啟遠端 server 的進度要顯示多久（完成或失敗後）。 */
+export const REMOTE_RESTART_SHOW_MS = 60_000;
+
+/**
+ * 看板定期重讀狀態檔時用：進度有變化才回傳要顯示的訊息（一次），沒變就不再蓋掉使用者其他操作的訊息；
+ * 完成或失敗超過 REMOTE_RESTART_SHOW_MS 不再顯示。`shown` 是這次看過的簽章，下次傳回來。
+ */
+export function remoteRestartMessage(
+  status: { machineId: string; state: string; note: string; updatedAt: number } | undefined,
+  nowMs: number,
+  lastShown: string,
+): { message?: string; shown: string } {
+  if (!status) return { shown: lastShown };
+  const signature = `${status.machineId}:${status.state}:${status.updatedAt}`;
+  if (signature === lastShown) return { shown: lastShown };
+  if (status.state !== "running" && nowMs - status.updatedAt > REMOTE_RESTART_SHOW_MS) return { shown: signature };
+  return { message: `${sanitizeForTerminal(status.machineId)}：${sanitizeForTerminal(status.note)}`, shown: signature };
 }
 
 /** 套用一次控制回應的覆寫：有新的就取代；沒有就保留尚未到期的舊值（到期由 `withStatusOverrides` 略過，review F3）。 */

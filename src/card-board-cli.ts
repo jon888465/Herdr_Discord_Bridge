@@ -28,6 +28,7 @@ import {
 import {
   machineControlKey,
   machineControlResult,
+  remoteRestartMessage,
   bridgeRestartResult,
   withStatusOverrides,
   type MachineControlUi,
@@ -55,6 +56,7 @@ import {
 } from "./machines-config-write.js";
 import { validateMachines, type MachineConfig } from "./machines.js";
 import { sendMachineControl } from "./machine-control-channel.js";
+import { loadRemoteRestart, remoteRestartFile } from "./machine-remote-restart.js";
 
 // Herdr plugin pane：卡片看板。只編輯 draft 類與已停手的卡，其餘唯讀。
 const rootDir = path.join(stateDirectory(), "cards");
@@ -79,7 +81,13 @@ let machineError = "";
 let control: MachineControlUi = { pending: false };
 const statusOverrides = new Map<string, StatusOverride>();
 
+let restartShown = "";
+
 function reloadMachines(): void {
+  // 背景重啟遠端 Herdr server 的進度（ISSUE-177）：有變化才顯示一次。
+  const restart = remoteRestartMessage(loadRemoteRestart(remoteRestartFile()).status, Date.now(), restartShown);
+  restartShown = restart.shown;
+  if (restart.message) message = restart.message;
   statuses = readMachineStatus(
     path.join(stateDirectory(), "machine-status.json"),
     new Date(),

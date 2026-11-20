@@ -27,6 +27,8 @@ export interface MachineControlCommand {
   action: MachineControlAction;
   machineId: string;
   force?: boolean;
+  /** 使用者已確認可以重啟遠端 Herdr server（ISSUE-177）；只對 connect 有意義，bridge 另外檢查這台確實被標成需要重啟。 */
+  restartRemote?: boolean;
 }
 
 export interface MachineControlHub {
@@ -61,7 +63,7 @@ export function tokenMatches(given: string, expected: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-/** 驗證一行請求；格式、版本、token、action、machineId、force 任何一項不對就回 undefined，不會呼叫 hub。 */
+/** 驗證一行請求；格式、版本、token、action、machineId、force、restartRemote 任何一項不對就回 undefined，不會呼叫 hub。 */
 export function parseControlRequest(
   line: string,
   token: string,
@@ -82,13 +84,16 @@ export function parseControlRequest(
       value.action !== "restart") ||
     typeof value.machineId !== "string" ||
     (value.action !== "restart" && !value.machineId) ||
-    (value.force !== undefined && typeof value.force !== "boolean")
+    (value.force !== undefined && typeof value.force !== "boolean") ||
+    (value.restartRemote !== undefined && typeof value.restartRemote !== "boolean") ||
+    (value.restartRemote === true && value.action !== "connect")
   )
     return undefined;
   return {
     action: value.action,
     machineId: value.machineId,
     ...(value.force === true ? { force: true } : {}),
+    ...(value.restartRemote === true ? { restartRemote: true } : {}),
   };
 }
 
@@ -108,6 +113,7 @@ export function normalizeControlResult(value: unknown): MachineControlResult {
       ...(value.restarting === true ? { restarting: true } : {}),
       ...(typeof value.note === "string" ? { note: value.note } : {}),
       ...(typeof value.herdr === "string" ? { herdr: value.herdr } : {}),
+      ...(value.needsRemoteRestart === true ? { needsRemoteRestart: true } : {}),
     };
   }
   if (value.ok !== false || typeof value.reason !== "string")
@@ -231,6 +237,12 @@ async function listenPrivately(
   fs.chmodSync(socketPath, 0o600);
 }
 
+/** afterControl 可以回字串（等同 `{ herdr }`），或帶結構化的「需要使用者確認重啟遠端 server」（ISSUE-177）。 */
+export interface AfterControlExtra {
+  herdr?: string;
+  needsRemoteRestart?: boolean;
+}
+
 export interface MachineControlServerOptions {
   socketPath?: string;
   tokenFile?: string;
@@ -242,7 +254,7 @@ export interface MachineControlServerOptions {
   afterControl?: (
     command: MachineControlCommand,
     result: MachineControlResult,
-  ) => Promise<string | undefined>;
+  ) => Promise<string | AfterControlExtra | undefined>;
 }
 
 export async function startMachineControlServer(
@@ -307,7 +319,11 @@ export async function startMachineControlServer(
       // 總期限（deadline）照舊計時：附帶動作太慢時，原結果照回，不等它。
       options
         .afterControl(command, result)
-        .then((herdr) => (herdr ? { ...result, herdr } : result))
+        .then((extra): MachineControlResult => {
+          if (!extra) return result;
+          const { herdr, needsRemoteRestart } = typeof extra === "string" ? { herdr: extra, needsRemoteRestart: false } : extra;
+          return { ...result, ...(herdr ? { herdr } : {}), ...(needsRemoteRestart ? { needsRemoteRestart: true } : {}) };
+        })
         .catch(() => result)
         .then(reply);
     });
@@ -407,6 +423,7 @@ export function sendMachineControl(
           action: command.action,
           machineId: command.machineId,
           ...(command.force ? { force: true } : {}),
+          ...(command.restartRemote ? { restartRemote: true } : {}),
         }) + "\n",
       ),
     );
