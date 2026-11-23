@@ -2,7 +2,7 @@
 
 ## ISSUE-191：`docs/known-issues.md` 超過版本擷取的單檔上限（1 MiB），所有動到它的卡片都無法通過驗收
 
-更新日期：2026-11-23。狀態：待調查（現象、數字與程式位置已確認；**尚未修正，修法待使用者決定**）。
+更新日期：2026-11-23。狀態：已修正、待驗收（使用者選修法 3 與 4；原始碼與自動化測試通過；**尚未部署、未實機重跑失敗的卡片**）。先前：待調查。
 
 **使用者可見症狀（2026-11-23，`REQ-20261123-merge-entry-audit`，bridge 為含 #352 的 main `871f9a0` 重啟後第一張撿的卡）：**task 的 9 個指派全部 `done`、沒有任何 finding，卻在 06:59:48 UTC 以 `Lead reached the planning round limit; task remains incomplete` 失敗；沒有開 PR。task 的 `acceptance` 是 `ok: false`，原因兩條：`version capture exceeded the read limit` 與 `no passing review for the current version`；4 次 review 全部是 `inconclusive`（獨立審查旗標為真），Lead 於是一直追加檢查指派，直到規劃輪數用完。卡片的交付物（新檔案 `docs/merge-gates.md` 約 13 KB 等）還留在卡片 worktree，未 commit。
 
@@ -23,6 +23,13 @@
 3. **版本擷取改成不必讀完整檔案**（例如用 git 已有的 blob 雜湊，大檔不整份讀進記憶體）：最根本，但改動核心驗收邏輯，風險最高。
 4. **讓 Lead 在 `acceptance` 因 `overflow` 失敗時直接停下並說明原因**，不要追加檢查指派耗盡規劃輪數：與上面任何一項都不衝突，是獨立的行為改善。
 **下一步：**使用者決定方向。在那之前，**不要放行任何會修改 `docs/known-issues.md` 的 bridge 卡**（包含 `REQ-20261123-precheck-diff-size`，保持 `draft`）；需要更新這份文件時，用手動 PR。
+**修正（2026-11-23，使用者選修法 3 與 4）：**
+- **修法 3（版本擷取不被單檔大小卡死）：**`hashWorktree` 改成**分段讀取**雜湊（`hashFileInChunks`，每次 256 KiB，結果與整份讀取的 sha256 完全相同，所以既有 fingerprint 不變），記憶體用量與檔案大小無關；單檔上限由 1 MiB 放寬到與總量上限相同的 8 MiB。**要說清楚：這不是「不必讀完整檔案」**，檔案仍會整個被讀一遍，只是不再整份放進記憶體，上限放寬到 8 MiB；`MAX_TOTAL_BYTES`（8 MiB）、檔案數 200、`git diff` 輸出 1 MiB 沒變。另外 overflow 現在會記白話原因（哪個檔案、哪個上限，`overflowDetail`），驗收原因變成 `version capture exceeded the read limit: <原因>`（開頭不變）；`overflowDetail` **不進任何 fingerprint**，有測試證明。
+- **修法 4（Lead 遇到 overflow 早停）：**`CodingHooks` 新增可選的 `unrecoverable()`（只讀，不寫事件、不改閘門狀態），`team-orchestration.ts` 在每一波指派結束後檢查，**有 overflow 就結束規劃迴圈**，由驗收閘門以含檔案名稱的原因讓任務失敗，不再追加指派耗盡規劃輪數；沒有 overflow 時行為完全不變（有測試證明仍會一路規劃到上限）。
+- **測試（2026-11-23，本機 macOS，worktree）：**新增 6 項（分段雜湊與整份 sha256 在分段邊界前後與空檔都相同；>1 MiB 的已追蹤檔案被擷取而不 overflow，內容改變 fingerprint 隨之改變；超過單檔上限仍 overflow 且原因寫出檔案名稱與上限；`overflowDetail` 不影響 fingerprint；overflow 時任務在當波結束後以含原因的訊息失敗、只問過一次規劃；沒有 overflow 時同一個一直追加指派的 Lead 仍照舊耗到規劃輪數上限）。暫時拿掉早停、把單檔上限改回 1 MiB、讓分段雜湊多算舊資料，各有 1、3、15 項失敗，已還原且逐字相同；完整 `npm test` 2264 項、通過 2263、失敗 0、略過 1；typecheck、lint 通過。
+- **真實檔案的前後對照（2026-11-23，探針，不是 bridge 日誌）：**對 1,092,650 位元組的 `docs/known-issues.md` 追加一行，用目前部署的舊版 build 做版本擷取：`overflow: true`；用新版：`overflow: false`、`deliveryPaths: ["docs/known-issues.md"]`；檔案已還原且逐位元組相同。
+- **未驗證：**部署重啟後重跑失敗的卡片（`REQ-20261123-merge-entry-audit`）是否能走完、review 是否不再 `inconclusive`；`git diff` 輸出 1 MiB 的上限仍在（一張卡若整段改寫大型檔案，diff 本身可能超過）；`docs/known-issues.md` 若繼續成長，8 MiB 離現在還很遠（目前約 1.04 MiB），但沒有評估成長速度；其他大檔案（`SPEC.md`、`README`）沒有逐一量；Lead 在 review 一直 `inconclusive` 但**不是** overflow 的情況下仍會追加指派到輪數上限，這次沒有處理。
+
 
 ## ISSUE-190：`team ask`／`team discuss` 透過 Discord 傳檔案或圖片，附件被默默丟掉，Agent 沒有讀取
 
