@@ -22,7 +22,7 @@
 
 ## ISSUE-188：`team discuss` 的 Lead 是使用者自己的互動 session，彙整會把該 session 的先前對話內容帶進討論結果與 Discord thread
 
-更新日期：2026-11-23。狀態：已修正、待驗收（使用者選修法 3「維持現狀並提示」；原始碼與自動化測試通過；**尚未部署、未實機驗收；這只是提示，不是隔離，Lead 的對話脈絡仍可能出現在結果裡**）。先前：待調查。
+更新日期：2026-11-23。狀態：**已驗收（console 實機，2026-11-23；Discord 上的呈現未驗；這只是提示，不是隔離，Lead 的對話脈絡仍可能出現在結果裡）**。先前：已修正、待驗收；再先前：待調查。
 
 **使用者可見症狀（2026-11-23，Discord thread 實機驗收，見 ISSUE-186）：**Lead 是 workspace 的 active Agent，也就是使用者自己的互動 claude session。它的彙整在「Overlooked questions」第 1 項引用了與這次題目無關的先前對話內容（該 session 之前做的另一件維修工作的細節），三位同儕完全沒看到那些內容。結果有標明那是「我的觀察，不是同儕的共識」。結果被送進 Discord thread，所以那個 session 的對話脈絡會出現在 thread 裡，任何看得到 thread 的人都能讀到。
 
@@ -38,6 +38,7 @@
 3. **維持現狀並在文件與結果標頭提示**：結果標明 Lead 可能引用自己的對話脈絡，由使用者決定要不要在公開 thread 執行。
 **下一步：**使用者決定方向後開需求卡；在那之前，在多人可見的 thread 執行 `team discuss` 時，Lead 的對話內容可能一併出現，使用者需自行評估。
 **修正（2026-11-23，使用者選修法 3）：**`team discuss` 在 Lead 真的產出彙整時，於參與者清單後固定附一行 `Note: the Lead synthesizes inside its own live session and may cite that session's earlier conversation, which the peers never saw. Consider this before running it in a thread others can read.`（`src/team-discuss.ts` 的 `LEAD_CONTEXT_NOTE`）；Lead 彙整失敗或被取消時不附。SPEC 與兩份 README 同步說明。**沒有改變 Lead 的行為或提示**，Lead 仍可能引用自己的對話，只是使用者在結果上看得到警告。**測試（2026-11-23，本機 macOS，worktree）：**新增 1 項（有 Lead 彙整時結果含該提示）並在既有「Lead 彙整失敗」測試補斷言（不含該提示）；暫時把提示改成恆顯示，1 項失敗，改成恆不顯示，1 項失敗，已還原且逐字相同；`team-discuss` 測試 21 項全過，完整 `npm test` 2255 項、通過 2254、失敗 0、略過 1；typecheck、lint 通過。**未驗證：**部署後真實結果是否出現該行與在 Discord 的呈現；提示是否足以讓使用者避開在多人 thread 執行（沒有驗證使用者行為）；其他兩個修法（提示加限制、Lead 改用乾淨 session）沒有做。
+**實機驗收（2026-11-23 05:15 至 05:18 UTC，本機 macOS，bridge console；bridge 為 main `ef3e03d`（含 #348，同一次重啟也帶上 #347）重啟後的程序；專用單一 Agent workspace，`--rounds 1`）：**`discuss-c8a87f82…` 的結果在「Participants」清單之後、其他訊息之前，**出現了**預期的一行 `Note: the Lead synthesizes inside its own live session and may cite that session's earlier conversation, which the peers never saw. Consider this before running it in a thread others can read.`，Lead 有產出彙整。**未驗證：**這行在 Discord 的呈現與分段（console 與 Discord 共用同一份結果文字，但沒有在 Discord 看到）；Lead 彙整失敗或被取消時不附的行為只有單元測試覆蓋，沒有實機；這個提示是否真的讓使用者避開在多人 thread 執行，沒有驗證。
 
 
 ## ISSUE-187：實作完成後才發現 PR 超過 review 上限，流程只停手，沒有把「切分」交回 Lead
@@ -66,7 +67,7 @@
 
 ## ISSUE-186：team discuss 唯讀同儕討論與缺空格提示
 
-更新日期：2026-11-23。狀態：**已驗收（Discord thread 主路徑，2026-11-23，見下方「Discord 實機驗收」；範圍有限，未驗收項目與觀察到的限制列在同一段）**。先前：已修正、待驗收。需求 REQ-20261120-team-discuss。
+更新日期：2026-11-23。狀態：**重新開啟／待調查（agy 同儕不穩定地被標 `incomplete`：2026-11-23 05:15 UTC 又出現，根因未確認，見最後一則）；主路徑的 Discord 實機驗收（2026-11-23）與先前的修正歷史保留如下**。先前：已驗收（Discord thread 主路徑，範圍有限，見下方「Discord 實機驗收」）；再先前：已修正、待驗收。需求 REQ-20261120-team-discuss。
 
 - 症狀／根因：Discord 或 console 輸入 `team ask討論…` 時，切字保留了緊接的文字，Team dispatcher 落到通用 usage。一般 `team ask` 只用已配置的 Workers，單 Agent workspace 缺少獨立同儕討論與新 session 後備。ISSUE-185 是之前卡片指派的 Lead 就緒競態，與本指令實機驗收分開追蹤。
 - 修正／預期：`team discuss` 以本機 active Agent 彙整，優先使用 workspace 同儕，缺額由 Claude Sonnet、Codex、Agy 的新 session 補上。新增缺空格提示、額度與模型來源回報、獨立／匿名唯讀回合、工作樹指紋、workspace scope cancel 與 owned pane 清理。見 [SPEC](../SPEC.md#本機唯讀同儕討論)。
@@ -103,6 +104,7 @@
   - **觀察到的限制（沒有被當成缺陷修正，是否另開 issue 待使用者決定）：**(1) **`Worktree verification uncertain for one or more working directories`**，不是 `fingerprints matched`：該 workspace 的 cwd 不是單一 Git worktree，bridge 依契約標「不確定」，所以這個 workspace 沒有「討論前後沒改檔」的證據，唯讀只剩 prompt 約束（我只獨立確認了本專案主 checkout 的 `git status` 為 0 筆，**沒有檢查該 cwd 底下的其他 repo**，也不能保證 cwd 之外）。(2) **Lead 是使用者自己的互動 session，它的彙整引用了與這次題目無關的先前對話內容**（同儕完全看不到），結果有標明那是「我的觀察，不是同儕的共識」，但等於 Lead 的對話歷史會流進討論結果與 Discord thread；契約寫「Lead 只彙整」，實際上 Lead 帶著自己的 session 脈絡。已另記為 ISSUE-188。(3) 這次的題目缺少明確標的，同儕主要在討論「題目沒說清楚」，所以**討論內容的品質、對有明確標的題目的表現，沒有驗證**。
   - **仍沒有驗證：**整體 5 分鐘上限被觸及時的行為；額度阻擋；同儕回報 Opus 時停止派送；從 Discord 執行 `team cancel`；匿名（A／B／C、不含種類與模型）仍只由提示長度與結果推論，沒有逐字檢查各輪送出的提示；工作樹被改動時的警告；120 秒預算在更重負載下是否足夠（目前實測 72 秒與 86 秒）。
   - **驗收範圍的說明：**契約要求「在只有一個 agent 的 workspace」驗收，這次的 `w3` 另有一個既有 pane（被跳過），不是嚴格的單一 agent；console 上有兩次嚴格單一 agent 的驗收（前述）。以上合起來，開出三個新 session、兩輪、結果送回 Discord thread、session 被清掉都有實機證據，所以標「已驗收（主路徑）」；**不代表上列未驗證項目與限制已解決**。
+- **agy 再度未完成，這次是第三種現象（2026-11-23 05:15 至 05:18 UTC，同一次 ISSUE-188 驗收，bridge 含第一回合 120 秒的修正 #343）：**`C wAR:p4: Timed out waiting for current response from wAR:p4 (last state: done); no verified completion`，`Limits reached: time`，`verified replies by round: 2`（claude 與 codex），agy 被標 `incomplete`，pane 依契約保留。**對照：**agy 約 81 秒就回到 `done`（在 120 秒預算內），所以不是第一回合太慢；bridge 一直等到約 120 秒逾時。**我讀了保留的 agy pane（只讀）：**回覆是完整的，畫面上有成對的 `BRIDGE_BEGIN_`／`BRIDGE_END_` 標記、內容分好幾節。**bridge 日誌：**agy 的 Stop hook 有送到（`hook Stop … pane=<agy pane> chars=2254`），其長度 **2254 字元超過要求的 2200 字元上限（`REPORT`）**；claude 同場只有 1052 字元。設定的 `hookTransport` 對 agy 是 `auto`。**讀碼（`src/team-turn.ts`、`src/turn-hook-final.ts`）：**turn 結束要嘛從 hook 的最終訊息、要嘛從 pane 讀回的文字，以標記框 `extractFrame` 取出回覆；取不到框就一直輪詢到逾時，訊息就是 `no verified completion`。**未確認（不要當根因）：**到底是 hook 的訊息沒有完整的標記框，還是 pane 讀回的行數窗口（`outputLines`）容不下這麼長的回覆而丟了 `BEGIN`，或是別的原因；「超過 2200 字元」只是同時出現的現象，沒有驗證因果；為什麼前兩場（三個同儕都有有效回覆）的 agy 沒事，也沒查。**下一步：**用保留的現場重現框的取出（把該 pane 的文字與 hook 訊息餵給 `extractFrame`），或在逾時時把 hook 訊息與 pane 讀取結果的框狀態寫進日誌；在此之前，agy 同儕可能不穩定地被標 `incomplete`，討論仍會用其他同儕完成。
 
 
 ## ISSUE-185：卡片指派的 Lead 剛就緒就送提示，撞到跳過更新選單後短暫的 `working`，任務沒有啟動（`agent is busy`）
