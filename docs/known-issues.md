@@ -1,5 +1,29 @@
 # Known Issues
 
+## ISSUE-191：`docs/known-issues.md` 超過版本擷取的單檔上限（1 MiB），所有動到它的卡片都無法通過驗收
+
+更新日期：2026-11-23。狀態：待調查（現象、數字與程式位置已確認；**尚未修正，修法待使用者決定**）。
+
+**使用者可見症狀（2026-11-23，`REQ-20261123-merge-entry-audit`，bridge 為含 #352 的 main `871f9a0` 重啟後第一張撿的卡）：**task 的 9 個指派全部 `done`、沒有任何 finding，卻在 06:59:48 UTC 以 `Lead reached the planning round limit; task remains incomplete` 失敗；沒有開 PR。task 的 `acceptance` 是 `ok: false`，原因兩條：`version capture exceeded the read limit` 與 `no passing review for the current version`；4 次 review 全部是 `inconclusive`（獨立審查旗標為真），Lead 於是一直追加檢查指派，直到規劃輪數用完。卡片的交付物（新檔案 `docs/merge-gates.md` 約 13 KB 等）還留在卡片 worktree，未 commit。
+
+**預期：**內容沒有問題的純文件卡，應該能通過版本擷取與 review。
+
+**已確認（讀碼與量測）：**
+1. `src/coding-version.ts` 的 `MAX_FILE_BYTES = 1_048_576`（1 MiB）；版本擷取對每個變更檔案雜湊，**任何一個變更檔案超過這個大小就標 `overflow`**，`acceptanceReasons`（`src/coding-workflow.ts`）因此加上 `version capture exceeded the read limit`，`card-commit.ts` 也在 `version.overflow` 時擋下 commit。另有 `MAX_DIFF_BYTES`（1 MiB，git diff 輸出）、`MAX_TOTAL_BYTES`（8 MiB）、`MAX_FILES`（200）。
+2. **`docs/known-issues.md` 已經超過 1 MiB**：`08ecc1b` 為 1,042,607 位元組（低於）、`0ec0ebd` 為 1,057,097（超過）、`f916759` 為 1,078,167、目前 main `871f9a0` 為 1,088,761。也就是 2026-11-23 這一天的文件累積把它推過了上限。
+3. 此前 `team discuss` 那張卡（基準 `08ecc1b`）能通過，時間點與這個數字吻合：它開始時檔案仍低於上限。
+4. **`AGENTS.md` 要求動到程式或行為的變更都要同步更新 `docs/known-issues.md`**，所以**之後每一張會修改這份文件的 bridge 卡都會得到同樣的結果**（`REQ-20261123-precheck-diff-size` 的描述也要求更新它）。
+5. 手動走 PR 的流程（不經 bridge 的版本擷取）不受影響，這就是為什麼這幾天我手動合的文件 PR 都沒事。
+
+**未確認：**其他限制（`MAX_DIFF_BYTES`、`MAX_TOTAL_BYTES`）離上限多近，沒有量；是否有別的大檔案也快到 1 MiB（`SPEC.md`、`README` 等，沒有逐一量）；為什麼 Lead 在每次 review 都是 `inconclusive` 時只會追加檢查指派而不是早點停下並說明原因（這是另一個行為問題，沒有調查）。
+
+**修法方向（只是選項，尚未選定）：**
+1. **縮小 `docs/known-issues.md`**：把已驗收、已結案的 issue 移到封存檔（例如 `docs/known-issues-archive/…`），主檔只留進行中與近期的；不動程式，但是文件大搬家，連結與 `CONTEXT.md`、各處對 `docs/known-issues.md#issue-…` 錨點的引用都要處理。
+2. **調高 `MAX_FILE_BYTES`**（例如 4 MiB）：最小的程式改動；這個上限是為了限制讀取與雜湊成本，調高只是延後，檔案還會繼續長。
+3. **版本擷取改成不必讀完整檔案**（例如用 git 已有的 blob 雜湊，大檔不整份讀進記憶體）：最根本，但改動核心驗收邏輯，風險最高。
+4. **讓 Lead 在 `acceptance` 因 `overflow` 失敗時直接停下並說明原因**，不要追加檢查指派耗盡規劃輪數：與上面任何一項都不衝突，是獨立的行為改善。
+**下一步：**使用者決定方向。在那之前，**不要放行任何會修改 `docs/known-issues.md` 的 bridge 卡**（包含 `REQ-20261123-precheck-diff-size`，保持 `draft`）；需要更新這份文件時，用手動 PR。
+
 ## ISSUE-190：`team ask`／`team discuss` 透過 Discord 傳檔案或圖片，附件被默默丟掉，Agent 沒有讀取
 
 更新日期：2026-11-23。狀態：待調查（使用者回報；現象與原因已由讀碼確認；**尚未修正，修法待使用者決定**）。
