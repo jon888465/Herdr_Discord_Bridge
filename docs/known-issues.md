@@ -36,6 +36,14 @@
 - 執行中的 bridge、部署與重啟：本輪未部署、未重啟，未核對執行中的版本。討論不重播，舊訊息不會補送。
 - 真實驗收待辦：在有可啟動的本機 Claude／Codex／Agy 且無已知額度阻擋的單 Agent workspace，於 Discord thread 執行 `team discuss <主題>`。記錄日期、機器、CLI／模型、三個新 session 的啟停、兩輪及結果回原 thread；另檢查取消、逾時保留與缺空格提示。Fixture 不代表這些實機結果。唯讀屬提示約束；Git 指紋不涵蓋 ignored、submodule、repo 外或先改後還原。
 - Merge 紀錄（2026-11-23）：PR #338 在 CI 全綠（ubuntu、macOS）後 merge（`1c488f0`）。任務內：implement、verify（`typecheck`、`lint`、`npm test`、`team-discuss` 測試皆 exit 0，為 verifier 自己回報）、遠端 review（wubuntu 的 codex，`pass`、0 findings、獨立審查閘門通過）都完成；**PR 層級的 review 因 diff 93947 字元超過上限 80000 沒有進行，merge 是使用者明確決定繞過**（見 ISSUE-187）。reviewer 的 `commands` 為空，審查深度沒有證據。merge 後**尚未部署、尚未重啟，沒有任何實機驗收**，狀態維持「已修正、待驗收」。
+- 第二次部分實機驗收（2026-11-23 02:18 至 02:22 UTC，本機 macOS，**bridge console，仍不是 Discord thread**；bridge 同為 main `9cd4370` 的程序；**狀態維持「已修正、待驗收」**）：
+  - **agy 信任資料夾的原因（讀碼加唯讀查清單）：**本機 agy 只有兩種資料夾會被 bridge 預先信任（`src/agy-worktree-trust.ts`）：`agyTrustedDirectories` 裡**正好等於**該路徑的資料夾（使用者機器上只列了一個上層專案目錄，不含子目錄），以及 bridge 自己建立並有紀錄的卡片 worktree；其他一律不處理。agy 的信任是「完全相同路徑」，不繼承上層：第一次驗收的資料夾在本機 agy 自己的信任清單已含家目錄的情況下仍被要求確認。遠端 agy（agy-pod）機制不同：bridge 只替卡片 review／write 的 clone 目錄預先寫入信任，一般遠端 agy 啟動時程式明寫「遠端 agy 的信任需人工處理」；實際清單是人工設定的少數目錄加 clone 目錄。**`team discuss` 第一版不使用遠端同儕**（SPEC：遠端 workspace Lead 拒絕、遠端同儕跳過），所以 agy-pod 的 agy 與本功能無關。
+  - **環境：**專用 workspace，cwd 為主 checkout（本機 agy 已信任的路徑），只有一個 codex Lead，驗收前後主 checkout `git status` 皆 0 筆。
+  - **第二場（三個同儕）：**`discuss-150c4d64…` 接受後補了 claude（`model sonnet (launch argument)`）、codex、**agy（這次沒被信任提示擋住，收到討論提示並回覆）**，三個同時進入 `working`；`Peer rounds run: 2/2 (verified replies by round: 2, 2)`、`Limits reached: time, peer excerpt`、結果標 `completed with gaps`、`Worktree fingerprints matched`，四節齊全，Lead 在彙整時自己讀了原始碼並標明來源與「未驗證部署中的行為」。**但 agy（C）標 `incomplete`：`herdr agent.prompt: timeout timed out waiting for agent status`，pane 依契約保留（`retained (timeout)`）**；所以三個同儕都「出場」，但有效回覆只有 claude 與 codex（兩輪各 2）。agy 第一輪從 `working` 持續超過 60 秒（超過每回合派送預算），第二輪約 8 秒內完成；**為什麼 agy 的回覆沒被收到、60 秒預算對 agy 是否太緊，沒有查，未確認**。
+  - **第三場（`team cancel`）：**在 claude、codex 新 session 剛起來時取消，回 `Team Discussion cancelled`、`Peer rounds run: 0/2`、`No synthesis available`、`Worktree fingerprints matched`；新開的 claude 與 codex 同儕被清掉，只剩 Lead。
+  - **仍沒有驗證：**Discord thread 路徑與長結果分段；agy 的有效回覆（這次逾時）；整體 5 分鐘上限；額度阻擋；同儕回報 Opus 時停止派送；工作樹被改動時的警告（兩場指紋都相符，我也獨立確認主 checkout 乾淨）；匿名（A／B／C、不含種類與模型）仍只由提示長度與結果推論，沒有逐字檢查各輪送出的提示；討論內容品質沒有獨立評估。
+  - 下一步：查 agy 回覆被判逾時的原因（先看 agy 的回合耗時與 `agent.prompt` 的等待行為）；從 Discord thread 執行一次。
+
 
 ## ISSUE-185：卡片指派的 Lead 剛就緒就送提示，撞到跳過更新選單後短暫的 `working`，任務沒有啟動（`agent is busy`）
 
