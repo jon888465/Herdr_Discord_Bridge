@@ -1,5 +1,49 @@
 # Known Issues
 
+<a id="issue-201"></a>
+
+## ISSUE-201：Bridge 最終合併未驗證 PR base
+
+更新日期：2026-11-23。狀態：待調查。
+
+- **症狀與預期：**開新 PR 或登記時使用 repo 預設分支。最終 merge guard 未確認當時 base 仍符合原先的目標；應能證明最終目標分支已通過與該次審查相符的檢查。
+- **證據與根因：**2026-11-23 本機讀碼，`src/card-pr-flow.ts:198–211` 與 `src/card-attach-pr.ts:125–175` 檢查初始目標；`src/github.ts:652–692` 讀到 `baseRefName`，`src/card-merge-wiring.ts:124–163` 未傳入 guard，最終命令只帶 head 條件（`src/github.ts:738–762`）。
+- **範圍與核對結果：**共用於 autopick、loop 與手動 `card merge`。只確認程式缺少 base 比對。未修改程式或執行合併測試，也未重現變更 base 後的合併。
+- **待驗證：**平台對 base 變更的 review、checks 與合併重算條件，以及最終寫入時是否有額外保障。見 [main 合併入口稽核](merge-gates.md)。
+
+<a id="issue-200"></a>
+
+## ISSUE-200：Bridge PR review 以 head 前 12 碼通過合併閘門
+
+更新日期：2026-11-23。狀態：待調查。
+
+- **症狀與預期：**卡片整體 PR review 只保留 head 前 12 碼，最終 gate 無法用卡片紀錄證明完整 review head 與寫入條件相同。預期以完整 commit SHA 核對。
+- **證據與根因：**2026-11-23 本機讀碼，取材前後確認完整 head（`src/card-review-fetch.ts:37–97`），卡片序列化截成 12 碼（`src/card-findings.ts:196,296–301`），guard 比同長度前綴（`src/card-merge.ts:48–81`），寫入才帶完整 SHA（`src/github.ts:738–762`）。
+- **範圍與核對結果：**共用於 autopick、loop 與手動 `card merge`。只確認持久化及比對精度，未重現前綴相同而完整 SHA 不同的合併。未修改程式或執行合併測試。
+- **待驗證：**是否另有完整 SHA 證據可連到既有 review 紀錄，以及既有短 SHA 紀錄的處置。見 [main 合併入口稽核](merge-gates.md)。
+
+<a id="issue-199"></a>
+
+## ISSUE-199：Bridge 合併前的 CI 結果未帶受測 SHA
+
+更新日期：2026-11-23。狀態：待調查。
+
+- **症狀與預期：**Bridge 可得到 CI `success`，但該次 CI 摘要無法證明受測版本對應合併條件中的 head。預期可追溯 checks 的受測版本，並確認它與實際準備合併的版本相符。
+- **證據與根因：**2026-11-23 本機讀碼，先讀完整 head，再用 PR 編號獨立查 CI（`src/card-merge-wiring.ts:104–115`）。`gh pr checks` 欄位只有 `name,state,bucket,link`；guard 只收到彙整結論（`src/github.ts:389–454`、`src/card-merge-wiring.ts:124–163`）。
+- **範圍與核對結果：**影響 loop 等待與三個 bridge 入口共用的末次檢查。只確認 bridge 資料缺少 SHA，未重現錯版 CI 或合併。未修改程式或執行合併測試。
+- **待驗證：**平台必要檢查與實際 CI checkout／執行版本如何對應，及是否已有平台規則阻止不一致。見 [main 合併入口稽核](merge-gates.md)。
+
+<a id="issue-198"></a>
+
+## ISSUE-198：PR #338 合併時缺少 Bridge 整體 PR review
+
+更新日期：2026-11-23。狀態：待調查。
+
+- **症狀與預期：**ISSUE-187／186 記載 #338 超過 PR review 上限，當次在任務內獨立 review `pass` 且兩平台 CI 記為綠燈後，依使用者決定人工合併。稽核預期可辨認每個入口是否要求 PR 層審查，並追溯當次合併的審查、版本及例外依據。
+- **證據與根因：**2026-11-23 查本機紀錄與 Git 物件，`99d6ea8` 與 `1c488f0` 的 parent 和 tree 相同，`git diff --quiet 99d6ea8 1c488f0` exit 0。PR review 因 93,947 字元超過 80,000 字元而未執行，bridge 的 `pass` gate 位於自有合併路徑（`src/card-review-fetch.ts:60–74`、`src/card-merge.ts:65–81`）。確切人工入口及適用的平台規則尚未確認。
+- **範圍與核對結果：**已記載的單次歷史合併；本機只驗證兩 commit 的內容。未修改程式或設定，未執行合併測試。
+- **待驗證：**操作介面、GitHub approval、是否使用例外、當時 PR head 與 CI runs 的 SHA，以及任務版本指紋到最終 PR head 的比對。見 [main 合併入口稽核](merge-gates.md)。
+
 ## ISSUE-197：卡片 reviewer 被要求核對自己看不到的 session 身分，連續三次回 `inconclusive`，耗掉規劃輪數
 
 更新日期：2026-11-23。狀態：**待調查**（現象與程式位置已確認；**成因只確認一半，尚未修正**）。
@@ -107,7 +151,10 @@
 **實機驗收（2026-11-23 05:15 至 05:18 UTC，本機 macOS，bridge console；bridge 為 main `ef3e03d`（含 #348，同一次重啟也帶上 #347）重啟後的程序；專用單一 Agent workspace，`--rounds 1`）：**`discuss-c8a87f82…` 的結果在「Participants」清單之後、其他訊息之前，**出現了**預期的一行 `Note: the Lead synthesizes inside its own live session and may cite that session's earlier conversation, which the peers never saw. Consider this before running it in a thread others can read.`，Lead 有產出彙整。**未驗證：**這行在 Discord 的呈現與分段（console 與 Discord 共用同一份結果文字，但沒有在 Discord 看到）；Lead 彙整失敗或被取消時不附的行為只有單元測試覆蓋，沒有實機；這個提示是否真的讓使用者避開在多人 thread 執行，沒有驗證。
 
 
+<a id="issue-187"></a>
 ## ISSUE-187：實作完成後才發現 PR 超過 review 上限，流程只停手，沒有把「切分」交回 Lead
+
+合併入口的本機查核與待補線上證據見 [main 合併入口稽核](merge-gates.md)。
 
 更新日期：2026-11-23。狀態：待調查（現象與程式位置已確認；**尚未修正，修法方向待使用者決定**）。
 

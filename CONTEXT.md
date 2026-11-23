@@ -75,6 +75,8 @@ All contributors must follow [AGENTS.md](AGENTS.md), including same-session
 issue/spec documentation updates and reopening issues after failed acceptance.
 The current issue and verification ledger is [known issues](docs/known-issues.md).
 
+- [main 合併入口稽核](docs/merge-gates.md) 記錄 ISSUE-187 的本機查核、版本證據與線上待查項。
+
 ## Console routing
 
 The local bridge console can explicitly select an existing Discord thread with
