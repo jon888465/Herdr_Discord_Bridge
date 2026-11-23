@@ -99,6 +99,10 @@ instances; legacy processes without the lock still require explicit migration.
 - Profiles are definitions, sessions hold CLI context, panes host processes. Removing a profile from a Team does not stop its session. For `--coding`, automatic candidates include claude/codex/pi plus capability-opted-in agy; one profile suffices, with fresh sessions per assignment to preserve independent review (ISSUE-140; live acceptance pending).
 - Team roster may contain live mappings and enabled profiles; only selected profiles start. Lead may choose zero Workers. Tasks now have durable state and conservative restart reconciliation; automatic resume is not implemented.
 
+## Team Discussion
+
+[`team discuss`](docs/team-orchestration-spec.md#local-read-only-discussion) is the local read-only peer workflow behind Discord and console. It uses the selected Lead, existing Team peers, fresh Sonnet/Codex/Agy fallback, anonymous critique, quota checks and before/after worktree evidence. See ISSUE-186 for implementation checks and pending live acceptance. Discuss keeps its active state in memory.
+
 ## Durable Tasks
 
 [Phase 1 architecture and acceptance](docs/durable-task-engine.md): versioned atomic event journals, frozen task identity, shared Assignment lifecycle, status/cancel commands, restart quarantine and reservation ownership. ISSUE-020 tracks source/test evidence separately from live acceptance.

@@ -23,7 +23,7 @@ import {
   type CodingTaskState,
 } from "./coding-workflow.js";
 import { stripAnsi } from "./format.js";
-import { runTeamTurn } from "./team-turn.js";
+import { isTurnDeadlineError, runTeamTurn } from "./team-turn.js";
 import type { AgentRecord, ReadSource } from "./types.js";
 
 /**
@@ -204,23 +204,6 @@ function formatDuration(ms: number): string {
   const whole = Math.round(seconds);
   const minutes = Math.floor(whole / 60);
   return whole % 60 ? `${minutes} 分 ${whole % 60} 秒` : `${minutes} 分鐘`;
-}
-
-/**
- * 只認 `runTeamTurn` 自己的「回合期限」錯誤（review F7）：
- * - Herdr 端 agent.prompt／agent.wait 等待 Agent 狀態逾時（HerdrError，訊息 `herdr <method>: timeout …`）；
- * - `runTeamTurn` 等不到本次回應的期限（`Timed out waiting for current response …`）。
- * 回合裡面其他短 RPC（agent.read、agent.list…）的逾時不是回合期限，不能套用回合上限與 worktree 提示。
- */
-function isTurnDeadlineError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const message = error.message;
-  // bridge 端 request 逾時（`herdr agent.prompt timed out`）刻意不收：舊版 Herdr 沒有原子 prompt 時，
-  // 送出 prompt 的 promptAgent 只有預設約 5 秒，訊息與它相同，分不出來（review F9）。
-  return (
-    /^herdr agent\.(prompt|wait): timeout\b/.test(message) ||
-    /^Timed out waiting for current response from /.test(message)
-  );
 }
 
 /** 已知的 Worker 逾時摘要，放在失敗原因最前面（卡片只保留前 200 字元；review F4、F6）。 */

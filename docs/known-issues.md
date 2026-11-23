@@ -1,5 +1,17 @@
 # Known Issues
 
+## ISSUE-186：team discuss 唯讀同儕討論與缺空格提示
+
+更新日期：2026-11-23。狀態：已修正、待驗收。需求 REQ-20261120-team-discuss。
+
+- 症狀／根因：Discord 或 console 輸入 `team ask討論…` 時，切字保留了緊接的文字，Team dispatcher 落到通用 usage。一般 `team ask` 只用已配置的 Workers，單 Agent workspace 缺少獨立同儕討論與新 session 後備。ISSUE-185 是之前卡片指派的 Lead 就緒競態，與本指令實機驗收分開追蹤。
+- 修正／預期：`team discuss` 以本機 active Agent 彙整，優先使用 workspace 同儕，缺額由 Claude Sonnet、Codex、Agy 的新 session 補上。新增缺空格提示、額度與模型來源回報、獨立／匿名唯讀回合、工作樹指紋、workspace scope cancel 與 owned pane 清理。見 [SPEC](../SPEC.md#本機唯讀同儕討論)。
+- 原始碼與自動化（2026-11-23，本機 macOS，Node v26.12.0，假的 Discord／Herdr 及暫存 Git repo）：新增 `test/team-discuss.test.ts`。`node --test --test-timeout=25000 dist/test/team-discuss.test.js` 18/18 通過；`npm run check`（含 typecheck 與全套測試）2251 通過、0 失敗、1 略過，共 2252 項。另通過 `npm run lint`、修改範圍內的 Prettier 檢查、文件內 6 個相對連結的目標與錨點檢查、`git diff --check`。
+- Build：`npm run build` 通過（本工作樹的本機編譯）。
+- 開發期間的檢查失敗已重驗：Discord fixture 初版白名單為空，以及 Claude fixture 缺少 TUI 回覆格式，分別改用授權測試 ID 與正確 marker gutter；lint 初版因檢查掃描到 `AbortSignal.any` 字面值失敗，已改用顯式的 abort 傳遞與 timeout。
+- 執行中的 bridge、部署與重啟：本輪未部署、未重啟，未核對執行中的版本。討論不重播，舊訊息不會補送。
+- 真實驗收待辦：在有可啟動的本機 Claude／Codex／Agy 且無已知額度阻擋的單 Agent workspace，於 Discord thread 執行 `team discuss <主題>`。記錄日期、機器、CLI／模型、三個新 session 的啟停、兩輪及結果回原 thread；另檢查取消、逾時保留與缺空格提示。Fixture 不代表這些實機結果。唯讀屬提示約束；Git 指紋不涵蓋 ignored、submodule、repo 外或先改後還原。
+
 ## ISSUE-185：卡片指派的 Lead 剛就緒就送提示，撞到跳過更新選單後短暫的 `working`，任務沒有啟動（`agent is busy`）
 
 更新日期：2026-11-23。狀態：已修正、待驗收（原始碼、自動化測試與探針通過；**尚未部署重跑、未實機驗收**）。

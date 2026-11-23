@@ -21,6 +21,7 @@ export interface RepositoryEvidence {
 /** Never stores patch contents or untracked file contents in the registry. */
 export async function inspectRepository(
   cwd: string,
+  signal?: AbortSignal,
 ): Promise<RepositoryEvidence> {
   if (!path.isAbsolute(cwd))
     throw new Error("handoff requires an absolute local repository cwd");
@@ -33,6 +34,7 @@ export async function inspectRepository(
       await exec("git", ["-c", "core.fsmonitor=false", "-C", gitCwd, ...args], {
         env: { ...env, GIT_OPTIONAL_LOCKS: "0" },
         timeout: 15000,
+        signal,
         maxBuffer: 32 * 1024 * 1024,
       })
     ).stdout;
@@ -80,6 +82,7 @@ export async function inspectRepository(
   let total = 0;
   const hashes: string[] = [];
   for (const name of files) {
+    signal?.throwIfAborted();
     const file = path.resolve(root, name);
     if (!file.startsWith(root + path.sep))
       throw new Error("untracked path escapes repository");
@@ -91,7 +94,7 @@ export async function inspectRepository(
       throw new Error("untracked files exceed handoff verification limit");
     const content = stat.isSymbolicLink()
       ? await fs.readlink(file)
-      : await fs.readFile(file);
+      : await fs.readFile(file, { signal });
     hashes.push(JSON.stringify([name, stat.mode, digest(content)]));
   }
   if (

@@ -178,6 +178,7 @@ The original prefixed form remains supported:
 /herdr team add <agent-name-or-pane-id>
 /herdr team remove <agent-name-or-pane-id>
 /herdr team ask [--coding] <prompt>
+/herdr team discuss [--rounds N] <topic>
 ```
 
 When `requireMention` is enabled, mention the bot for both forms, for example
@@ -240,6 +241,8 @@ For a continuing one-to-one conversation, create a Discord thread and run
 that thread are sent only to the active Agent. The bridge requires an explicit
 mention when `requireMention` is enabled. Each thread stores its active Agent
 and can retain additional Agent mappings. `team add` manages workspace Team members; members are not automatically given the thread's full history.
+
+Use `team discuss [--rounds N] <topic>` in Discord or the console for a local read-only peer discussion. The selected Lead synthesizes. Up to three distinct peer kinds join, using eligible workspace Team sessions first and filling missing kinds with fresh Claude Sonnet, Codex and Agy sessions. Existing Claude peers need Sonnet evidence and new Claude peers launch with `--model sonnet`. Known quota limits cause visible skips. The default is two rounds (choose 1–3). Peers first analyze independently, then critique anonymous excerpts. Results show participants, model evidence, rounds, limits and the before/after Git worktree check. Use `team cancel [discussion-id]` from the same workspace. Owned fresh panes close after use, with blocked, timed-out or uncertain panes reported for inspection. Live Discord acceptance is pending ([ISSUE-186](docs/known-issues.md#issue-186team-discuss-唯讀同儕討論與缺空格提示)).
 
 E14 automatic candidates (updated 2026-11-11, ISSUE-140): when `--coding` has no specified Worker, the bridge enables claude/codex/pi profiles plus agy profiles whose `capabilities` include `implementation` or `review`; one eligible profile is sufficient. With a single profile, each coding assignment gets a fresh independent session so author/reviewer independence is preserved. Specified Workers are used as given. agy with missing, empty or analysis-only capabilities remains excluded; capabilities control automatic inclusion, not role assignment. The user reports pi has been verified as a coding Worker; detailed live evidence remains to be recorded. agy end-to-end acceptance is still pending (ISSUE-107).
 
