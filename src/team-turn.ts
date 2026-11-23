@@ -152,7 +152,8 @@ export async function runTeamTurn(
     const message = context?.hookFinal?.(current, since);
     return message === undefined
       ? undefined
-      : extractFrame(message, begin, end);
+      : (extractFrame(message, begin, end) ??
+          extractUnopenedFrame(message, begin, end));
   };
   let transcript = await CodexTranscript.connect(agent, prompt);
   check();
@@ -492,6 +493,24 @@ function extractFrame(
   const finish = markerPattern(end).exec(text.slice(offset));
   if (!finish) return;
   return text.slice(offset, offset + finish.index).trim();
+}
+
+/**
+ * ISSUE-186：claude 偶爾漏寫開頭標記，只留結尾標記（回覆本身完整）。hook 的訊息就是該 session 這一回合的最後一則回覆，
+ * 不會有提示回顯，所以只在 hook 路徑容許：訊息完全沒有開頭標記、且結尾標記是訊息最後的內容，才取結尾標記之前的全文。
+ * 畫面讀取不放寬（畫面會含提示回顯，缺開頭標記時無法分辨哪些是回覆）。
+ */
+function extractUnopenedFrame(
+  message: string,
+  begin: string,
+  end: string,
+): string | undefined {
+  const text = stripAnsi(message);
+  if (markerPattern(begin).test(text)) return;
+  const closing = [...text.matchAll(markerPattern(end))].at(-1);
+  if (!closing) return;
+  if (text.slice(closing.index! + closing[0].length).trim()) return;
+  return text.slice(0, closing.index).trim();
 }
 
 /** ISSUE-186：逾時診斷只記數字與布林（長度、標記出現次數、是否取得到框），不記任何回覆內容。 */

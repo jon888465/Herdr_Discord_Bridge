@@ -154,6 +154,105 @@ test("a hook final message is used instead of a screen frame that the pane width
   assert.equal(result.text, '{"assignments":[]}');
 });
 
+/**
+ * ISSUE-186：claude 的回覆完整，卻漏寫開頭標記，只有結尾標記。pane 與 hook 都取不到框，
+ * 原本會一路等到回合上限。hook 的訊息是這一回合的最後一則回覆，所以只在 hook 路徑容許缺開頭標記。
+ */
+function silentPort() {
+  let prompt = "";
+  const port: OrchestrationPort = {
+    promptAgent: async (_target, text) => {
+      prompt = text;
+    },
+    waitAgent: async () => ({ ...base, agent_status: "done" }),
+    readAgent: async () => "",
+  };
+  const end = () => prompt.match(/BRIDGE_END_[a-f0-9]+/)![0];
+  const begin = () => prompt.match(/BRIDGE_BEGIN_[a-f0-9]+/)![0];
+  return { port, begin, end };
+}
+
+test("a hook reply that lost its opening marker is accepted when the closing marker ends it", async () => {
+  const { port, end } = silentPort();
+  const result = await runTeamTurn(base, "plan", port, 2_000, 20, {
+    taskId: "t",
+    phase: "planning",
+    hookFinal: () => `## 診斷結果\n\n內容第一行\n內容第二行\n${end()}\n`,
+  });
+  assert.equal(result.state, "done");
+  assert.equal(result.terminal, false);
+  assert.equal(result.text, "## 診斷結果\n\n內容第一行\n內容第二行");
+});
+
+test("a hook reply with a closing marker split by a narrow terminal is still accepted", async () => {
+  const { port, end } = silentPort();
+  const result = await runTeamTurn(base, "plan", port, 2_000, 20, {
+    taskId: "t",
+    phase: "planning",
+    hookFinal: () => {
+      const marker = end();
+      return `只有結尾標記的回覆\n${marker.slice(0, 20)}\n${marker.slice(20)}`;
+    },
+  });
+  assert.equal(result.text, "只有結尾標記的回覆");
+});
+
+test("a hook reply with no opening marker is not accepted when text follows the closing marker", async () => {
+  const { port, end } = silentPort();
+  await assert.rejects(
+    runTeamTurn(base, "plan", port, 250, 20, {
+      taskId: "t",
+      phase: "planning",
+      hookFinal: () => `回覆\n${end()}\n之後還有別的文字`,
+    }),
+    /no verified completion/,
+  );
+});
+
+test("a hook reply that has an opening marker but no closing marker is still not accepted", async () => {
+  const { port, begin } = silentPort();
+  await assert.rejects(
+    runTeamTurn(base, "plan", port, 250, 20, {
+      taskId: "t",
+      phase: "planning",
+      hookFinal: () => `${begin()}\n沒有結尾的回覆`,
+    }),
+    /no verified completion/,
+  );
+});
+
+test("a hook reply that only quotes the closing marker with no body is reported as an empty report", async () => {
+  const { port, end } = silentPort();
+  await assert.rejects(
+    runTeamTurn(base, "plan", port, 2_000, 20, {
+      taskId: "t",
+      phase: "planning",
+      hookFinal: () => end(),
+    }),
+    /completed without a report/,
+  );
+});
+
+test("a screen read with only the closing marker is not relaxed (the pane can show the prompt echo)", async () => {
+  let prompt = "";
+  const port: OrchestrationPort = {
+    promptAgent: async (_target, text) => {
+      prompt = text;
+    },
+    waitAgent: async () => ({ ...base, agent_status: "done" }),
+    readAgent: async () =>
+      prompt ? `畫面上的回覆\n${prompt.match(/BRIDGE_END_[a-f0-9]+/)![0]}` : "",
+  };
+  await assert.rejects(
+    runTeamTurn(base, "plan", port, 250, 20, {
+      taskId: "t",
+      phase: "planning",
+      hookFinal: () => undefined,
+    }),
+    /no verified completion/,
+  );
+});
+
 test("without a hook message the screen frame is still used after a short grace period", async () => {
   const { port } = wrappedPort([{ ...base }]);
   const result = await runTeamTurn(base, "plan", port, 5_000, 20, {
