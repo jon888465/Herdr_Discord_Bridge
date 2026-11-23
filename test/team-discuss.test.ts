@@ -720,6 +720,20 @@ test("a failed Lead synthesis returns verified excerpts with owned panes closed"
   );
   assert.match(f.output(), /> peer point/);
   assert.equal(f.closed.length, 3);
+  // ISSUE-188：沒有 Lead 彙整時不顯示「Lead 可能引用自己對話」的提示。
+  assert.doesNotMatch(f.output(), /Lead synthesizes inside its own live session/);
+});
+
+// ISSUE-188：Lead 是使用者既有的互動 session，彙整可能引用它自己先前的對話；結果標頭要明講。
+test("a result with a Lead synthesis says the Lead may cite its own earlier conversation", async (t) => {
+  const f = fixture(t);
+  await f.consoleCommand("team discuss --rounds 1 lead context notice");
+  const output = f.output();
+  assert.match(output, /Team Discussion completed/);
+  assert.match(
+    output,
+    /Participants \(Lead synthesizes\):[\s\S]*Note: the Lead synthesizes inside its own live session and may cite that session's earlier conversation, which the peers never saw\./,
+  );
 });
 
 test("a fresh blocked startup is reported and left for manual inspection", async (t) => {

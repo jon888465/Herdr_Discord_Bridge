@@ -22,7 +22,7 @@
 
 ## ISSUE-188：`team discuss` 的 Lead 是使用者自己的互動 session，彙整會把該 session 的先前對話內容帶進討論結果與 Discord thread
 
-更新日期：2026-11-23。狀態：待調查（現象與原因已確認；**尚未修正，是否修與怎麼修待使用者決定**）。
+更新日期：2026-11-23。狀態：已修正、待驗收（使用者選修法 3「維持現狀並提示」；原始碼與自動化測試通過；**尚未部署、未實機驗收；這只是提示，不是隔離，Lead 的對話脈絡仍可能出現在結果裡**）。先前：待調查。
 
 **使用者可見症狀（2026-11-23，Discord thread 實機驗收，見 ISSUE-186）：**Lead 是 workspace 的 active Agent，也就是使用者自己的互動 claude session。它的彙整在「Overlooked questions」第 1 項引用了與這次題目無關的先前對話內容（該 session 之前做的另一件維修工作的細節），三位同儕完全沒看到那些內容。結果有標明那是「我的觀察，不是同儕的共識」。結果被送進 Discord thread，所以那個 session 的對話脈絡會出現在 thread 裡，任何看得到 thread 的人都能讀到。
 
@@ -37,6 +37,8 @@
 2. **Lead 也改用 bridge 新開的乾淨 session 彙整**：隔離最徹底，但多一個 session 的成本與等待，且使用者的 active Agent 不再參與。
 3. **維持現狀並在文件與結果標頭提示**：結果標明 Lead 可能引用自己的對話脈絡，由使用者決定要不要在公開 thread 執行。
 **下一步：**使用者決定方向後開需求卡；在那之前，在多人可見的 thread 執行 `team discuss` 時，Lead 的對話內容可能一併出現，使用者需自行評估。
+**修正（2026-11-23，使用者選修法 3）：**`team discuss` 在 Lead 真的產出彙整時，於參與者清單後固定附一行 `Note: the Lead synthesizes inside its own live session and may cite that session's earlier conversation, which the peers never saw. Consider this before running it in a thread others can read.`（`src/team-discuss.ts` 的 `LEAD_CONTEXT_NOTE`）；Lead 彙整失敗或被取消時不附。SPEC 與兩份 README 同步說明。**沒有改變 Lead 的行為或提示**，Lead 仍可能引用自己的對話，只是使用者在結果上看得到警告。**測試（2026-11-23，本機 macOS，worktree）：**新增 1 項（有 Lead 彙整時結果含該提示）並在既有「Lead 彙整失敗」測試補斷言（不含該提示）；暫時把提示改成恆顯示，1 項失敗，改成恆不顯示，1 項失敗，已還原且逐字相同；`team-discuss` 測試 21 項全過，完整 `npm test` 2255 項、通過 2254、失敗 0、略過 1；typecheck、lint 通過。**未驗證：**部署後真實結果是否出現該行與在 Discord 的呈現；提示是否足以讓使用者避開在多人 thread 執行（沒有驗證使用者行為）；其他兩個修法（提示加限制、Lead 改用乾淨 session）沒有做。
+
 
 ## ISSUE-187：實作完成後才發現 PR 超過 review 上限，流程只停手，沒有把「切分」交回 Lead
 
