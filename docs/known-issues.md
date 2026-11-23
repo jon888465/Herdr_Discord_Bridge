@@ -19,6 +19,8 @@
 **修正二（2026-11-20）：**送鍵後在確認窗口（預設 3 秒、每 100 毫秒）內持續重讀，選單消失就繼續；窗口結束仍在、或讀取失敗照舊直接失敗，不會再送第二次鍵。窗口與間隔可由 `ReadyDeps.skipConfirmMs`／`skipConfirmPollMs` 調整（測試用）。**測試（2026-11-20，本機 macOS，worktree）：**新增 2 項（前幾次重讀仍是舊選單、之後換畫面應成功，修正前失敗、修正後通過；選單一直在窗口內不消失仍失敗且只送一次鍵）；既有「持續選單」測試的讀取次數斷言由「剛好 2 次」改為「至少 2 次」（行為改變：送鍵後會多讀）；`agent-ready`／`card-worktree-flow`／`update-prompts` 共 57 項全過；完整 `npm test` 2230 項、通過 2229、失敗 0、略過 1；typecheck、lint 通過。**壓力探針（不是 bridge 日誌）：**同樣的 6 個同時啟動，修正後 6/6 `ok=true`，其中 5 個有吸收到「送鍵後仍是舊選單」的重讀。**未驗證：**部署重啟後重跑 team discuss（worktree Lead、Worker、reviewer 的實機啟動）；3 秒窗口在更重的負載下是否足夠。
 **修正（2026-11-20）：**跳過後若確認畫面已不是整組選單，記下時間，之後 5 秒內該 pane 再看到 `blocked` 視為狀態落後、繼續輪詢；超過 5 秒仍 `blocked` 照舊失敗（接著跳出的信任提示等仍會失敗，只是最多晚約 5 秒），沒送過鍵或選單還在時行為不變。**測試（2026-11-20，本機 macOS，worktree）：**新增 2 項（狀態落後 2 輪後 idle 應成功，修正前失敗、修正後通過；狀態超過寬限期仍 blocked 應失敗）；`agent-ready.test.ts`＋`card-worktree-flow.test.ts`＋`update-prompts.test.ts` 共 55 項全過；完整 `npm test` 2228 項、通過 2227、失敗 0、略過 1；typecheck、lint 通過。**未驗證：**部署重啟後 helper／reviewer／claude Worker 的實際啟動；5 秒寬限期是否足夠。
 
+**第六次嘗試的實機結果（2026-11-20 09:36 至 09:43 UTC，`REQ-20261120-team-discuss`，main `db7771e` 含 #335，bridge 重啟後）：**worktree Lead（codex）起得來，task 開始；計畫通過（09:36:56）後 `implement-discuss`（`profile:helper`，codex）Worker 啟動並進入 `working`（09:37:03），先前每次都在這兩步失敗。**未走到：**review（wubuntu 的 codex reviewer）、verify、claude Worker——使用者在 09:43 因 wubuntu 需要斷線而要求取消，task 以 `team cancel` 乾淨收尾（`task_cancelled` 09:43:52，沒有卡在 `cancelling`）。因此**這只驗證了 Lead 與 helper 的啟動，不是整張卡的端到端驗收**；狀態維持「已修正、待驗收」。取消時 helper 已寫了 12 個檔案（未完成、未驗證），保存在本機分支 `attempt2/REQ-20261120-team-discuss`（未 push，僅供參考）。
+
 ## ISSUE-183：worktree Lead 啟動回傳時狀態還是 `unknown`，被直接判「Lead 尚未就緒」，任務沒有啟動
 
 更新日期：2026-11-20。狀態：已修正、待驗收（原始碼與自動化測試通過；**尚未部署重跑、未實機驗收**；**根因是依取樣推論，沒有直接量到 `agent.start` 的回傳狀態**）。
@@ -48,6 +50,8 @@
 
 **驗收：**重啟後，開一張沒指定 roles 的卡，確認新開的 claude Worker 不再要求 opus、也不跳模型確認；記錄日期、環境與結果。
 
+**目前結論（2026-11-20 至 23）：**claude profile 的 `model` 已設為 `sonnet`（使用者機器設定，不在 repo），**只管 Worker／reviewer／fixer**；Lead 啟動只傳 `kind`，bridge 沒有 Lead model 的設定，Lead（claude）落到帳號預設 Fable 5.1 並跳「Switch to Opus 5.5」。暫時辦法是政策檔把 `autopick_lead` 的順序改成 `codex` 優先（第六次嘗試的 Lead 就是 codex，沒有跳模型提示）。**未驗證：**claude Worker 實際是否用 Sonnet 且不跳確認（第六次嘗試沒走到 claude Worker）。**待使用者決定：**是否新增「Lead 可指定 model」功能。
+
 ## ISSUE-182：先關掉卡片的 workspace，`card cleanup` 就無法移除 worktree，之後重跑被「已有作用中的 worktree」擋住
 
 更新日期：2026-11-20。狀態：待調查（現象已在實機遇到，**尚未修正**，修法待決定）。
@@ -61,6 +65,8 @@
 **本次的手動收尾（不是修正）：**`git worktree remove`（不強制）、`git branch -d` 空分支、在 `card-worktrees.json` 把該筆標 `removedAt`（備份 `card-worktrees.json.bak-20261120`）並重啟 bridge。
 
 **下一步：**決定修法（找不到 workspace 時改走 git 直接移除，或在關閉 workspace 時一併處理 store），開卡實作；在此之前收尾順序要先 `card cleanup` 再關 workspace。
+
+**收尾順序的實測（2026-11-20 稍晚，只是繞過，不是修正）：**取消一個進行中的 task 再清理，先 `team cancel`（要先在 bridge console `wk use <該 task 的 workspace>`，否則回 `task belongs to another workspace`），確認 `task_cancelled` 後再 `card cleanup`，最後處理分支；workspace 還在時 `card cleanup` 正常運作（乾淨的 worktree 會移除、有未提交改動會保留）。先關 workspace 才會踩到本 issue。
 
 ## ISSUE-181：Worker 啟動被判「卡在啟動提示」後，卡片沒有及時失敗，等到逾時才結束（使用者回報）
 
@@ -114,6 +120,8 @@
 **測試與驗收：**無（尚未修正）。同一張卡的實作在 worktree 本機跑過：`npm run typecheck`、`npm run lint` 通過，`npm test` 2246 項、通過 2245、失敗 0、略過 1（2026-11-20）；這只代表那份實作的自動化檢查，與本 issue 的修正無關。
 
 **下一步：**確認並實作本機卡片 worktree 的預先信任；修好後重跑 `REQ-20261120-team-discuss`，並做實機驗收。
+
+**結論（2026-11-21，同一輪嘗試之後）：**這張 issue 原本的假設（卡片 worktree 因信任提示被擋）已被推翻：真正的原因是 codex 更新選單跳過後的處理（ISSUE-181 橫幅誤判、ISSUE-184 送鍵後重讀的時序），修正後 Lead 與 helper Worker 在真實流程啟動成功（見 ISSUE-184）。修正卡 `REQ-20261120-local-worktree-codex-trust` 維持 `draft`、建議不要做。**待使用者決定是否關閉本 issue**；探針 1 只證明 linked worktree 不跳信任，沒有測過其他 codex 版本。
 
 ## ISSUE-178：卡片 workspace 清除後，team list 仍列出舊 Team
 
