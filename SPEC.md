@@ -168,7 +168,7 @@ thread mapping > user mapping > channel default
 ```
 
 Thread mapping 以 guild、parent channel 與 thread 作為 key。每個 thread route
-Team 成員 mapping 會持久化在 routing state；重啟後會保留原 Team。若對應 pane 或 CLI 尚未啟動，成員保留為 stale，不能 dispatch，待 Herdr 重新回報該 pane 後才可使用。新增 Team 成員時，所有成員必須屬於同一 workspace。
+Team 成員 mapping 會持久化在 routing state；重啟後會保留原 Team。若對應 pane 或 CLI 尚未啟動，成員保留為 stale，不能 dispatch，待 Herdr 重新回報該 pane 後才可使用。`team ask` 遇到 stale Worker 時略過它、照樣以其餘成員執行，並在「Team Task accepted」回條列出被略過的 pane 與 `team remove <pane>` 的移除方式；不自動刪除名單。Lead 失效，或 Worker 身分不符、workspace 未授權時仍擋下整個任務（ISSUE-189）。新增 Team 成員時，所有成員必須屬於同一 workspace。
 包含 `activeAgentKey` 與獨立的 Agent mapping：
 
 ```json
