@@ -477,14 +477,25 @@ function stableVerify(artifact: CodingArtifactRecord, fingerprint: string) {
   );
 }
 
+/** 版本擷取超過讀取上限的驗收原因（開頭固定）；重新規劃、重跑 review 都無法解除。 */
+export const VERSION_CAPTURE_OVERFLOW =
+  "version capture exceeded the read limit";
+
 export function acceptanceReasons(
   state: CodingTaskState,
   version: CodingVersion,
   writeScopes: string[],
 ): string[] {
   const reasons: string[] = [];
-  if (version.overflow || state.baseline.overflow)
-    reasons.push("version capture exceeded the read limit");
+  if (version.overflow || state.baseline.overflow) {
+    // ISSUE-191：寫出是哪個檔案或哪個上限；訊息開頭維持原樣，下游以此辨識「重新排程也修不好」的條件。
+    const detail = version.overflowDetail ?? state.baseline.overflowDetail;
+    reasons.push(
+      detail
+        ? `${VERSION_CAPTURE_OVERFLOW}: ${detail}`
+        : VERSION_CAPTURE_OVERFLOW,
+    );
+  }
   const outside = version.deliveryPaths.filter(
     (file) => !inWriteScope(file, writeScopes),
   );

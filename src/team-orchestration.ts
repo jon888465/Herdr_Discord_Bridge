@@ -71,6 +71,8 @@ export interface CodingHooks {
     observedSession?: { kind: string; value: string },
   ): void;
   assess(): { reasons: string[]; fingerprint: string };
+  /** ISSUE-191：重新規劃也解不掉的驗收條件（例如版本擷取超過讀取上限）；只讀，不寫事件、不改閘門狀態。 */
+  unrecoverable?(): string | undefined;
 }
 
 export interface OrchestrationPort {
@@ -517,6 +519,9 @@ export async function runTeamTask(
         }
       }
 
+      // ISSUE-191：版本擷取超過讀取上限不是重新規劃就能解的（review 會一直 inconclusive）；
+      // 繼續讓 Lead 追加檢查指派只會用光規劃輪數，直接結束迴圈，由後面的閘門把原因寫進失敗訊息。
+      if (input.coding && input.codingHooks?.unrecoverable?.()) break;
       if (!input.replan || reports.some((r) => r.state !== "done")) break;
     }
     considerGate();

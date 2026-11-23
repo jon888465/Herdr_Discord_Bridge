@@ -9,6 +9,7 @@ import {
   parseCodingResult,
   sessionIdentity,
   settleReadonlyVersion,
+  VERSION_CAPTURE_OVERFLOW,
   type CodingArtifactRecord,
 } from "./coding-workflow.js";
 import {
@@ -558,6 +559,13 @@ export class TeamTaskEngine {
             version.fingerprint,
           );
         });
+      },
+      unrecoverable: () => {
+        const task = this.store.get(taskId);
+        const version = current();
+        return version.overflow || task.coding!.baseline.overflow
+          ? VERSION_CAPTURE_OVERFLOW
+          : undefined;
       },
       assess: () => {
         const task = this.store.get(taskId);

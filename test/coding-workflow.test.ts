@@ -23,10 +23,13 @@ import {
   validateAssignmentPlan,
 } from "../src/team-orchestration.js";
 import {
+  acceptanceReasons,
   assertIndependentReview,
   codingPlanningAddendum,
   codingWorkerAddendum,
+  initialCodingState,
   parseCodingResult,
+  VERSION_CAPTURE_OVERFLOW,
 } from "../src/coding-workflow.js";
 import {
   captureCodingTree,
@@ -218,6 +221,98 @@ test("version fingerprint covers untracked bytes, ignores ignored files, and kee
   }
 });
 
+// ISSUE-191：分段雜湊必須與整份讀取的 sha256 完全相同，尤其是分段邊界（262144 位元組）前後與空檔。
+test("chunked file hashing matches the whole-file sha256 around the chunk boundary", () => {
+  const { repo } = repoWithBaseline();
+  try {
+    const baseline = captureCodingTree(repo);
+    const sizes = [0, 1, 262_143, 262_144, 262_145, 524_288, 1_500_000];
+    for (const size of sizes) {
+      const content = Buffer.alloc(size, size % 251);
+      writeFileSync(join(repo, `blob-${size}.bin`), content);
+    }
+    const version = versionFromBaseline(baseline, captureCodingTree(repo));
+    assert.equal(version.overflow, false);
+    for (const size of sizes) {
+      const content = Buffer.alloc(size, size % 251);
+      const recorded = version.untracked.find(
+        (item) => item.path === `blob-${size}.bin`,
+      );
+      assert.equal(
+        recorded?.sha256,
+        createHash("sha256").update(content).digest("hex"),
+        `size ${size}`,
+      );
+      assert.equal(recorded?.bytes, size);
+    }
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// ISSUE-191：docs/known-issues.md 長過 1 MiB 後，所有動到它的卡片都因 overflow 無法通過驗收。
+test("a changed tracked file larger than the old 1 MiB limit is fingerprinted instead of overflowing", () => {
+  const { repo } = repoWithBaseline();
+  try {
+    const big = join(repo, "big.md");
+    writeFileSync(big, "line\n".repeat(220_000)); // 約 1.1 MiB，超過舊的單檔上限
+    git(repo, ["add", "big.md"]);
+    git(repo, ["commit", "-m", "big"]);
+    const baseline = captureCodingTree(repo);
+    writeFileSync(big, "line\n".repeat(220_000) + "added\n");
+    const first = versionFromBaseline(baseline, captureCodingTree(repo));
+    assert.equal(first.overflow, false);
+    assert.deepEqual(first.deliveryPaths, ["big.md"]);
+    assert.equal(first.overflowDetail, undefined);
+    writeFileSync(big, "line\n".repeat(220_000) + "added again\n");
+    const second = versionFromBaseline(baseline, captureCodingTree(repo));
+    assert.equal(second.overflow, false);
+    assert.notEqual(second.fingerprint, first.fingerprint);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("a file over the per-file limit still overflows, and the acceptance reason names the file and the limit", () => {
+  const { repo } = repoWithBaseline();
+  try {
+    const baseline = captureCodingTree(repo);
+    writeFileSync(join(repo, "huge.bin"), Buffer.alloc(8_388_608 + 1, 7));
+    const version = versionFromBaseline(baseline, captureCodingTree(repo));
+    assert.equal(version.overflow, true);
+    assert.match(version.overflowDetail ?? "", /huge\.bin is 8388609 bytes/);
+    const reasons = acceptanceReasons(
+      initialCodingState(baseline),
+      version,
+      [],
+    );
+    const overflow = reasons.find((reason) =>
+      reason.startsWith(VERSION_CAPTURE_OVERFLOW),
+    );
+    assert.ok(overflow, "驗收原因仍以固定開頭辨識");
+    assert.match(overflow, /huge\.bin is 8388609 bytes, over the 8388608 byte per-file limit/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("the overflow detail text never changes the version fingerprint", () => {
+  const { repo } = repoWithBaseline();
+  try {
+    const baseline = captureCodingTree(repo);
+    writeFileSync(join(repo, "huge.bin"), Buffer.alloc(8_388_608 + 1, 7));
+    const current = captureCodingTree(repo);
+    const withDetail = versionFromBaseline(baseline, current);
+    const { overflowDetail: _drop, ...withoutDetail } = current;
+    const stripped = versionFromBaseline(baseline, withoutDetail);
+    assert.equal(withDetail.overflow, true);
+    assert.equal(stripped.overflowDetail, undefined);
+    assert.equal(withDetail.fingerprint, stripped.fingerprint);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 /** ISSUE-088：測試用的 session 標籤 → 固定的 UUID（rollout 檔名帶的 id）。 */
 function uuidFor(label: string): string {
   const h = sha(label);
@@ -247,7 +342,8 @@ function harness(options: {
     | "verify-drift"
     | "prior-cover"
     | "repeat-finding"
-    | "overlap";
+    | "overlap"
+    | "keep-planning";
   planningReply?: (attempt: number) => string;
   hangWorker?: boolean;
 }) {
@@ -532,6 +628,12 @@ function planFor(
   if (script === "overlap") {
     return {
       assignments: [implement, review("rev1")],
+    };
+  }
+  if (script === "keep-planning") {
+    // ISSUE-191：Lead 每一輪都追加新的 review，永遠不回空計畫（review 一直 inconclusive 時的實際樣子）。
+    return {
+      assignments: round === 1 ? [implement] : [review(`rev${round}`)],
     };
   }
   if (script === "gate-feedback") {
@@ -1050,6 +1152,61 @@ test("ISSUE-093: a Lead that keeps returning an empty plan is asked at most twic
       item.text.includes("acceptance gate is authoritative and is not satisfied"),
     );
     assert.equal(notices.length, 2);
+  } finally {
+    h.close();
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// ISSUE-191：版本擷取 overflow 不是重新規劃就能解的；Lead 每輪都追加指派時不能一路耗到規劃輪數上限才失敗。
+test("a version capture overflow ends the task after the current wave instead of burning every planning round", async () => {
+  const { repo } = repoWithBaseline();
+  writeFileSync(join(repo, "huge.bin"), Buffer.alloc(8_388_608 + 1, 7));
+  const h = harness({ repo, script: "keep-planning" });
+  try {
+    const task = await h.engine.run({
+      taskId: "task-overflow-early-stop",
+      prompt: "ship the local change",
+      lead: h.lead,
+      workers: [h.author, h.reviewer],
+      replan: true,
+      coding: true,
+      timeoutMs: 500,
+    });
+    assert.equal(task.state, "failed");
+    assert.match(task.detail ?? "", /version capture exceeded the read limit/);
+    assert.match(task.detail ?? "", /huge\.bin is 8388609 bytes/);
+    assert.doesNotMatch(task.detail ?? "", /planning round limit/);
+    const planning = h.prompts.filter((item) =>
+      item.text.includes("Do not modify files while planning"),
+    );
+    assert.equal(planning.length, 1, "只問過一次規劃，沒有一路追加到上限");
+  } finally {
+    h.close();
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("without an overflow the same keep-planning Lead still reaches the planning round limit as before", async () => {
+  const { repo } = repoWithBaseline();
+  const h = harness({ repo, script: "keep-planning" });
+  try {
+    const task = await h.engine.run({
+      taskId: "task-no-overflow-keeps-planning",
+      prompt: "ship the local change",
+      lead: h.lead,
+      workers: [h.author, h.reviewer],
+      replan: true,
+      coding: true,
+      timeoutMs: 500,
+      maxRounds: 3,
+    });
+    assert.equal(task.state, "failed");
+    assert.match(task.detail ?? "", /planning round limit/);
+    const planning = h.prompts.filter((item) =>
+      item.text.includes("Do not modify files while planning"),
+    );
+    assert.ok(planning.length >= 3, "沒有 overflow 時行為不變：照常一路規劃到上限");
   } finally {
     h.close();
     rmSync(repo, { recursive: true, force: true });

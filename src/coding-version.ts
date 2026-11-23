@@ -6,8 +6,11 @@ import path from "node:path";
 /** Local Git identity for one coding task. This module only reads; it never
  * commits, merges, pushes, checks out, resets, or cleans. */
 
-const MAX_FILE_BYTES = 1_048_576;
 const MAX_TOTAL_BYTES = 8_388_608;
+// ISSUE-191：單檔上限原本是 1 MiB（整份 readFileSync 進記憶體），docs/known-issues.md 長過它之後，所有動到它的卡片
+// 都因 overflow 無法通過驗收。雜湊改成分段讀取、記憶體用量與檔案大小無關，單檔上限放寬到與總量上限相同。
+const MAX_FILE_BYTES = MAX_TOTAL_BYTES;
+const HASH_CHUNK_BYTES = 262_144;
 const MAX_FILES = 200;
 const MAX_DIFF_BYTES = 1_048_576;
 export const MAX_ARTIFACT_BYTES = 262_144;
@@ -28,6 +31,8 @@ export interface CodingTreeSnapshot {
   stagedDiffSha256: string;
   unstagedDiffSha256: string;
   overflow: boolean;
+  /** overflow 的白話原因（哪個檔案或哪個上限）；只給訊息用，**不進任何 fingerprint**。 */
+  overflowDetail?: string;
   files: CodingFileRecord[];
 }
 
@@ -42,6 +47,8 @@ export interface CodingVersion {
   deliveryPaths: string[];
   untracked: Array<{ path: string; sha256: string; bytes: number }>;
   overflow: boolean;
+  /** 同 `CodingTreeSnapshot.overflowDetail`，不進 fingerprint。 */
+  overflowDetail?: string;
 }
 
 export function digest(value: string | Buffer): string {
@@ -126,10 +133,27 @@ function hashWorktree(
   if (!stat.isFile()) throw new Error("unsupported coding version file type");
   if (stat.size > MAX_FILE_BYTES) return "overflow";
   return {
-    sha256: digest(fs.readFileSync(file)),
+    sha256: hashFileInChunks(file),
     bytes: stat.size,
     mode: stat.mode,
   };
+}
+
+/** 與 `digest(fs.readFileSync(file))` 的結果完全相同，但每次只讀一小段，不把整個檔案放進記憶體。 */
+function hashFileInChunks(file: string): string {
+  const hash = createHash("sha256");
+  const fd = fs.openSync(file, "r");
+  try {
+    const buffer = Buffer.allocUnsafe(HASH_CHUNK_BYTES);
+    for (;;) {
+      const read = fs.readSync(fd, buffer, 0, buffer.length, null);
+      if (read === 0) break;
+      hash.update(buffer.subarray(0, read));
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  return hash.digest("hex");
 }
 
 export function captureCodingTree(cwd: string): CodingTreeSnapshot {
@@ -193,17 +217,28 @@ export function captureCodingTree(cwd: string): CodingTreeSnapshot {
   const files: CodingFileRecord[] = [];
   let total = 0;
   let fileOverflow = false;
+  let overflowDetail: string | undefined;
+  if (staged === "overflow" || unstaged === "overflow")
+    overflowDetail = `git diff output is over ${MAX_DIFF_BYTES} bytes (${[
+      staged === "overflow" ? "staged" : "",
+      unstaged === "overflow" ? "unstaged" : "",
+    ]
+      .filter(Boolean)
+      .join(" and ")})`;
   for (const name of names) {
     const untracked = untrackedNames.includes(name);
     const hashed = hashWorktree(repository, name);
     if (hashed === "overflow") {
       fileOverflow = true;
+      const size = fs.lstatSync(assertRepoPath(repository, name)).size;
+      overflowDetail ??= `${name} is ${size} bytes, over the ${MAX_FILE_BYTES} byte per-file limit`;
       break;
     }
     const bytes = hashed?.bytes ?? 0;
     total += bytes;
     if (total > MAX_TOTAL_BYTES) {
       fileOverflow = true;
+      overflowDetail ??= `changed files total over ${MAX_TOTAL_BYTES} bytes (at ${name})`;
       break;
     }
     let indexSha256: string | null = null;
@@ -235,6 +270,7 @@ export function captureCodingTree(cwd: string): CodingTreeSnapshot {
     stagedDiffSha256: staged === "overflow" ? "overflow" : digest(staged),
     unstagedDiffSha256: unstaged === "overflow" ? "overflow" : digest(unstaged),
     overflow: overflow || fileOverflow,
+    ...(overflowDetail ? { overflowDetail } : {}),
     files,
   };
 }
@@ -315,6 +351,9 @@ export function versionFromBaseline(
       bytes: file.bytes,
     }));
   const overflow = baseline.overflow || current.overflow;
+  const overflowDetail = overflow
+    ? (current.overflowDetail ?? baseline.overflowDetail)
+    : undefined;
   const fingerprint = digest(
     JSON.stringify({
       mode,
@@ -338,6 +377,7 @@ export function versionFromBaseline(
     deliveryPaths,
     untracked,
     overflow,
+    ...(overflowDetail ? { overflowDetail } : {}),
   };
 }
 
