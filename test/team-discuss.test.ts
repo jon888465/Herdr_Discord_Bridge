@@ -71,7 +71,7 @@ function fixture(t: TestContext) {
   const closed: string[] = [];
   const stopped: string[] = [];
   const outputs = new Map<string, string>();
-  const prompts: { pane: string; text: string }[] = [];
+  const prompts: { pane: string; text: string; timeoutMs?: number }[] = [];
   const launches: AgentProfile[] = [];
   const replies: string[] = [];
   const activeStreams = new Set<string>();
@@ -142,8 +142,8 @@ function fixture(t: TestContext) {
     async waitAgent(pane: string) {
       return structuredClone(live.get(pane));
     },
-    async promptAgentAndWait(pane: string, text: string) {
-      prompts.push({ pane, text });
+    async promptAgentAndWait(pane: string, text: string, timeoutMs?: number) {
+      prompts.push({ pane, text, timeoutMs });
       const current = live.get(pane)!;
       const final = await answer(current, text);
       const start = text.match(
@@ -386,6 +386,28 @@ test("Discord command with only a Lead launches three fresh peers and posts tagg
     /Consensus:[\s\S]*Disagreements:[\s\S]*Overlooked questions:[\s\S]*Decisions for the user:/,
   );
   assert.match(f.output(), /Worktree fingerprints matched/);
+});
+
+// ISSUE-186：agy 新 session 的第一個回合實測要 59 至 77 秒，超過一般 60 秒預算會被判逾時、整場少一個同儕。
+test("a fresh peer's first turn gets the longer budget while later turns, the Lead and workspace peers keep 60 seconds", async (t) => {
+  const f = fixture(t);
+  await f.discordCommand("/herdr team discuss first turn budget");
+  const budgets = (pane: string) =>
+    f.prompts.filter((p) => p.pane === pane).map((p) => p.timeoutMs);
+  for (const fresh of ["w1:fresh-agy", "w1:fresh-claude", "w1:fresh-codex"])
+    assert.deepEqual(budgets(fresh), [120_000, 60_000], fresh);
+  assert.deepEqual(budgets(f.lead.pane_id), [60_000]);
+});
+
+test("peers that already live in the workspace never get the longer first-turn budget", async (t) => {
+  const f = fixture(t);
+  f.add(f.make("claude", "claude", { model: "claude-sonnet-4-6" }));
+  f.add(f.make("codex", "codex"));
+  f.add(f.make("agy", "antigravity"));
+  await f.consoleCommand("team discuss --rounds 1 workspace peers budget");
+  assert.equal(f.launches.length, 0);
+  assert.ok(f.prompts.length > 0);
+  assert.ok(f.prompts.every((p) => p.timeoutMs === 60_000));
 });
 
 test("workspace-only roster uses three distinct eligible peers and leaves their panes alone", async (t) => {

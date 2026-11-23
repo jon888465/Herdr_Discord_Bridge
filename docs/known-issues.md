@@ -49,6 +49,7 @@
   - **第三場（`team cancel`）：**在 claude、codex 新 session 剛起來時取消，回 `Team Discussion cancelled`、`Peer rounds run: 0/2`、`No synthesis available`、`Worktree fingerprints matched`；新開的 claude 與 codex 同儕被清掉，只剩 Lead。
   - **仍沒有驗證：**Discord thread 路徑與長結果分段；agy 的有效回覆（這次逾時）；整體 5 分鐘上限；額度阻擋；同儕回報 Opus 時停止派送；工作樹被改動時的警告（兩場指紋都相符，我也獨立確認主 checkout 乾淨）；匿名（A／B／C、不含種類與模型）仍只由提示長度與結果推論，沒有逐字檢查各輪送出的提示；討論內容品質沒有獨立評估。
   - 下一步：決定 agy 新 session 第一回合的處理方式（例如對新 session 的第一回合給較長預算、或先暖機，需先決定，尚未修正）；從 Discord thread 執行一次。
+- agy 逾時的修正（2026-11-23，使用者選「對新 session 的第一回合給較長預算」）：bridge 新開、尚未送過提示的同儕，第一回合的等待上限由 60 秒改為 120 秒（`src/team-discuss.ts` 的 `FIRST_TURN_LIMIT_MS`；`startDiscussion` 的 `firstTurnMs` 可覆寫，測試用；`turnMs` 有設而 `firstTurnMs` 沒設時沿用 `turnMs`，既有測試不受影響）；之後的回合、Lead、workspace 既有同儕仍是 60 秒，整體 5 分鐘上限不變。**測試（2026-11-23，本機 macOS，worktree）：**新增 2 項（新 session 第一回合 120 秒、第二回合與 Lead 60 秒；workspace 既有同儕全部 60 秒）；測試 fixture 改為記錄每次提示實際的等待上限；暫時把「是否為新 session 第一回合」恆設為 false，1 項失敗，恆設為 true，2 項失敗，已還原且逐字相同；`team-discuss` 測試 20 項全過，完整 `npm test` 2254 項、通過 2253、失敗 0、略過 1；typecheck、lint 通過。**未驗證：**部署後 agy 新 session 在真實討論中是否在 120 秒內回覆（探針只量到 59 至 77 秒，沒有量三個同時跑）；120 秒是否足夠、最壞情況（第一輪 120 秒加第二輪 60 秒加 Lead 彙整）是否仍在整體 5 分鐘內，只是算術推論，沒有實測。
 
 
 ## ISSUE-185：卡片指派的 Lead 剛就緒就送提示，撞到跳過更新選單後短暫的 `working`，任務沒有啟動（`agent is busy`）
