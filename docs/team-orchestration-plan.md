@@ -45,6 +45,14 @@
 
 詳見 [Phase 4 契約與驗收](quota-failover-manager.md)、ISSUE-022。
 
+## 本機唯讀同儕討論（2026-11-23，待驗收）
+
+`team discuss` 已接入 Discord 與 console，含本機 Team 選擇、Sonnet 新 session、
+額度跳過、匿名多輪互評、Lead 彙整及 workspace scope 取消。獨立的記憶體流程
+重用 Team receiver 與 fresh pane 啟停驗證。[契約](team-orchestration-spec.md#local-read-only-discussion)
+與 ISSUE-186 記錄限制與驗收；fixture 通過後仍需以單一 Lead 的 workspace
+走真實 Discord／Herdr／CLI 流程。
+
 ## 其他後續提案（未實作）
 
 - 有證據的 turn resume／重新規劃，不盲目重送有副作用的 prompt。

@@ -41,23 +41,34 @@ export type RoleCleanupReason =
   "before_dispatch_failure" | "completed" | "blocked" | "timeout" | "uncertain";
 /** A fresh launch per assignment: no persistent binding, no reused model/session. */
 const launchQueues = new WeakMap<object, Promise<void>>();
-export async function startCardRoleSession(
+export async function startFreshProfileSession(
   port: AgentStartPort & {
     startProfile(
       lead: AgentRecord,
       profile: AgentProfile,
       name: string,
       onPane: (id: string, terminalId?: string) => void,
+      onStarting?: () => void,
+      beforeLaunch?: () => void,
     ): Promise<AgentRecord>;
   },
   lead: AgentRecord,
   profile: AgentProfile,
   name: string,
+  options?: {
+    beforeCreate: () => void;
+    claimPane: (paneId: string, terminalId: string) => void;
+    afterCreate: () => void;
+    modelMatches: (model: string) => boolean;
+    note: (message: string) => void;
+    retainLaunchError: (error: unknown) => boolean;
+  },
 ) {
   assertFreshProfile(profile);
   let created: string | undefined;
   let owned: { paneId: string; terminalId: string } | undefined;
   let keepPane = false;
+  const note = options?.note ?? console.error;
   const cleanup = async (reason: RoleCleanupReason = "completed") => {
     if (!owned) return;
     if (
@@ -65,21 +76,32 @@ export async function startCardRoleSession(
       reason === "timeout" ||
       reason === "uncertain"
     ) {
-      console.error(
-        `Card role pane ${owned.paneId} retained (${reason}); task stop/cleanup rules apply`,
+      note(
+        `Fresh pane ${owned.paneId} retained (${reason}); task stop/cleanup rules apply`,
       );
       return;
     }
     const result = await closeReviewerPane(port, owned);
     if (!result.closed)
-      console.error(`卡片角色 pane 保留 ${owned.paneId}：${result.note}`);
+      note(`Fresh pane ${owned.paneId} retained: ${result.note}`);
   };
   try {
     const launch = (launchQueues.get(port) ?? Promise.resolve()).then(() =>
-      port.startProfile(lead, profile, name, (id, terminalId) => {
-        created = id;
-        if (terminalId) owned = { paneId: id, terminalId };
-      }),
+      port.startProfile(
+        lead,
+        profile,
+        name,
+        (id, terminalId) => {
+          created = id;
+          if (terminalId) {
+            options?.claimPane(id, terminalId);
+            owned = { paneId: id, terminalId };
+            options?.afterCreate();
+          }
+        },
+        options?.beforeCreate,
+        options?.afterCreate,
+      ),
     );
     launchQueues.set(
       port,
@@ -117,7 +139,10 @@ export async function startCardRoleSession(
     if (
       profile.model &&
       ready.agent.model &&
-      ready.agent.model !== profile.model
+      !(
+        options?.modelMatches(String(ready.agent.model)) ??
+        ready.agent.model === profile.model
+      )
     )
       throw new Error("卡片角色實際 model 與啟動指定不符");
     const agent: AgentRecord = {
@@ -132,15 +157,14 @@ export async function startCardRoleSession(
     return { agent, continuity: "new-session", cleanup };
   } catch (error) {
     // Without the creation-time terminal identity closing could destroy a replacement.
-    if (owned && !keepPane) await cleanup();
+    if (owned && !keepPane && !options?.retainLaunchError(error))
+      await cleanup();
     else if (owned)
-      console.error(
-        `Card role pane ${owned.paneId} readiness not confirmed; retained for manual inspection`,
-      );
+      note(`Fresh pane ${owned.paneId} retained for manual inspection`);
     else if (created)
-      console.error(
-        `卡片角色啟動失敗；pane ${created} 身分不明，保留供人工檢查`,
-      );
+      note(`Fresh pane ${created} ownership unconfirmed; inspect manually`);
     throw error;
   }
 }
+
+export const startCardRoleSession = startFreshProfileSession;

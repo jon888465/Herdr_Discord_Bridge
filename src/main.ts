@@ -154,6 +154,12 @@ import {
 } from "./response-stream.js";
 import { findRemoteCodexSession } from "./remote-codex-session.js";
 import { AgentPool, type AgentProfile } from "./agent-pool.js";
+import {
+  cancelDiscussion,
+  discussionOwns,
+  parseDiscussion,
+  startDiscussion,
+} from "./team-discuss.js";
 import { runTeamTurn } from "./team-turn.js";
 import { createTurnHookFinal } from "./turn-hook-final.js";
 import {
@@ -494,6 +500,8 @@ async function startBridge(
         throw new Error(
           "Workspace is held by a session handoff; inspect handoff status",
         );
+      if (target && discussionOwns(activeStreams, target))
+        throw new Error("Team Discussion is read-only; use team cancel <discussion-id>");
       if (target && tasks.owns(target))
         throw new Error(
           "Use team questions <task-id> and team reply <task-id> <question-id> <answer> for Team Task replies",
@@ -624,7 +632,11 @@ async function startBridge(
 
   const watcher = new AgentWatcher(herdr, config.pollIntervalMs);
   watcher.on("transition", (transition: AgentTransition) => {
-    if (!tasks.owns(transition.agent) && !handoffs.blocks(transition.agent))
+    if (
+      !discussionOwns(activeStreams, transition.agent) &&
+      !tasks.owns(transition.agent) &&
+      !handoffs.blocks(transition.agent)
+    )
       void handleTransition(transition, { config, herdr, routing, discord });
     if (
       ["idle", "done"].includes(transition.to) &&
@@ -1770,6 +1782,8 @@ async function askAgent(
         throw new Error(
           "Workspace is held by a session handoff; inspect handoff status",
         );
+      if (discussionOwns(runtime.activeStreams, explicit))
+        throw new Error("Agent belongs to a Team Discussion; use team cancel <discussion-id>");
       if (runtime.tasks?.owns(explicit))
         throw new Error(
           "Agent belongs to a Team Task; use team questions/reply/status/cancel",
@@ -1810,6 +1824,8 @@ async function askAgent(
       );
     if (runtime.tasks) {
       const selected = await resolveContextAgent("", context, runtime);
+      if (discussionOwns(runtime.activeStreams, selected))
+        throw new Error("Agent belongs to a Team Discussion; use team cancel <discussion-id>");
       if (runtime.tasks.owns(selected))
         throw new Error(
           "Agent belongs to a Team Task; use team questions/reply/status/cancel",
@@ -1905,6 +1921,20 @@ async function teamCommand(
     case "status":
     case "cancel": {
       const workspace = await teamWorkspaceId(context, runtime);
+      if (action === "cancel" && args.length <= 1) {
+        const discussion = cancelDiscussion(
+          runtime.activeStreams,
+          workspace,
+          args[0],
+        );
+        if (discussion) {
+          await runtime.discord.reply(
+            context.message,
+            `Cancelling Team Discussion \`${discussion.id}\`. The final cleanup report goes to the originating conversation.`,
+          );
+          return;
+        }
+      }
       if (!runtime.tasks) throw new Error("Team Task Engine unavailable");
       if (args.length > 1 || (action === "cancel" && args.length !== 1))
         throw new Error("usage: team status [task-id] | team cancel <task-id>");
@@ -2004,11 +2034,76 @@ async function teamCommand(
     case "ask":
       await teamAsk(args, context, runtime);
       return;
-    default:
+    case "discuss":
+      await teamDiscuss(args, context, runtime);
+      return;
+    default: {
+      const malformed = /^(ask|discuss).+/u.exec(action ?? "");
+      if (malformed)
+        throw new Error(
+          `看起來少了空格（missing space）。請使用 team ${malformed[1]} <內容>`,
+        );
       throw new Error(
-        "usage: /herdr team list|add|remove <agent-name-or-pane-id> or /herdr team ask <prompt>",
+        "usage: /herdr team list|add|remove <agent-name-or-pane-id> or /herdr team ask <prompt> or /herdr team discuss <topic>",
       );
+    }
   }
+}
+
+async function teamDiscuss(
+  args: string[],
+  context: CommandContext,
+  runtime: Runtime,
+): Promise<void> {
+  const input = parseDiscussion(args);
+  const { workspaceId, lead, agents } = await activeLeadFor(
+    context,
+    runtime,
+    "team discuss",
+  );
+  const existing = runtime.routing.workspaceTargets(workspaceId).flatMap(
+    (target): AgentRecord[] => {
+      if (!target.paneId) return [];
+      return [
+        agents.find((item) => item.pane_id === target.paneId) ?? {
+          pane_id: target.paneId,
+          terminal_id: "",
+          tab_id: "",
+          workspace_id: workspaceId,
+          agent_status: "unknown",
+        },
+      ];
+    },
+  );
+  const pool = runtime.pool;
+  for (const profile of pool?.members(workspaceId) ?? []) {
+    const bound = pool?.passiveProfilePane(workspaceId, profile, agents);
+    if (bound) existing.push(bound);
+  }
+  const discussion = startDiscussion(input, lead, {
+    port: runtime.herdr,
+    reserved: runtime.activeStreams,
+    profiles: runtime.pool?.profiles ?? runtime.config.agentProfiles ?? [],
+    existing,
+    canUse: (agent) => !runtime.handoffs?.blocks(agent),
+    quota: (kind, live, actor) =>
+      runtime.failover?.discussionQuota(kind, live, actor) ?? { unknown: true },
+    hookFinal: createTurnHookFinal(runtime.config.hookTransport, hookEvents),
+    lines: runtime.config.outputLines,
+  });
+  // A failed receipt must not detach the run from its eventual cleanup/result.
+  try {
+    await runtime.discord.reply(
+      context.message,
+      `${agentHeaderFor(lead)}\n**Team Discussion accepted** · \`${discussion.id}\`\nCancel: team cancel ${discussion.id}`,
+    );
+  } catch (error) {
+    console.error(`Team Discussion receipt failed: ${safeError(error)}`);
+  }
+  await runtime.discord.reply(
+    context.message,
+    `${agentHeaderFor(lead)}\n${await discussion.result}`,
+  );
 }
 
 async function teamWorkspaceId(
@@ -2866,7 +2961,11 @@ async function handoffAgent(
     undefined,
     runtime.config.allowedWorkspaceIds,
   );
-  if (runtime.handoffs?.blocks(source) || runtime.tasks?.owns(source))
+  if (
+    runtime.handoffs?.blocks(source) ||
+    runtime.tasks?.owns(source) ||
+    discussionOwns(runtime.activeStreams, source)
+  )
     throw new Error(
       "Source belongs to an active task/handoff; settle it first",
     );
@@ -2929,6 +3028,8 @@ export async function promptMappedAgent(
       throw new Error(
         "Workspace is held by a session handoff; use handoff status/continue/cancel",
       );
+    if (discussionOwns(runtime.activeStreams, agent))
+      throw new Error("Agent belongs to a read-only Team Discussion; use team cancel <discussion-id>");
     if (runtime.tasks?.owns(agent))
       throw new Error(
         "Use team questions <task-id> and team reply <task-id> <question-id> <answer> for Team Task replies",
@@ -3184,7 +3285,8 @@ function restoreWorktreeAuthorization(allowed: string[]): void {
 async function activeLeadFor(
   context: CommandContext,
   runtime: Runtime,
-): Promise<{ workspaceId: string; lead: AgentRecord }> {
+  command = "--worktree",
+): Promise<{ workspaceId: string; lead: AgentRecord; agents: AgentRecord[] }> {
   const workspaceId = await teamWorkspaceId(context, runtime);
   const agents = await runtime.herdr.listAgentsWithWorkspaceNames();
   const activeRoute = runtime.routing.resolve(context.routing);
@@ -3194,13 +3296,13 @@ async function activeLeadFor(
       : runtime.routing.workspaceActiveTarget(workspaceId);
   if (!leadTarget?.paneId)
     throw new Error(
-      "請先選好目前 workspace 的 active Agent，再使用 --worktree",
+      `請先選好目前 workspace 的 active Agent，再使用 ${command}`,
     );
   const lead = agents.find((agent) => agent.pane_id === leadTarget.paneId);
   if (!lead)
     throw new Error(`Lead pane ${leadTarget.paneId} is stale or unavailable`);
   validateAgentTarget(lead, leadTarget, runtime.config.allowedWorkspaceIds);
-  return { workspaceId, lead };
+  return { workspaceId, lead, agents };
 }
 
 /**
@@ -3786,6 +3888,8 @@ async function cancelAgent(
     throw new Error(
       "Workspace is held by a session handoff; settle sessions before handoff cancel",
     );
+  if (discussionOwns(runtime.activeStreams, agent))
+    throw new Error("Agent belongs to a Team Discussion; use team cancel <discussion-id>");
   if (runtime.tasks?.owns(agent))
     throw new Error("Agent belongs to a Team Task; use team cancel <task-id>");
   await runtime.herdr.cancelAgent(agent.pane_id);
@@ -4807,6 +4911,7 @@ function helpText(prefix: string): string {
     "**多 Agent 與交接**",
     `\`${prefix} team add <agent>\` / \`${prefix} team remove <agent>\` — 管理 thread participants`,
     `\`${prefix} team list\` — 查看目前 thread 的 Team 成員、pane 與即時狀態`,
+    `\`${prefix} team discuss [--rounds 1–3] <topic>\` — 本機唯讀同儕討論；\`team cancel [discussion-id]\` 取消討論`,
     `\`${prefix} team ask [--coding] <prompt>\` — 建立持久化任務，由 Lead 動態分工；--coding 才啟用本機 Git 驗收`,
     `\`${prefix} team questions <task-id>\` / \`${prefix} team reply <task-id> <question-id> <answer>\` — 指定問題回答`,
     `\`${prefix} team status [task-id]\` / \`${prefix} team cancel <task-id>\` — 查看／取消任務`,
@@ -4863,6 +4968,7 @@ function consoleHelpText(): string {
     "**Team 與交接**",
     "team list — 列出所有 workspace Team 成員",
     "team add <agent> | team remove <agent> — 管理目前 workspace Team",
+    "team discuss [--rounds 1–3] <topic> — 本機唯讀同儕討論；team cancel [discussion-id] 取消討論",
     "team ask [--coding] <prompt> — 建立持久化任務，由 Lead 動態分工；--coding 才啟用本機 Git 驗收",
     "team status [task-id] — 查看持久狀態與重啟核對結果",
     "team questions <task-id> — 列出多 Agent 問題與狀態",

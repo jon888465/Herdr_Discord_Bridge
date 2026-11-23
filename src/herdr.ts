@@ -262,6 +262,7 @@ export class HerdrClient {
     name: string,
     onPane: (paneId: string, terminalId?: string) => void,
     onStarting?: () => void,
+    beforeLaunch?: () => void,
   ): Promise<AgentRecord> {
     const liveLead = (await this.listAgents()).find(
       (a) =>
@@ -305,9 +306,11 @@ export class HerdrClient {
     // （「target pane … is not an available shell」，與 ISSUE-067 同一個錯誤）。這個錯誤代表什麼都還沒
     // 啟動，所以只對它短暫重試（有上限）；其他任何錯誤都立刻失敗，不重試。
     const retryDeadline = Date.now() + PROFILE_BUSY_RETRY_MS;
+    beforeLaunch?.();
     this.prepareWorkspaceTrust(profile.kind, pane.pane_id, cwd);
     const extra = extraLaunchArgsFor(profile.kind, cwd);
     for (;;) {
+      beforeLaunch?.();
       try {
         await this.request(
           "agent.start",

@@ -238,6 +238,7 @@ Agent 完成後，回覆會更新原本的 progress message；預設不會另外
 /herdr team add <agent-name-or-pane-id>
 /herdr team remove <agent-name-or-pane-id>
 /herdr team ask [--coding] <prompt>
+/herdr team discuss [--rounds N] <topic>
 ```
 
 設定 `requireMention` 後，兩種 command 都必須 mention bot，例如 `@bridge agents` 或 `@bridge /herdr agents`。在已 mapping 的 thread 中，普通文字會被當作 active Agent 的 prompt；在頻道中選取 Agent（`agent use`）後，`@bot 文字` 也會送給該 Agent，無選取時 bot 會提示。
@@ -346,6 +347,10 @@ Lead 自行決定角色、是否委派，以及依報告追加工作，無固定
 
 釋放任務租用或移出 Team 不會停止 CLI。Bridge 會核對 session identity，不能確認時不宣稱 context 延續；新 session 收到原任務與有界報告。
 啟動送達不確定時不重試開 pane，需檢查後明確 bind。完整操作、限制與驗收見 [Agent Pool 與 console 架構](docs/agent-pool-console.md)。
+
+### 本機唯讀同儕討論
+
+Discord 與 console 的 `team discuss [--rounds N] <主題>` 提供本機唯讀同儕討論。選定的 Lead 負責彙整，最多三名不同種類同儕，優先使用 workspace 裡可用的 Team 成員，缺額由新開的 Claude Sonnet、Codex、Agy 補足。既有 Claude 只選型號可確認為 Sonnet 的 session，新 Claude 明確帶 `--model sonnet`。已知額度不足會跳過並說明。預設兩輪（可選 1–3），先獨立分析再匿名互評，回報模型來源、實際輪數、觸及的上限及工作樹前後差異。從同 workspace 用 `team cancel [discussion-id]` 取消；自開 pane 用完關閉，卡住、逾時或身分有疑義則回報並保留。Discord 實機驗收待辦見 [ISSUE-186](docs/known-issues.md#issue-186team-discuss-唯讀同儕討論與缺空格提示)。
 
 ## Durable Team Task（Phase 1）
 

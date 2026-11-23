@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { usageKind } from "./cli-adapter.js";
 import type { AgentRecord } from "./types.js";
 import type { HandoffRecord } from "./handoff-store.js";
 import { publicText, sessionIdentity } from "./handoff-evidence.js";
@@ -304,6 +305,32 @@ export class QuotaFailoverManager {
     )
       return;
     return q;
+  }
+  /** A fresh session has no exact observation. Use known local same-kind
+   * evidence conservatively and honor explicit shared-budget conflicts. */
+  discussionQuota(kind: string, live: AgentRecord[], actor?: AgentRecord): {
+    skip?: string;
+    unknown?: boolean;
+  } {
+    const now = this.now();
+    const valid = this.store.read().quotas.filter((q) =>
+      Date.parse(q.observedAt) <= now && Date.parse(q.expiresAt) > now,
+    );
+    const applicable = valid.filter((q) =>
+      actor ? sameTaskSession(q.agent, actor) : live.some((agent) =>
+        (agent.agent === kind || usageKind(agent.agent) === kind) &&
+        (agent.machine === undefined || agent.machine === "local") &&
+        agent.pane_id.split(":").length < 3 &&
+        sameTaskSession(q.agent, agent),
+      ),
+    );
+    const groups = new Set(applicable.map((q) => q.group));
+    const blocked = valid.find((q) =>
+      groups.has(q.group) && (q.state === "limited" || q.state === "exhausted"),
+    );
+    if (blocked) return { skip: `quota ${blocked.state} (operator report, budget ${blocked.group})` };
+    // Same-kind evidence can veto a launch but cannot prove a new session's quota.
+    return { unknown: !actor || !applicable.some((q) => q.state === "available") };
   }
   arm(
     source: AgentRecord,

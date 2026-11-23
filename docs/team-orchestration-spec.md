@@ -192,3 +192,24 @@ Phase 2 question queue 已實作；auto resume、retention、跨 bot writer lock
 測試需涵蓋 state transitions、round trip、restart、stale running、whole-team cancellation、動態多輪、零 Worker及 ISSUE-014 回歸。
 詳見 [Phase 1 live acceptance](durable-task-engine.md#live-acceptance-still-required)及 [known issues](known-issues.md)。
 先前 Draw.io 為初版排程圖，未呈現新增 durable journal／restart quarantine／Phase 2 question queue；不得據此推論自動 resume 已完成。
+
+## Local read-only discussion
+
+`team discuss [--rounds N] <topic>` selects the current workspace Lead to
+synthesize and reserves up to three distinct local peer kinds. It prefers
+available Team panes, including verified bindings of enabled pool profiles,
+then uses fresh Claude Sonnet, Codex and Agy sessions for unrepresented kinds.
+A live Claude peer needs affirmative Sonnet evidence. Fresh Claude always
+receives `--model sonnet`. Codex uses a configured model or its CLI default
+and Agy uses its CLI default. Launch model arguments and observations have
+separate provenance. Unavailable quota, launch failures and retained panes are
+reported. Missing quota measurements appear as unknown.
+
+Each round has a barrier. The first round uses independent prompts, and later
+rounds contain only other peers' redacted, anonymous, fenced excerpts from the
+previous round. The read-only Lead synthesizes all rounds from bounded excerpts,
+preserving disagreements. The Git worktree check uses before/after fingerprints
+and reports changes or uncertainty. See [SPEC.md](../SPEC.md#本機唯讀同儕討論)
+for bounds, cancellation and identity checks. Discussion has in-memory state
+and uses the existing Team receiver and origin reply path. No card or coding
+workflow is called. Live acceptance is tracked in ISSUE-186.
