@@ -26,7 +26,7 @@
 
 ## ISSUE-186：team discuss 唯讀同儕討論與缺空格提示
 
-更新日期：2026-11-23。狀態：已修正、待驗收。需求 REQ-20261120-team-discuss。
+更新日期：2026-11-23。狀態：**已驗收（Discord thread 主路徑，2026-11-23，見下方「Discord 實機驗收」；範圍有限，未驗收項目與觀察到的限制列在同一段）**。先前：已修正、待驗收。需求 REQ-20261120-team-discuss。
 
 - 症狀／根因：Discord 或 console 輸入 `team ask討論…` 時，切字保留了緊接的文字，Team dispatcher 落到通用 usage。一般 `team ask` 只用已配置的 Workers，單 Agent workspace 缺少獨立同儕討論與新 session 後備。ISSUE-185 是之前卡片指派的 Lead 就緒競態，與本指令實機驗收分開追蹤。
 - 修正／預期：`team discuss` 以本機 active Agent 彙整，優先使用 workspace 同儕，缺額由 Claude Sonnet、Codex、Agy 的新 session 補上。新增缺空格提示、額度與模型來源回報、獨立／匿名唯讀回合、工作樹指紋、workspace scope cancel 與 owned pane 清理。見 [SPEC](../SPEC.md#本機唯讀同儕討論)。
@@ -57,6 +57,12 @@
   - **這次沒有驗證：**Discord thread 路徑與長結果在 Discord 的分段；整體 5 分鐘上限被觸及時的行為；額度阻擋；同儕回報 Opus 時停止派送；工作樹被改動時的警告（三場指紋都相符，沒有製造改動）；匿名（A／B／C、不含種類與模型）仍只由提示長度與結果推論，沒有逐字檢查各輪送出的提示；討論內容品質沒有獨立評估（結果自己也標了截斷與「未驗證部署行為」）；120 秒預算在更重負載或 agy 更慢時是否足夠（只有這一次實測 72 秒）。
   - 目前累計的實機證據（console）：三個同儕兩輪完成、`team cancel`、缺空格與 `--rounds` 檢查、agy 信任與逾時兩個問題已查清並修正。**唯一契約上的實機驗收路徑（Discord thread）尚未做，所以不能標已驗收。**
   - 下一步：從 Discord thread 執行一次 `team discuss <主題>`（需要使用者在 thread 下指令），記錄分段與回覆位置。
+- **Discord 實機驗收（2026-11-23 03:31 至 03:34 UTC，本機 macOS，使用者在 Discord thread 下 `team discuss <主題>`，我同時看 bridge 日誌；bridge 為 main `0ec0ebd`（含 #343）重啟後的程序；Lead 為 workspace `w3` 的 claude）：**
+  - **看到的（bridge 日誌，我直接觀察）：**補了三個新 session（claude `model sonnet (launch argument)`、codex、agy），agy 走 `agyTrustedDirectories`（日誌 `agy trusted directory unchanged`）沒被信任提示擋住；第一輪約 03:31:57 派送，agy 約 86 秒完成（超過舊的 60 秒、在新的 120 秒內）；第二輪約 03:33:18 派送；Lead 彙整 03:34:02 至 03:34:27；整場約 2 分 30 秒；結束後三個新同儕全被清掉、`active-streams.json` 為空、主 checkout `git status` 為 0 筆（我獨立確認）；日誌沒有錯誤。
+  - **看到的（使用者貼出 Discord 結果，我沒有親眼看 thread）：**結果以標頭 `🤖 claude │ WK: w3 · git_wk │ Pane: w3:p1` 開頭，`Team Discussion completed`、`Peer rounds run: 2/2 (verified replies by round: 3, 3)`、`Limits reached: peer excerpt`，參與者與模型來源（claude `sonnet (launch argument)`、codex、agy 皆標 fresh session、Lead 標 `model unknown`）、各同儕 `quota unknown`；既有 pane `w3:p3` 因 `unavailable or busy` 被跳過；**結果被分成兩則**，斷在 Overlooked 清單的兩個項目之間，沒有掉字；內容含 Consensus、Disagreements、Overlooked questions、Decisions for the user 四節，並引用 A、B、C 三方。**是否回在原 thread 是使用者的回報（使用者在 thread 下指令並看到結果），我沒有獨立查證。**
+  - **觀察到的限制（沒有被當成缺陷修正，是否另開 issue 待使用者決定）：**(1) **`Worktree verification uncertain for one or more working directories`**，不是 `fingerprints matched`：該 workspace 的 cwd 不是單一 Git worktree，bridge 依契約標「不確定」，所以這個 workspace 沒有「討論前後沒改檔」的證據，唯讀只剩 prompt 約束（我獨立確認該 cwd 下的 repo 內沒有變動，但不能保證 cwd 之外）。(2) **Lead 是使用者自己的互動 session，它的彙整引用了與這次題目無關的先前對話內容**（同儕完全看不到），結果有標明那是「我的觀察，不是同儕的共識」，但等於 Lead 的對話歷史會流進討論結果與 Discord thread；契約寫「Lead 只彙整」，實際上 Lead 帶著自己的 session 脈絡。(3) 這次的題目缺少明確標的，同儕主要在討論「題目沒說清楚」，所以**討論內容的品質、對有明確標的題目的表現，沒有驗證**。
+  - **仍沒有驗證：**整體 5 分鐘上限被觸及時的行為；額度阻擋；同儕回報 Opus 時停止派送；從 Discord 執行 `team cancel`；匿名（A／B／C、不含種類與模型）仍只由提示長度與結果推論，沒有逐字檢查各輪送出的提示；工作樹被改動時的警告；120 秒預算在更重負載下是否足夠（目前實測 72 秒與 86 秒）。
+  - **驗收範圍的說明：**契約要求「在只有一個 agent 的 workspace」驗收，這次的 `w3` 另有一個既有 pane（被跳過），不是嚴格的單一 agent；console 上有兩次嚴格單一 agent 的驗收（前述）。以上合起來，開出三個新 session、兩輪、結果送回 Discord thread、session 被清掉都有實機證據，所以標「已驗收（主路徑）」；**不代表上列未驗證項目與限制已解決**。
 
 
 ## ISSUE-185：卡片指派的 Lead 剛就緒就送提示，撞到跳過更新選單後短暫的 `working`，任務沒有啟動（`agent is busy`）
