@@ -269,7 +269,7 @@ active Agent 作為 Lead，先要求 Lead 產生受驗證的 Assignment plan，�
 
 ### 本機唯讀同儕討論
 
-- Discord 與 console 的 `team discuss [--rounds N] <topic>` 為獨立流程。選定 workspace 的 active Agent 擔任 Lead，最多三名不同種類的本機同儕。先取同 workspace 的 idle／done、未被佔用的 Team panes，含目前啟用且身份吻合的 pool 綁定。仍有缺額時按 Claude、Codex、Agy 的順序補尚未出現的同儕種類。Lead 只彙整，種類不計入三個同儕名額。遠端 workspace Lead 拒絕、遠端同儕跳過。
+- Discord 與 console 的 `team discuss [--rounds N] <topic>` 為獨立流程。選定 workspace 的 active Agent 擔任 Lead，最多三名不同種類的本機同儕。先取同 workspace 的 idle／done、未被佔用的 Team panes，含目前啟用且身份吻合的 pool 綁定。仍有缺額時按 Claude、Codex、Agy 的順序補尚未出現的同儕種類。Lead 只彙整，種類不計入三個同儕名額。Lead 是使用者既有的互動 session，彙整可能引用它自己先前的對話（同儕看不到）；Lead 真的產出彙整時，結果固定附一行提示 `Note: the Lead synthesizes inside its own live session and may cite that session's earlier conversation, which the peers never saw.`，由使用者決定要不要在多人可見的 thread 執行（ISSUE-188，2026-11-23，使用者選「維持現狀並提示」，已修正、待驗收；這只是提示，不是隔離）。遠端 workspace Lead 拒絕、遠端同儕跳過。
 - Claude 既有同儕須有可確認的 Sonnet 模型，包含 Herdr 實際回報的 Sonnet 型號；未知、只靠 profile 推斷、Opus 或其他模型均跳過。Claude 新 session 明確傳 `--model sonnet`；Codex 採首個對應 pool profile 指定的非 Opus 模型及標準 `-m`，未指定則使用 CLI 預設；Agy 採 CLI 預設。自動選出的同儕如果回報 Opus，bridge 會停止該同儕的派送。無 profile 時用內建同種類的臨時預設，現有 profile 的自由參數不帶入（避免 resume 或覆寫限制）。標示 workspace／fresh session、種類、模型的 launch／observed 來源或 unknown；CLI 預設值不當成已知模型。
 - 啟動前讀 Quota Manager 的有效 operator observation。新 session 無 exact observation；現存本機同種類 session 的有限／耗盡觀測，或已知共享 budget group 的同類衝突，會阻止相應啟動並回報。缺乏對應證據會標示 quota unknown，仍可嘗試啟動。沒有 provider 額度量測、帳號切換或自動 handoff。Session 不寫入 pool 節點或 Team 名單。
 - 預設兩輪，`--rounds N` 放在主題之前且只接受 1–3。第一輪各自分析，不傳同儕輸出。之後只傳上一輪其他同儕的 A／B／C 匿名摘錄，要求反例、分歧與遺漏問題；不插入對方的種類、模型或 pane。Lead 讀每名同儕各輪的有界摘錄，分列共識、分歧、排序的遺漏問題、供使用者決定的事。要求保留異議原意與可用原文，資料不足或 Lead 回覆缺節時標示。Bridge 先遮蔽已知機敏樣式，再限長、逸出分隔線及回合標記，將外來文字包成不可信資料。唯讀與不可信資料是 prompt 約束，沒有 OS 層隔離或完整注入、機敏資料防護。
