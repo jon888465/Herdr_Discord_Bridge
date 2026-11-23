@@ -723,3 +723,59 @@ for (const atomicMs of [60, 90]) {
     assert.equal(dispatched, 1);
   });
 }
+
+// ISSUE-186：agy 偶爾回覆完整卻被判 no verified completion，原因未確認；逾時前要把兩條取框路徑各自看到什麼記成一行。
+test("a turn that times out logs one diagnostics line with counts only and keeps the original timeout error", async (t) => {
+  const warn = t.mock.method(console, "warn", () => {});
+  const secret = "REPLY-BODY-THAT-MUST-NOT-BE-LOGGED";
+  let prompt = "";
+  const port: OrchestrationPort = {
+    promptAgent: async (_target, text) => {
+      prompt = text;
+    },
+    waitAgent: async () => ({ ...base, agent_status: "done" }),
+    // 只有 BEGIN、沒有 END：取不到框，會一路等到逾時。
+    readAgent: async () =>
+      prompt
+        ? `${prompt.match(/BRIDGE_BEGIN_[a-f0-9]+/)![0]}\n${secret}`
+        : "",
+  };
+  await assert.rejects(
+    runTeamTurn(base, "plan", port, 250, 20, {
+      hookFinal: () => `${secret} but no frame`,
+    }),
+    /Timed out waiting for current response from w17:p1 \(last state: done\); no verified completion/,
+  );
+  const lines = warn.mock.calls
+    .map((call) => String(call.arguments[0]))
+    .filter((line) => line.startsWith("[turn-timeout-diag] "));
+  assert.equal(lines.length, 1);
+  const diag = JSON.parse(lines[0].slice("[turn-timeout-diag] ".length));
+  assert.equal(diag.pane, "w17:p1");
+  assert.equal(diag.lastStatus, "done");
+  assert.equal(diag.hookMode, "wired");
+  assert.deepEqual(diag.hook, {
+    present: true,
+    chars: `${secret} but no frame`.length,
+    begins: 0,
+    ends: 0,
+    frame: false,
+  });
+  assert.ok(diag.reads.length > 0);
+  assert.equal(diag.reads[0].raw.begins, 1);
+  assert.equal(diag.reads[0].raw.ends, 0);
+  assert.equal(diag.reads[0].raw.frame, false);
+  assert.ok(!lines[0].includes(secret), "診斷不能記回覆內容");
+});
+
+test("a turn that completes normally logs no diagnostics", async (t) => {
+  const warn = t.mock.method(console, "warn", () => {});
+  const result = await run(base, [{ ...base }]);
+  assert.equal(result.state, "done");
+  assert.equal(
+    warn.mock.calls.filter((c) =>
+      String(c.arguments[0]).startsWith("[turn-timeout-diag]"),
+    ).length,
+    0,
+  );
+});
