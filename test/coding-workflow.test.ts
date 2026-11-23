@@ -1311,6 +1311,55 @@ test("team ask --coding is opt-in and does not reinterpret the original prompt",
   }
 });
 
+test("ISSUE-189: team ask skips a stale Team Worker and lists it instead of failing", async () => {
+  const { repo } = repoWithBaseline();
+  const dir = mkdtempSync(join(tmpdir(), "coding-cli-"));
+  const routing = new RoutingStore(join(dir, "routing.json"));
+  const output: string[] = [];
+  const general = harness({ repo, script: "general" });
+  try {
+    const context = createConsoleContext((text) => output.push(text));
+    routing.bind(context.routing, { workspaceId: "w1", paneId: "w1:p1" });
+    routing.bindWorkspace(
+      "w1",
+      { workspaceId: "w1", paneId: "w1:p9", agentName: "gone" },
+      { activate: false },
+    );
+    routing.bindWorkspace(
+      "w1",
+      { workspaceId: "w1", paneId: "w1:p2" },
+      { activate: false },
+    );
+    routing.bindWorkspace("w1", { workspaceId: "w1", paneId: "w1:p1" });
+    await handleCommand("team", ["ask", "please"], context, {
+      tasks: general.engine,
+      herdr: general.port,
+      routing,
+      activeStreams: new Set<string>(),
+      config: { allowedWorkspaceIds: [], approvalTimeoutMs: 500 },
+      discord: {
+        reply: async (_message: unknown, text: string) => output.push(text),
+      },
+    } as never);
+    const text = output.join("\n");
+    assert.doesNotMatch(text, /is stale or unavailable/);
+    assert.match(text, /Team Task accepted/);
+    assert.match(text, /Skipped stale Team Workers: `w1:p9`/);
+    assert.match(text, /team remove w1:p9/);
+    assert.match(text, /completed/);
+    assert.ok(general.prompts.every((item) => item.target !== "w1:p9"));
+    // 失效成員只略過，不自動刪除持久化名單。
+    assert.ok(
+      routing.workspaceTargets("w1").some((item) => item.paneId === "w1:p9"),
+    );
+  } finally {
+    routing.flush();
+    general.close();
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("ISSUE-105: the planning prompt distinguishes registered review findings from diagnosis artifacts", () => {
   const prompt = codingPlanningAddendum();
   assert.match(
