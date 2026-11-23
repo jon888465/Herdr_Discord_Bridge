@@ -228,6 +228,7 @@ export async function runTeamTurn(
   // agent.prompt(wait=...) already waited for this request. Reusing its
   // settled record avoids spending a second timeout on agent.wait.
   let current = promptSettled;
+  let lastRecord: AgentRecord | undefined = promptSettled;
   do {
     check();
     if (clock.now() >= deadline) break;
@@ -264,6 +265,7 @@ export async function runTeamTurn(
         );
     }
     lastStatus = current.agent_status;
+    lastRecord = current;
     if (lastStatus === "blocked" && onBlocked) {
       await onBlocked(current);
       check();
@@ -396,6 +398,46 @@ export async function runTeamTurn(
     if (remaining > 0)
       await abortable(clock.sleep(Math.min(100, remaining)), signal);
   } while (clock.now() < deadline);
+  // ISSUE-186：agy 偶爾回覆完整（pane 有成對標記、Stop hook 也到了）卻被判 no verified completion，
+  // 原因未確認。逾時前把兩條取框路徑各自「看到什麼」記成一行（只有數字，沒有內容），之後才有證據判斷。
+  try {
+    const hookMessage = lastRecord
+      ? context?.hookFinal?.(lastRecord, since)
+      : undefined;
+    const reads = [];
+    for (const source of sources) {
+      try {
+        const output = await herdr.readAgent(agent.pane_id, source, lines);
+        reads.push({
+          source,
+          equalsBaseline: output === baseline.get(source),
+          raw: frameStats(output, begin, end),
+          normalized: frameStats(
+            normalizeTerminalResponse(agent.agent, output),
+            begin,
+            end,
+          ),
+        });
+      } catch {
+        reads.push({ source, readFailed: true });
+      }
+    }
+    console.warn(
+      `[turn-timeout-diag] ${JSON.stringify({
+        pane: agent.pane_id,
+        agent: agent.agent,
+        lastStatus,
+        hookMode: context?.hookFinal ? "wired" : "absent",
+        hook: frameStats(hookMessage, begin, end),
+        transcript: transcript
+          ? { completed: transcript.turn.completed }
+          : "none",
+        reads,
+      })}`,
+    );
+  } catch {
+    /* 診斷失敗不能改變原本的逾時錯誤 */
+  }
   throw new Error(
     `Timed out waiting for current response from ${agent.pane_id} (last state: ${lastStatus}); no verified completion`,
   );
@@ -433,22 +475,36 @@ function sessionKey(agent: AgentRecord): string {
   return typeof value === "string" ? value : "unknown";
 }
 
+// Markers may themselves wrap in a narrow terminal; body whitespace is untouched.
+const markerPattern = (marker: string) =>
+  new RegExp(marker.split("").join("\\s*"), "g");
+
 function extractFrame(
   output: string,
   begin: string,
   end: string,
 ): string | undefined {
   const text = stripAnsi(output);
-  // Markers may themselves wrap in a narrow terminal; body whitespace is untouched.
-  const pattern = (marker: string) =>
-    new RegExp(marker.split("").join("\\s*"), "g");
-  const starts = [...text.matchAll(pattern(begin))];
+  const starts = [...text.matchAll(markerPattern(begin))];
   const start = starts.at(-1);
   if (!start) return;
   const offset = start.index! + start[0].length;
-  const finish = pattern(end).exec(text.slice(offset));
+  const finish = markerPattern(end).exec(text.slice(offset));
   if (!finish) return;
   return text.slice(offset, offset + finish.index).trim();
+}
+
+/** ISSUE-186：逾時診斷只記數字與布林（長度、標記出現次數、是否取得到框），不記任何回覆內容。 */
+function frameStats(text: string | undefined, begin: string, end: string) {
+  if (text === undefined) return { present: false };
+  const plain = stripAnsi(text);
+  return {
+    present: true,
+    chars: plain.length,
+    begins: [...plain.matchAll(markerPattern(begin))].length,
+    ends: [...plain.matchAll(markerPattern(end))].length,
+    frame: extractFrame(plain, begin, end) !== undefined,
+  };
 }
 
 /** Only observational waits are raced. Dispatch must settle before cancellation cleans up. */
