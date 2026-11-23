@@ -1,5 +1,18 @@
 # Known Issues
 
+## ISSUE-202：card 的 PR review 以 claude 當 reviewer 時，兩輪都在約 2 秒內回 `blocked`
+
+更新日期：2026-11-23。狀態：**待調查**（現象已確認；**成因是假設，尚未驗證，尚未修正**）。
+
+- **使用者可見症狀（2026-11-23 09:08 UTC，`REQ-20261123-merge-entry-audit`，PR #356）：**task 完成並開 PR 後，bridge 的 PR review 第 1 輪（09:08:08 派送、09:08:10 結果）與第 2 輪（09:08:19、09:08:21）reviewer 都是 claude（本機，新開的 pane），**各約 2 秒就回 `inconclusive`，原因寫「reviewer 卡住了（blocked，可能在等人確認）」**；同一個 head 連續 2 次 `inconclusive`，卡片以 `autopick_stopped` 失敗，退回人工處理。這兩輪沒有審過任何內容。
+- **預期行為：**reviewer 起來後真的審 PR 並回 `pass`／`changes_requested`；若 reviewer 起不來，要說出它在等什麼。
+- **對照：**我手動重跑（`card review <id> --agent codex`）第 3 輪，codex 本機 reviewer 在約 1 分鐘內正常回覆 `changes_requested`（兩個 medium 的文件精確度發現，內容有針對檔案與行號），所以流程本身、PR 材料與 reviewer 之後的解析都可用，問題在 claude reviewer 啟動後。
+- **已確認：**(1) `src/card-review-flow.ts` 在 `runTurn` 回 `state === "blocked"` 時直接判 `inconclusive`；(2) 兩輪 reviewer 的 pane 在判定後都被收掉，**事後讀不到畫面，不知道它實際在等什麼**；(3) `src/card-review-wiring.ts` 在沒有 profile 啟動資料時只傳 `requestedKind`（agent 種類），**不帶 profile 的 model**。
+- **假設（沒有驗證，不要當根因）：**claude 以種類啟動、沒有帶 model，落在帳號預設的 Fable 5.1，需要 usage credits，彈出確認而 `blocked`。這與 ISSUE-180（Lead 啟動只傳種類）相同；config 的 claude profile 已固定 `sonnet`，但 profile 的 model 只在有 profile 啟動資料時才會被帶上。**我沒有看到任何一次 reviewer 的畫面，也沒有重現。**
+- **驗證：**尚無。
+- **下一步：**(a) 重現並讀畫面：以同樣的種類啟動 claude reviewer，保留 pane 看它卡在哪；(b) 若確認是 model 確認，讓 PR review 的 reviewer 啟動帶 profile 的 model；(c) reviewer `blocked` 時在 verdict 原因裡附上最後幾行畫面，不要只寫「可能在等人確認」。
+- **相關：**ISSUE-180（Lead 預設 model 的確認提示）、ISSUE-197（task 內 reviewer 的 `inconclusive`，機制不同）。
+
 <a id="issue-201"></a>
 
 ## ISSUE-201：Bridge 最終合併未驗證 PR base
@@ -46,7 +59,7 @@
 
 ## ISSUE-197：卡片 reviewer 被要求核對自己看不到的 session 身分，連續三次回 `inconclusive`，耗掉規劃輪數
 
-更新日期：2026-11-23。狀態：**待調查**（現象與程式位置已確認；**成因只確認一半，尚未修正**）。
+更新日期：2026-11-23。狀態：**待調查**（現象與程式位置已確認；**成因只確認一半，尚未修正**；**第二輪重跑出現不同結果：依 reviewer 而異，見最後一則**）。
 
 - **使用者可見症狀：**ISSUE-191 修正後重跑卡片 `REQ-20261123-merge-entry-audit`（2026-11-23 07:27 UTC 起，Lead codex）：版本擷取沒有 overflow（驗收原因只剩 `no passing review for the current version`），但三個 reviewer 的 verdict 都是 `inconclusive`：本機 codex（07:33）找到兩處實質文字問題，之後被修正；本機 agy（07:36）與遠端 machine 的 codex（07:38）的內容核對**都沒有發現問題**，卻也回 `inconclusive`。三者給的理由相同：**它們看到的 Debug context 是 `session=none`，交接資料沒有作者的已知 session，所以無法確認「與作者不同的已知 session」**。Lead 因此一直追加指派，我寫這段時規劃已用到第 7 輪（上限 8）。
 - **預期行為：**reviewer 只審內容；「是否獨立」由 bridge 判定，reviewer 不必也不能核對。
@@ -56,10 +69,14 @@
 - **驗證：**尚無（只有觀察）。
 - **下一步：**等該卡片收尾後確認最終結果與耗用輪數，再決定修法。
 - **相關：**ISSUE-191（版本擷取 overflow，已修正、待驗收）、ISSUE-187（合併入口審計）、ISSUE-186（另一種卡住：claude 漏開頭標記）。
+- **累計與第二輪結果（2026-11-23，同一張卡、乾淨基準 `b9de32f`，task `task-09585cf6-5692-44d1-a475-9bd2e02ffd42`，08:58 至 09:07 UTC）：**task 內的 review 指派共 5 次：本機 codex `inconclusive`（07:33，找到兩處實質問題）、本機 agy `inconclusive`（07:36）、遠端 machine 的 codex `inconclusive`（07:38）、第二輪的本機 codex `inconclusive`（09:04，內容核對沒有問題，理由同樣是看不到可比對的 session 身分、session continuity 標為 `unknown`）、**遠端 machine 的 agy `pass`**（09:06，`independentReview: true`、沒有 finding）。後一個 `pass` 讓 `acceptance` 變成 `ok=True`，task 在規劃第 4 輪完成。
+- **這次 `pass` 的判斷依據要說清楚：**agy 的報告把「獨立」寫成依據「指派標示新 session 加上 agent 種類不同（agy 對本機 codex 作者）」，**不是它核對了具體的 session 識別碼**；bridge 自己算的 `independentReview` 對前面那些 `inconclusive` 的 review 也都是 `true`。所以這個問題**依 reviewer 而異**：同一套提示，5 次裡 4 次回 `inconclusive`、1 次 `pass`，**樣本太少，不能估計比例，也不能說 agy 比較好**。
+- **成因仍只確認一半：**沒有改變「Debug context 為什麼是 `session=none`」的未確認狀態；沒有修任何東西。**第一輪重跑**（`task-762ce9df…`）另外被 ISSUE-186 的 claude 漏開頭標記卡住，08:39 UTC 失敗；這份文件的修正（#355）已部署但那次之後沒有再遇到，仍未實機驗證。
+
 
 ## ISSUE-191：`docs/known-issues.md` 超過版本擷取的單檔上限（1 MiB），所有動到它的卡片都無法通過驗收
 
-更新日期：2026-11-23。狀態：已修正、待驗收（使用者選修法 3 與 4；原始碼與自動化測試通過；**尚未部署、未實機重跑失敗的卡片**）。先前：待調查。
+更新日期：2026-11-23。狀態：**已驗收（範圍有限，見最後一則）**。先前：已修正、待驗收（使用者選修法 3 與 4；原始碼與自動化測試通過）；再先前：待調查。
 
 **使用者可見症狀（2026-11-23，`REQ-20261123-merge-entry-audit`，bridge 為含 #352 的 main `871f9a0` 重啟後第一張撿的卡）：**task 的 9 個指派全部 `done`、沒有任何 finding，卻在 06:59:48 UTC 以 `Lead reached the planning round limit; task remains incomplete` 失敗；沒有開 PR。task 的 `acceptance` 是 `ok: false`，原因兩條：`version capture exceeded the read limit` 與 `no passing review for the current version`；4 次 review 全部是 `inconclusive`（獨立審查旗標為真），Lead 於是一直追加檢查指派，直到規劃輪數用完。卡片的交付物（新檔案 `docs/merge-gates.md` 約 13 KB 等）還留在卡片 worktree，未 commit。
 
@@ -86,6 +103,8 @@
 - **測試（2026-11-23，本機 macOS，worktree）：**新增 6 項（分段雜湊與整份 sha256 在分段邊界前後與空檔都相同；>1 MiB 的已追蹤檔案被擷取而不 overflow，內容改變 fingerprint 隨之改變；超過單檔上限仍 overflow 且原因寫出檔案名稱與上限；`overflowDetail` 不影響 fingerprint；overflow 時任務在當波結束後以含原因的訊息失敗、只問過一次規劃；沒有 overflow 時同一個一直追加指派的 Lead 仍照舊耗到規劃輪數上限）。暫時拿掉早停、把單檔上限改回 1 MiB、讓分段雜湊多算舊資料，各有 1、3、15 項失敗，已還原且逐字相同；完整 `npm test` 2264 項、通過 2263、失敗 0、略過 1；typecheck、lint 通過。
 - **真實檔案的前後對照（2026-11-23，探針，不是 bridge 日誌）：**對 1,092,650 位元組的 `docs/known-issues.md` 追加一行，用目前部署的舊版 build 做版本擷取：`overflow: true`；用新版：`overflow: false`、`deliveryPaths: ["docs/known-issues.md"]`；檔案已還原且逐位元組相同。
 - **未驗證：**部署重啟後重跑失敗的卡片（`REQ-20261123-merge-entry-audit`）是否能走完、review 是否不再 `inconclusive`；`git diff` 輸出 1 MiB 的上限仍在（一張卡若整段改寫大型檔案，diff 本身可能超過）；`docs/known-issues.md` 若繼續成長，8 MiB 離現在還很遠（目前約 1.04 MiB），但沒有評估成長速度；其他大檔案（`SPEC.md`、`README`）沒有逐一量；Lead 在 review 一直 `inconclusive` 但**不是** overflow 的情況下仍會追加指派到輪數上限，這次沒有處理。
+- **實機驗收（2026-11-23，本機 macOS，bridge 以含 #354 的 main 重啟）：**重跑失敗的卡片 `REQ-20261123-merge-entry-audit`，task `task-09585cf6-5692-44d1-a475-9bd2e02ffd42`（基準 main `b9de32f`，Lead codex）：8 個指派全部 `done`，規劃 4 輪（失敗那次是 9 個指派、耗盡規劃輪數）；**`coding_assessed` 在 09:07:03、09:07:04、09:07:22 連續三次 `acceptance ok=True`、`reasons` 為空**，沒有 `version capture exceeded the read limit`；task `completed`，卡片提交（`c7ed3a5`）、開 PR #356、CI 兩個平台通過，並合併為 `aaf02a8`。**這張卡修改了 `docs/known-issues.md`（約 1.09 MB，超過原本的 1 MiB 單檔上限）**，正是先前讓所有動到它的卡片失敗的條件。另外，先前一次重跑（task `task-762ce9df-a1b9-4c4a-b699-5239cfdc6bc5`，07:27 UTC 起）也在同一個檔案上沒有 overflow（我用部署的 build 對該卡 worktree 做版本擷取，`overflow: false`），但那次因別的原因失敗（見 ISSUE-186、ISSUE-197）。
+- **驗收範圍與仍未驗證：**驗證的是「大於 1 MiB 的已追蹤檔案不再讓版本擷取 overflow」與「卡片因此能走到驗收通過」。**沒有驗證：**`git diff` 輸出 1 MiB 的上限（沒有哪張卡逼近它）；超過 8 MiB 的檔案或檔案數 200 的上限；修法 4（overflow 時 Lead 早停）沒有在真實卡片上被觸發（只有自動化測試）；Lead 在 review 一直 `inconclusive` 但**不是** overflow 的情況仍會追加指派到輪數上限（失敗那次的 task `task-762ce9df…` 就是這樣，ISSUE-197）。
 
 
 ## ISSUE-190：`team ask`／`team discuss` 透過 Discord 傳檔案或圖片，附件被默默丟掉，Agent 沒有讀取
@@ -164,7 +183,7 @@
 
 **已確認（讀碼）：**上限是 `MAX_REVIEW_DIFF_CHARS = 80_000`（另有檔案數上限 `MAX_REVIEW_FILES`），**只在 PR 已開出來之後的 `card review` 才檢查**（`src/card-review.ts`、`src/card-review-fetch.ts`）；超過就回「請 Lead 把需求重新切分成較小的部分」，`src/card-loop.ts` 的 `loop` 步驟 `stop`。**沒有任何程式把這句話交給 Lead 執行**：Lead 在 task 結束後不會被叫回，也沒有「依序多個較小 PR」的機制。發現得太晚的成本：implement、verify、遠端 review 都已花掉才在最後一步被擋。
 
-**這次的處置（不是修正）：**使用者決定直接 merge #338（CI 綠；task 內獨立 review 為 pass、審的是同一版內容；PR 層級 review 因超過上限沒進行）。**merge 繞過了這個上限，PR 層級的 review 沒有做過**，詳見 ISSUE-186。
+**這次的處置（不是修正）：**使用者決定直接 merge #338（CI 綠；task 內獨立 review 為 pass（當時記載為審同一版內容，**這只是歷史記載，版本鏈尚未核對**：兩個本機 commit 的 tree 相同，但無法證明受審的工作樹指紋對應合併時的 PR head，見 `docs/merge-gates.md` 與 ISSUE-198）；PR 層級 review 因超過上限沒進行）。**merge 繞過了這個上限，PR 層級的 review 沒有做過**，詳見 ISSUE-186。
 
 **未確認：**(1) 上限 80000 字元是否合理（它的真正理由是 reviewer 的 context，沒有查設計文件）；(2) 這次 task 內的 review（遠端 codex）為何能審下 1859 行而 PR 層級會被擋，兩者的輸入大小規則是否不同；(3) 把已完成的實作切成多個依序 PR 是否可行（哪些檔案進哪個 PR、後面是否依賴前面）。
 
@@ -191,6 +210,8 @@
 - **分歧（未解決）：**預檢是硬限制還是只當提示；測試與產生檔要降權還是給摘要；超限後的人工出口開多寬；「按需取材」（讓 reviewer 自己去 repo 查）是否能證明看的是固定版本且涵蓋完整變更。
 - **Lead 彙整建議的組合（同儕對人工例外的門檻沒有共識）：**先盤點所有合併入口；再加交付後、verify 前的實測預檢（fix 後重算），規劃估算當提示；超限時保留成果並通知有明確接手責任的 Lead、提供可追蹤的人工覆核；若超限多半來自可獨立部署的範圍，才讓 Lead 拆成有依賴關係的卡；若常遇到無法安全切開的變更，再投資固定版本的分塊取材與全域覆核；可驗證的審查證據重用只當窄路徑；單獨調高上限成本低，但仍需量測審查品質，下一次超限仍需有人接手。
 - **我對這份討論的判斷（推論）：**同儕的新點裡，**「先盤點合併入口」與「預檢要用實測、放在 verify 之前」我認為最值得做**，比我原本的「commit 前估算」更準；「硬限制會犧牲測試」是真實的設計風險，值得在任何預算設計裡處理；其餘（取材白名單、證據重用、多卡拆分）都要先定義資料模型或驗證機制，不是小改動。**討論本身的限制：**摘錄有截斷、同儕的讀碼陳述未複查、成本與漏判率沒有任何量測。
+- **第一步（盤點合併入口）完成並合併（2026-11-23，`REQ-20261123-merge-entry-audit`）：**bridge 卡片流程在 main `b9de32f` 上產出 `docs/merge-gates.md`（12 個入口、每個入口四欄、區分已核對與未核對）與 ISSUE-198 至 ISSUE-201，PR #356 以 squash 合併為 `aaf02a8`（CI 兩個平台通過）。**注意這張 PR 不是依「bridge PR review `pass`」合併的：**bridge 的 PR review 前兩輪 reviewer 都 `blocked`（見 ISSUE-202），第 3 輪我手動指定 codex 當 reviewer，結果是 `changes_requested`（兩個 medium 的文件精確度問題），再來是**使用者明確要求合併**（「ci綠就merge」），所以是在有 open finding 的情況下合併；兩項發現隨後在文件 PR 中修正（`docs/merge-gates.md` 手動 CLI、網頁、API 三列的 review 欄改為分開寫「Bridge 卡片閘門」與「GitHub 規則」；本節上面「同一版內容」改為歷史記載）。**修正後沒有再做一次 review。**
+- **仍然沒有核對的（沿用 `docs/merge-gates.md`）：**現行 GitHub 權限、分支保護與 ruleset 的線上設定、#338 實際合併介面與當時 PR head；這些需要唯讀的線上查詢，本卡禁止使用 GitHub。下一步 `REQ-20261123-precheck-diff-size` 仍是 `draft`；ISSUE-191 已實機驗證，可以改為 `ready`，由使用者決定。
 
 
 ## ISSUE-186：team discuss 唯讀同儕討論與缺空格提示
@@ -242,6 +263,8 @@
   - **修正（2026-11-23，使用者選修法 1）：**只在 hook 路徑容許缺開頭標記：hook 訊息**完全沒有開頭標記**、且**結尾標記是訊息最後的內容**（其後只有空白）時，取結尾標記之前的全文當回覆（`extractUnopenedFrame`，結尾標記被窄終端機切開也算）。**不放寬的情況：**畫面讀取（畫面會含提示回顯，缺開頭標記時分不出哪些是回覆）；有開頭標記但沒結尾標記；結尾標記之後還有文字；結尾標記前沒有內容（維持 `completed without a report`）。`card review`／`card fix` 與 Team 任務共用 `runTeamTurn` 與同一個 hook 取框，所以同樣適用，**這部分沒有逐一實機驗證**。
   - **測試（2026-11-23，本機 macOS，worktree）：**`team-turn` 新增 6 項（缺開頭標記的 hook 回覆被接受；結尾標記被切開仍接受；結尾標記後還有文字不接受；有開頭沒結尾不接受；只有結尾標記沒內容回報空回覆；畫面只有結尾標記不放寬）。暫時讓後備永遠回傳 `undefined`：3 項預期的測試失敗；暫時拿掉「結尾標記後不得有文字」那一行：1 項失敗；兩者都已還原，`git diff` 確認只剩預期的改動；`team-turn` 測試 42 項全過。完整 `npm test`（2026-11-23）2270 項、通過 2269、失敗 0、略過 1；typecheck、lint 通過。
   - **未驗證：**部署重啟後在真實卡片或 `team discuss` 中，claude 再漏開頭標記時是否真的完成；agy 那種「標記成對卻判逾時」的原因（診斷日誌 `[turn-timeout-diag]` 尚未等到重現）；claude 為什麼偶爾漏寫第一行（模型行為，沒有調查，也沒有改提示）；回覆同時漏了結尾標記的情況沒有改善。**目前那個卡住的指派不會因為這個修正而恢復**（修正尚未部署，執行中的 bridge 仍是舊版）。
+- **診斷日誌的第一筆實證（2026-11-23 08:39 UTC，ISSUE-191 重跑的第一輪，task `task-762ce9df…` 的診斷指派逾時，bridge console 的 `[turn-timeout-diag]`）：**`agent: claude`、`lastStatus: idle`、`hookMode: wired`、`hook: {present: true, chars: 3230, begins: 0, ends: 1, frame: false}`、`transcript: none`；四個讀取來源（`recent_unwrapped`、`recent`、`visible`、`detection`）逾時當下都是 `begins: 0, ends: 0`（畫面內容在 08:00 與 08:39 之間已不同）。**這與上一則「claude 漏寫開頭標記」的根因一致**：hook 訊息有到、長度與 claude 逐字稿相同、只有結尾標記。指派等到 60 分鐘的回合上限才失敗（`Timed out waiting for current response…; no verified completion`）。
+- **修正 #355 的部署與驗證狀態（2026-11-23）：**含 #355 的 build 已於 08:44 UTC 部署（`dist` 內有 `extractUnopenedFrame`），之後的重跑沒有再遇到 claude 漏開頭標記，所以**修正尚未被真實情境觸發過，仍是「已修正、待驗收」**；agy 那種「標記成對卻判逾時」仍是根因未確認。
 
 
 ## ISSUE-185：卡片指派的 Lead 剛就緒就送提示，撞到跳過更新選單後短暫的 `working`，任務沒有啟動（`agent is busy`）
