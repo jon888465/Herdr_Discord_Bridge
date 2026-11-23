@@ -86,6 +86,7 @@ import {
 } from "./card-worktree-flow.js";
 import { startAgentInPane } from "./agent-start.js";
 import { doneAsReady, waitUntilReady } from "./agent-ready.js";
+import { settleWorkingAgent } from "./lead-settle.js";
 import {
   parseAgentStartArgs,
   runAgentStart,
@@ -2298,7 +2299,19 @@ async function startTeamTask(
   const remoteRoles = coding && runtime.herdr instanceof HerdrHub && remoteReviewers.length ? remoteRoleCandidates(cardRoleContext(runtime)) : [];
   if (remoteRoles.length) workers.push(...remoteRoleTargets(cardRoleContext(runtime), workspaceId));
   assertCodingRoster(coding, workers.length);
-  assertAgentAvailable(lead, runtime);
+  // ISSUE-185：卡片指派的 Lead 剛就緒時可能還在短暫 working，先等它穩定；一般 `team ask` 遇到真的忙碌仍立即拒絕。
+  assertAgentAvailable(
+    cardId
+      ? await settleWorkingAgent(
+          async () =>
+            (await runtime.herdr.listAgentsWithWorkspaceNames()).find(
+              (agent) => agent.pane_id === lead.pane_id,
+            ),
+          lead,
+        )
+      : lead,
+    runtime,
+  );
 
   const taskId = `task-${randomUUID()}`;
   if (!runtime.tasks) throw new Error("Team Task Engine unavailable");
