@@ -1,5 +1,18 @@
 # Known Issues
 
+## ISSUE-197：卡片 reviewer 被要求核對自己看不到的 session 身分，連續三次回 `inconclusive`，耗掉規劃輪數
+
+更新日期：2026-11-23。狀態：**待調查**（現象與程式位置已確認；**成因只確認一半，尚未修正**）。
+
+- **使用者可見症狀：**ISSUE-191 修正後重跑卡片 `REQ-20261123-merge-entry-audit`（2026-11-23 07:27 UTC 起，Lead codex）：版本擷取沒有 overflow（驗收原因只剩 `no passing review for the current version`），但三個 reviewer 的 verdict 都是 `inconclusive`：本機 codex（07:33）找到兩處實質文字問題，之後被修正；本機 agy（07:36）與遠端 machine 的 codex（07:38）的內容核對**都沒有發現問題**，卻也回 `inconclusive`。三者給的理由相同：**它們看到的 Debug context 是 `session=none`，交接資料沒有作者的已知 session，所以無法確認「與作者不同的已知 session」**。Lead 因此一直追加指派，我寫這段時規劃已用到第 7 輪（上限 8）。
+- **預期行為：**reviewer 只審內容；「是否獨立」由 bridge 判定，reviewer 不必也不能核對。
+- **已確認（2026-11-23，我讀 task 紀錄與原始碼）：**(1) bridge 自己算出的 `independentReview` 對這三個 review artifact **都是 `true`**，沒有 `independenceFailure`；`inconclusive` 是 reviewer 自己回報的 `reportedVerdict`。(2) Coding 規劃提示（`src/coding-workflow.ts:276`）寫「reviewer 必須是與作者不同的已知 session；不同 pane 不算證據」，reviewer 看得到這句話，卻看不到 session 證據，只能回 `inconclusive`。(3) Lead 的診斷指派（claude）讀 task 紀錄後得到同樣結論；**那是 Worker 的報告，我另外核對了 artifact 欄位，沒有逐一核對它引用的每個欄位**。
+- **未確認：**Debug context 為什麼對這些 reviewer 顯示 `session=none`（是新啟動的 pane 還沒有 session、是遠端 machine 沒有 hook，或是 bridge 本來就不把 session 放進 Debug context）；Lead 是否會在剩下的輪數裡自己走出這個迴圈。
+- **可能的修法（未做、未決定）：**(a) 在給 reviewer 的指示明寫「獨立性由 bridge 判定，你只審內容並回 `pass`／`fail`，不要因為看不到 session 而回 `inconclusive`」；(b) 把 reviewer 該看的身分欄位放進 Debug context。兩者都**不是**降低驗收標準：`stableReview` 仍要求 bridge 算出的 `independentReview === true`。
+- **驗證：**尚無（只有觀察）。
+- **下一步：**等該卡片收尾後確認最終結果與耗用輪數，再決定修法。
+- **相關：**ISSUE-191（版本擷取 overflow，已修正、待驗收）、ISSUE-187（合併入口審計）、ISSUE-186（另一種卡住：claude 漏開頭標記）。
+
 ## ISSUE-191：`docs/known-issues.md` 超過版本擷取的單檔上限（1 MiB），所有動到它的卡片都無法通過驗收
 
 更新日期：2026-11-23。狀態：已修正、待驗收（使用者選修法 3 與 4；原始碼與自動化測試通過；**尚未部署、未實機重跑失敗的卡片**）。先前：待調查。
@@ -135,7 +148,7 @@
 
 ## ISSUE-186：team discuss 唯讀同儕討論與缺空格提示
 
-更新日期：2026-11-23。狀態：**重新開啟／待調查（agy 同儕不穩定地被標 `incomplete`：2026-11-23 05:15 UTC 又出現，根因未確認，見最後一則）；主路徑的 Discord 實機驗收（2026-11-23）與先前的修正歷史保留如下**。先前：已驗收（Discord thread 主路徑，範圍有限，見下方「Discord 實機驗收」）；再先前：已修正、待驗收。需求 REQ-20261120-team-discuss。
+更新日期：2026-11-23。狀態：**重新開啟／待調查（agy 同儕不穩定地被標 `incomplete`：2026-11-23 05:15 UTC 又出現，根因未確認，見「agy 再度未完成」那則）；另有一種**不同機制**的現象（claude 漏寫開頭標記）根因已確認、已修正、待驗收，見最後一則；主路徑的 Discord 實機驗收（2026-11-23）與先前的修正歷史保留如下**。先前：已驗收（Discord thread 主路徑，範圍有限，見下方「Discord 實機驗收」）；再先前：已修正、待驗收。需求 REQ-20261120-team-discuss。
 
 - 症狀／根因：Discord 或 console 輸入 `team ask討論…` 時，切字保留了緊接的文字，Team dispatcher 落到通用 usage。一般 `team ask` 只用已配置的 Workers，單 Agent workspace 缺少獨立同儕討論與新 session 後備。ISSUE-185 是之前卡片指派的 Lead 就緒競態，與本指令實機驗收分開追蹤。
 - 修正／預期：`team discuss` 以本機 active Agent 彙整，優先使用 workspace 同儕，缺額由 Claude Sonnet、Codex、Agy 的新 session 補上。新增缺空格提示、額度與模型來源回報、獨立／匿名唯讀回合、工作樹指紋、workspace scope cancel 與 owned pane 清理。見 [SPEC](../SPEC.md#本機唯讀同儕討論)。
@@ -175,6 +188,13 @@
 - **agy 再度未完成，這次是第三種現象（2026-11-23 05:15 至 05:18 UTC，同一次 ISSUE-188 驗收，bridge 含第一回合 120 秒的修正 #343）：**`C wAR:p4: Timed out waiting for current response from wAR:p4 (last state: done); no verified completion`，`Limits reached: time`，`verified replies by round: 2`（claude 與 codex），agy 被標 `incomplete`，pane 依契約保留。**對照：**agy 約 81 秒就回到 `done`（在 120 秒預算內），所以不是第一回合太慢；bridge 一直等到約 120 秒逾時。**我讀了保留的 agy pane（只讀）：**回覆是完整的，畫面上有成對的 `BRIDGE_BEGIN_`／`BRIDGE_END_` 標記、內容分好幾節。**bridge 日誌：**agy 的 Stop hook 有送到（`hook Stop … pane=<agy pane> chars=2254`），其長度 **2254 字元超過要求的 2200 字元上限（`REPORT`）**；claude 同場只有 1052 字元。設定的 `hookTransport` 對 agy 是 `auto`。**讀碼（`src/team-turn.ts`、`src/turn-hook-final.ts`）：**turn 結束要嘛從 hook 的最終訊息、要嘛從 pane 讀回的文字，以標記框 `extractFrame` 取出回覆；取不到框就一直輪詢到逾時，訊息就是 `no verified completion`。**未確認（不要當根因）：**到底是 hook 的訊息沒有完整的標記框，還是 pane 讀回的行數窗口（`outputLines`）容不下這麼長的回覆而丟了 `BEGIN`，或是別的原因；「超過 2200 字元」只是同時出現的現象，沒有驗證因果；為什麼前兩場（三個同儕都有有效回覆）的 agy 沒事，也沒查。**下一步：**用保留的現場重現框的取出（把該 pane 的文字與 hook 訊息餵給 `extractFrame`），或在逾時時把 hook 訊息與 pane 讀取結果的框狀態寫進日誌；在此之前，agy 同儕可能不穩定地被標 `incomplete`，討論仍會用其他同儕完成。
 - **agy 完成與否的累計（2026-11-23，含第一回合 120 秒修正 #343 之後）：**共 3 場有 agy 的討論，2 場有效完成（Discord 那場約 86 秒；ISSUE-187 討論約 97 秒，`verified replies by round: 3, 3`），1 場 `incomplete`（ISSUE-188 驗收，上一則）。樣本太少（3 場），不能據此估計頻率，也沒有改變該則的「根因未確認」。
 - **診斷日誌（2026-11-23，使用者同意先加診斷，尚未部署）：**`runTeamTurn`（`src/team-turn.ts`）在**丟出 `no verified completion` 逾時錯誤之前**，多記一行 `[turn-timeout-diag] {…}` 到 bridge console：pane、Agent 種類、最後狀態、hook 是否有接線，以及**兩條取框路徑各自看到什麼**——hook 最終訊息與每個讀取來源的 pane 文字，各記長度、`BEGIN`／`END` 標記出現次數、是否取得到框（`extractFrame`）、pane 文字是否等於派送前的基準。**只記數字與布林，不記任何回覆內容**；診斷失敗不會改變原本的逾時錯誤，也沒有改變任何判定或等待行為。**測試（2026-11-23，本機 macOS，worktree）：**新增 2 項（逾時時剛好一行診斷、欄位正確、不含回覆內容、原錯誤不變；正常完成不記）；暫時改掉診斷前綴、以及讓診斷偷偷記回覆內容，各 1 項失敗，已還原且逐字相同；`team-turn` 測試 36 項全過，完整 `npm test` 2258 項、通過 2257、失敗 0、略過 1；typecheck、lint 通過。**用途與限制：**之後再出現 agy `incomplete` 時，這一行能告訴我們是 hook 訊息沒有完整標記框、pane 讀取沒有 `BEGIN`、還是兩者都有框卻仍判逾時；**它不修任何東西，也不會讓問題變少**；要等 bridge 部署重啟、問題重現才有資料。
+- **claude 回覆漏寫開頭標記（2026-11-23 07:39 UTC，ISSUE-191 修正後重跑卡片 `REQ-20261123-merge-entry-audit` 的診斷指派；根因已確認，已修正、待驗收）：**
+  - **症狀：**claude Worker 約 07:39:45 就把回覆寫完（pane 狀態 `done`），bridge 卻一直不記錄完成；task 事件停在 `turn_dispatched`，我在 07:58 UTC 觀察到已超過 19 分鐘仍未完成，會等到回合上限才以 `no verified completion` 逾時。
+  - **根因（只讀查證，2026-11-23）：**那一則回覆**只有結尾標記、沒有開頭標記**。claude 自己的 session 逐字稿最後一則回覆 3230 字元，`BRIDGE_BEGIN_<nonce>` 出現 0 次、`BRIDGE_END_<nonce>` 出現 1 次，開頭直接是正文；bridge 日誌的 Stop hook 訊息長度 `chars=3230` 與它完全相同，所以 hook 訊息就是這則回覆；pane 的 `visible`／`recent`／`recent_unwrapped` 三種讀取也都是開頭標記 0 個、結尾標記 1 個。`runTeamTurn` 的兩條取框路徑（hook 訊息與 pane 讀取）都要求「最後一個開頭標記之後找得到結尾標記」（`extractFrame`），所以都取不到框。同一個 claude session 先前兩個回合都有成對標記（1599、1446 字元），所以是這一次沒照提示寫第一行，不是每次都發生。提示確實有要求「Opening marker (first line)」。
+  - **與 agy 那次不同：**agy 那次（上一則）pane 畫面上標記是成對的，所以這個原因**不能**拿來解釋 agy；agy 仍是「根因未確認」。
+  - **修正（2026-11-23，使用者選修法 1）：**只在 hook 路徑容許缺開頭標記：hook 訊息**完全沒有開頭標記**、且**結尾標記是訊息最後的內容**（其後只有空白）時，取結尾標記之前的全文當回覆（`extractUnopenedFrame`，結尾標記被窄終端機切開也算）。**不放寬的情況：**畫面讀取（畫面會含提示回顯，缺開頭標記時分不出哪些是回覆）；有開頭標記但沒結尾標記；結尾標記之後還有文字；結尾標記前沒有內容（維持 `completed without a report`）。`card review`／`card fix` 與 Team 任務共用 `runTeamTurn` 與同一個 hook 取框，所以同樣適用，**這部分沒有逐一實機驗證**。
+  - **測試（2026-11-23，本機 macOS，worktree）：**`team-turn` 新增 6 項（缺開頭標記的 hook 回覆被接受；結尾標記被切開仍接受；結尾標記後還有文字不接受；有開頭沒結尾不接受；只有結尾標記沒內容回報空回覆；畫面只有結尾標記不放寬）。暫時讓後備永遠回傳 `undefined`：3 項預期的測試失敗；暫時拿掉「結尾標記後不得有文字」那一行：1 項失敗；兩者都已還原，`git diff` 確認只剩預期的改動；`team-turn` 測試 42 項全過。完整 `npm test`（2026-11-23）2270 項、通過 2269、失敗 0、略過 1；typecheck、lint 通過。
+  - **未驗證：**部署重啟後在真實卡片或 `team discuss` 中，claude 再漏開頭標記時是否真的完成；agy 那種「標記成對卻判逾時」的原因（診斷日誌 `[turn-timeout-diag]` 尚未等到重現）；claude 為什麼偶爾漏寫第一行（模型行為，沒有調查，也沒有改提示）；回覆同時漏了結尾標記的情況沒有改善。**目前那個卡住的指派不會因為這個修正而恢復**（修正尚未部署，執行中的 bridge 仍是舊版）。
 
 
 ## ISSUE-185：卡片指派的 Lead 剛就緒就送提示，撞到跳過更新選單後短暫的 `working`，任務沒有啟動（`agent is busy`）
