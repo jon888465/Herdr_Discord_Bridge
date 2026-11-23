@@ -1,5 +1,25 @@
 # Known Issues
 
+## ISSUE-189：Team 名單殘留一個失效 Worker，整個 `team ask` 直接失敗
+
+更新日期：2026-11-23。狀態：已修正、待驗收（原始碼與自動化測試完成；**執行中的 bridge 尚未重啟，未在 Discord 實機驗收**）。
+
+**使用者可見症狀（2026-11-23 11:16，Discord thread，workspace `w3`／`git_wk`）：**先 `agent use w3:p1` 成功，接著 `team ask 討論還有哪些該注意或沒想到的`（附 `langpacks.drawio`），bridge 回「❌ Team Worker pane w3:p3 is stale or unavailable」，沒有任何 Agent 收到問題。使用者以為 `agent use` 已改成 `w3:p1`，不懂為何還提 `w3:p3`。
+
+**預期：**`agent use` 選的是 Lead；Team 的其他成員是另一份持久化名單。名單中某個成員失效時，應略過它（並告知）或明確說「名單中的 `w3:p3` 已失效，用 `team remove w3:p3` 移除」，而不是整個任務失敗且不給處理方式。
+
+**已確認（讀碼）：**`src/main.ts` 的 `startTeamTask` 以 `agent use` 綁定的 pane 當 Lead，其餘 Worker 取自 `routing.workspaceTargets(workspaceId)`（`team add` 持久化的名單）。對每個 Worker 在即時 Agent 清單中找不到就直接 `throw`，所以只要名單裡有一個已關閉的 pane，整個 `team ask` 就失敗。這符合 SPEC「stale 成員不能 dispatch」，但 SPEC 沒有要求一個 stale 成員就讓整個任務失敗。同類情況 2026-11-05 也出現過（`w1:p8`，見 ISSUE-085 的 2026-11-05 實機嘗試紀錄，當時只當成驗收環境問題）。`w3:p3` 何時、如何關閉沒有查。
+
+**目前的處理方式（不是修正）：**在該 thread 執行 `team list` 確認名單，再 `team remove w3:p3` 移除失效成員後重試 `team ask`。
+
+**同一輪的第二則訊息（不是新 bug）：**使用者在另一個 thread（`w5D`）問「agent use w3:p1後 team ask 怎麼還是說w3p:3」，因為開頭是 `agent use`，被當成指令，整句後面被當成 workspace 名稱，回「workspace '…' was not found or is not authorized」。這是 ISSUE-029 已記錄的副作用：免 mention 的 thread 中，以已知指令字開頭的普通對話會被當成指令。
+
+**修正（2026-11-23，使用者選定「略過並列出」）：**`startTeamTask` 遇到 Herdr 查不到的 Worker pane 時不再 `throw`，改為略過並收集到 `staleWorkers`，bridge console 印一行紀錄。「Team Task accepted」回條多一行「⚠️ Skipped stale Team Workers: `w3:p3` · remove with `team remove w3:p3`」。`team ask` 與卡片啟動的任務共用這段，所以都適用。**不變的部分：**不自動刪除持久化名單；Lead 失效、Worker 身分不符或 workspace 未授權仍擋下整個任務。全部 Worker 都失效時，非 coding 任務由 Lead 以零 Worker 執行，`--coding` 走既有的自動啟用 profile 流程。SPEC、README、README.zh-TW 已同步。
+
+**測試（2026-11-23）：**新增 `test/coding-workflow.test.ts` 的「ISSUE-189: team ask skips a stale Team Worker…」，修正前失敗（`Team Worker pane w1:p9 is stale or unavailable`），修正後通過；`--test-name-pattern="ISSUE-189|team ask"` 2/2 通過。`npm run typecheck`、`npm run lint`（282 檔）、`npm run build` 通過。完整 `node --test dist/test/*.test.js`（2255 項）一次跑完時 18 失敗、23 取消，集中在 `team-task-engine`、`run-sh-args`、`coding-workflow` 等檔的逾時與取消；把有失敗的 7 個檔案逐一單獨重跑：`team-task-engine` 41/41、`coding-workflow` 33/33、`cli-adapter` 34/34、`session-handoff` 27/27、`runtime-core-bridge` 12/12、`card-review-flow` 24/24 全過，`run-sh-args` 第一次 55/56，再跑兩次 56/56。判斷為整批並行跑時的負載逾時，與本修改無關，但沒有在 HEAD 上跑同一批作對照。
+
+**未驗證／下一步：**重啟 bridge 後，在 `w3` 的 thread 以名單仍含 `w3:p3` 的狀態執行 `team ask`，確認回條列出略過的 pane、其餘成員正常回覆，再改為已驗收。
+
 ## ISSUE-188：`team discuss` 的 Lead 是使用者自己的互動 session，彙整會把該 session 的先前對話內容帶進討論結果與 Discord thread
 
 更新日期：2026-11-23。狀態：待調查（現象與原因已確認；**尚未修正，是否修與怎麼修待使用者決定**）。

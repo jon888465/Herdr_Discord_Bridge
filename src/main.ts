@@ -2333,6 +2333,8 @@ async function startTeamTask(
   taskId: string;
   lead: AgentRecord;
   workers: AgentRecord[];
+  /** ISSUE-189：Team 名單中 Herdr 已查不到的 Worker pane；本次略過，不刪名單。 */
+  staleWorkers: string[];
   running: Promise<DurableTeamTask>;
 }> {
   const roleCard = cardId
@@ -2362,17 +2364,23 @@ async function startTeamTask(
   if (!lead)
     throw new Error(`Lead pane ${leadTarget.paneId} is stale or unavailable`);
   validateAgentTarget(lead, leadTarget, runtime.config.allowedWorkspaceIds);
+  // ISSUE-189：名單中已失效的 Worker 只略過並回報，不讓整個任務失敗；身分不符或未授權仍擋下。
+  const staleWorkers: string[] = [];
   const workers = targets
     .filter((target) => target.paneId !== lead.pane_id)
-    .map((target) => {
+    .flatMap((target) => {
       const agent = agents.find((item) => item.pane_id === target.paneId);
-      if (!agent)
-        throw new Error(
-          `Team Worker pane ${target.paneId} is stale or unavailable`,
-        );
+      if (!agent) {
+        staleWorkers.push(target.paneId || target.agentName || "unknown pane");
+        return [];
+      }
       validateAgentTarget(agent, target, runtime.config.allowedWorkspaceIds);
-      return agent;
+      return [agent];
     });
+  if (staleWorkers.length)
+    console.log(
+      `team ask：workspace ${workspaceId} 略過失效的 Team Worker：${staleWorkers.join(", ")}`,
+    );
   workers.push(...(runtime.pool?.roster(workspaceId) || []));
   // E14：--coding 沒有指定 Worker 時，自動候選為 claude／codex／pi 與 capabilities 含 implementation／review 的 agy。
   // capabilities 只決定自動入池，誰寫誰審交給 Lead。
@@ -2629,7 +2637,7 @@ async function startTeamTask(
   );
   // Register/persist before the receipt. A delivery failure must not orphan execution.
   void running.catch((error) => console.error(safeError(error)));
-  return { taskId, lead, workers, running };
+  return { taskId, lead, workers, staleWorkers, running };
 }
 
 async function teamAsk(
@@ -2648,13 +2656,22 @@ async function teamAsk(
 
 /** 送出「已接受」回條、等任務結束、再送出結果。 */
 async function reportTeamTask(
-  { taskId, lead, workers, running }: Awaited<ReturnType<typeof startTeamTask>>,
+  {
+    taskId,
+    lead,
+    workers,
+    staleWorkers,
+    running,
+  }: Awaited<ReturnType<typeof startTeamTask>>,
   context: CommandContext,
   runtime: Runtime,
 ): Promise<void> {
+  const skipped = staleWorkers.length
+    ? `\n⚠️ Skipped stale Team Workers: ${staleWorkers.map((pane) => `\`${pane}\``).join(", ")} · remove with ${staleWorkers.map((pane) => `\`team remove ${pane}\``).join(", ")}`
+    : "";
   await runtime.discord.reply(
     context.message,
-    `${agentHeaderFor(lead)}\n🧭 **Team Task accepted** · \`${taskId}\`\nLead: **${agentLabel(lead)}**\nWorkers: ${workers.map(agentLabel).join(", ")}`,
+    `${agentHeaderFor(lead)}\n🧭 **Team Task accepted** · \`${taskId}\`\nLead: **${agentLabel(lead)}**\nWorkers: ${workers.map(agentLabel).join(", ")}${skipped}`,
   );
   const result = await running;
   await runtime.discord.reply(
