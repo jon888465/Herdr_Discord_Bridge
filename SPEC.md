@@ -204,6 +204,8 @@ mapping 過期時，一律 fail closed。
 
 共用 `waitUntilReady` 用於 autopick 來源 Lead、worktree Lead、fresh role／單一 coding profile Worker；persistent profile pool 亦接入此等待。`card review` 的 reviewer 與 `card fix` 的 fixer 也用它，且只在等待就緒這一步把 `done` 當 `idle`（ISSUE-173，2026-11-19，已修正、待驗收；codex 的 hook 只回報 session，狀態由畫面推斷，剛啟動可能顯示 done）。只有預期 CLI 已被辨識且 idle／done（呼叫端明確選用 doneAsReady）才就緒；pane／terminal／workspace／CLI 被替換即失敗。就緒不保證 Herdr 已登記 active named agent，首次 prompt 的有界 agent_not_ready 重試仍見 ISSUE-137。
 
+卡片指派（有 cardId）的 Lead 在送第一個提示前若狀態是 `working`，先每 500 ms 重讀、最多等 15 秒讓它穩定（跳過更新選單後 codex 會短暫 working）；逾時仍 working 才以 busy 拒絕，一般 `team ask` 不受影響（ISSUE-185，2026-11-23，已修正、待驗收）。
+
 卡片 worktree 的 Lead 在 `agent.start` 回傳時只要不是 `idle`／`done`（含 `working`、`blocked`、啟動初期的 `unknown`）就先等就緒再判斷，不直接判未就緒（ISSUE-183，2026-11-20，已修正、待驗收）。
 
 僅在 blocked 且 visible 畫面完整符合觀察到的 Codex 更新選單時自動選 **`2. Skip`**。畫面須有 `Update available · <semver> → <semver>` 與依序精確選項 `1. Update now`、`2. Skip`、`3. Skip until next version`；容許空白、ANSI 樣式、`›` 選取標記、已知 release notes 網址、`enter continue · esc skip` 底列，以及既有觀察到的 brew 更新說明。任何額外文字、一般 question、approval、信任、權限、登入、缺選項、不同編號或其他 CLI 均 fail closed，不送按鍵。不得選 Update now 或 Skip until next version，也不改私人設定／policy。

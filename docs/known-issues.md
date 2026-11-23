@@ -1,5 +1,17 @@
 # Known Issues
 
+## ISSUE-185：卡片指派的 Lead 剛就緒就送提示，撞到跳過更新選單後短暫的 `working`，任務沒有啟動（`agent is busy`）
+
+更新日期：2026-11-23。狀態：已修正、待驗收（原始碼、自動化測試與探針通過；**尚未部署重跑、未實機驗收**）。
+
+**使用者可見症狀（2026-11-23 01:19 UTC，`REQ-20261120-team-discuss` 第七次嘗試，ISSUE-181／183／184 的修正都已部署）：**worktree 建好、兩個 Lead（codex）都成功跳過更新選單且事後是 `done`，但 autopick 以「worktree 已建立…但任務沒有啟動：agent is busy (wAB:p1); wait for it to settle before assigning another prompt」失敗；卡片仍是 `ready`，要重試得重啟 bridge（autopick 的 `attempted` 集合在記憶體，見 `src/autopick.ts`）。前一輪（2026-11-20）同一條路徑是成功的，所以是不穩定的。
+
+**預期：**Lead 剛就緒時的短暫忙碌不應讓任務啟動失敗；真的在忙時才拒絕。
+
+**根因（已直接量到）：**`startTeamTask`（`src/main.ts`）在送第一個提示前用 `assertAgentAvailable(lead)` 讀一次狀態，`working` 就直接丟 busy、不重試。2026-11-23 用 production 的 `HerdrClient`＋`startAgentInPane`＋`waitUntilReady` 在真實 Herdr 對 codex 啟動 3 次，`waitUntilReady` 回 `ok=true`（`idle`）之後每 100 ms 取樣狀態：1 次在 +314 ms 變 `working`、約 1.2 秒後才變 `done`（另 2 次直接 `done`）。這個短暫 `working` 就是 codex 跳過更新選單後載入工作階段的時段，剛好落在送提示的瞬間就失敗。
+
+**修正（2026-11-23）：**新增 `src/lead-settle.ts` 的 `settleWorkingAgent`：Lead 是 `working` 就每 500 ms 重讀、最多等 15 秒，狀態改變即回傳；逾時仍 `working`、讀取失敗或 pane 不見則回傳最後已知紀錄，由原本的忙碌檢查拒絕。**只對卡片指派（有 `cardId`）的 Lead 使用**，一般 `team ask` 遇到真的忙碌仍立即拒絕，行為不變。**測試（2026-11-23，本機 macOS，worktree）：**新增 4 項（短暫 working 後 idle 要等到、不是 working 不重讀、逾時仍 working 原樣回傳、讀取失敗或 pane 消失保留最後紀錄）；暫時讓函式不輪詢，2 項失敗，已還原且逐字相同；完整 `npm test` 2234 項、通過 2233、失敗 0、略過 1；typecheck、lint 通過。**未驗證：**`startTeamTask` 的接線沒有單元測試（`main.ts` 內沒有接縫）；部署重啟後重跑 team discuss；15 秒是否足夠；為什麼 1/3 的探針才出現（其餘直接 `done`）。
+
 ## ISSUE-184：跳過更新選單後，Herdr 的 agent_status 還停在 `blocked`，下一輪輪詢又被判「卡在啟動提示」（Worker 池）
 
 更新日期：2026-11-20。狀態：已修正、待驗收（2026-11-20 稍晚：**根因已直接重現並確認**；原始碼、自動化測試與壓力探針通過；**尚未部署重跑 team discuss、未實機驗收**）。先前（同日）的狀態與推論見下方各段，其中「輪詢時狀態落後」只是次要因素。
