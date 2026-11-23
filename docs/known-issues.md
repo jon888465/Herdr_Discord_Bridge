@@ -50,6 +50,13 @@
   - **仍沒有驗證：**Discord thread 路徑與長結果分段；agy 的有效回覆（這次逾時）；整體 5 分鐘上限；額度阻擋；同儕回報 Opus 時停止派送；工作樹被改動時的警告（兩場指紋都相符，我也獨立確認主 checkout 乾淨）；匿名（A／B／C、不含種類與模型）仍只由提示長度與結果推論，沒有逐字檢查各輪送出的提示；討論內容品質沒有獨立評估。
   - 下一步：決定 agy 新 session 第一回合的處理方式（例如對新 session 的第一回合給較長預算、或先暖機，需先決定，尚未修正）；從 Discord thread 執行一次。
 - agy 逾時的修正（2026-11-23，使用者選「對新 session 的第一回合給較長預算」）：bridge 新開、尚未送過提示的同儕，第一回合的等待上限由 60 秒改為 120 秒（`src/team-discuss.ts` 的 `FIRST_TURN_LIMIT_MS`；`startDiscussion` 的 `firstTurnMs` 可覆寫，測試用；`turnMs` 有設而 `firstTurnMs` 沒設時沿用 `turnMs`，既有測試不受影響）；之後的回合、Lead、workspace 既有同儕仍是 60 秒，整體 5 分鐘上限不變。**測試（2026-11-23，本機 macOS，worktree）：**新增 2 項（新 session 第一回合 120 秒、第二回合與 Lead 60 秒；workspace 既有同儕全部 60 秒）；測試 fixture 改為記錄每次提示實際的等待上限；暫時把「是否為新 session 第一回合」恆設為 false，1 項失敗，恆設為 true，2 項失敗，已還原且逐字相同；`team-discuss` 測試 20 項全過，完整 `npm test` 2254 項、通過 2253、失敗 0、略過 1；typecheck、lint 通過。**未驗證：**部署後 agy 新 session 在真實討論中是否在 120 秒內回覆（探針只量到 59 至 77 秒，沒有量三個同時跑）；120 秒是否足夠、最壞情況（第一輪 120 秒加第二輪 60 秒加 Lead 彙整）是否仍在整體 5 分鐘內，只是算術推論，沒有實測。
+- 第三次部分實機驗收（2026-11-23 02:54 至 02:57 UTC，本機 macOS，**bridge console，仍不是 Discord thread**；bridge 為 main `0ec0ebd`（含第一回合 120 秒的修正 #343）重啟後的程序；**狀態維持「已修正、待驗收」**）：
+  - 環境：與第二次相同，專用 workspace、cwd 為本機 agy 已信任的路徑、只有一個 codex Lead（`team list` 確認沒有同儕）；驗收前後主 checkout 的 `git status` 皆 0 筆（我獨立確認，不只看 bridge 的指紋）。
+  - **看到的：**`discuss-bdf92a99…` 結果為 `Team Discussion completed`（先前兩場是 `completed with gaps` 或被取消）；`Peer rounds run: 2/2 (verified replies by round: 3, 3)`，**三個同儕（claude `model sonnet (launch argument)`、codex、agy）兩輪都有有效回覆**，agy 沒有 `incomplete`；`Limits reached: participant output, peer excerpt`（部分回覆被長度上限截斷，結果內也標明「三份討論均有截斷」）；`Worktree fingerprints matched`；四節齊全，共識與分歧明確引用 A、B、C 三方；整場約 2 分 53 秒（02:54:23 接受、02:57:16 結果），在 5 分鐘上限內；結束後新開的三個同儕被清掉，只剩 Lead。
+  - **agy 第一回合：**從 `working`（02:54:51）到第二輪開始（02:56:03）約 72 秒，超過舊的 60 秒預算、在新的 120 秒預算內，沒有被截斷；claude 約 8 秒、codex 約 24 秒。這是狀態時間線推算（第一輪屏障要等三個都回覆），不是逐 session 的計時日誌。
+  - **這次沒有驗證：**Discord thread 路徑與長結果在 Discord 的分段；整體 5 分鐘上限被觸及時的行為；額度阻擋；同儕回報 Opus 時停止派送；工作樹被改動時的警告（三場指紋都相符，沒有製造改動）；匿名（A／B／C、不含種類與模型）仍只由提示長度與結果推論，沒有逐字檢查各輪送出的提示；討論內容品質沒有獨立評估（結果自己也標了截斷與「未驗證部署行為」）；120 秒預算在更重負載或 agy 更慢時是否足夠（只有這一次實測 72 秒）。
+  - 目前累計的實機證據（console）：三個同儕兩輪完成、`team cancel`、缺空格與 `--rounds` 檢查、agy 信任與逾時兩個問題已查清並修正。**唯一契約上的實機驗收路徑（Discord thread）尚未做，所以不能標已驗收。**
+  - 下一步：從 Discord thread 執行一次 `team discuss <主題>`（需要使用者在 thread 下指令），記錄分段與回覆位置。
 
 
 ## ISSUE-185：卡片指派的 Lead 剛就緒就送提示，撞到跳過更新選單後短暫的 `working`，任務沒有啟動（`agent is busy`）
