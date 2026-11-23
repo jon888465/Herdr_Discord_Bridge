@@ -1,5 +1,29 @@
 # Known Issues
 
+## ISSUE-187：實作完成後才發現 PR 超過 review 上限，流程只停手，沒有把「切分」交回 Lead
+
+更新日期：2026-11-23。狀態：待調查（現象與程式位置已確認；**尚未修正，修法方向待使用者決定**）。
+
+**使用者可見症狀（2026-11-23，`REQ-20261120-team-discuss`，PR #338）：**implement（約 18 分鐘）、verify、遠端 review 都完成並通過後，autopick commit 並開出 PR，卻在 PR 層級的 `card review` 以「review 沒有進行：PR 的 diff 有 93947 字元，超過 review 上限 80000；請 Lead 把需求重新切分成較小的部分」停手，卡片流程等人。PR 實際是 +1859／-42、16 個檔案（新檔案 `src/team-discuss.ts` 854 行、`test/team-discuss.test.ts` 735 行）。
+
+**預期（使用者 2026-11-23 的看法）：**Lead 分配 implement 做完之後，若發現 diff 會超過 review 上限，流程應該處理「拆 PR」，而不是等到 PR 開出來才停下來叫人。
+
+**已確認（讀碼）：**上限是 `MAX_REVIEW_DIFF_CHARS = 80_000`（另有檔案數上限 `MAX_REVIEW_FILES`），**只在 PR 已開出來之後的 `card review` 才檢查**（`src/card-review.ts`、`src/card-review-fetch.ts`）；超過就回「請 Lead 把需求重新切分成較小的部分」，`src/card-loop.ts` 的 `loop` 步驟 `stop`。**沒有任何程式把這句話交給 Lead 執行**：Lead 在 task 結束後不會被叫回，也沒有「依序多個較小 PR」的機制。發現得太晚的成本：implement、verify、遠端 review 都已花掉才在最後一步被擋。
+
+**這次的處置（不是修正）：**使用者決定直接 merge #338（CI 綠；task 內獨立 review 為 pass、審的是同一版內容；PR 層級 review 因超過上限沒進行）。**merge 繞過了這個上限，PR 層級的 review 沒有做過**，詳見 ISSUE-186。
+
+**未確認：**(1) 上限 80000 字元是否合理（它的真正理由是 reviewer 的 context，沒有查設計文件）；(2) 這次 task 內的 review（遠端 codex）為何能審下 1859 行而 PR 層級會被擋，兩者的輸入大小規則是否不同；(3) 把已完成的實作切成多個依序 PR 是否可行（哪些檔案進哪個 PR、後面是否依賴前面）。
+
+**修法方向（只是選項，尚未選定）：**
+1. **提早檢查**：implement 完成後、commit 與開 PR 之前，用實作產出（`deliveryPaths`、檔案大小）估算 diff，過大就提早停下並明說原因，至少省下之後的步驟。
+2. **叫回 Lead 重新規劃**：過大時把「切成 N 個依序的 PR」交回 Lead，再依序跑多個較小的 PR。最貼近預期，但最大，需要設計依賴順序與失敗處理。
+3. **讓 review 能分塊審**：不縮 PR，改讓 reviewer 分批看大 diff；這才是上限存在的真正原因。
+傾向「1 加 3」，2 需另外設計。
+
+**另一個在同一輪觀察到的小不一致（原因未確認）：**PR merge 後 bridge 通知 `card merged`，卡片 worktree 目錄已不存在，但 `card-worktrees.json` 裡該 worktree（`wAG`）仍標「作用中」，`card cleanup` 回 `worktree.remove: … is not a working tree`。這會讓同一張卡日後重跑被「已有作用中的 worktree」擋住（與 ISSUE-182 同一類：store 與實際狀態不一致）；是誰先移除了目錄沒有查，沒有手改 store。
+
+**下一步：**使用者決定方向後開需求卡；在那之前，超過上限的 PR 仍需人工決定（拆分或像這次一樣明確繞過）。
+
 ## ISSUE-186：team discuss 唯讀同儕討論與缺空格提示
 
 更新日期：2026-11-23。狀態：已修正、待驗收。需求 REQ-20261120-team-discuss。
@@ -11,6 +35,7 @@
 - 開發期間的檢查失敗已重驗：Discord fixture 初版白名單為空，以及 Claude fixture 缺少 TUI 回覆格式，分別改用授權測試 ID 與正確 marker gutter；lint 初版因檢查掃描到 `AbortSignal.any` 字面值失敗，已改用顯式的 abort 傳遞與 timeout。
 - 執行中的 bridge、部署與重啟：本輪未部署、未重啟，未核對執行中的版本。討論不重播，舊訊息不會補送。
 - 真實驗收待辦：在有可啟動的本機 Claude／Codex／Agy 且無已知額度阻擋的單 Agent workspace，於 Discord thread 執行 `team discuss <主題>`。記錄日期、機器、CLI／模型、三個新 session 的啟停、兩輪及結果回原 thread；另檢查取消、逾時保留與缺空格提示。Fixture 不代表這些實機結果。唯讀屬提示約束；Git 指紋不涵蓋 ignored、submodule、repo 外或先改後還原。
+- Merge 紀錄（2026-11-23）：PR #338 在 CI 全綠（ubuntu、macOS）後 merge（`1c488f0`）。任務內：implement、verify（`typecheck`、`lint`、`npm test`、`team-discuss` 測試皆 exit 0，為 verifier 自己回報）、遠端 review（wubuntu 的 codex，`pass`、0 findings、獨立審查閘門通過）都完成；**PR 層級的 review 因 diff 93947 字元超過上限 80000 沒有進行，merge 是使用者明確決定繞過**（見 ISSUE-187）。reviewer 的 `commands` 為空，審查深度沒有證據。merge 後**尚未部署、尚未重啟，沒有任何實機驗收**，狀態維持「已修正、待驗收」。
 
 ## ISSUE-185：卡片指派的 Lead 剛就緒就送提示，撞到跳過更新選單後短暫的 `working`，任務沒有啟動（`agent is busy`）
 
