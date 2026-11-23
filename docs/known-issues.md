@@ -36,6 +36,13 @@
 - 執行中的 bridge、部署與重啟：本輪未部署、未重啟，未核對執行中的版本。討論不重播，舊訊息不會補送。
 - 真實驗收待辦：在有可啟動的本機 Claude／Codex／Agy 且無已知額度阻擋的單 Agent workspace，於 Discord thread 執行 `team discuss <主題>`。記錄日期、機器、CLI／模型、三個新 session 的啟停、兩輪及結果回原 thread；另檢查取消、逾時保留與缺空格提示。Fixture 不代表這些實機結果。唯讀屬提示約束；Git 指紋不涵蓋 ignored、submodule、repo 外或先改後還原。
 - Merge 紀錄（2026-11-23）：PR #338 在 CI 全綠（ubuntu、macOS）後 merge（`1c488f0`）。任務內：implement、verify（`typecheck`、`lint`、`npm test`、`team-discuss` 測試皆 exit 0，為 verifier 自己回報）、遠端 review（wubuntu 的 codex，`pass`、0 findings、獨立審查閘門通過）都完成；**PR 層級的 review 因 diff 93947 字元超過上限 80000 沒有進行，merge 是使用者明確決定繞過**（見 ISSUE-187）。reviewer 的 `commands` 為空，審查深度沒有證據。merge 後**尚未部署、尚未重啟，沒有任何實機驗收**，狀態維持「已修正、待驗收」。
+- 部分實機驗收（2026-11-23 02:10 至 02:12 UTC，本機 macOS，**bridge console，不是 Discord thread**；bridge 為 main `9cd4370`（含 #338）剛重啟；Lead 為 codex 0.170.0，claude 新 session 顯示 `Sonnet 5.5`；結果與限制如下，**狀態維持「已修正、待驗收」**）：
+  - 環境：專用 workspace（主 repo 的暫時 linked worktree，只有一個 codex Lead，`team list` 確認沒有同儕），話題是純設計問題（bridge 加連線健康檢查的風險），不碰檔案。
+  - **看到的：**`team discuss` 被接受（`discuss-5445f344…`）；補了兩個新 session：claude（`model sonnet (launch argument)`，沒有 Fable／Opus 提示）與 codex；第三個 agy 新 session 卡在「Do you trust the contents of this project?」（**我的驗收資料夾不在 `agyTrustedDirectories`，是驗收設定造成**），bridge 沒有替人確認，回報 `Skipped agy fresh session … Worker 卡在啟動提示（blocked）`、`Fresh pane … retained for manual inspection`，其他同儕照常進行；`Peer rounds run: 2/2 (verified replies by round: 2, 2)`；第二輪送給同儕的提示（2233、2340 字元）比第一輪（1132、1169 字元）長，與「帶入其他同儕的匿名摘錄」一致，Lead 彙整提示 3532 字元；結果標 `completed with gaps`、`Limits reached: peer excerpt`、`quota unknown`、`Worktree fingerprints matched`，並有 Consensus／Disagreements／Overlooked questions (ranked)／Decisions for the user 四節；結束後新開的 claude 與 codex 同儕被清掉，只留 Lead 與依契約保留的 agy。
+  - 輸入檢查：`team discuss討論一下`、`team ask討論一下` 都回「少了空格」並給對應寫法；`team discuss --rounds 5 測試` 回 `--rounds must be an integer from 1 to 3`；`team foo` 的 usage 含 `team discuss <topic>`。
+  - **沒有驗證：**Discord thread 路徑與長結果的分段；**三個同儕都參與**（agy 這次被信任提示擋住，沒有成功參與）；`team cancel` 與取消後的清理；逾時與 5 分鐘整體上限；額度阻擋；同儕回報 Opus 時停止派送；工作樹被改動時的警告（這次指紋相符，沒有製造改動）；我**沒有讀各輪實際送出的提示內容**，匿名（A／B、不含種類與模型）只由提示長度與結果推論，沒有逐字確認；Lead 彙整自己也寫「雙方回覆均有截斷、本次綜整未查閱實作」，討論內容的品質沒有獨立評估。
+  - 下一步：在 Lead 的 cwd 位於被信任目錄的 workspace 重做一次，讓 agy 也參與；再從 Discord thread 執行，並測 `team cancel`。
+
 
 ## ISSUE-185：卡片指派的 Lead 剛就緒就送提示，撞到跳過更新選單後短暫的 `working`，任務沒有啟動（`agent is busy`）
 
