@@ -1,5 +1,23 @@
 # Known Issues
 
+## ISSUE-188：`team discuss` 的 Lead 是使用者自己的互動 session，彙整會把該 session 的先前對話內容帶進討論結果與 Discord thread
+
+更新日期：2026-11-23。狀態：待調查（現象與原因已確認；**尚未修正，是否修與怎麼修待使用者決定**）。
+
+**使用者可見症狀（2026-11-23，Discord thread 實機驗收，見 ISSUE-186）：**Lead 是 workspace 的 active Agent，也就是使用者自己的互動 claude session。它的彙整在「Overlooked questions」第 1 項引用了與這次題目無關的先前對話內容（該 session 之前做的另一件維修工作的細節），三位同儕完全沒看到那些內容。結果有標明那是「我的觀察，不是同儕的共識」。結果被送進 Discord thread，所以那個 session 的對話脈絡會出現在 thread 裡，任何看得到 thread 的人都能讀到。
+
+**預期：**SPEC 寫「Lead 只彙整」、讀每名同儕的有界摘錄；彙整應只反映這場討論的材料，不應帶入 Lead 自己的對話歷史，尤其結果會公開到 thread。
+
+**已確認：**(1) Lead 是使用者既有的互動 session，bridge 把彙整提示送進該 session（日誌 `agent.prompt target=<Lead pane>`），它保有自己的完整對話歷史；(2) Lead 的彙整提示（`src/team-discuss.ts`）**明確允許**它報告自己的觀察（`Report missing evidence and distinguish your observations from peer agreement`），**沒有**要求只依提示內提供的資料，也沒有要求忽略先前對話，所以這次的行為符合現行提示，問題在設計而不是單次失誤；(3) 同儕是 bridge 新開的乾淨 session，沒有這個問題，只有 Lead 有。
+
+**未確認：**洩漏的實際風險取決於該 session 的內容與 thread 的可見範圍，沒有評估；若 Lead 是 bridge 新開的乾淨 session 會不會改變討論品質，沒有測；提示加上「只依下列資料、忽略先前對話」是否能可靠約束一個已有長對話歷史的互動 session，沒有驗證（prompt 約束本來就不是隔離）。
+
+**修法方向（只是選項，尚未選定）：**
+1. **彙整提示加限制**：明確要求只依提示內的題目與同儕摘錄，不引用先前對話。簡單，但屬於 prompt 約束，無法保證。
+2. **Lead 也改用 bridge 新開的乾淨 session 彙整**：隔離最徹底，但多一個 session 的成本與等待，且使用者的 active Agent 不再參與。
+3. **維持現狀並在文件與結果標頭提示**：結果標明 Lead 可能引用自己的對話脈絡，由使用者決定要不要在公開 thread 執行。
+**下一步：**使用者決定方向後開需求卡；在那之前，在多人可見的 thread 執行 `team discuss` 時，Lead 的對話內容可能一併出現，使用者需自行評估。
+
 ## ISSUE-187：實作完成後才發現 PR 超過 review 上限，流程只停手，沒有把「切分」交回 Lead
 
 更新日期：2026-11-23。狀態：待調查（現象與程式位置已確認；**尚未修正，修法方向待使用者決定**）。
@@ -60,7 +78,7 @@
 - **Discord 實機驗收（2026-11-23 03:31 至 03:34 UTC，本機 macOS，使用者在 Discord thread 下 `team discuss <主題>`，我同時看 bridge 日誌；bridge 為 main `0ec0ebd`（含 #343）重啟後的程序；Lead 為 workspace `w3` 的 claude）：**
   - **看到的（bridge 日誌，我直接觀察）：**補了三個新 session（claude `model sonnet (launch argument)`、codex、agy），agy 走 `agyTrustedDirectories`（日誌 `agy trusted directory unchanged`）沒被信任提示擋住；第一輪約 03:31:57 派送，agy 約 86 秒完成（超過舊的 60 秒、在新的 120 秒內）；第二輪約 03:33:18 派送；Lead 彙整 03:34:02 至 03:34:27；整場約 2 分 30 秒；結束後三個新同儕全被清掉、`active-streams.json` 為空、主 checkout `git status` 為 0 筆（我獨立確認）；日誌沒有錯誤。
   - **看到的（使用者貼出 Discord 結果，我沒有親眼看 thread）：**結果以 `🤖 claude │ WK: w3 · <workspace 名稱> │ Pane: w3:p1` 的標頭開頭，`Team Discussion completed`、`Peer rounds run: 2/2 (verified replies by round: 3, 3)`、`Limits reached: peer excerpt`，參與者與模型來源（claude `sonnet (launch argument)`、codex、agy 皆標 fresh session、Lead 標 `model unknown`）、各同儕 `quota unknown`；既有 pane `w3:p3` 因 `unavailable or busy` 被跳過；**結果被分成兩則**，斷在 Overlooked 清單的兩個項目之間，沒有掉字；內容含 Consensus、Disagreements、Overlooked questions、Decisions for the user 四節，並引用 A、B、C 三方。**是否回在原 thread 是使用者的回報（使用者在 thread 下指令並看到結果），我沒有獨立查證。**
-  - **觀察到的限制（沒有被當成缺陷修正，是否另開 issue 待使用者決定）：**(1) **`Worktree verification uncertain for one or more working directories`**，不是 `fingerprints matched`：該 workspace 的 cwd 不是單一 Git worktree，bridge 依契約標「不確定」，所以這個 workspace 沒有「討論前後沒改檔」的證據，唯讀只剩 prompt 約束（我只獨立確認了本專案主 checkout 的 `git status` 為 0 筆，**沒有檢查該 cwd 底下的其他 repo**，也不能保證 cwd 之外）。(2) **Lead 是使用者自己的互動 session，它的彙整引用了與這次題目無關的先前對話內容**（同儕完全看不到），結果有標明那是「我的觀察，不是同儕的共識」，但等於 Lead 的對話歷史會流進討論結果與 Discord thread；契約寫「Lead 只彙整」，實際上 Lead 帶著自己的 session 脈絡。(3) 這次的題目缺少明確標的，同儕主要在討論「題目沒說清楚」，所以**討論內容的品質、對有明確標的題目的表現，沒有驗證**。
+  - **觀察到的限制（沒有被當成缺陷修正，是否另開 issue 待使用者決定）：**(1) **`Worktree verification uncertain for one or more working directories`**，不是 `fingerprints matched`：該 workspace 的 cwd 不是單一 Git worktree，bridge 依契約標「不確定」，所以這個 workspace 沒有「討論前後沒改檔」的證據，唯讀只剩 prompt 約束（我只獨立確認了本專案主 checkout 的 `git status` 為 0 筆，**沒有檢查該 cwd 底下的其他 repo**，也不能保證 cwd 之外）。(2) **Lead 是使用者自己的互動 session，它的彙整引用了與這次題目無關的先前對話內容**（同儕完全看不到），結果有標明那是「我的觀察，不是同儕的共識」，但等於 Lead 的對話歷史會流進討論結果與 Discord thread；契約寫「Lead 只彙整」，實際上 Lead 帶著自己的 session 脈絡。已另記為 ISSUE-188。(3) 這次的題目缺少明確標的，同儕主要在討論「題目沒說清楚」，所以**討論內容的品質、對有明確標的題目的表現，沒有驗證**。
   - **仍沒有驗證：**整體 5 分鐘上限被觸及時的行為；額度阻擋；同儕回報 Opus 時停止派送；從 Discord 執行 `team cancel`；匿名（A／B／C、不含種類與模型）仍只由提示長度與結果推論，沒有逐字檢查各輪送出的提示；工作樹被改動時的警告；120 秒預算在更重負載下是否足夠（目前實測 72 秒與 86 秒）。
   - **驗收範圍的說明：**契約要求「在只有一個 agent 的 workspace」驗收，這次的 `w3` 另有一個既有 pane（被跳過），不是嚴格的單一 agent；console 上有兩次嚴格單一 agent 的驗收（前述）。以上合起來，開出三個新 session、兩輪、結果送回 Discord thread、session 被清掉都有實機證據，所以標「已驗收（主路徑）」；**不代表上列未驗證項目與限制已解決**。
 
