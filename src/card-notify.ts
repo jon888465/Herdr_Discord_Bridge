@@ -150,12 +150,11 @@ export function classifyRoleRejection(text: string): string {
 export function notificationReason(event: LogEntry): string {
   if (event.event === "precheck_warning") {
     const label = "無法預檢 PR diff";
-    if (event.text === `${label}：git merge-base 無法執行（本機缺少 PR base commit）`)
+    if (event.text.startsWith("[missing_base] "))
       return `${label}：本機缺少 PR base commit`;
-    const operation = /^無法預檢 PR diff：(git (?:rev-parse|init|merge-base|read-tree|update-index|add|diff)|gh (?:api|pr|repo)) /.exec(event.text)?.[1];
-    return operation
-      ? `${label}：${operation} 失敗，流程照常繼續`
-      : `${label}：流程照常繼續，原因見任務紀錄`;
+    if (event.text.startsWith("[missing_worktree] "))
+      return `${label}：找不到作用中的卡片 worktree`;
+    return `${label}：流程照常繼續，原因見任務紀錄`;
   }
   if (event.event === "failed") {
     const limit = deliveryLimitNotification(event.text);

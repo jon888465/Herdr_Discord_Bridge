@@ -12,6 +12,14 @@ const exec = promisify(execFile);
 const TIMEOUT_MS = 20_000;
 const SHA = /^[0-9a-f]{40}$/;
 
+export type DeliveryPrecheckWarningCode = "missing_worktree" | "missing_base";
+
+export class DeliveryPrecheckError extends Error {
+  constructor(readonly code: DeliveryPrecheckWarningCode, message: string) {
+    super(message);
+  }
+}
+
 function validPath(file: string): boolean {
   return (
     !/[\x00-\x1f\x7f\\\uFFFD]/.test(file) &&
@@ -128,7 +136,10 @@ export async function measureDelivery(
     try {
       await git("cat-file", "-e", `${baseHead}^{commit}`);
     } catch {
-      throw new Error("git merge-base 無法執行（本機缺少 PR base commit）");
+      throw new DeliveryPrecheckError(
+        "missing_base",
+        "git merge-base 無法執行（本機缺少 PR base commit）",
+      );
     }
     const base = (await git("merge-base", baseHead, version.headSha)).trim();
     if (!SHA.test(base)) throw new Error("無法確認 PR merge-base");

@@ -26,7 +26,7 @@
 - **觀察到、沒有處理：**只要**一個**指派失敗，Lead 的規劃迴圈就中止並收尾（這次 review 已經完成、有 finding，但沒有機會修）；這與 ISSUE-191 的 overflow 早停不同，是原本的設計，沒有調查是否合理。
 - **復原方式（沿用 ISSUE-185／206 的記載）：**失敗的卡要清理 worktree、刪卡片分支、**重啟 bridge**（autopick 的 `attempted` 在記憶體）後才會被重撿。這輪 implement 與 review 的產出可能值得保留（review 的 finding 還沒處理）。
 - **相關：**ISSUE-165（codex session 不可信時的重用規則）、ISSUE-206（同一張卡先前的 Lead 啟動失敗，成因不同）。
-
+- **實機觀察（2026-11-24 03:40 UTC，同一張卡重跑，bridge 為含此修正的 main `bca83e6`）：**`verify-precheck` 由新啟動的 claude Worker 執行並完成，沒有 `profile configuration changed`。**這只是單一樣本**：我無法回頭確認那個 workspace ID 帶不帶舊綁定，所以不能說修正擋住了那個特定情境；狀態維持「已修正、待驗收」。
 ## ISSUE-206：卡片剛撿起、worktree 建好後任務沒有啟動：`Agent is working`（Lead 的第一個 prompt 沒送出）
 
 更新日期：2026-11-24。狀態：**待調查**（現象與時間線已確認；**丟出這句的位置與 Herdr 的錯誤碼未確認，未修正**）。
@@ -39,7 +39,7 @@
 - **可能的修法（未做、未決定）：**(a) 在丟出這個錯誤的路徑記下 Herdr 的錯誤碼與呼叫位置，先把「未確認」補齊；(b) 若確認是 Herdr 的 working 拒收，比照 `agent_not_ready` 在有上限的預算內重試第一個 prompt，同樣要求重試前重新驗證 Agent 身分；(c) 與 `settleWorkingAgent` 的空窗一併處理。
 - **驗證：**尚無（只有觀察，沒有重現、沒有修正）。
 - **相關：**ISSUE-185（Lead 剛就緒送提示撞到 `working`，`agent is busy`，已修正、待驗收）、ISSUE-137（第一個 prompt 在 Herdr 登記前被拒，`agent_not_ready`，已修正）。
-
+- **後續觀察（2026-11-24）：**重啟重跑後連續 2 次撿卡（02:34、03:06 UTC）Lead 都正常啟動、第一個 prompt 送出。**這不代表已解決**：失敗那次（02:18）是該 bridge 重啟後的第一次撿卡，之後才連續成功 2 次，樣本太少，不能估計發生頻率；成因與錯誤碼仍未確認，狀態維持待調查。
 ## ISSUE-205：2026-11-03 建立的 Team task 卡在 `cancelling`，每次 bridge 重啟都只被對帳一次，從沒結束
 
 更新日期：2026-11-24。狀態：**待調查**（現象已確認；**成因未確認，未修正**）。
@@ -77,7 +77,7 @@
 
 ## ISSUE-202：card 的 PR review 以 claude 當 reviewer 時，兩輪都在約 2 秒內回 `blocked`
 
-更新日期：2026-11-24。狀態：**已修正、待驗收**（成因有 session 逐字稿證據；程式與自動化測試通過；**2026-11-24 已部署重啟（main `e144dff`），未實機驗收**）。先前：待調查（成因是假設）。
+更新日期：2026-11-24。狀態：**已驗收（範圍有限，見最後一則）**（成因有 session 逐字稿證據；程式與自動化測試通過；2026-11-24 已部署重啟（main `e144dff`））。先前：待調查（成因是假設）。
 
 - **使用者可見症狀（2026-11-23 09:08 UTC，`REQ-20261123-merge-entry-audit`，PR #356）：**task 完成並開 PR 後，bridge 的 PR review 第 1 輪（09:08:08 派送、09:08:10 結果）與第 2 輪（09:08:19、09:08:21）reviewer 都是 claude（本機，新開的 pane），**各約 2 秒就回 `inconclusive`，原因寫「reviewer 卡住了（blocked，可能在等人確認）」**；同一個 head 連續 2 次 `inconclusive`，卡片以 `autopick_stopped` 失敗，退回人工處理。這兩輪沒有審過任何內容。
 - **預期行為：**reviewer 起來後真的審 PR 並回 `pass`／`changes_requested`；若 reviewer 起不來，要說出它在等什麼。
@@ -92,10 +92,11 @@
 - **未驗證：**部署重啟後，沒有 `roles` 的卡的 PR review 用 claude 當 reviewer 是否真的以 Sonnet 啟動並完成 review；套用後沒有比對 reviewer 實際 model 與設定相同；`card loop` 內自動 review／fix 走同一個接線，沒有逐一實機驗證；遠端 reviewer、已有 `roles` 的卡不在這次範圍；config 內同一種類有多個設了 model 的 profile 時只取第一個。**bridge 已於 2026-11-24 重啟為含此修正的版本**（build 內有 `withDefaultModel` 與兩處接線，bridge 已連線），但**還沒有在真實卡片上觀察到**。驗收方式：用一張**沒有 `roles`** 的卡讓 claude 當 PR reviewer，確認它以 Sonnet 啟動並完成 review（可從 claude 的 session 逐字稿看 `model` 附件與 `cost-state`）。
 - **另一個沒修的相關問題：**reviewer 在 prompt 送出後 `blocked` 時，bridge 關掉 pane 並只回「可能在等人確認」，沒有附最後幾行畫面，之後無法診斷（這次只能靠 claude 的逐字稿反推）。沒有改。
 - **相關：**ISSUE-180（Lead 預設 model 的確認提示）、ISSUE-197（task 內 reviewer 的 `inconclusive`，機制不同）。
+- **實機驗收（2026-11-24 04:14 至 04:15 UTC，`REQ-20261123-precheck-diff-size` 的 PR #364，沒有 `roles` 的卡）：**PR review 第 1 輪的 claude reviewer，session 逐字稿顯示 **model `claude-sonnet-5-5`**、2 則 assistant 回應、`totalCostUSD` 約 0.26、`totalAPIDuration` 約 16.8 秒，約 23 秒完成並給出 2 個帶檔案與行號的 finding；第 2 輪 reviewer 的 session 同樣是 Sonnet 並給出 `changes_requested`。修正前同一情境是 `claude-fable-5-1`、零次 API 呼叫、約 2 秒 `blocked`。
+- **驗收範圍與仍未驗證：**驗證的是「沒有 `roles` 的卡，claude 當 PR reviewer 以 Sonnet 啟動並完成 review」。**沒有驗證：**`card fix` 以 claude 當作者（這次 fixer 是 codex）；已有 `roles` 的卡；遠端 reviewer；config 內有多個同種類且設了 model 的 profile 時只取第一個。第 1 輪 verdict 是 `inconclusive` 而不是明確的 `pass`／`changes_requested`，原因沒有查（兩個 finding 都是 low）。
 
-<a id="issue-201"></a>
 
-## ISSUE-201：Bridge 最終合併未驗證 PR base
+<a id="issue-201"></a>## ISSUE-201：Bridge 最終合併未驗證 PR base
 
 更新日期：2026-11-23。狀態：待調查。
 
@@ -294,6 +295,7 @@
 - **仍然沒有核對的（沿用 `docs/merge-gates.md`）：**現行 GitHub 權限、分支保護與 ruleset 的線上設定、#338 實際合併介面與當時 PR head；這些需要唯讀的線上查詢，本卡禁止使用 GitHub。下一步 `REQ-20261123-precheck-diff-size` 仍是 `draft`；ISSUE-191 已實機驗證，可以改為 `ready`，由使用者決定。
 
 - **第二步（2026-11-24）：**卡片 worktree 的 coding writer 每次交付（含任務內 fix）後，先以 PR base 的 merge-base 和隔離索引實測，再派送後續指派。索引以交付 HEAD 為底，只加本輪版本相對任務基準的未提交交付路徑。以去重後的有效路徑先檢查 20 檔（rename 計新舊路徑），再以 Node UTF-8 字串長度檢查 80,000 字元。超限停止任務，保留 worktree、原索引及 HEAD；autopick 停在 task，由卡片 `notify` 傳上限名稱、實測值、門檻與超過量。Git 或 base 查詢失敗、base 物件不在本機等均回報「無法預檢」，把原因記進實作 artifact，循既有閘門繼續。規劃提示建議必要時拆小並保留測試、邊界檢查與錯誤處理。 暫存後的路徑核對也改為計入 rename 兩側，避免 `card commit` 把有效的未暫存改名誤認為路徑不符。
+- **PR 層 review 與人工接手（2026-11-24，`REQ-20261123-precheck-diff-size`，PR #364）：**task 內 review 三輪後 `pass`、驗收 `ok=True`，提交後 bridge 的 PR review 第 1 輪 `inconclusive`（2 個 low）、第 2 輪 `changes_requested`（F3 medium、F4／F5 low，F1／F2 沿用第 1 輪）。bridge 派的 `fixer`（codex）改了 8 個檔案但**結束時沒有 commit**，流程判定這一圈不採用、沒有 push、退回人工處理（原因的完整文字只送到 Discord，我讀不到；依程式碼與 worktree 狀態推測是「作者結束時工作樹還有未提交的修改」，**這是推論**）。**使用者要求人工接手（選項 1）**：我檢查那份未提交的修改（+61／−17，與 F1、F2、F4、F5 對應：找不到作用中的 worktree 改成丟出帶 `missing_worktree` 代碼的警告而不是默默略過；通知原因改看記錄的代碼而不是比對中文字串；預檢條件改成 `access: write` 而不是只認 implement 角色），在 worktree 跑 `npm run build`、`npm run lint` 與完整 `npm test`（2026-11-24：2305 項、通過 2304、失敗 0、略過 1），暫時讓通知的代碼分類失效，新增的測試失敗 1 項、已還原，再提交到 PR 分支。**F3（medium）沒有改程式**：它要求預檢與 PR 服務實際的 diff 輸出對照，這只能實機比對；SPEC 已改成明寫「尚未對照，不得視為與 `card review` 完全等價」。**這張 PR 不是依「bridge PR review `pass`」合併的**（PR review 最後一輪是 `changes_requested`，之後的修正沒有再 review），是使用者明確要求「CI 綠就 merge」。
 - **驗證（2026-11-24，macOS arm64，Git 2.54.0，Node 26.12.0）：** `npm run typecheck`、`npm run lint`、`npm run build`、`npm test`（2,299 通過、1 項 Linux 專用測試跳過）、`git diff --check` 通過。以 `node --test --test-name-pattern='ISSUE-187' dist/test/{card-delivery-precheck,card-notify,team-task-engine}.test.js` 定向驗證 12 項全過。將檔案數早停暫時移除後，`node --test --test-name-pattern='21 files with invalid UTF-8' dist/test/team-task-engine.test.js` 如預期 exit 1（verify 誤派 1 次，預期 0 次），還原後通過。81,000 個 `0xe9` 的 `invalid.txt` fixture 同一份 patch 兩端皆量到 81,131 字元，超過 1,131。
 - **審查修正（2026-11-24）：**見 ISSUE-208／209。前輪唯讀 review 全套初跑 2,288 通過、11 項因暫存副本缺 `src`／`skills` 失敗、1 項跳過，補齊後 11 項分組重跑通過；唯讀 verify 首跑有 1 項 Grok turn budget 逾時，單檔重跑 34/34、全套重跑 2,299 通過、1 項跳過。逾時根因未確認。本輪 `npm run typecheck`、`npm run lint`、`npm run build`、`npm test`、`git diff --check` 均通過。完整測試 2,301 通過、0 失敗、1 項 Linux 專用測試跳過；`node --test --test-name-pattern=ISSUE-187 dist/test/{card-delivery-precheck,team-task-engine}.test.js` 的 14 項定向案例均通過。
 - **暫存語意修正（2026-11-24）：**見 ISSUE-210。來源 repo 設定只用於建立實際會暫存的 blobs；patch 則在隔離環境讀取交付 tree 和其中的 attributes。macOS arm64 上 `npm run typecheck`、`npm run lint`、`npm run build`、`npm test`、`git diff --check` 均通過。完整測試 2,303 通過、0 失敗、1 項 Linux 專用測試跳過；`node --test --test-name-pattern=ISSUE-187 dist/test/{card-delivery-precheck,team-task-engine}.test.js` 定向 16 項全過。

@@ -109,7 +109,7 @@ export type CardEvent = { time: string; eventId: string } & (
   | { event: "merged"; sha: string; method: (typeof MERGE_METHODS)[number] }
   | { event: "blocked"; reason: (typeof BLOCK_REASONS)[number] }
   | { event: "resumed" }
-  | { event: "precheck_warning"; reason: string }
+  | { event: "precheck_warning"; reason: string; code?: import("./card-delivery-precheck.js").DeliveryPrecheckWarningCode }
   | { event: "failed"; code: string; reason?: string }
   | { event: "cancelled"; by: "user" | "bridge" }
   | { event: "cleanup_done"; result: "removed" | "kept" }
@@ -484,8 +484,13 @@ function render(fields: Fields): { text: string; suspicious: boolean } {
       };
     case "resumed":
       return { text: "已恢復", suspicious: false };
-    case "precheck_warning":
-      return failureReason(fields);
+    case "precheck_warning": {
+      const reason = failureReason(fields);
+      const code = fields.code;
+      if (code === "missing_base" || code === "missing_worktree")
+        return { ...reason, text: `[${code}] ${reason.text}` };
+      return reason;
+    }
     case "failed": {
       const code = text(
         fields,

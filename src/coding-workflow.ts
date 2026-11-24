@@ -66,6 +66,7 @@ export interface CodingArtifactRecord {
   endVersionFingerprint?: string;
   driftReason?: string;
   precheckWarning?: string;
+  precheckWarningCode?: import("./card-delivery-precheck.js").DeliveryPrecheckWarningCode;
 }
 
 export interface CodingTaskState {

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { buildLogEntry } from "../src/card-events.js";
 import { CardStore } from "../src/card-store.js";
 import { parseCard, type Card } from "../src/card.js";
 import { serializeCard } from "../src/card-serialize.js";
@@ -466,4 +467,22 @@ test("sensitive wording in other events keeps the existing multi-category classi
     "CI 條件未滿足",
   );
   s.store.appendLog(id, [make("failed", "x")]);
+});
+
+test("precheck warning notifications use the recorded code independently of diagnostic wording", () => {
+  const event = {
+    event: "precheck_warning",
+    time: "2026-11-24T00:00:01Z",
+    eventId: "precheck-fixture",
+    reason: "internal diagnostic wording",
+  } as const;
+  for (const [code, expected] of [
+    ["missing_base", "本機缺少 PR base commit"],
+    ["missing_worktree", "找不到作用中的卡片 worktree"],
+    [undefined, "流程照常繼續，原因見任務紀錄"],
+  ] as const) {
+    const built = buildLogEntry({ ...event, code });
+    assert.ok(built.ok);
+    assert.equal(notificationReason(built.entry), `無法預檢 PR diff：${expected}`);
+  }
 });

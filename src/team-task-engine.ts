@@ -1,3 +1,4 @@
+import { DeliveryPrecheckError, type DeliveryPrecheckWarningCode } from "./card-delivery-precheck.js";
 import { deliveryLimitMessage } from "./card-review-fetch.js";
 import { redactSecrets } from "./redact.js";
 import { randomUUID, createHash } from "node:crypto";
@@ -12,6 +13,7 @@ import {
   sessionIdentity,
   settleReadonlyVersion,
   VERSION_CAPTURE_OVERFLOW,
+  type AssignmentCoding,
   type CodingArtifactRecord,
 } from "./coding-workflow.js";
 import {
@@ -436,7 +438,7 @@ export class TeamTaskEngine {
       onAssignmentDone: async (
         assignment: {
           id: string;
-          coding?: { role: CodingArtifactRecord["role"] };
+          coding?: Pick<AssignmentCoding, "role" | "access">;
         },
         worker: Parameters<typeof sessionIdentity>[0],
         report: string,
@@ -490,11 +492,15 @@ export class TeamTaskEngine {
         });
         const drifted = Boolean(settled.driftReason);
         let precheckWarning: string | undefined;
-        if (assignment.coding.role === "implement" && precheckDelivery) {
+        let precheckWarningCode: DeliveryPrecheckWarningCode | undefined;
+        // Coding v1 validates implement (including fixes) as the sole writer role.
+        // A limit violation terminates the scheduler after this wave.
+        if (assignment.coding.access === "write" && precheckDelivery) {
           try {
             const exceeded = await precheckDelivery(coding.repository, version);
             if (exceeded) stop = deliveryLimitMessage(exceeded);
           } catch (error) {
+            if (error instanceof DeliveryPrecheckError) precheckWarningCode = error.code;
             const reason =
               error instanceof Error
                 ? stripAnsi(error.message).split(/\r?\n/).find((line) => line.trim())
@@ -506,6 +512,7 @@ export class TeamTaskEngine {
           id: `a-${assignment.id}-${coding.artifacts.length + 1}`,
           assignmentId: assignment.id,
           ...(precheckWarning ? { precheckWarning } : {}),
+          ...(precheckWarningCode ? { precheckWarningCode } : {}),
           role: assignment.coding.role,
           versionFingerprint: settled.versionFingerprint,
           mode: version.mode,

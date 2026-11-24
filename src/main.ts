@@ -121,7 +121,7 @@ import { mergeCardPullRequest, readCardChecks } from "./card-merge-wiring.js";
 import { sharedCardPullRequests } from "./card-prs.js";
 import { openCardPullRequest } from "./card-pr-flow.js";
 import { attachCardPullRequest } from "./card-attach-pr.js";
-import { measureDelivery } from "./card-delivery-precheck.js";
+import { DeliveryPrecheckError, measureDelivery } from "./card-delivery-precheck.js";
 import { fetchReviewMaterial } from "./card-review-fetch.js";
 import { reviewCardPullRequest } from "./card-review-wiring.js";
 import { RemoteFailure, remoteReviewDeps, type RemoteReviewDeps } from "./remote-checkout.js";
@@ -2475,7 +2475,8 @@ async function startTeamTask(
         ? {
             precheckDelivery: async (repository, version) => {
               const worktree = lazyCardWorktrees().active(cardId);
-              if (!worktree) return undefined;
+              if (!worktree)
+                throw new DeliveryPrecheckError("missing_worktree", "找不到作用中的卡片 worktree");
               if (
                 repository !== realpathSync(worktree.path) ||
                 version.branch !== worktree.branch

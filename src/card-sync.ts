@@ -18,7 +18,7 @@ export interface TaskSnapshot {
   state: string;
   detail?: string;
   finishedAt?: string;
-  precheckWarnings?: { id: string; reason: string }[];
+  precheckWarnings?: { id: string; reason: string; code?: import("./card-delivery-precheck.js").DeliveryPrecheckWarningCode }[];
   /** journal 中第一次進入目前終止狀態的事件 sequence（非終止狀態時沒有）。 */
   terminalSequence?: number;
 }
@@ -56,8 +56,8 @@ export function taskSourceFrom(store: TeamTaskStore): TaskSource {
         state: task.state,
         detail: task.detail,
         finishedAt: task.finishedAt,
-        precheckWarnings: task.coding?.artifacts.flatMap(({ id, precheckWarning }) =>
-          precheckWarning ? [{ id, reason: precheckWarning }] : [],
+        precheckWarnings: task.coding?.artifacts.flatMap(({ id, precheckWarning, precheckWarningCode }) =>
+          precheckWarning ? [{ id, reason: precheckWarning, code: precheckWarningCode }] : [],
         ),
       };
       if (terminalTask(task.state)) {
@@ -103,12 +103,13 @@ function syncCard(
   for (const [index, taskId] of ids.entries()) {
     const task = tasks.get(taskId);
     if (!task) continue;
-    for (const { id, reason } of task.precheckWarnings ?? []) {
+    for (const { id, reason, code } of task.precheckWarnings ?? []) {
       const logged = store.recordEvent(card.id, {
         event: "precheck_warning",
         eventId: `precheck-${createHash("sha256").update(`${taskId}/${id}`).digest("hex").slice(0, 40)}`,
         time: now(),
         reason,
+        ...(code ? { code } : {}),
       });
       if (!logged.ok) problems.push(`${card.id}：${logged.error}`);
       else if (logged.added > 0) changed = true;
