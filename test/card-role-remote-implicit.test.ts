@@ -13,7 +13,7 @@ import {
 
 /**
  * ISSUE-211：本機沒有 pi profile（使用者刻意關掉），但遠端機器的 `cardReview.kinds` 開放了 pi。
- * 角色驗證原本對遠端角色也要求本機有同 kind 的 profile，所以 `implement: wubuntu:pi` 在撿卡時被拒絕。
+ * 角色驗證原本對遠端角色也要求本機有同 kind 的 profile，所以 `implement: <machine>:pi` 在撿卡時被拒絕。
  * 現在：本機完全沒有同 kind 的 profile 時，才為遠端機器開放的 kind 補一個只用在遠端的隱含 profile；
  * 本機有同 kind 的 profile 時完全照舊（它的能力設定仍是閘門）；機器自己的 kinds／write／toolchain 閘門都保留。
  */
