@@ -2,15 +2,20 @@
 
 ## ISSUE-202：card 的 PR review 以 claude 當 reviewer 時，兩輪都在約 2 秒內回 `blocked`
 
-更新日期：2026-11-23。狀態：**待調查**（現象已確認；**成因是假設，尚未驗證，尚未修正**）。
+更新日期：2026-11-24。狀態：**已修正、待驗收**（成因有 session 逐字稿證據；程式與自動化測試通過；**尚未部署、未實機驗收**）。先前：待調查（成因是假設）。
 
 - **使用者可見症狀（2026-11-23 09:08 UTC，`REQ-20261123-merge-entry-audit`，PR #356）：**task 完成並開 PR 後，bridge 的 PR review 第 1 輪（09:08:08 派送、09:08:10 結果）與第 2 輪（09:08:19、09:08:21）reviewer 都是 claude（本機，新開的 pane），**各約 2 秒就回 `inconclusive`，原因寫「reviewer 卡住了（blocked，可能在等人確認）」**；同一個 head 連續 2 次 `inconclusive`，卡片以 `autopick_stopped` 失敗，退回人工處理。這兩輪沒有審過任何內容。
 - **預期行為：**reviewer 起來後真的審 PR 並回 `pass`／`changes_requested`；若 reviewer 起不來，要說出它在等什麼。
 - **對照：**我手動重跑（`card review <id> --agent codex`）第 3 輪，codex 本機 reviewer 在約 1 分鐘內正常回覆 `changes_requested`（兩個 medium 的文件精確度發現，內容有針對檔案與行號），所以流程本身、PR 材料與 reviewer 之後的解析都可用，問題在 claude reviewer 啟動後。
 - **已確認：**(1) `src/card-review-flow.ts` 在 `runTurn` 回 `state === "blocked"` 時直接判 `inconclusive`；(2) 兩輪 reviewer 的 pane 在判定後都被收掉，**事後讀不到畫面，不知道它實際在等什麼**；(3) `src/card-review-wiring.ts` 在沒有 profile 啟動資料時只傳 `requestedKind`（agent 種類），**不帶 profile 的 model**。
-- **假設（沒有驗證，不要當根因）：**claude 以種類啟動、沒有帶 model，落在帳號預設的 Fable 5.1，需要 usage credits，彈出確認而 `blocked`。這與 ISSUE-180（Lead 啟動只傳種類）相同；config 的 claude profile 已固定 `sonnet`，但 profile 的 model 只在有 profile 啟動資料時才會被帶上。**我沒有看到任何一次 reviewer 的畫面，也沒有重現。**
-- **驗證：**尚無。
-- **下一步：**(a) 重現並讀畫面：以同樣的種類啟動 claude reviewer，保留 pane 看它卡在哪；(b) 若確認是 model 確認，讓 PR review 的 reviewer 啟動帶 profile 的 model；(c) reviewer `blocked` 時在 verdict 原因裡附上最後幾行畫面，不要只寫「可能在等人確認」。
+- **當時的假設（2026-11-23；「落在預設的 Fable 5.1」已被下方 2026-11-24 的逐字稿證據證實，「卡在 usage credits 確認提示」仍是推論）：**claude 以種類啟動、沒有帶 model，落在帳號預設的 Fable 5.1，需要 usage credits，彈出確認而 `blocked`。這與 ISSUE-180（Lead 啟動只傳種類）相同；config 的 claude profile 已固定 `sonnet`，但 profile 的 model 只在有 profile 啟動資料時才會被帶上。**我沒有看到任何一次 reviewer 的畫面，也沒有重現。**
+- **逐字稿證據（2026-11-24，只讀；沒有重現、也沒有起新的 claude）：**claude 把每個 session 存在本機。09:08 UTC 的兩個 reviewer session 各只有 24 筆紀錄：一則 15,913 字元的 user prompt 與一批 attachment，**沒有任何 assistant 回應**；`model` 附件寫 **`claude-fable-5-1`（Fable 5.1）**；`cost-state` 是 `totalAPIDuration: 0`、`totalCostUSD: 0`、`modelUsage: {}`、`totalDuration` 約 6.1 秒——**整個 session 沒有呼叫過 API**。對照：同一 worktree 內成功回覆的 claude Worker session，assistant 訊息的 model 是 `claude-sonnet-5-5`。所以「reviewer 以種類啟動、落在預設的 Fable 5.1」**已確認**；「它卡在 Fable 的 usage credits 確認提示」仍是**推論**（pane 被關掉了，我沒有親眼看到畫面，但 Fable 5.1 加零次 API 呼叫與 ISSUE-180 記錄的提示一致）。
+- **更正：**卡片事件裡的原因字串「reviewer 卡住了（blocked，可能在等人確認）」是 **prompt 送出後** `runTurn` 回 `blocked`（`src/card-review-flow.ts:399`），**不是**啟動時卡住：啟動時卡住用另一句（「卡在啟動提示」），而且那種情況會保留 pane；所以 reviewer 通過了就緒等待，pane 在 `blocked` 後被關掉，事後讀不到畫面。我先前寫的「啟動後立刻 blocked」不精確。
+- **為什麼這張卡才遇到：**`card-review-wiring.ts` 只在卡片有 `roles` 快照時才會解析出 `launch`（含 model）；`REQ-20261123-merge-entry-audit` 沒有 `roles`。2026-11-09 的 claude reviewer 實機驗證（ISSUE-134，`pass`）早於 2026-11-20 之後 CLI 預設落在 Fable 5.1 的狀況（ISSUE-180）。
+- **修正（2026-11-24，原始碼）：**新增 `src/default-launch.ts` 的 `withDefaultModel`，`src/main.ts` 的 **PR review 與 `card fix` 兩處**啟動 Agent 時套用：只在**完全沒有指定 args** 時，補上 config 內第一個同種類且有設 `model` 的 profile 的 model 旗標與 model（claude profile 是 `--model sonnet`）。**不補 profile 的其他 args**（codex helper 帶 `--dangerously-bypass-approvals-and-sandbox`，不能讓 reviewer 因此放寬權限）；沒有 model／modelFlag／同種類 profile 時原樣。**Lead 的啟動不動**（ISSUE-180，使用者決定不固定 Lead 的 model）。
+- **測試（2026-11-24，本機 macOS，worktree）：**新增 `test/default-launch.test.ts` 8 項（只傳種類的 claude 得到 `--model sonnet`；已帶 args 不變；codex 有 profile args 但沒設 model 時不套用也不繼承 args；沒有 profile 或沒有 modelFlag 不猜；第一個有設 model 的 profile 優先；不改動輸入；`main.ts` 恰有兩處套用、Lead 那處沒有）。暫時讓配對不要求 model：2 項失敗；暫時讓函式永遠原樣回傳：2 項失敗；暫時讓 Lead 也套用：1 項失敗；各已還原並確認原始碼逐字相同。完整 `npm test` 2278 項、通過 2277、失敗 0、略過 1；typecheck、lint 通過。
+- **未驗證：**部署重啟後，沒有 `roles` 的卡的 PR review 用 claude 當 reviewer 是否真的以 Sonnet 啟動並完成 review；套用後沒有比對 reviewer 實際 model 與設定相同；`card loop` 內自動 review／fix 走同一個接線，沒有逐一實機驗證；遠端 reviewer、已有 `roles` 的卡不在這次範圍；config 內同一種類有多個設了 model 的 profile 時只取第一個。**目前執行中的 bridge 仍是舊版**，修正未部署。
+- **另一個沒修的相關問題：**reviewer 在 prompt 送出後 `blocked` 時，bridge 關掉 pane 並只回「可能在等人確認」，沒有附最後幾行畫面，之後無法診斷（這次只能靠 claude 的逐字稿反推）。沒有改。
 - **相關：**ISSUE-180（Lead 預設 model 的確認提示）、ISSUE-197（task 內 reviewer 的 `inconclusive`，機制不同）。
 
 <a id="issue-201"></a>
