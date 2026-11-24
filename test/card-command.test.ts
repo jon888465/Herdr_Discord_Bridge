@@ -559,13 +559,13 @@ test("the agent and machine written to the log come from the started task", asyn
   const { store, run } = assignSetup({
     startTask: async () => ({
       taskId: "task-2222",
-      lead: { agent: "claude", machine: "agy-pod" },
+      lead: { agent: "claude", machine: "agy-machine" },
     }),
   });
   store.create(assignable());
   await run("assign", "REQ-20261102-work");
   const log = store.readLog("REQ-20261102-work");
-  assert.equal(log.ok && log.entries[1].text, "指派給 claude（agy-pod）");
+  assert.equal(log.ok && log.entries[1].text, "指派給 claude（agy-machine）");
 });
 
 test("assign records which card the task came from, and a failure to record only warns", async () => {
@@ -1026,13 +1026,13 @@ test("card policy says the file is missing and that every project is L0", async 
 test("card policy lists the loaded default and projects, and one project's effective level", async () => {
   const policy = {
     default: "L0" as const,
-    projects: { "local:Foo": "L1" as const, "agy-pod:Bar": "L2" as const },
+    projects: { "local:Foo": "L1" as const, "agy-machine:Bar": "L2" as const },
   };
   const { run } = setup({ policy: () => loadedPolicy("loaded", policy) });
   const text = await run("policy");
   assert.match(text, /已載入/);
   assert.match(text, /- local:Foo → L1/);
-  assert.match(text, /- agy-pod:Bar → L2/);
+  assert.match(text, /- agy-machine:Bar → L2/);
   assert.match(await run("policy", "local:Foo"), /local:Foo → L1/);
   assert.match(
     await run("policy", "local:Unlisted"),

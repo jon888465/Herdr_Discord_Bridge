@@ -4,7 +4,7 @@
 
 - Prepared: 2026-10-01T06:40:48Z; state: checkpoint-only.
 - Source: Codex session 01a0f5ea-f06c-78c1-b425-c8eea649639b, pane w2:p4.
-- Workspace: /home/jones/wk/Herdr_Discord_Bridge; main HEAD 5e7568c825f3315f56d713f1897ebf6bc23eadfd.
+- Workspace: /home/<user>/wk/Herdr_Discord_Bridge; main HEAD 5e7568c825f3315f56d713f1897ebf6bc23eadfd.
 - Destination: agy requested by user if quota runs low; exact session/pane not selected.
 - Quota: unknown; user requests conditional handoff, no provider warning/reset observed.
 - Source still owns edits. No transfer or receiving receipt yet. Other writers unknown.
@@ -43,7 +43,7 @@ Current edits: main.ts, response-delivery.test.ts; issue/spec updates completed,
 Validation completed: lint/typecheck/npm test (including build), 190/190 pass, 0 fail,
 2026-10-01 Linux Node.js v22.23.3. Log /tmp/bridge-visible-suite.log. No task-owned commands
 remain active; source has finished code changes. Other writers unknown; verify ownership before edits.
-Native history: /home/jones/.codex/sessions/2026/10/01/rollout-2026-10-01T13-23-30-01a0f5ea-f06c-78c1-b425-c8eea649639b.jsonl.
+Native history: /home/<user>/.codex/sessions/2026/10/01/rollout-2026-10-01T13-23-30-01a0f5ea-f06c-78c1-b425-c8eea649639b.jsonl.
 Recover this exact session only; filter public records and exclude private reasoning.
 Original screenshot bytes remain at supplied /media/sf_tmp paths; raw captures from Grok are in /tmp,
 not repository artifacts. Build updated, running bridge version not verified, no restart or old-message replay.
@@ -63,7 +63,7 @@ not repository artifacts. Build updated, running bridge version not verified, no
 - Status: Accepted.
 - Receiver: agy session `43b43d7c-5045-4c73-a771-f0990e016657`.
 - Source: Codex session `01a0f5ea-f06c-78c1-b425-c8eea649639b` (pane `w2:p4`), turn completed and writer stopped.
-- Workspace: `/home/jones/wk/Herdr_Discord_Bridge`.
+- Workspace: `/home/<user>/wk/Herdr_Discord_Bridge`.
 - HEAD: `5e7568c825f3315f56d713f1897ebf6bc23eadfd`.
 - Transferred scope: Debug and fix ISSUE-002 (image rejection) and ISSUE-003 (response capture fallback) while preserving Grok adapter work.
 - Progress: User authorized auto-detecting actual image format via magic bytes and normalizing file extension to safely tolerate declared vs actual format mismatches (e.g. JPEG declared as PNG). Implemented in `src/attachments.ts`, added unit tests in `test/attachments.test.ts`, updated `SPEC.md` and `docs/known-issues.md`.

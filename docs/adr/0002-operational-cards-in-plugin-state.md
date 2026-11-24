@@ -41,7 +41,7 @@ Team 任務的 journal（`src/team-task-store.ts`）已是執行狀態的權威�
 ### 4. 異動專案
 
 - frontmatter 以 `projects: [專案名, ...]`（純量陣列，現有格式即可表達）取代單一的 `project` 欄位，方便搜尋與列表。
-- **專案名稱 = `<機器 id>:<repo 目錄名>`**（使用者 2026-11-02 選擇），本機用 `local:`，例如 `local:Herdr_Discord_Bridge`、`agy-pod:Herdr_Discord_Bridge`。完整 repo 路徑與 remote 網址放在 `## 異動專案`，需要唯一識別時查那裡。
+- **專案名稱 = `<機器 id>:<repo 目錄名>`**（使用者 2026-11-02 選擇），本機用 `local:`，例如 `local:Herdr_Discord_Bridge`、`agy-machine:Herdr_Discord_Bridge`。完整 repo 路徑與 remote 網址放在 `## 異動專案`，需要唯一識別時查那裡。
 - 詳細資料由 bridge 追加在內文 `## 異動專案`，每個專案一段：機器、repo 路徑、分支、worktree 路徑、base 與 head commit、PR 連結（完整網址）。
 - 現有 `project` 欄位暫時仍被接受以相容既有範例，之後移除。
 
@@ -50,7 +50,7 @@ Team 任務的 journal（`src/team-task-store.ts`）已是執行狀態的權威�
 `## 流程紀錄` 只追加，每行一個事件：
 
 ```text
-- 2026-11-02T08:15:00Z | started | 在 agy-pod 建立 worktree，分支 card/REQ-20261102-example | ev:3f2a9c
+- 2026-11-02T08:15:00Z | started | 在 agy-machine 建立 worktree，分支 card/REQ-20261102-example | ev:3f2a9c
 ```
 
 欄位為時間、事件名、單行說明、事件 id。說明不得含換行。

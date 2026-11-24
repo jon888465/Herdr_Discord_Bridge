@@ -10,7 +10,7 @@ agy reviewer 預先信任 checkout：契約（範圍、生命週期、`cleanup_p
 
 ## 範圍與限制
 
-card reviewer（PR 後的 review／loop，唯讀）可在 remote：卡片 `roles: {implement: "local:claude:opus", reviewer: "agy-pod:agy"}`。implement／fixer 預設拒絕；machine 設 `cardReview.write: true` 才開放（ISSUE-171，見 [remote-write-roles.md](remote-write-roles.md)）。**沒有 `roles` 的卡不支援由 Lead 自己選 PR 後的 remote reviewer**，只有卡片宣告 `reviewer: <machine>:<agent>` 才會派到 pod。task 內 diagnose／review／verify 見 SPEC.md「task 內 remote 唯讀角色」（`toolchain` 才可 verify）。卡片內容與 PR diff 會送到該機器，只對信任的機器開 `cardReview`。
+card reviewer（PR 後的 review／loop，唯讀）可在 remote：卡片 `roles: {implement: "local:claude:opus", reviewer: "agy-machine:agy"}`。implement／fixer 預設拒絕；machine 設 `cardReview.write: true` 才開放（ISSUE-171，見 [remote-write-roles.md](remote-write-roles.md)）。**沒有 `roles` 的卡不支援由 Lead 自己選 PR 後的 remote reviewer**，只有卡片宣告 `reviewer: <machine>:<agent>` 才會派到 pod。task 內 diagnose／review／verify 見 SPEC.md「task 內 remote 唯讀角色」（`toolchain` 才可 verify）。卡片內容與 PR diff 會送到該機器，只對信任的機器開 `cardReview`。
 
 ## 設定
 
@@ -18,7 +18,7 @@ card reviewer（PR 後的 review／loop，唯讀）可在 remote：卡片 `roles
 
 <!-- prettier-ignore -->
 ```jsonc
-"machines": [{ "id": "agy-pod", "ssh": "agy-pod", "socket": "/root/.config/herdr/herdr.sock", "cardReview": { "root": "/root/hdb-card-review", "kinds": ["agy"] } }]
+"machines": [{ "id": "agy-machine", "ssh": "agy-machine", "socket": "/root/.config/herdr/herdr.sock", "cardReview": { "root": "/root/hdb-card-review", "kinds": ["agy"] } }]
 ```
 
 `root` 是 bridge 專用的遠端絕對路徑（≥2 段，不含 `.`／`..` 段、空白、控制或 shell 字元，段不以 `-` 開頭）；`kinds` 是允許種類（`claude`、`codex`、`agy`、`pi`，不重複）；其他欄位拒絕。`HerdrHub` 新增 `machineConfig`、`requestOn`（只送指定機器、不經快取）、`freshAgentsOn`（當下 Agent 清單）。

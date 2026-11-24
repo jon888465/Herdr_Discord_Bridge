@@ -27,7 +27,7 @@ function fake(path: string, handler: Handler): Promise<Server> {
 
 test("validateMachines accepts good entries and rejects confusable ids", () => {
   const ok = validateMachines([
-    { id: "agy-pod", ssh: "agy-pod", socket: "/root/.config/herdr/herdr.sock" },
+    { id: "agy-machine", ssh: "agy-machine", socket: "/root/.config/herdr/herdr.sock" },
   ]);
   assert.equal(ok.length, 1);
   assert.deepEqual(validateMachines(undefined), []);
@@ -50,7 +50,7 @@ test("validateMachines accepts good entries and rejects confusable ids", () => {
 });
 
 test("cardReview.write：只接受布林，true 保留、false 省略，預設關閉（ISSUE-171）", () => {
-  const base = { id: "agy-pod", ssh: "agy-pod", socket: "/s.sock" };
+  const base = { id: "agy-machine", ssh: "agy-machine", socket: "/s.sock" };
   const review = (write?: unknown) =>
     validateMachines([
       { ...base, cardReview: { root: "/root/review", kinds: ["agy"], ...(write === undefined ? {} : { write }) } },
@@ -63,7 +63,7 @@ test("cardReview.write：只接受布林，true 保留、false 省略，預設�
 });
 
 test("cardReview.toolchain: only a boolean is accepted, true is kept, false is omitted", () => {
-  const base = { id: "agy-pod", ssh: "agy-pod", socket: "/s.sock" };
+  const base = { id: "agy-machine", ssh: "agy-machine", socket: "/s.sock" };
   const review = (toolchain?: unknown) =>
     validateMachines([
       { ...base, cardReview: { root: "/root/review", kinds: ["agy"], ...(toolchain === undefined ? {} : { toolchain }) } },

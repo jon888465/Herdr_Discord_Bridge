@@ -389,7 +389,7 @@ test("projects is an inline array of machine-prefixed names and coexists with th
   const result = parseCard(
     withExtra(
       "project: Legacy",
-      "projects: [local:Herdr_Discord_Bridge, agy-pod:other.repo_1]",
+      "projects: [local:Herdr_Discord_Bridge, agy-machine:other.repo_1]",
     ),
     "REQ-20261030-example.md",
   );
@@ -398,7 +398,7 @@ test("projects is an inline array of machine-prefixed names and coexists with th
   assert.equal(result.card.project, "Legacy");
   assert.deepEqual(result.card.projects, [
     "local:Herdr_Discord_Bridge",
-    "agy-pod:other.repo_1",
+    "agy-machine:other.repo_1",
   ]);
 });
 

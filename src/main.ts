@@ -1024,7 +1024,7 @@ export async function handleCommand(
                         ? {
                             beforePromptAttempt: async () => {
                               // 遠端 fixer（ISSUE-171）的 agent 在遠端機器上：清單與 machine 都要跟著它，
-                              // 否則會拿本機清單比對、誤判「machine local → agy-pod」。
+                              // 否則會拿本機清單比對、誤判「machine local → agy-machine」。
                               const live = (
                                 await liveAgentList(runtime.herdr, agent)
                               ).find((a) => a.pane_id === agent.pane_id);

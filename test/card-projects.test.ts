@@ -15,7 +15,7 @@ test("projectName is <machine>:<directory> and keeps valid directory names as th
     projectName("local", "Herdr_Discord_Bridge"),
     "local:Herdr_Discord_Bridge",
   );
-  assert.equal(projectName("agy-pod", "repo.v2"), "agy-pod:repo.v2");
+  assert.equal(projectName("agy-machine", "repo.v2"), "agy-machine:repo.v2");
   assert.equal(projectName("local", ".hidden-repo"), "local:.hidden-repo");
 });
 
@@ -152,12 +152,12 @@ test("another project is added after the first, inside the section and before th
   const body =
     "# T\n\n## 異動專案\n\n### local:Foo\n\n- 機器：local\n- repo：/a/Foo\n\n## 待確認\n- a\n";
   const result = upsertProjectSection(body, {
-    machine: "agy-pod",
+    machine: "agy-machine",
     repoPath: "/srv/Bar",
   });
   assert.equal(
     result.ok && result.body,
-    "# T\n\n## 異動專案\n\n### local:Foo\n\n- 機器：local\n- repo：/a/Foo\n\n### agy-pod:Bar\n\n- 機器：agy-pod\n- repo：/srv/Bar\n\n## 待確認\n- a\n",
+    "# T\n\n## 異動專案\n\n### local:Foo\n\n- 機器：local\n- repo：/a/Foo\n\n### agy-machine:Bar\n\n- 機器：agy-machine\n- repo：/srv/Bar\n\n## 待確認\n- a\n",
   );
 });
 

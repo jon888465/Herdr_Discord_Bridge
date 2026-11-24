@@ -22,15 +22,15 @@ const templates: Array<[CardEvent, string]> = [
     {
       ...base,
       event: "worktree_created",
-      machine: "agy-pod",
+      machine: "agy-machine",
       path: "/root/.herdr/worktrees/repo/card-1",
       branch: "card/REQ-20261102-example",
       baseSha: "0123456789abcdef0123456789abcdef01234567",
     },
-    "建立 worktree agy-pod:/root/.herdr/worktrees/repo/card-1 分支 card/REQ-20261102-example 基準 0123456789ab",
+    "建立 worktree agy-machine:/root/.herdr/worktrees/repo/card-1 分支 card/REQ-20261102-example 基準 0123456789ab",
   ],
   [{ ...base, event: "agy_worktree_trust", action: "add", result: "added", path: "/work/tree" }, "agy trust add added /work/tree"],
-  [{ ...base, event: "agy_worktree_trust", machine: "agy-pod", action: "remove", result: "removed", path: "/root/herdr-card-review/o__r__abc" }, "agy trust remove removed agy-pod:/root/herdr-card-review/o__r__abc"],
+  [{ ...base, event: "agy_worktree_trust", machine: "agy-machine", action: "remove", result: "removed", path: "/root/herdr-card-review/o__r__abc" }, "agy trust remove removed agy-machine:/root/herdr-card-review/o__r__abc"],
   [{ ...base, event: "started", taskId: "task-42" }, "開始執行 task task-42"],
   [
     {
@@ -135,7 +135,7 @@ test("fields that do not match their pattern are rejected, naming the field", ()
   const wt = {
     ...base,
     event: "worktree_created",
-    machine: "agy-pod",
+    machine: "agy-machine",
     path: "/work/tree",
     branch: "card/x",
     baseSha: "0123456789abcdef",
@@ -301,7 +301,7 @@ test("a suspected secret in one field replaces the whole text with the fixed mes
   const result = buildLogEntry({
     ...base,
     event: "worktree_created",
-    machine: "agy-pod",
+    machine: "agy-machine",
     path: "/work/tree",
     branch: token,
     baseSha: "0123456789abcdef",

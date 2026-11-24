@@ -577,11 +577,11 @@ test("agents without agent_session match Stop events by pane id (remote machines
   const store = new HookEventStore();
   const at = Date.now();
   store.record(
-    { event: "Stop", sessionId: "s1", paneId: "agy-pod:w2:p1", message: "hi" },
+    { event: "Stop", sessionId: "s1", paneId: "agy-machine:w2:p1", message: "hi" },
     at,
   );
-  assert.equal(store.stopForPane("agy-pod:w2:p1", at - 1)?.message, "hi");
-  assert.equal(store.stopForPane("agy-pod:w2:p1", at + 1), undefined);
+  assert.equal(store.stopForPane("agy-machine:w2:p1", at - 1)?.message, "hi");
+  assert.equal(store.stopForPane("agy-machine:w2:p1", at + 1), undefined);
   assert.equal(store.stopForPane("w2:p1", at - 1), undefined);
   assert.equal(store.stopForPane(undefined, 0), undefined);
 });

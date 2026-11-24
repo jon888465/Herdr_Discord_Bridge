@@ -24,7 +24,7 @@ function resolve(
 ) {
   const parsed = parseLaunchSpec(spec);
   assert.ok(parsed.ok, spec);
-  return resolveLaunch(parsed.value, sel, ["agy-pod"]);
+  return resolveLaunch(parsed.value, sel, ["agy-machine"]);
 }
 function error(spec: string, sel?: { machine: string; kind?: string }): string {
   const result = resolve(spec, sel);
@@ -43,8 +43,8 @@ test("example specs resolve; omitted segments follow the selected Agent or CLI d
     ],
     [":::high", "local claude - high --effort high"],
     [
-      "agy-pod:codex:gpt-6.1-sol:medium",
-      "agy-pod codex gpt-6.1-sol medium -m gpt-6.1-sol -c model_reasoning_effort=medium",
+      "agy-machine:codex:gpt-6.1-sol:medium",
+      "agy-machine codex gpt-6.1-sol medium -m gpt-6.1-sol -c model_reasoning_effort=medium",
     ],
     ["", "local claude - - "],
   ];
@@ -62,8 +62,8 @@ test("single segment is an agent or a machine; over four segments is rejected", 
     ok: true,
     value: { agent: "codex" },
   });
-  const machine = parseLaunchSpec("agy-pod");
-  assert.ok(machine.ok && machine.value.machine === "agy-pod");
+  const machine = parseLaunchSpec("agy-machine");
+  assert.ok(machine.ok && machine.value.machine === "agy-machine");
   assert.match(error("gemini"), /未知的 machine "gemini"/);
   const many = parseLaunchSpec("local:claude:opus:high:extra");
   assert.ok(!many.ok && /最多四段/.test(many.error));
@@ -150,7 +150,7 @@ const baseDeps = (port: AgentStartPort): AgentStartDeps => ({
   port,
   selected: agent(),
   workspacePath: PLAIN_DIR,
-  machineIds: ["agy-pod", "pod"],
+  machineIds: ["agy-machine", "pod"],
   allowedWorkspaceIds: [],
   readyTimeoutMs: 50,
   readyPollMs: 5,
@@ -192,7 +192,7 @@ test("invalid specs fail before a pane is opened", async () => {
     runAgentStart(deps, { spec });
   for (const spec of ["::opus:--x", ":agy::high", ":pi:m", "nowhere:codex"])
     await assert.rejects(run(spec), Error, spec);
-  await assert.rejects(run("agy-pod:codex"), /只能在選定 Agent 所在的機器/);
+  await assert.rejects(run("agy-machine:codex"), /只能在選定 Agent 所在的機器/);
   await assert.rejects(
     run("codex", { ...baseDeps(port), selected: undefined }),
     /尚未選定 Agent/,
