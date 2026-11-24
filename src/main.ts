@@ -2051,9 +2051,11 @@ async function teamCommand(
       await teamRemove(args, context, runtime);
       return;
     case "ask":
+      rejectTeamAttachments(context, "ask");
       await teamAsk(args, context, runtime);
       return;
     case "discuss":
+      rejectTeamAttachments(context, "discuss");
       await teamDiscuss(args, context, runtime);
       return;
     default: {
@@ -2067,6 +2069,20 @@ async function teamCommand(
       );
     }
   }
+}
+
+/**
+ * ISSUE-190：`team ask`／`team discuss` 的程式完全沒有處理附件，附件會被默默丟掉、Agent 照純文字回答。
+ * 在支援之前先明確拒絕；一般訊息（單一 Agent）才會把附件存檔並交給 Agent。
+ */
+function rejectTeamAttachments(
+  context: CommandContext,
+  command: "ask" | "discuss",
+): void {
+  if (context.message.attachments.size)
+    throw new Error(
+      `team ${command} 目前不支援附件（檔案或圖片），Agent 不會讀取；請拿掉附件再下指令，或改用一般訊息把附件傳給單一 Agent。`,
+    );
 }
 
 async function teamDiscuss(
