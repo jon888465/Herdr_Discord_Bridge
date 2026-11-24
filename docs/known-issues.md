@@ -1,5 +1,16 @@
 # Known Issues
 
+## ISSUE-205：2026-11-03 建立的 Team task 卡在 `cancelling`，每次 bridge 重啟都只被對帳一次，從沒結束
+
+更新日期：2026-11-24。狀態：**待調查**（現象已確認；**成因未確認，未修正**）。
+
+- **使用者可見症狀：**2026-11-24 部署重啟前檢查「有沒有進行中的任務」時發現：`team-tasks` 的 task 檔案 `task-efb29d5c-…`（建立於 2026-11-03）狀態是 `cancelling`，共 207 個事件，最後一串事件全是 `restart_reconciled`（最近一次是 2026-11-24 的重啟）。這不是進行中的工作（沒有任何 Agent 在做它），但狀態永遠不會變成終態，會讓「確認沒有進行中的任務」的判斷多一個需要人工排除的例外。
+- **預期行為：**被取消的 task 在收尾完成後進入終態（`cancelled`）；或對帳發現它的 Agent 與 pane 都已不存在時，直接收尾，而不是每次重啟都重複記一筆 `restart_reconciled` 然後維持 `cancelling`。
+- **已確認（2026-11-24，只讀）：**狀態 `cancelling`、建立 2026-11-03、207 個事件、最後 6 個事件都是 `restart_reconciled`、沒有指派在進行。**沒有改動這個檔案。**
+- **未確認：**它是怎麼進入 `cancelling` 的（哪一次取消）、為什麼收尾沒有完成（對帳邏輯沒有把它推到終態，或需要的 pane 早就不在）；其他 task 是否也有同樣情況（我只看到這一個非終態的）；它是否影響 `team status` 的顯示。
+- **驗證：**尚無（只有觀察）。
+- **下一步：**讀 `restart_reconciled` 的處理邏輯與該 task 的最後幾個非對帳事件，確認為什麼不會收尾，再決定修法；**在此之前不要手動編輯 task 檔案**。
+
 ## ISSUE-204：公開 repo 的追蹤內容含個人機器資訊（帳號名、主機名、機器名稱、machine ID）
 
 更新日期：2026-11-24。狀態：**目前內容已清理、待驗收；git 歷史沒有處理（見「未處理」）**。
@@ -26,7 +37,7 @@
 
 ## ISSUE-202：card 的 PR review 以 claude 當 reviewer 時，兩輪都在約 2 秒內回 `blocked`
 
-更新日期：2026-11-24。狀態：**已修正、待驗收**（成因有 session 逐字稿證據；程式與自動化測試通過；**尚未部署、未實機驗收**）。先前：待調查（成因是假設）。
+更新日期：2026-11-24。狀態：**已修正、待驗收**（成因有 session 逐字稿證據；程式與自動化測試通過；**2026-11-24 已部署重啟（main `e144dff`），未實機驗收**）。先前：待調查（成因是假設）。
 
 - **使用者可見症狀（2026-11-23 09:08 UTC，`REQ-20261123-merge-entry-audit`，PR #356）：**task 完成並開 PR 後，bridge 的 PR review 第 1 輪（09:08:08 派送、09:08:10 結果）與第 2 輪（09:08:19、09:08:21）reviewer 都是 claude（本機，新開的 pane），**各約 2 秒就回 `inconclusive`，原因寫「reviewer 卡住了（blocked，可能在等人確認）」**；同一個 head 連續 2 次 `inconclusive`，卡片以 `autopick_stopped` 失敗，退回人工處理。這兩輪沒有審過任何內容。
 - **預期行為：**reviewer 起來後真的審 PR 並回 `pass`／`changes_requested`；若 reviewer 起不來，要說出它在等什麼。
@@ -38,7 +49,7 @@
 - **為什麼這張卡才遇到：**`card-review-wiring.ts` 只在卡片有 `roles` 快照時才會解析出 `launch`（含 model）；`REQ-20261123-merge-entry-audit` 沒有 `roles`。2026-11-09 的 claude reviewer 實機驗證（ISSUE-134，`pass`）早於 2026-11-20 之後 CLI 預設落在 Fable 5.1 的狀況（ISSUE-180）。
 - **修正（2026-11-24，原始碼）：**新增 `src/default-launch.ts` 的 `withDefaultModel`，`src/main.ts` 的 **PR review 與 `card fix` 兩處**啟動 Agent 時套用：只在**完全沒有指定 args** 時，補上 config 內第一個同種類且有設 `model` 的 profile 的 model 旗標與 model（claude profile 是 `--model sonnet`）。**不補 profile 的其他 args**（codex helper 帶 `--dangerously-bypass-approvals-and-sandbox`，不能讓 reviewer 因此放寬權限）；沒有 model／modelFlag／同種類 profile 時原樣。**Lead 的啟動不動**（ISSUE-180，使用者決定不固定 Lead 的 model）。
 - **測試（2026-11-24，本機 macOS，worktree）：**新增 `test/default-launch.test.ts` 8 項（只傳種類的 claude 得到 `--model sonnet`；已帶 args 不變；codex 有 profile args 但沒設 model 時不套用也不繼承 args；沒有 profile 或沒有 modelFlag 不猜；第一個有設 model 的 profile 優先；不改動輸入；`main.ts` 恰有兩處套用、Lead 那處沒有）。暫時讓配對不要求 model：2 項失敗；暫時讓函式永遠原樣回傳：2 項失敗；暫時讓 Lead 也套用：1 項失敗；各已還原並確認原始碼逐字相同。完整 `npm test` 2278 項、通過 2277、失敗 0、略過 1；typecheck、lint 通過。
-- **未驗證：**部署重啟後，沒有 `roles` 的卡的 PR review 用 claude 當 reviewer 是否真的以 Sonnet 啟動並完成 review；套用後沒有比對 reviewer 實際 model 與設定相同；`card loop` 內自動 review／fix 走同一個接線，沒有逐一實機驗證；遠端 reviewer、已有 `roles` 的卡不在這次範圍；config 內同一種類有多個設了 model 的 profile 時只取第一個。**目前執行中的 bridge 仍是舊版**，修正未部署。
+- **未驗證：**部署重啟後，沒有 `roles` 的卡的 PR review 用 claude 當 reviewer 是否真的以 Sonnet 啟動並完成 review；套用後沒有比對 reviewer 實際 model 與設定相同；`card loop` 內自動 review／fix 走同一個接線，沒有逐一實機驗證；遠端 reviewer、已有 `roles` 的卡不在這次範圍；config 內同一種類有多個設了 model 的 profile 時只取第一個。**bridge 已於 2026-11-24 重啟為含此修正的版本**（build 內有 `withDefaultModel` 與兩處接線，bridge 已連線），但**還沒有在真實卡片上觀察到**。驗收方式：用一張**沒有 `roles`** 的卡讓 claude 當 PR reviewer，確認它以 Sonnet 啟動並完成 review（可從 claude 的 session 逐字稿看 `model` 附件與 `cost-state`）。
 - **另一個沒修的相關問題：**reviewer 在 prompt 送出後 `blocked` 時，bridge 關掉 pane 並只回「可能在等人確認」，沒有附最後幾行畫面，之後無法診斷（這次只能靠 claude 的逐字稿反推）。沒有改。
 - **相關：**ISSUE-180（Lead 預設 model 的確認提示）、ISSUE-197（task 內 reviewer 的 `inconclusive`，機制不同）。
 
@@ -138,7 +149,7 @@
 
 ## ISSUE-190：`team ask`／`team discuss` 透過 Discord 傳檔案或圖片，附件被默默丟掉，Agent 沒有讀取
 
-更新日期：2026-11-24。狀態：**選項 1 已修正、待驗收**（原始碼與自動化測試通過；**尚未部署、未實機驗收**）；**選項 2、3（真的把附件交給 Agent）沒有做，各另開需求卡（`draft`）**。先前：待調查（使用者回報；現象與原因已由讀碼確認；修法待使用者決定）。
+更新日期：2026-11-24。狀態：**選項 1 已修正、待驗收**（原始碼與自動化測試通過；**2026-11-24 已部署重啟（main `e144dff`），未實機驗收**）；**選項 2、3（真的把附件交給 Agent）沒有做，各另開需求卡（`draft`）**。先前：待調查（使用者回報；現象與原因已由讀碼確認；修法待使用者決定）。
 
 **使用者可見症狀（2026-11-23，使用者回報）：**188（`team discuss` 的 Lead 提示）看起來正常，但現在透過 Discord 下 `team ask`、`team discuss` 時，訊息附上檔案或圖片，回答完全沒有讀取附件、沒有看檔案內容。同樣的附件對單一 Agent 的一般訊息是會被讀取的。
 
@@ -157,7 +168,7 @@
 3. **`team discuss` 支援附件**：同儕與 Lead 都看得到附件，但要先解決存檔位置與唯讀指紋的衝突（例如存到 bridge 自己的狀態目錄而不是 Lead 的 cwd），並把附件內容當不可信資料。
 4. 1 先做，2、3 另開需求卡。我傾向 1 加上 2 的設計討論，3 最後。
 **下一步：**部署重啟後從 Discord 對 `team ask`、`team discuss` 各帶一個附件實測拒絕訊息；選項 2、3 的需求卡由使用者決定何時放行。**在選項 2、3 完成前，請不要依賴 `team ask`／`team discuss` 讀附件**，需要 Agent 看檔案或圖片時，改對單一 Agent 用一般訊息傳送。
-**修正（2026-11-24，使用者選修法 1；原始碼，尚未部署）：**`src/main.ts` 新增 `rejectTeamAttachments`，在 `team` 指令的 `ask` 與 `discuss` 兩個分支**最先**呼叫：訊息帶任何附件（`context.message.attachments.size`）就丟出 `team <ask|discuss> 目前不支援附件（檔案或圖片），Agent 不會讀取；請拿掉附件再下指令，或改用一般訊息把附件傳給單一 Agent。`，不再往下建立任務或討論。其他 `team` 子指令與沒有附件的 `team ask`／`team discuss` 行為不變。`team ask --coding` 與 `team ask` 同一個分支，所以一併被擋。console 的訊息沒有附件，不受影響。
+**修正（2026-11-24，使用者選修法 1；原始碼，同日已部署）：**`src/main.ts` 新增 `rejectTeamAttachments`，在 `team` 指令的 `ask` 與 `discuss` 兩個分支**最先**呼叫：訊息帶任何附件（`context.message.attachments.size`）就丟出 `team <ask|discuss> 目前不支援附件（檔案或圖片），Agent 不會讀取；請拿掉附件再下指令，或改用一般訊息把附件傳給單一 Agent。`，不再往下建立任務或討論。其他 `team` 子指令與沒有附件的 `team ask`／`team discuss` 行為不變。`team ask --coding` 與 `team ask` 同一個分支，所以一併被擋。console 的訊息沒有附件，不受影響。
 **測試（2026-11-24，本機 macOS，worktree）：**新增 `test/team-attachments-main.test.ts` 7 項（`ask`、`discuss` 各：帶 1 個附件、帶 3 個附件都在存取 runtime 之前被拒絕並說明；沒有附件時不會被這個檢查擋下；其他 `team` 子指令不受影響）。先寫測試，尚未實作時 4 項失敗；暫時拿掉 `ask` 的那行呼叫，2 項失敗，已還原且逐字相同。既有 `team-discuss` 測試的假 Discord 訊息沒有 `attachments` 欄位（真實訊息一定有），補上空的 `attachments` 後完整 `npm test`（2026-11-24）2285 項、通過 2284、失敗 0、略過 1；typecheck、lint 通過。
 **未驗證：**Discord 端到端（真的從 Discord 對 `team ask`／`team discuss` 帶附件看到這則訊息）；Discord 附件是否在訊息分派到 `team` 指令之前就被別處處理（讀碼沒有發現，沒有實測）；訊息只有附件、沒有任何文字時的路徑；`/herdr` 斜線或前綴以外的入口（沒有發現其他入口）。選項 2、3 沒有做：`team ask` 附件（Lead 與 Worker 都帶路徑，遠端 Worker 用既有遠端交付）與 `team discuss` 附件（存放位置要避開 Lead 的 cwd 以免破壞唯讀指紋，內容要當不可信資料）各是需求卡 `REQ-20261124-team-ask-attachments`、`REQ-20261124-team-discuss-attachments`（卡片檔在 bridge 的 state 目錄，不在 repo 內；狀態 `draft`，未放行）。
 ## ISSUE-189：Team 名單殘留一個失效 Worker，整個 `team ask` 直接失敗
