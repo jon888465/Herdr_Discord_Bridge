@@ -1,5 +1,18 @@
 # Known Issues
 
+## ISSUE-206：卡片剛撿起、worktree 建好後任務沒有啟動：`Agent is working`（Lead 的第一個 prompt 沒送出）
+
+更新日期：2026-11-24。狀態：**待調查**（現象與時間線已確認；**丟出這句的位置與 Herdr 的錯誤碼未確認，未修正**）。
+
+- **使用者可見症狀（2026-11-24 02:18 UTC，`REQ-20261123-precheck-diff-size`，使用者放行後第一次撿卡，bridge 為含 #358、#359 的 main `e144dff` 重啟後）：**autopick 02:18:00 撿起卡片；02:18:18 建立 worktree（基準 `a3c391be67ce`，就是當時的 main，基準正確）；**02:18:21 以 `assign：worktree 已建立…但任務沒有啟動：Agent is working` 失敗**，卡片仍是 `ready`，沒有開 PR、沒有任何 Worker。同一輪 bridge 日誌有兩次「已自動跳過 codex 的更新提示」（autopick 的 Lead workspace 與卡片 workspace 各一個 codex）。
+- **預期行為：**Lead 剛跳過更新選單後可能短暫 `working`，bridge 應該等它穩定再送第一個 prompt（ISSUE-185）或在被拒時有上限地重試（ISSUE-137），任務正常啟動。
+- **已確認（2026-11-24，只讀）：**(1) 事件時間線如上，失敗在 worktree 建好後 3 秒。(2) 失敗後約 1 分鐘（02:19:34）我看兩個 codex pane：狀態都是 `done`，卡片 workspace 的 codex 輸入框是空的（`Ask Codex to do anything`），**任務的第一個 prompt 從沒送出去**，所以是暫時的競態，不是 pane 卡住。(3) **這句訊息不是 bridge 自己的忙碌檢查**：`assertAgentAvailable` 丟的是小寫的 `agent is busy (…)`（ISSUE-185 的訊息），原始碼裡搜不到 `Agent is working` 這個字面值；`runTeamTurn` 只對 Herdr 的 `agent_not_ready` 重試（`src/team-turn.ts`），其他 Herdr 錯誤直接丟出。所以它**比較像 Herdr 拒絕第一個 prompt 的回應，被原樣當成錯誤訊息**，但這是推論。(4) ISSUE-185 的修正（`settleWorkingAgent`，#337）已部署；11/23 的 4 次撿卡（06:45、07:27、08:46、08:58 UTC，同一張卡的不同輪）Lead 都正常啟動，所以不是每次發生。
+- **未確認：**這句訊息實際由哪一層丟出（Herdr 的 `agent.prompt` 回應，還是別的）與它的錯誤碼（bridge 沒有記錄）；為什麼 `settleWorkingAgent` 沒有擋下（可能是它讀到的紀錄當下不是 `working`，之後送出 prompt 前才又變 `working`，中間有一小段空窗）；codex 跳過更新選單後載入工作階段的 `working` 持續多久。
+- **復原方式（沿用 ISSUE-185 的記載）：**autopick 的 `attempted` 集合在記憶體，失敗的卡要**重啟 bridge** 才會被重新撿起；手動 `card assign <id> --coding`（不帶 `--worktree`）也能啟動任務，但 autopick 後續的提交、PR 與 review 迴圈**不會**接手手動啟動的任務。
+- **可能的修法（未做、未決定）：**(a) 在丟出這個錯誤的路徑記下 Herdr 的錯誤碼與呼叫位置，先把「未確認」補齊；(b) 若確認是 Herdr 的 working 拒收，比照 `agent_not_ready` 在有上限的預算內重試第一個 prompt，同樣要求重試前重新驗證 Agent 身分；(c) 與 `settleWorkingAgent` 的空窗一併處理。
+- **驗證：**尚無（只有觀察，沒有重現、沒有修正）。
+- **相關：**ISSUE-185（Lead 剛就緒送提示撞到 `working`，`agent is busy`，已修正、待驗收）、ISSUE-137（第一個 prompt 在 Herdr 登記前被拒，`agent_not_ready`，已修正）。
+
 ## ISSUE-205：2026-11-03 建立的 Team task 卡在 `cancelling`，每次 bridge 重啟都只被對帳一次，從沒結束
 
 更新日期：2026-11-24。狀態：**待調查**（現象已確認；**成因未確認，未修正**）。
