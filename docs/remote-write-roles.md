@@ -1,10 +1,10 @@
 # 遠端寫入角色：implement／fixer
 
-ISSUE-171。2026-11-18，**第 1～3 階段（取回與套用的純管線、task 內 implement、PR 階段 fixer）都已實作並有單元測試；task 內 implement 的成功路徑（2026-11-18）與兩種失敗路徑（沒有任何改動、遠端產生符號連結，2026-11-19）已在 agy-pod 實機驗收通過，PR 階段 fixer 的成功路徑（2026-11-19，修正 #310 後）與「遠端產生符號連結」失敗路徑（2026-11-19）也已通過；其他失敗、fixer 的其他失敗路徑與修正後的 push、devbox 的 codex 的 implement 與 fixer 成功路徑（2026-11-19，ISSUE-174 修正後，見 ISSUE-171 第九次）也已通過；devbox 的 pi 的 implement 與 fixer 成功路徑也已通過（2026-11-19，第十次；pi 當 fixer 偶發提示沒送出，見 ISSUE-176），devbox 上寫入角色的其他失敗路徑尚未實機驗收，遠端 codex 當 implement 作者時獨立審查原本會失敗（ISSUE-175，根因是本機只讀得到本機的 codex rollout），2026-11-19 已修正並實機驗收，整個 task 能走完（遠端 codex 當 reviewer 未驗）**（見文末「分階段」與 ISSUE-171）。目前 remote implement／fixer 仍會在撿卡前被拒絕（「remote 寫入尚未支援」，見 `src/card-role-assignment.ts` 的 `remoteReviewMachine`）。
+ISSUE-171。2026-11-18，**第 1～3 階段（取回與套用的純管線、task 內 implement、PR 階段 fixer）都已實作並有單元測試；task 內 implement 的成功路徑（2026-11-18）與兩種失敗路徑（沒有任何改動、遠端產生符號連結，2026-11-19）已在 agy-machine 實機驗收通過，PR 階段 fixer 的成功路徑（2026-11-19，修正 #310 後）與「遠端產生符號連結」失敗路徑（2026-11-19）也已通過；其他失敗、fixer 的其他失敗路徑與修正後的 push、devbox 的 codex 的 implement 與 fixer 成功路徑（2026-11-19，ISSUE-174 修正後，見 ISSUE-171 第九次）也已通過；devbox 的 pi 的 implement 與 fixer 成功路徑也已通過（2026-11-19，第十次；pi 當 fixer 偶發提示沒送出，見 ISSUE-176），devbox 上寫入角色的其他失敗路徑尚未實機驗收，遠端 codex 當 implement 作者時獨立審查原本會失敗（ISSUE-175，根因是本機只讀得到本機的 codex rollout），2026-11-19 已修正並實機驗收，整個 task 能走完（遠端 codex 當 reviewer 未驗）**（見文末「分階段」與 ISSUE-171）。目前 remote implement／fixer 仍會在撿卡前被拒絕（「remote 寫入尚未支援」，見 `src/card-role-assignment.ts` 的 `remoteReviewMachine`）。
 
 ## 目標與決定（使用者 2026-11-18）
 
-讓 `machines[].cardReview` 開放的遠端機器（目前是 agy-pod 的 agy、devbox 的 codex／pi）也能擔任寫入角色 `implement` 與 `fixer`。
+讓 `machines[].cardReview` 開放的遠端機器（目前是 agy-machine 的 agy、devbox 的 codex／pi）也能擔任寫入角色 `implement` 與 `fixer`。
 
 | 決定 | 選擇 | 理由 |
 | --- | --- | --- |
@@ -87,10 +87,10 @@ afterTurn（寫入模式）
 1. 純函式與管線：patch 取回、路徑檢查、套用＋tree 驗證＋commit、失敗還原（單元測試，不連真機器）。**已完成（2026-11-18，`src/remote-write-result.ts`）。**實作時補上的細節：寫入模式要求派工前本機工作樹乾淨（快照 tree 等於 HEAD tree），否則不派工，因為 commit 會是「HEAD＋patch」，不能夾帶先前未提交的本機改動；遠端 patch 寫成 `.git` 底下的檔案再用位元組取回（`RemoteExec` 只留 64 KiB）；符號連結一律拒絕；沒有任何改動視為失敗。
 2. task 內 `implement` 接線與 `write` 設定、preflight 與 Lead 候選。**已完成（2026-11-18，只有單元測試）：**`cardReview.write`（布林、預設關閉）驗證與凍結進角色快照；`REMOTE_TASK_ROLES` 加入 implement、target `remote:<machine>:implement:<profile>`、候選在沒有 write 時標 `available:false`；`startRemoteRole` 寫入模式（要求 write 與取回通道、派工前 `assertCleanBase`、`afterTurn` 先確認本機 digest 再取回套用 commit）；`main.ts` 提供會尊重手動斷線的 `sshRemoteFetch`；Lead 提示說明 implement 是寫入。
 3. PR 階段 `fixer` 接線。**已完成（2026-11-18，只有單元測試）：**`src/card-fix-remote.ts` 的 `runRemoteCardFix`（重用 `startRemoteRole` 寫入模式；作者宣告修好才取回；輸出與本機 fixer 相同的 `FixOutcome`），`card-fix-wiring` 依 `roles.fixer.machine` 路由並用目前 config 重驗，`main.ts` 與 task implement 共用 `remoteWriteDeps`。實作時的決定：fixer 不是 task 內角色，不進 Lead 候選與 `remote:` target；沒有宣告修好任何 finding 就不取回（比本機 fixer 更嚴：本機是 commit 已經存在、只能標失敗）。
-4. 實機驗收（agy-pod／devbox 各一次成功路徑與一次失敗路徑），結果記進 ISSUE-171。**進度（2026-11-18）：**agy-pod 的 implement 成功路徑已通過，兩種失敗路徑（沒有任何改動、遠端產生符號連結）於 2026-11-19 通過；第一次嘗試曾因角色紀錄不允許遠端 implement／fixer 而失敗並已修正；其餘：PR 階段 fixer 成功路徑與符號連結失敗路徑（agy-pod，2026-11-19）、devbox 的 codex 的 implement 與 fixer 成功路徑（2026-11-19）已通過；devbox 的 pi 的 implement 與 fixer 成功路徑（2026-11-19）與 fixer 的逾時路徑也已通過；其他失敗與 devbox 上寫入角色的其他失敗路徑未做。
+4. 實機驗收（agy-machine／devbox 各一次成功路徑與一次失敗路徑），結果記進 ISSUE-171。**進度（2026-11-18）：**agy-machine 的 implement 成功路徑已通過，兩種失敗路徑（沒有任何改動、遠端產生符號連結）於 2026-11-19 通過；第一次嘗試曾因角色紀錄不允許遠端 implement／fixer 而失敗並已修正；其餘：PR 階段 fixer 成功路徑與符號連結失敗路徑（agy-machine，2026-11-19）、devbox 的 codex 的 implement 與 fixer 成功路徑（2026-11-19）已通過；devbox 的 pi 的 implement 與 fixer 成功路徑（2026-11-19）與 fixer 的逾時路徑也已通過；其他失敗與 devbox 上寫入角色的其他失敗路徑未做。
 
 ## 驗收條件
 
 - 單元測試涵蓋：正常回傳並 commit、tree 不符、路徑違規、超過上限、digest 不符、套用失敗還原、取消與逾時不採用、`write` 未開啟時拒絕。
-- 實機：在 agy-pod 與 devbox 各跑一張 `roles: {implement: "<machine>:<agent>"}` 的卡，確認遠端沒有任何憑證、本機得到預期的 commit、遠端目錄被清除。
+- 實機：在 agy-machine 與 devbox 各跑一張 `roles: {implement: "<machine>:<agent>"}` 的卡，確認遠端沒有任何憑證、本機得到預期的 commit、遠端目錄被清除。
 - 未驗收前，README 與 SPEC 只能寫「設計階段」，不可寫成已可使用。

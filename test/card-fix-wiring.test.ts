@@ -80,7 +80,7 @@ test("without an active worktree the fix is refused, since the author works ther
 test("the last author must be known, local and still present, otherwise there is no pane to split from", async () => {
   await refused({ assignments: { forCard: () => [] } }, /作者/);
   await refused({ taskLead: () => undefined }, /作者/);
-  await refused({ taskLead: () => ({ ...author, machine: "agy-pod" }) }, /本機/);
+  await refused({ taskLead: () => ({ ...author, machine: "agy-machine" }) }, /本機/);
   await refused({ listAgents: async () => [] }, /不在/);
   await refused({ listAgents: async () => [{ ...author, terminal_id: "term_other" }] }, /不在/);
 });

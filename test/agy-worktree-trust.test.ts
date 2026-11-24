@@ -198,7 +198,7 @@ test("cleanup failure only warns and retains ownership for retry", () => {
 test("remote indexed agy warns without reading or touching local settings", () => {
   const f = fixture();
   fs.unlinkSync(f.settings);
-  f.trust.beforeLaunch("agy", "agy-pod:w1:p1", f.cwd);
+  f.trust.beforeLaunch("agy", "agy-machine:w1:p1", f.cwd);
   assert.equal(fs.existsSync(f.settings), false);
   assert.match(f.logs[0], /remote agy trust needs manual handling/);
   assert.equal(f.events.length, 1);
@@ -431,7 +431,7 @@ test("trust implementation has no terminal key or input path and emits no stdout
 
 test("remote agy outside local index still reports manual handling without settings access", () => {
   const f = fixture();
-  f.trust.beforeLaunch("agy", "agy-pod:w1:p2", "/remote/project");
+  f.trust.beforeLaunch("agy", "agy-machine:w1:p2", "/remote/project");
   assert.match(f.logs[0] ?? "", /remote agy trust needs manual handling/);
   assert.deepEqual(f.read(), f.original);
 });

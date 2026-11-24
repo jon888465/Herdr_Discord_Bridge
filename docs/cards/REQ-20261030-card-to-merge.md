@@ -165,7 +165,7 @@ external: { notion: null, github: null, mantis: null }
    - review 的材料必須來自 GitHub 的 PR（head sha、檔案清單、diff，階段 3b 已是這樣），**不能依賴 coding 那台機器的本機 worktree**。
    - 所以 review 只在 feature branch **已 push 並開了 PR 之後**進行；reviewer 的工作目錄是它所在機器上、從 `origin` 取回 PR head 的**新 worktree**（review 用完連同 pane 一起清理，唯讀）。
    - 每台機器都要有這個 repo 的 clone；Herdr 已支援 `--machine <label-or-id>`，卡片的 `## 異動專案` 已記錄機器 id（專案名稱 `<機器 id>:<repo>`）。
-   - 目前 bridge 的卡片功能**只支援本機**（worktree、`card pr`、清理都是）；遠端 pane／worktree 的實測需要使用者同意（不得未經同意在 `agy-pod` 上執行指令，追蹤清單 H1／ISSUE-055）。
+   - 目前 bridge 的卡片功能**只支援本機**（worktree、`card pr`、清理都是）；遠端 pane／worktree 的實測需要使用者同意（不得未經同意在 `agy-machine` 上執行指令，追蹤清單 H1／ISSUE-055）。
 
 **第一版範圍（Agent 的建議，待使用者確認）：** 3c 先做**本機**的新 pane reviewer（含關閉），但介面不綁死本機（review 材料來自 PR、reviewer 的 checkout 來自 `origin`）；遠端機器另開階段（F9），先用最小的實驗確認 Herdr 的 `--machine` 對 pane／worktree／agent 的支援，再決定。
 

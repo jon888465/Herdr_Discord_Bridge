@@ -270,7 +270,7 @@ test("projects is written after project and before links, and round trips", () =
   const card: Card = {
     ...minimal,
     project: "Legacy",
-    projects: ["local:Herdr_Discord_Bridge", "agy-pod:other"],
+    projects: ["local:Herdr_Discord_Bridge", "agy-machine:other"],
     links: { parent: "REQ-20261030-parent" },
   };
   const result = serializeCard(card);
@@ -279,7 +279,7 @@ test("projects is written after project and before links, and round trips", () =
   const lines = result.text.split("\n---\n")[0].split("\n").slice(8);
   assert.deepEqual(lines, [
     "project: Legacy",
-    "projects: [local:Herdr_Discord_Bridge, agy-pod:other]",
+    "projects: [local:Herdr_Discord_Bridge, agy-machine:other]",
     "links: { parent: REQ-20261030-parent }",
   ]);
   const reread = parseCard(result.text, "REQ-20261030-example.md");

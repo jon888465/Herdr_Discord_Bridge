@@ -59,15 +59,15 @@ test("agent header is one unframed line and shows the machine only through the p
   assert.match(local, /🤖 codex · backend │ WK: w1 · review │ Pane: w1:p2/);
   const remote = agentHeader(
     "agy",
-    "agy-pod:w2",
-    "agy-pod:w2:p1",
+    "agy-machine:w2",
+    "agy-machine:w2:p1",
     "agy",
-    "agy-pod:~",
+    "agy-machine:~",
   );
-  assert.match(remote, /🤖 agy │ WK: w2 · ~ │ Pane: agy-pod:w2:p1/);
+  assert.match(remote, /🤖 agy │ WK: w2 · ~ │ Pane: agy-machine:w2:p1/);
 });
 
-test("agent header (reviewed with agy-pod): clean before comparing, per-field limits, safe separators", () => {
+test("agent header (reviewed with agy-machine): clean before comparing, per-field limits, safe separators", () => {
   // ANSI／換行不會讓同名 kind 被當成不同。
   assert.match(
     agentHeader("agy\n", "w1", "w1:p1", "\u001b[1magy", "w1"),

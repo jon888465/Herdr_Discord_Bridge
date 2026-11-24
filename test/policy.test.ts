@@ -18,7 +18,7 @@ const valid = [
   "projects:",
   "  # 這個專案只開 PR",
   "  local:Herdr_Discord_Bridge: L1",
-  "  agy-pod:other.repo: L0",
+  "  agy-machine:other.repo: L0",
   "",
 ].join("\n");
 
@@ -30,7 +30,7 @@ test("a valid policy gives the default level and one level per project", () => {
       default: "L0",
       projects: {
         "local:Herdr_Discord_Bridge": "L1",
-        "agy-pod:other.repo": "L0",
+        "agy-machine:other.repo": "L0",
       },
     },
   });
@@ -128,7 +128,7 @@ test("levelFor gives the project's own level, or the default for an unlisted pro
   assert.equal(parsed.ok, true);
   if (!parsed.ok) return;
   assert.equal(levelFor(parsed.policy, "local:Herdr_Discord_Bridge"), "L1");
-  assert.equal(levelFor(parsed.policy, "agy-pod:other.repo"), "L0");
+  assert.equal(levelFor(parsed.policy, "agy-machine:other.repo"), "L0");
   assert.equal(levelFor(parsed.policy, "local:Unlisted"), "L0");
   assert.equal(levelFor(DEFAULT_POLICY, "local:Anything"), "L0");
 });

@@ -915,7 +915,7 @@ test("a second project and later updates keep both, change only the given fields
   store.recordProject(sample.id, fooInfo, "2026-11-03");
   store.recordProject(
     sample.id,
-    { machine: "agy-pod", repoPath: "/srv/Bar" },
+    { machine: "agy-machine", repoPath: "/srv/Bar" },
     "2026-11-03",
   );
   store.recordProject(
@@ -928,7 +928,7 @@ test("a second project and later updates keep both, change only the given fields
     "2026-11-04",
   );
   const read = store.read(sample.id);
-  assert.deepEqual(read.ok && read.card.projects, ["local:Foo", "agy-pod:Bar"]);
+  assert.deepEqual(read.ok && read.card.projects, ["local:Foo", "agy-machine:Bar"]);
   const body = read.ok ? read.card.body : "";
   assert.equal(body.split("### local:Foo").length, 2);
   assert.ok(
@@ -937,7 +937,7 @@ test("a second project and later updates keep both, change only the given fields
     ),
   );
   assert.ok(
-    body.includes("### agy-pod:Bar\n\n- 機器：agy-pod\n- repo：/srv/Bar\n"),
+    body.includes("### agy-machine:Bar\n\n- 機器：agy-machine\n- repo：/srv/Bar\n"),
   );
   assert.equal(read.ok && read.card.updated, "2026-11-04");
 });

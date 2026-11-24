@@ -323,7 +323,7 @@ test("uncertain fingerprint failure keeps the directory; a certain one removes i
 
 test("fixed result text: only known labels pass, the rest is unclassified", () => {
   equal(rc.fixedResultText("reviewer 沒有回覆：pod secret"), "reviewer 沒有回覆");
-  for (const sample of ["agent.start failed on agy-pod: permission denied", "machine pod unreachable", "pod：stderr SECRET", "reviewer 沒有回覆 pod", "stderr: /root/hdb-card-review/x", ""]) {
+  for (const sample of ["agent.start failed on agy-machine: permission denied", "machine pod unreachable", "pod：stderr SECRET", "reviewer 沒有回覆 pod", "stderr: /root/hdb-card-review/x", ""]) {
     equal(rc.fixedResultText(sample), rc.UNCLASSIFIED);
     ok(!/pod|SECRET|stderr|\/root/.test(rc.fixedResultText(sample)));
   }

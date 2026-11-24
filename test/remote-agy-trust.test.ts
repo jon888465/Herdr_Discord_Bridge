@@ -48,7 +48,7 @@ test("ssh argv is fixed; values never enter the script text", async () => {
   equal(p.state.settings, SETTINGS);
   eq(p.state.calls.at(-1)!.slice(0, 9), ["sh", "-c", TRUST_WRITE_SCRIPT, "sh", ROOT, DIR, NAME, MARKER, "remove"]);
   for (const script of [TRUST_READ_SCRIPT, TRUST_WRITE_SCRIPT])
-    for (const value of [ROOT, NAME, HASH, MARKER, "/root/workspace", "SCREEN_SECRET", "agy-pod"]) ok(!script.includes(value), value);
+    for (const value of [ROOT, NAME, HASH, MARKER, "/root/workspace", "SCREEN_SECRET", "agy-machine"]) ok(!script.includes(value), value);
   ok(TRUST_WRITE_SCRIPT.includes('"$3/.git/hdb-card-review"') && !/[\u0000-\u001F]/.test(TRUST_WRITE_SCRIPT + TRUST_READ_SCRIPT));
 });
 

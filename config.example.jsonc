@@ -35,7 +35,7 @@
   "machines": [
     // Optional `hookSocket`: remote path of a unix socket the bridge reverse-forwards (`ssh -R`)
     // to its local hook socket, so remote Stop hooks reach the bridge (ISSUE-045).
-    { "id": "agy-pod", "ssh": "agy-pod", "socket": "/root/.config/herdr/herdr.sock", "hookSocket": "/root/.config/herdr-discord-bridge/hooks.sock" },
+    { "id": "agy-machine", "ssh": "agy-machine", "socket": "/root/.config/herdr/herdr.sock", "hookSocket": "/root/.config/herdr-discord-bridge/hooks.sock" },
   ],
   // Profiles are definitions, not running panes. Enable them per workspace with team select.
   // Model names must be supported by your installed CLI/account; no model is forced here.
