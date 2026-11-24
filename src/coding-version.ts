@@ -34,6 +34,8 @@ export interface CodingTreeSnapshot {
   /** overflow 的白話原因（哪個檔案或哪個上限）；只給訊息用，**不進任何 fingerprint**。 */
   overflowDetail?: string;
   files: CodingFileRecord[];
+  /** Names still available when hashing stops at the byte limit. */
+  unhashedPaths?: string[];
 }
 
 export interface CodingVersion {
@@ -45,6 +47,7 @@ export interface CodingVersion {
   stagedDiffSha256: string;
   unstagedDiffSha256: string;
   deliveryPaths: string[];
+  worktreePaths: string[] | undefined;
   untracked: Array<{ path: string; sha256: string; bytes: number }>;
   overflow: boolean;
   /** 同 `CodingTreeSnapshot.overflowDetail`，不進 fingerprint。 */
@@ -195,10 +198,10 @@ export function captureCodingTree(cwd: string): CodingTreeSnapshot {
   ]);
   const overflow = staged === "overflow" || unstaged === "overflow";
   const stagedNames = nulSplit(
-    gitText(repository, ["diff", "--name-only", "-z", "--cached"]),
+    gitText(repository, ["diff", "--name-only", "--no-renames", "-z", "--cached"]),
   );
   const unstagedNames = nulSplit(
-    gitText(repository, ["diff", "--name-only", "-z"]),
+    gitText(repository, ["diff", "--name-only", "--no-renames", "-z"]),
   );
   const untrackedNames = nulSplit(
     gitText(repository, [
@@ -272,6 +275,7 @@ export function captureCodingTree(cwd: string): CodingTreeSnapshot {
     overflow: overflow || fileOverflow,
     ...(overflowDetail ? { overflowDetail } : {}),
     files,
+    ...(fileOverflow ? { unhashedPaths: names.slice(files.length) } : {}),
   };
 }
 
@@ -375,6 +379,13 @@ export function versionFromBaseline(
     stagedDiffSha256: current.stagedDiffSha256,
     unstagedDiffSha256: current.unstagedDiffSha256,
     deliveryPaths,
+    // Unhashed new paths still belong to the delivery. A baseline file that
+    // was never hashed on either side cannot be compared reliably.
+    worktreePaths:
+      baseline.unhashedPaths ||
+      current.unhashedPaths?.some((file) => baseFiles.has(file))
+        ? undefined
+        : [...changed.map((file) => file.path), ...(current.unhashedPaths ?? [])],
     untracked,
     overflow,
     ...(overflowDetail ? { overflowDetail } : {}),

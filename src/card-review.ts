@@ -22,12 +22,16 @@ import {
   type FindingInput,
   type Verdict,
 } from "./card-findings.js";
+import {
+  MAX_REVIEW_DIFF_CHARS,
+  reviewLimit,
+  reviewLimitError,
+} from "./card-review-fetch.js";
 import { redactSecrets } from "./redact.js";
 import { unwrapCodexJson } from "./team-orchestration.js";
 
-export const MAX_REVIEW_FILES = 20;
-/** 使用者 2026-11-17 由 60,000 提高到 80,000（ISSUE-111）；超過仍拒絕並要求 Lead 重新切分。 */
-export const MAX_REVIEW_DIFF_CHARS = 80_000;
+export { MAX_REVIEW_DIFF_CHARS, MAX_REVIEW_FILES } from "./card-review-fetch.js";
+
 export const MAX_CRITERIA = 20;
 export const MAX_REPLY_CHARS = 64 * 1024;
 
@@ -128,11 +132,8 @@ export function buildReviewPrompt(input: ReviewInput): ReviewPrompt {
     };
   if (input.files.length === 0)
     return { ok: false, error: "PR 沒有動到任何檔案，沒有東西可以 review" };
-  if (input.files.length > MAX_REVIEW_FILES)
-    return {
-      ok: false,
-      error: `PR 動到 ${input.files.length} 個檔案，超過 review 上限 ${MAX_REVIEW_FILES} 個；請 Lead 把需求重新切分成較小的部分`,
-    };
+  const fileLimit = reviewLimit("files", input.files.length);
+  if (fileLimit) return { ok: false, error: reviewLimitError(fileLimit) };
   const unciteable = input.files.find((file) => !CITABLE_PATH.test(file));
   if (unciteable !== undefined)
     return {
@@ -141,11 +142,8 @@ export function buildReviewPrompt(input: ReviewInput): ReviewPrompt {
     };
   if (input.diff.trim() === "")
     return { ok: false, error: "PR 的 diff 是空的，沒有東西可以 review" };
-  if (input.diff.length > MAX_REVIEW_DIFF_CHARS)
-    return {
-      ok: false,
-      error: `PR 的 diff 有 ${input.diff.length} 字元，超過 review 上限 ${MAX_REVIEW_DIFF_CHARS}；請 Lead 把需求重新切分成較小的部分`,
-    };
+  const diffLimit = reviewLimit("diff", input.diff.length);
+  if (diffLimit) return { ok: false, error: reviewLimitError(diffLimit) };
 
   const scope =
     input.scope === "whole" ? "整體" : `commit ${input.scope.slice(0, 12)}`;

@@ -1,3 +1,5 @@
+import type { ReviewLimit } from "./card-review-fetch.js";
+import type { CodingVersion } from "./coding-version.js";
 import type { RoleCleanupReason } from "./card-role-session.js";
 import {
   assertRoleMatches,
@@ -69,7 +71,8 @@ export interface CodingHooks {
     report: string,
     /** ISSUE-088：codex 由 rollout 觀察到的實際 session。 */
     observedSession?: { kind: string; value: string },
-  ): void;
+  ): void | Promise<void>;
+  deliveryStop?(): string | undefined;
   assess(): { reasons: string[]; fingerprint: string };
   /** ISSUE-191：重新規劃也解不掉的驗收條件（例如版本擷取超過讀取上限）；只讀，不寫事件、不改閘門狀態。 */
   unrecoverable?(): string | undefined;
@@ -159,6 +162,11 @@ export interface TeamTaskInput {
   coding?: boolean;
   codingBaseline?: CodingTaskState;
   codingHooks?: CodingHooks;
+  /** Supplied only for coding tasks that can deliver a card PR. */
+  precheckDelivery?: (
+    repository: string,
+    version: CodingVersion,
+  ) => Promise<ReviewLimit | undefined>;
   acquireWorker?: (
     worker: AgentRecord,
     assignment?: AssignmentPlan["assignments"][number],
@@ -476,6 +484,8 @@ export async function runTeamTask(
           }),
         );
         check();
+        const deliveryStop = input.codingHooks?.deliveryStop?.();
+        if (deliveryStop) throw new Error(deliveryStop);
         const rejected = settledWave.find((v) => v.status === "rejected");
         if (rejected?.status === "rejected") throw rejected.reason;
         const wave = settledWave.flatMap((v) =>
@@ -748,7 +758,7 @@ async function runAssignment(
     )
       await input.onWorkerSession?.(worker, settled.session);
     if (settled.state !== "blocked")
-      input.codingHooks?.onAssignmentDone(
+      await input.codingHooks?.onAssignmentDone(
         assignment,
         worker,
         observed,

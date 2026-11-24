@@ -45,6 +45,9 @@ export interface CommitOutcome {
   taskId: string;
 }
 
+export const deliveryAddArgs = (files: readonly string[]): string[] =>
+  ["add", "--", ...files];
+
 export const defaultCommitDeps: CommitDeps = {
   git(cwd, args) {
     const env = Object.fromEntries(
@@ -154,9 +157,10 @@ export function commitVerifiedVersion(
     );
 
   const [subject, body] = commitMessage(card, task, version.fingerprint);
-  deps.git(worktreePath, ["add", "--", ...files]);
+  deps.git(worktreePath, deliveryAddArgs(files));
+  // Match deliveryPaths: a rename stages both a deletion and an addition.
   const staged = deps
-    .git(worktreePath, ["diff", "--cached", "--name-only", "-z"])
+    .git(worktreePath, ["diff", "--cached", "--no-renames", "--name-only", "-z"])
     .split("\0")
     .filter(Boolean)
     .sort();

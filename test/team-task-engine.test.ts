@@ -1,3 +1,10 @@
+import { runAutopick } from "../src/autopick.js";
+import { createAutopickSteps } from "../src/autopick-wiring.js";
+import { CardStore } from "../src/card-store.js";
+import { syncCards, taskSourceFrom } from "../src/card-sync.js";
+import { createCardNotifier } from "../src/card-notify.js";
+import { measureDelivery } from "../src/card-delivery-precheck.js";
+import type { TeamTaskInput } from "../src/team-orchestration.js";
 import test from "node:test";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -863,6 +870,9 @@ function codingRun(options: {
   skipImplement?: boolean;
   /** Single configured profile is reacquired as a fresh session per assignment. */
   singleProfile?: boolean;
+  precheckDelivery?: TeamTaskInput["precheckDelivery"];
+  writeDelivery?: (repo: string, pass: number) => void;
+  fixAfterVerify?: boolean;
 }) {
   const repo = codingRepo();
   const dir = mkdtempSync(join(tmpdir(), "agy-coding-task-"));
@@ -905,13 +915,17 @@ function codingRun(options: {
   const all = [leadAgent, author, reviewer];
   const prompts: Array<{ target: string; text: string }> = [];
   let plans = 0;
+  let writes = 0;
   const port = {
     listAgentsWithWorkspaceNames: async () => all.map(record),
     promptAgent: async (target: string, text: string) => {
       prompts.push({ target, text });
       if (text.includes("Do not modify files while planning")) plans += 1;
-      if (text.includes("Coding role: implement"))
-        writeFileSync(join(repo, "added.txt"), "one\n");
+      if (text.includes("Coding role: implement")) {
+        writes += 1;
+        if (options.writeDelivery) options.writeDelivery(repo, writes);
+        else writeFileSync(join(repo, "added.txt"), "one\n");
+      }
       // 第一個 prompt 處理完之後 Herdr 才登記 session。
       registered.add(target);
     },
@@ -955,7 +969,14 @@ function codingRun(options: {
         const first = options.skipImplement ? [review] : [implement];
         const rounds = options.skipImplement
           ? [first, []]
-          : [first, [review], [verify], []];
+          : [
+              first, [review], [verify],
+              ...(options.fixAfterVerify ? [[
+                { ...implement, id: "fix", instruction: "Fix the delivery" },
+                { ...verify, id: "reverify", dependsOn: ["fix"] },
+              ]] : []),
+              [],
+            ];
         body = JSON.stringify({ assignments: rounds[plans - 1] ?? [] });
       } else if (prompt.includes("Coding role: implement"))
         body = JSON.stringify({
@@ -983,6 +1004,10 @@ function codingRun(options: {
   };
   const engine = new TeamTaskEngine(store, port, new Set());
   return {
+    prompts,
+    store,
+    cards: join(dir, "cards"),
+    repo,
     run: () =>
       engine.run({
         taskId: "task-agy",
@@ -1013,6 +1038,7 @@ function codingRun(options: {
           : {}),
         replan: true,
         coding: true,
+        precheckDelivery: options.precheckDelivery,
         timeoutMs: 500,
       }),
     close: () => {
@@ -1021,6 +1047,167 @@ function codingRun(options: {
     },
   };
 }
+
+for (const scenario of ["within limit", "normalized CRLF", "21 files with invalid UTF-8", "oversize fix", "unavailable"] as const) {
+  test(`ISSUE-187 delivery precheck: ${scenario}`, async () => {
+    let measured = 0;
+    let measuredChars: number | undefined;
+    const h = codingRun({
+      author: { agent: "opencode", initial: "author" },
+      reviewer: { agent: "opencode", initial: "reviewer" },
+      fixAfterVerify: scenario === "oversize fix",
+      writeDelivery(repo, pass) {
+        writeFileSync(join(repo, "added.txt"), pass === 2 ? "a".repeat(81_000) + "\n" : "one\n");
+        if (scenario === "normalized CRLF") {
+          execFileSync("git", ["-C", repo, "config", "core.autocrlf", "true"]);
+          writeFileSync(join(repo, "added.txt"), "aaaaaa\r\n".repeat(9500));
+        }
+        if (scenario === "21 files with invalid UTF-8") {
+          for (let i = 0; i < 20; i++)
+            writeFileSync(join(repo, `extra-${i}.txt`), Buffer.from([0xe9, 10]));
+        }
+      },
+      async precheckDelivery(repo, version) {
+        measured += 1;
+        const base = scenario === "unavailable" ? "0".repeat(40) : version.baseSha;
+        const readPatch = scenario === "21 files with invalid UTF-8" ? async () => {
+          assert.fail("patch must not be read after the file limit is known");
+        } : undefined;
+        const result = await measureDelivery(repo, base, version, readPatch);
+        measuredChars = result.chars;
+        return result.exceeded;
+      },
+    });
+    try {
+      const task = await h.run();
+      const verifies = h.prompts.filter(({ text }) => text.includes("Coding role: verify")).length;
+      const git = (...args: string[]) => execFileSync("git", ["-C", h.repo, ...args], { encoding: "utf8" });
+      assert.equal(git("rev-list", "--count", "HEAD").trim(), "1");
+      assert.equal(git("diff", "--cached", "--name-only"), "");
+      assert.match(git("status", "--porcelain"), /\?\? added\.txt/);
+      assert.match(h.prompts[0].text, /split the plan into smaller cards.*Do not reduce tests, boundary checks, or error handling to shrink the diff/);
+      assert.equal(measured, scenario === "oversize fix" ? 2 : 1);
+      if (scenario === "21 files with invalid UTF-8") {
+        assert.equal(task.state, "failed");
+        assert.equal(verifies, 0);
+        assert.match(task.detail!, /MAX_REVIEW_FILES：實測 21 個檔案，上限 20，超過 1/);
+        assert.deepEqual(readFileSync(join(h.repo, "extra-0.txt")), Buffer.from([0xe9, 10]));
+      } else if (scenario === "oversize fix") {
+        assert.equal(task.state, "failed");
+        assert.equal(verifies, 1);
+        const match = /MAX_REVIEW_DIFF_CHARS：實測 (\d+) 字元，上限 80000，超過 (\d+)/.exec(task.detail!);
+        assert.ok(match);
+        assert.equal(Number(match[2]), Number(match[1]) - 80_000);
+        assert.equal(readFileSync(join(h.repo, "added.txt")).length, 81_001);
+      } else {
+        if (scenario === "normalized CRLF") {
+          git("add", "--", "added.txt");
+          const expected = git("diff", "--cached", "--abbrev=7", "HEAD").length;
+          assert.ok(expected < 80_000);
+          assert.equal(measuredChars, expected);
+        }
+        assert.equal(task.state, "completed");
+        assert.equal(verifies, 1);
+        const warning = task.coding?.artifacts[0].precheckWarning;
+        if (scenario === "unavailable") assert.match(warning!, /無法預檢 PR diff：.*merge-base/);
+        else assert.equal(warning, undefined);
+      }
+    } finally {
+      h.close();
+    }
+  });
+}
+
+test("ISSUE-187 autopick keeps a successful delivery and sends the missing base warning via card notify", async () => {
+  const h = codingRun({
+    author: { agent: "opencode", initial: "author" },
+    reviewer: { agent: "opencode", initial: "reviewer" },
+    async precheckDelivery(repo, version) {
+      return (await measureDelivery(repo, "0".repeat(40), version)).exceeded;
+    },
+  });
+  try {
+    mkdirSync(h.cards, { mode: 0o700 });
+    const cards = new CardStore(h.cards);
+    const card = {
+      id: "REQ-20261124-precheck", title: "Fixture", type: "requirement",
+      status: "ready", version: 1, body: "Fixture",
+      created: "2026-11-24", updated: "2026-11-24", notify: "discord:12345",
+    } as const;
+    assert.ok(cards.create(card).ok);
+    const now = () => "2026-11-24T00:00:01Z";
+    const delivered: [string, string][] = [];
+    const notifier = createCardNotifier({
+      store: cards, now, startedAt: "2026-11-24T00:00:00Z",
+      prUrl: () => undefined,
+      async discord(target, text) { delivered.push([target, text]); },
+      async pane() { return undefined; }, async agent() { assert.fail("wrong target"); },
+      log() {},
+    });
+    const commands: string[] = [];
+    const tasks = taskSourceFrom(h.store);
+    const steps = createAutopickSteps({
+      port: {} as Parameters<typeof createAutopickSteps>[0]["port"],
+      async command(text) {
+        commands.push(text);
+        if (text.startsWith("card assign ")) {
+          assert.ok(cards.setStatus(card.id, "in_progress", card.updated).ok);
+          assert.ok(cards.recordTask(card.id, "task-agy", card.updated).ok);
+          assert.equal((await h.run()).state, "completed");
+          return "successful assignment output that the picker discards";
+        }
+        return "ok";
+      },
+      recordLeadWorkspace() {},
+      taskIdForCard: () => "task-agy",
+      taskState: tasks.get,
+      cardStatus: () => {
+        for (let i = 0; i < 2; i++)
+          assert.deepEqual(syncCards({ rootDir: h.cards, tasks, now }).problems, []);
+        const result = cards.read(card.id);
+        assert.ok(result.ok);
+        return result.card.status;
+      },
+      allowedWorkspaceIds: [],
+      sleep: async () => assert.fail("unexpected poll"),
+      now: () => 0,
+    });
+    const report = await runAutopick({
+      card, project: "local/fixture", repoPath: h.repo, level: "L1", lead: "codex",
+    }, { ...steps, startLead: async () => ({ close: async () => {} }) });
+    assert.equal(report.outcome, "reached", report.reason);
+    assert.equal(report.lastStep, "pr");
+    assert.deepEqual(commands, [
+      `card assign ${card.id} --worktree --coding`,
+      `card commit ${card.id}`,
+      `card pr ${card.id}`,
+    ]);
+    const task = h.store.get("task-agy");
+    assert.match(task.coding?.artifacts[0].precheckWarning ?? "", /本機缺少 PR base commit/);
+    assert.ok(task.coding?.artifacts.some((artifact) => artifact.verdict === "pass"));
+    assert.ok(task.coding?.artifacts.some((artifact) => artifact.verificationPassed));
+    const ledger = cards.readLog(card.id);
+    assert.ok(ledger.ok);
+    assert.equal(ledger.entries.filter(({ event }) => event === "precheck_warning").length, 1);
+    await notifier.tick();
+    await notifier.tick();
+    assert.equal(delivered.length, 1);
+    assert.equal(delivered[0][0], "12345");
+    assert.match(delivered[0][1], /無法預檢 PR diff：本機缺少 PR base commit/);
+
+    const summary = "PR 預檢超限 MAX_REVIEW_FILES：實測 21 個檔案，上限 20，超過 1；成果已保留";
+    assert.ok(cards.recordEvent(card.id, {
+      event: "failed", time: now(), eventId: "task-precheck-failed",
+      code: "task_failed", reason: `private prefix ${summary}`,
+    }).ok);
+    await notifier.tick();
+    assert.equal(delivered[1][0], "12345");
+    assert.ok(delivered[1][1].includes(summary));
+    assert.ok(!delivered[1][1].includes("private prefix"));
+  } finally {
+    h.close();
+  }
+});
 
 test("ISSUE-107: a session that agy gets only after its first turn becomes the implement artifact's authorSession, and a different known reviewer passes", async () => {
   const h = codingRun({
