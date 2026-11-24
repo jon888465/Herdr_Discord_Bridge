@@ -1,5 +1,20 @@
 # Known Issues
 
+## ISSUE-211：卡片 `roles` 指定遠端的 pi 時，驗證仍要求本機有 pi profile，撿卡即被拒絕
+
+更新日期：2026-11-24。狀態：**已修正、待驗收**（根因已確認；程式與自動化測試通過；**尚未部署、未實機驗收**）。
+
+- **使用者可見症狀（2026-11-24 05:42 UTC，ISSUE-187 的沙盒驗收卡 S1，`roles: {implement: "<machine>:pi:", …}`）：**autopick 撿起卡片後立刻 `autopick_stopped`：`卡片角色指定無效：implement：agent pi 未開放（需要已配置且符合角色開放條件的 profile）`；沒有建立 worktree、任務沒有啟動。當時 遠端 machine 的 `cardReview.kinds` 已開放 `pi`、`write` 已暫時打開。
+- **預期行為：**遠端機器開放的 kind，不需要本機也配置它；本機沒有 pi（使用者刻意把本機的 pi profile 註解掉），遠端有，卡片應能指定遠端的 pi。
+- **根因（2026-11-24 讀碼確認）：**`preflightRoles`（`src/card-role-assignment.ts`）對**每個角色（包含遠端）**都要求本機 `agentProfiles` 裡有該 kind、而且非 claude／codex 的 kind 要帶 `implementation` 或 `review` 能力的 profile；`remoteRoleCandidates`、`remoteReviewerCandidates` 與 `remoteRoleTargets` 也都以本機 profile 為單位（目標名稱 `remote:<machine>:<role>:<profile id>` 的最後一段就是 profile id，凍結進目標的 profile 是遠端啟動的配方）。使用者的 `config.json` 把 pi profile 註解掉了（2026-11-19 的 pi 寫入驗收是**暫時**打開它並在驗完還原，見本檔先前記載），所以沒有任何符合的 profile。
+- **使用者決定（2026-11-24）：**選「修驗證規則」，而不是在本機打開 pi profile 或改用別的 agent。
+- **修正（2026-11-24，原始碼）：**`machines[].cardReview.kinds` 開放的 kind，**本機完全沒有任何同 kind 的 profile** 時，為該遠端機器補一個**只用在遠端的隱含 profile**（id 等於 kind、`args: []`、沒有 model、能力為 analysis／implementation／review，不受本機 Team 的 profile 選取影響）。四個地方一致使用（`preflightRoles` 的遠端分支、`remoteRoleCandidates`、`remoteReviewerCandidates`、`remoteRoleTargets` 的凍結 profile）。**不變的部分：**本機有同 kind 的 profile 時完全不補（它的能力設定仍是閘門，使用者可以靠它關掉某個 kind）；隱含 profile 只用在遠端，`local:pi` 仍被拒絕、本機 `--coding` 自動啟用與 `profile:` 目標看不到它；指定 model 仍須有本機 profile 的允許清單（隱含 profile 沒有 model）；機器自己的閘門（`kinds`、`write`、`toolchain`、斷線排除）原樣保留。凍結快照重新驗證通過（凍結的候選當成本機 profile 重驗，行為一致）。
+- **測試（2026-11-24，本機 macOS，worktree）：**新增 `test/card-role-remote-implicit.test.ts` 9 項（本機沒有 pi 時遠端 pi 的 implement 與 reviewer 被接受且快照可重驗；機器的 kinds／write／toolchain 閘門仍生效；`local:pi` 仍被拒絕；指定 model 被拒絕；本機有同 kind 但只有 analysis 能力的 profile 時仍被拒絕、有 implementation 能力的 profile 時用它而不補隱含的；Team 選取清單不會遮蔽隱含 profile；Lead 候選與目標含隱含 profile 並遵守機器閘門；有本機 profile 時只有一個候選；斷線的機器不提供也不接受）。**修正前** 4 項失敗（5 項保護測試本來就該過）；暫時讓隱含 profile 永遠不產生：4 項失敗；暫時讓它即使本機已有同 kind 也補：2 項失敗；皆已還原。完整 `npm test` 2314 項、通過 2313、失敗 0、略過 1；typecheck、lint 通過。既有的角色與遠端測試沒有任何一項需要修改。
+- **副作用（沒有避開，使用者需要知道）：**隱含 profile 也進入 **Lead 的遠端候選**，所以本機沒有、遠端開放的 kind（目前是 遠端 machine 的 pi）會出現在**所有** coding 任務 Lead 可選的候選裡，不只是有 `roles` 的卡。寫入角色（implement／fixer）仍需要 `write: true`（預設關閉）；但唯讀角色（diagnose／review／verify）會多一個 pi 選項，而 **pi 當唯讀角色沒有實機驗過**（只驗過 implement 與 fixer，2026-11-19）。如果要避免，需要另外做「只對卡片 `roles` 明列的遠端 kind 才補隱含 profile」，這次沒有做。
+- **未驗證：**部署後 `<machine>:pi` 的卡片實際被接受並把 implement 派到遠端 pi（ISSUE-187 的沙盒驗收 S1 到 S3 會一起驗到）；隱含 profile 是否讓遠端啟動缺少某些本機 profile 才有的啟動參數（pi 的 `args` 本來就是空陣列，其他 kind 沒有驗）；多台遠端機器同時開放同一個 kind 時的行為。
+- **環境（暫時，驗收後還原）：**使用者本機設定為了這輪驗收**暫時**加了 遠端 machine 的 `write: true`、打開本機被註解掉的 pi profile（這項在選定修法後就不再需要）、加入沙盒專案（L0）；備份在設定目錄，驗收完全部還原並重啟。**目前執行中的 bridge 仍是舊版，且仍帶著暫時打開的 pi profile。**
+- **相關：**ISSUE-171（遠端寫入角色）、ISSUE-187（預檢，這是它的沙盒驗收被擋下的原因）。
+
 ## ISSUE-210：PR 預檢快照與 card commit 的暫存正規化不同
 
 2026-11-24，**已修正、待驗收**。在 macOS fixture 設 `core.autocrlf=true`，新增 9,500 行 `aaaaaa\r\n`。前輪審查的 `review-crlf.txt` 量到 85,646 字元，實際 Git add 的 patch 為 76,146；本輪用 `added.txt` 在修正前重現 85,628 實測與 76,128 預期，定向測試 exit 1。根因是同一套隔離設定也用來暫存，漏掉來源 repo 的 blob 正規化，誤擋 verify。修正後沿 `card commit` 的 Git add 暫存工作樹內容，索引與新 Git 物件均在暫存區，再以交付 tree 的獨立索引套用 patch attributes。修正途中直接比較兩個 tree 讀不到交付的 `-diff`，回歸測試 exit 1，改用載入交付 tree 的索引後通過。CRLF 預檢與實際暫存 patch 均為 76,128，verify 派送一次。另核對同路徑 staged／unstaged 的工作樹版本經來源 clean filter 後一致，且來源索引、Git 物件和檔案維持原樣。驗證與部署狀態見 ISSUE-187。
@@ -300,8 +315,7 @@
 - **審查修正（2026-11-24）：**見 ISSUE-208／209。前輪唯讀 review 全套初跑 2,288 通過、11 項因暫存副本缺 `src`／`skills` 失敗、1 項跳過，補齊後 11 項分組重跑通過；唯讀 verify 首跑有 1 項 Grok turn budget 逾時，單檔重跑 34/34、全套重跑 2,299 通過、1 項跳過。逾時根因未確認。本輪 `npm run typecheck`、`npm run lint`、`npm run build`、`npm test`、`git diff --check` 均通過。完整測試 2,301 通過、0 失敗、1 項 Linux 專用測試跳過；`node --test --test-name-pattern=ISSUE-187 dist/test/{card-delivery-precheck,team-task-engine}.test.js` 的 14 項定向案例均通過。
 - **暫存語意修正（2026-11-24）：**見 ISSUE-210。來源 repo 設定只用於建立實際會暫存的 blobs；patch 則在隔離環境讀取交付 tree 和其中的 attributes。macOS arm64 上 `npm run typecheck`、`npm run lint`、`npm run build`、`npm test`、`git diff --check` 均通過。完整測試 2,303 通過、0 失敗、1 項 Linux 專用測試跳過；`node --test --test-name-pattern=ISSUE-187 dist/test/{card-delivery-precheck,team-task-engine}.test.js` 定向 16 項全過。
 - **部署與驗收：**預檢已隨 PR #364 合併（main `b936074`），**2026-11-24 05:17 UTC 已部署重啟**（build 內有預檢模組與 `precheckDelivery` 接線，bridge 已連線）；**尚未實機驗收**。接下來要以專用沙盒 repo 的超限卡片查核 verify 零派送、`notify` 收到完整量測、未提交交付與 worktree 保留，以及未自動 commit／開 PR。PR 服務實際輸出的差異、CRLF 正規化後派送 verify，以及缺少 base 時成功卡片的通知也待實機比對。
-
-
+- **沙盒驗收進度（2026-11-24，使用者要求 S1 到 S5，implement 用 遠端 machine 的 pi、reviewer 用 遠端 machine 的 codex；沙盒 repo 是先前遠端寫入驗收用過的那個，專案設 L0）：**設計為 5 個情境：S1 未超限、S2 diff 字元超限、S3 檔案數超限、S4 `core.autocrlf=true` 的 CRLF（用本機 codex，因為遠端寫入是 `git apply` 後由 bridge commit，不走 `git add` 的正規化）、S5 與 PR 服務實際輸出對照（需要 L1）。**S1 在撿卡時被角色驗證擋下**（`implement：agent pi 未開放`，成因與修正見 ISSUE-211），所以**目前一個情境都還沒有執行，預檢仍然沒有實機驗收**。
 ## ISSUE-186：team discuss 唯讀同儕討論與缺空格提示
 
 更新日期：2026-11-23。狀態：**重新開啟／待調查（agy 同儕不穩定地被標 `incomplete`：2026-11-23 05:15 UTC 又出現，根因未確認，見「agy 再度未完成」那則）；另有一種**不同機制**的現象（claude 漏寫開頭標記）根因已確認、已修正、待驗收，見最後一則；主路徑的 Discord 實機驗收（2026-11-23）與先前的修正歷史保留如下**。先前：已驗收（Discord thread 主路徑，範圍有限，見下方「Discord 實機驗收」）；再先前：已修正、待驗收。需求 REQ-20261120-team-discuss。

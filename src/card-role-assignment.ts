@@ -120,6 +120,25 @@ export function roleProfileEnabled(role: CardRole, p: AgentProfile): boolean {
     (c) => c === "implementation" || c === "review",
   );
 }
+/**
+ * ISSUE-211：遠端機器（`machines[].cardReview.kinds`）開放的 kind，**本機完全沒有任何同 kind 的 profile** 時，
+ * 視為有一個只用在遠端的隱含 profile（id 等於 kind、沒有啟動參數與 model）。使用者刻意不在本機配置某個 kind
+ * （例如本機沒有 pi）時，遠端仍能用它，不必為此在本機打開那個 kind。
+ * 本機有同 kind 的 profile 時完全不補（那個 profile 的能力設定仍是閘門）；隱含 profile 沒有 model，
+ * 所以指定 model 仍必須有本機 profile 的允許清單。機器自己的閘門（kinds／write／toolchain）不變。
+ */
+function implicitRemoteProfiles(context: RoleContext, machine: RemoteReviewMachine): AgentProfile[] {
+  return machine.kinds
+    .filter((kind) => KINDS.includes(kind) && !context.profiles.some((p) => p.kind === kind || p.id === kind))
+    .map((kind) => ({ id: kind, kind, args: [], capabilities: ["analysis", "implementation", "review"] }));
+}
+/** 這台遠端機器可用的 profile：本機符合 kind 且在 Team 選取內的，加上隱含的（不受本機 Team 選取影響）。 */
+function remoteProfilesFor(context: RoleContext, machine: RemoteReviewMachine): AgentProfile[] {
+  return [
+    ...context.profiles.filter((p) => machine.kinds.includes(p.kind) && (context.enabledProfileIds?.includes(p.id) ?? true)),
+    ...implicitRemoteProfiles(context, machine),
+  ];
+}
 export function preflightRoles(
   roles: CardRoles,
   context: RoleContext,
@@ -149,13 +168,14 @@ export function preflightRoles(
     )
       roleError(role, `不存在 machine ${c.machine}`);
     const remote = c.machine?.replace(/^local$/, "") && remoteReviewMachine(role, c, context);
-    const kindProfiles = context.profiles.filter(
-      (p) =>
-        (!c.agent || p.kind === c.agent) &&
-        (!remote || remote.kinds.includes(p.kind)) &&
-        (!context.enabledProfileIds ||
-          context.enabledProfileIds.includes(p.id)),
-    );
+    const kindProfiles = remote
+      ? remoteProfilesFor(context, remote).filter((p) => !c.agent || p.kind === c.agent)
+      : context.profiles.filter(
+          (p) =>
+            (!c.agent || p.kind === c.agent) &&
+            (!context.enabledProfileIds ||
+              context.enabledProfileIds.includes(p.id)),
+        );
     const enabled = kindProfiles.filter((p) => roleProfileEnabled(role, p));
     if (!enabled.length)
       roleError(
@@ -190,8 +210,8 @@ function remoteReviewMachine(role: CardRole, c: RoleConstraint, context: RoleCon
 export function remoteRoleCandidates(context: RoleContext) {
   return (context.remoteMachines ?? []).filter((m) => !context.isDisconnected?.(m.id)).flatMap((m) =>
     REMOTE_TASK_ROLES.flatMap((role) =>
-      context.profiles
-        .filter((p) => m.kinds.includes(p.kind) && roleProfileEnabled(role, p) && (context.enabledProfileIds?.includes(p.id) ?? true))
+      remoteProfilesFor(context, m)
+        .filter((p) => roleProfileEnabled(role, p))
         .map((p) => ({
           machine: m.id,
           role,
@@ -225,7 +245,9 @@ export function remoteRoleTargets(context: RoleContext, workspace: string): Agen
         agent_status: "idle",
         machine: c.machine,
         model: c.model,
-        profile: structuredClone(context.profiles.find((p) => p.id === c.profileId)),
+        profile: structuredClone(
+          remoteProfilesFor(context, context.remoteMachines!.find((m) => m.id === c.machine)!).find((p) => p.id === c.profileId),
+        ),
         roleTarget: c.role,
       };
     });
@@ -250,8 +272,8 @@ export function roleConstraint(snapshot: RoleSnapshot, role: CardRole): RoleCons
 /** Lead 候選：每個開放遠端上的可用 reviewer profile，標明 machine。 */
 export function remoteReviewerCandidates(context: RoleContext) {
   return (context.remoteMachines ?? []).filter((m) => !context.isDisconnected?.(m.id)).flatMap((m) =>
-    context.profiles
-      .filter((p) => m.kinds.includes(p.kind) && roleProfileEnabled("reviewer", p) && (context.enabledProfileIds?.includes(p.id) ?? true))
+    remoteProfilesFor(context, m)
+      .filter((p) => roleProfileEnabled("reviewer", p))
       .map((p) => ({ machine: m.id, kind: p.kind, profileId: p.id, ...(p.model ? { model: p.model } : {}) })),
   );
 }
