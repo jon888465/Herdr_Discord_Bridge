@@ -76,6 +76,7 @@ issue/spec documentation updates and reopening issues after failed acceptance.
 The current issue and verification ledger is [known issues](docs/known-issues.md).
 
 - [main 合併入口稽核](docs/merge-gates.md) 記錄 ISSUE-187 的本機查核、版本證據與線上待查項。
+- [ISSUE-187 第二步](docs/known-issues.md#issue-187實作完成後才發現-pr-超過-review-上限流程只停手沒有把切分交回-lead) 記錄每次卡片 writer 交付後、verify 前的 PR diff 預檢與待完成的實機驗收；patch 隔離、autopick 警告及快照暫存語意見 ISSUE-208／209／210。
 
 ## Console routing
 

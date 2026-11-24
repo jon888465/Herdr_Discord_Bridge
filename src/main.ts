@@ -102,7 +102,9 @@ import { missingCardMessage, syncCards, taskSourceFrom } from "./card-sync.js";
 import { loadPolicy } from "./policy.js";
 import {
   allowedMergeMethods,
+  cardPullRequestBaseHead,
   defaultExec,
+  getRemoteRepo,
   mergePullRequest,
   pullRequestChecks,
   pullRequestFiles,
@@ -119,6 +121,7 @@ import { mergeCardPullRequest, readCardChecks } from "./card-merge-wiring.js";
 import { sharedCardPullRequests } from "./card-prs.js";
 import { openCardPullRequest } from "./card-pr-flow.js";
 import { attachCardPullRequest } from "./card-attach-pr.js";
+import { measureDelivery } from "./card-delivery-precheck.js";
 import { fetchReviewMaterial } from "./card-review-fetch.js";
 import { reviewCardPullRequest } from "./card-review-wiring.js";
 import { RemoteFailure, remoteReviewDeps, type RemoteReviewDeps } from "./remote-checkout.js";
@@ -134,7 +137,7 @@ import {
 import { syncPullRequests } from "./card-pr-sync.js";
 import { basename, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { splitFinalMarkdown } from "./final-format.js";
@@ -2468,6 +2471,22 @@ async function startTeamTask(
       workers,
       replan: true,
       ...(coding ? { coding: true } : {}),
+      ...(coding && cardId
+        ? {
+            precheckDelivery: async (repository, version) => {
+              const worktree = lazyCardWorktrees().active(cardId);
+              if (!worktree) return undefined;
+              if (
+                repository !== realpathSync(worktree.path) ||
+                version.branch !== worktree.branch
+              )
+                throw new Error("coding 任務與卡片 worktree 不符");
+              const repo = await getRemoteRepo(defaultExec, worktree.repoPath);
+              const base = await cardPullRequestBaseHead(defaultExec, repo, worktree.branch);
+              return (await measureDelivery(repository, base, version)).exceeded;
+            },
+          }
+        : {}),
       ...(coding && remoteReviewers.length ? { remoteReviewers } : {}),
       ...(remoteRoles.length ? { remoteRoles } : {}),
       // ISSUE-175：遠端 codex 的 rollout 在遠端機器上，本機找不到，作者／reviewer 的 session 會變成「不明」而讓獨立審查失敗。
@@ -2709,9 +2728,13 @@ async function reportTeamTask(
     `${agentHeaderFor(lead)}\n🧭 **Team Task accepted** · \`${taskId}\`\nLead: **${agentLabel(lead)}**\nWorkers: ${workers.map(agentLabel).join(", ")}${skipped}`,
   );
   const result = await running;
+  const warnings =
+    result.coding?.artifacts.flatMap((artifact) =>
+      artifact.precheckWarning ? [artifact.precheckWarning] : [],
+    ) ?? [];
   await runtime.discord.reply(
     context.message,
-    `${agentHeaderFor(lead)}\n**Team Task ${result.state}** · \`${taskId}\`\n\n${result.synthesis || result.detail || "(no synthesis)"}`,
+    `${agentHeaderFor(lead)}\n**Team Task ${result.state}** · \`${taskId}\`\n\n${[...warnings, result.synthesis || result.detail || "(no synthesis)"].join("\n\n")}`,
   );
 }
 

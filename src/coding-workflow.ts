@@ -1,3 +1,4 @@
+import { MAX_REVIEW_DIFF_CHARS, MAX_REVIEW_FILES } from "./card-review-fetch.js";
 import { sameAgentSession } from "./response-stream.js";
 import type { AgentRecord } from "./types.js";
 import {
@@ -64,6 +65,7 @@ export interface CodingArtifactRecord {
   startVersionFingerprint?: string;
   endVersionFingerprint?: string;
   driftReason?: string;
+  precheckWarning?: string;
 }
 
 export interface CodingTaskState {
@@ -275,6 +277,7 @@ export function codingPlanningAddendum(): string {
     "Each assignment also has role (diagnose, implement, review, or verify), access (read or write), writeScope (repository-relative paths; required for write and empty for read), artifactRefs, and findingRefs.",
     "Coding v1 allows one writer. diagnose, review, and verify are read-only. A reviewer must be a different known session from the author; a different pane is not proof. Do not implement, commit, merge, push, or use GitHub.",
     "The review role is only for reviewing completed implementation in this task, so schedule it only after the writer. Before implementation, critique or validate diagnosis results or plans using diagnose (read-only); such diagnose assignments may go to whichever Worker is selected, including profiles with only review capability, because capability is currently not a dispatch gate.",
+    `For a card PR, aim to stay within the review limits (${MAX_REVIEW_FILES} paths and ${MAX_REVIEW_DIFF_CHARS.toLocaleString("en-US")} diff characters) and split the plan into smaller cards if needed. Do not reduce tests, boundary checks, or error handling to shrink the diff.`,
     "Write scope is checked against the captured diff after the fact. It is not an operating-system lock and prompt text does not isolate writers.",
     "Return an empty assignments array only to request the acceptance gate. An empty plan does not authorize you to edit the repository. The bridge, not this prompt, decides completion.",
     "Review execution can succeed while its verdict asks for changes. Refer to earlier findings and artifacts by findingRefs and artifactRefs. Dependencies still refer only to this round.",

@@ -1,5 +1,17 @@
 # Known Issues
 
+## ISSUE-210：PR 預檢快照與 card commit 的暫存正規化不同
+
+2026-11-24，**已修正、待驗收**。在 macOS fixture 設 `core.autocrlf=true`，新增 9,500 行 `aaaaaa\r\n`。前輪審查的 `review-crlf.txt` 量到 85,646 字元，實際 Git add 的 patch 為 76,146；本輪用 `added.txt` 在修正前重現 85,628 實測與 76,128 預期，定向測試 exit 1。根因是同一套隔離設定也用來暫存，漏掉來源 repo 的 blob 正規化，誤擋 verify。修正後沿 `card commit` 的 Git add 暫存工作樹內容，索引與新 Git 物件均在暫存區，再以交付 tree 的獨立索引套用 patch attributes。修正途中直接比較兩個 tree 讀不到交付的 `-diff`，回歸測試 exit 1，改用載入交付 tree 的索引後通過。CRLF 預檢與實際暫存 patch 均為 76,128，verify 派送一次。另核對同路徑 staged／unstaged 的工作樹版本經來源 clean filter 後一致，且來源索引、Git 物件和檔案維持原樣。驗證與部署狀態見 ISSUE-187。
+
+## ISSUE-209：autopick 成功時未通知 PR 預檢無法執行
+
+2026-11-24，**已修正、待驗收**。ISSUE-187 的前輪審查發現，本機缺少 PR base 時，警告只在實作 artifact 和 `card assign` 的回覆裡；autopick 捨棄成功指派的回覆，後續 review／verify 仍成功卻無通知。卡片同步現在從 artifact 記入去重的警告事件，沿用卡片 `notify` 路由；通知顯示缺少 base 或安全分類，完整原因留在 artifact。macOS 的 L1 autopick 回歸以真實 scheduler、卡片同步及 notifier，搭配模擬 console／通知端，證實 review／verify 成功且流程到達 PR，警告送達配置的目標一次。首次測試的卡片目錄模式為 0755，被安全檢查拒絕；改為正常的 0700 後通過。在暫存編譯副本停用警告事件同步，定向測試如預期 exit 1（事件 0 筆，預期 1 筆），還原後 exit 0。驗證命令與部署狀態見 ISSUE-187。
+
+## ISSUE-208：本機 attributes／設定讓 PR 預檢漏判超限
+
+2026-11-24，**已修正、待驗收**。ISSUE-187 的前輪審查在 macOS 用 `review-fixture-187.txt`（81,000 個 `a` 加換行）重現：`.git/info/attributes` 的 `-diff` 令舊量測從 81,164 降到 164 字元，誤判未超限。新增回歸再現此數值，確認新量測仍為 81,164，超過 1,164。獨立 Git 環境只用於量測 patch，以交付 tree 的 `.gitattributes` 為準。交付 blobs 依 ISSUE-210 使用來源 repo 的暫存語意。測試核對本機 diff driver、未交付的 attributes、交付的 CRLF 正規化與 `-diff` 語意，以及原索引未變。驗證命令與部署狀態見 ISSUE-187。
+
 ## ISSUE-207：pool 裡舊 workspace 的綁定（pane 已不存在、設定指紋是舊格式）讓 claude Worker 永遠啟動不了：`profile configuration changed`
 
 更新日期：2026-11-24。狀態：**已修正、待驗收**（根因有證據、一個前提是推論；程式與自動化測試通過；**尚未部署、未實機驗收**）。
@@ -245,27 +257,25 @@
 
 合併入口的本機查核與待補線上證據見 [main 合併入口稽核](merge-gates.md)。
 
-更新日期：2026-11-23。狀態：待調查（現象與程式位置已確認；**尚未修正，修法方向待使用者決定**）。
+更新日期：2026-11-24。狀態：**已修正、待驗收**（REQ-20261123-precheck-diff-size）。
 
 **使用者可見症狀（2026-11-23，`REQ-20261120-team-discuss`，PR #338）：**implement（約 18 分鐘）、verify、遠端 review 都完成並通過後，autopick commit 並開出 PR，卻在 PR 層級的 `card review` 以「review 沒有進行：PR 的 diff 有 93947 字元，超過 review 上限 80000；請 Lead 把需求重新切分成較小的部分」停手，卡片流程等人。PR 實際是 +1859／-42、16 個檔案（新檔案 `src/team-discuss.ts` 854 行、`test/team-discuss.test.ts` 735 行）。
 
-**預期（使用者 2026-11-23 的看法）：**Lead 分配 implement 做完之後，若發現 diff 會超過 review 上限，流程應該處理「拆 PR」，而不是等到 PR 開出來才停下來叫人。
+**本卡預期（2026-11-24）：**每次 writer 交付後及早量測，超限就保留成果並通知，由人決定是否切分。原先討論的自動切分與分塊 review 仍是提案。
 
-**已確認（讀碼）：**上限是 `MAX_REVIEW_DIFF_CHARS = 80_000`（另有檔案數上限 `MAX_REVIEW_FILES`），**只在 PR 已開出來之後的 `card review` 才檢查**（`src/card-review.ts`、`src/card-review-fetch.ts`）；超過就回「請 Lead 把需求重新切分成較小的部分」，`src/card-loop.ts` 的 `loop` 步驟 `stop`。**沒有任何程式把這句話交給 Lead 執行**：Lead 在 task 結束後不會被叫回，也沒有「依序多個較小 PR」的機制。發現得太晚的成本：implement、verify、遠端 review 都已花掉才在最後一步被擋。
+**已確認的原始根因（2026-11-23）：**上限是 `MAX_REVIEW_DIFF_CHARS = 80_000`（另有檔案數上限 `MAX_REVIEW_FILES`），**只在 PR 已開出來之後的 `card review` 才檢查**（`src/card-review.ts`、`src/card-review-fetch.ts`）；超過就回「請 Lead 把需求重新切分成較小的部分」，`src/card-loop.ts` 的 `loop` 步驟 `stop`。**沒有任何程式把這句話交給 Lead 執行**：Lead 在 task 結束後不會被叫回，也沒有「依序多個較小 PR」的機制。發現得太晚的成本：implement、verify、遠端 review 都已花掉才在最後一步被擋。
 
 **這次的處置（不是修正）：**使用者決定直接 merge #338（CI 綠；task 內獨立 review 為 pass（當時記載為審同一版內容，**這只是歷史記載，版本鏈尚未核對**：兩個本機 commit 的 tree 相同，但無法證明受審的工作樹指紋對應合併時的 PR head，見 `docs/merge-gates.md` 與 ISSUE-198）；PR 層級 review 因超過上限沒進行）。**merge 繞過了這個上限，PR 層級的 review 沒有做過**，詳見 ISSUE-186。
 
 **未確認：**(1) 上限 80000 字元是否合理（它的真正理由是 reviewer 的 context，沒有查設計文件）；(2) 這次 task 內的 review（遠端 codex）為何能審下 1859 行而 PR 層級會被擋，兩者的輸入大小規則是否不同；(3) 把已完成的實作切成多個依序 PR 是否可行（哪些檔案進哪個 PR、後面是否依賴前面）。
 
-**修法方向（只是選項，尚未選定）：**
+**當時討論的選項（2026-11-23）：**
 1. **提早檢查**：implement 完成後、commit 與開 PR 之前，用實作產出（`deliveryPaths`、檔案大小）估算 diff，過大就提早停下並明說原因，至少省下之後的步驟。
 2. **叫回 Lead 重新規劃**：過大時把「切成 N 個依序的 PR」交回 Lead，再依序跑多個較小的 PR。最貼近預期，但最大，需要設計依賴順序與失敗處理。
 3. **讓 review 能分塊審**：不縮 PR，改讓 reviewer 分批看大 diff；這才是上限存在的真正原因。
 傾向「1 加 3」，2 需另外設計。
 
 **另一個在同一輪觀察到的小不一致（原因未確認）：**PR merge 後 bridge 通知 `card merged`，卡片 worktree 目錄已不存在，但 `card-worktrees.json` 裡該 worktree（`wAG`）仍標「作用中」，`card cleanup` 回 `worktree.remove: … is not a working tree`。這會讓同一張卡日後重跑被「已有作用中的 worktree」擋住（與 ISSUE-182 同一類：store 與實際狀態不一致）；是誰先移除了目錄沒有查，沒有手改 store。
-
-**下一步：**使用者決定方向後開需求卡；在那之前，超過上限的 PR 仍需人工決定（拆分或像這次一樣明確繞過）。
 
 **選項 3（讓 review 分塊審）與選項 2＋3 的分析（2026-11-23，使用者詢問；依讀 `src/card-review.ts` 的 prompt 與回覆格式、`src/card-loop.ts` 的輪數常數整理，沒有實測，沒有做任何實驗）：**
 - **review 現狀（讀碼）：**一次 review 是一個 reviewer 看一份 diff，回一個 JSON：`verdict`（`pass`／`changes_requested`／`inconclusive`）、**每一條驗收條件各一筆** `criteria`（`met`／`unmet`／`unknown`）、`findings`（路徑必須在檔案清單內）；**所有條件都 `met` 且沒有 high／medium finding 才 `pass`**。上限是 diff 80000 字元（`MAX_REVIEW_DIFF_CHARS`，2026-11-17 由 60000 調高，ISSUE-111）與 20 個檔案（`MAX_REVIEW_FILES`）。review 綁定「PR、head sha、輪數、scope」，scope 目前是「整體」或單一 commit。`loop` 有總輪數上限（`MAX_LOOP_ROUNDS`），review 與 fix 輪流算，超過就退回人工。
@@ -282,6 +292,12 @@
 - **我對這份討論的判斷（推論）：**同儕的新點裡，**「先盤點合併入口」與「預檢要用實測、放在 verify 之前」我認為最值得做**，比我原本的「commit 前估算」更準；「硬限制會犧牲測試」是真實的設計風險，值得在任何預算設計裡處理；其餘（取材白名單、證據重用、多卡拆分）都要先定義資料模型或驗證機制，不是小改動。**討論本身的限制：**摘錄有截斷、同儕的讀碼陳述未複查、成本與漏判率沒有任何量測。
 - **第一步（盤點合併入口）完成並合併（2026-11-23，`REQ-20261123-merge-entry-audit`）：**bridge 卡片流程在 main `b9de32f` 上產出 `docs/merge-gates.md`（12 個入口、每個入口四欄、區分已核對與未核對）與 ISSUE-198 至 ISSUE-201，PR #356 以 squash 合併為 `aaf02a8`（CI 兩個平台通過）。**注意這張 PR 不是依「bridge PR review `pass`」合併的：**bridge 的 PR review 前兩輪 reviewer 都 `blocked`（見 ISSUE-202），第 3 輪我手動指定 codex 當 reviewer，結果是 `changes_requested`（兩個 medium 的文件精確度問題），再來是**使用者明確要求合併**（「ci綠就merge」），所以是在有 open finding 的情況下合併；兩項發現隨後在文件 PR 中修正（`docs/merge-gates.md` 手動 CLI、網頁、API 三列的 review 欄改為分開寫「Bridge 卡片閘門」與「GitHub 規則」；本節上面「同一版內容」改為歷史記載）。**修正後沒有再做一次 review。**
 - **仍然沒有核對的（沿用 `docs/merge-gates.md`）：**現行 GitHub 權限、分支保護與 ruleset 的線上設定、#338 實際合併介面與當時 PR head；這些需要唯讀的線上查詢，本卡禁止使用 GitHub。下一步 `REQ-20261123-precheck-diff-size` 仍是 `draft`；ISSUE-191 已實機驗證，可以改為 `ready`，由使用者決定。
+
+- **第二步（2026-11-24）：**卡片 worktree 的 coding writer 每次交付（含任務內 fix）後，先以 PR base 的 merge-base 和隔離索引實測，再派送後續指派。索引以交付 HEAD 為底，只加本輪版本相對任務基準的未提交交付路徑。以去重後的有效路徑先檢查 20 檔（rename 計新舊路徑），再以 Node UTF-8 字串長度檢查 80,000 字元。超限停止任務，保留 worktree、原索引及 HEAD；autopick 停在 task，由卡片 `notify` 傳上限名稱、實測值、門檻與超過量。Git 或 base 查詢失敗、base 物件不在本機等均回報「無法預檢」，把原因記進實作 artifact，循既有閘門繼續。規劃提示建議必要時拆小並保留測試、邊界檢查與錯誤處理。 暫存後的路徑核對也改為計入 rename 兩側，避免 `card commit` 把有效的未暫存改名誤認為路徑不符。
+- **驗證（2026-11-24，macOS arm64，Git 2.54.0，Node 26.12.0）：** `npm run typecheck`、`npm run lint`、`npm run build`、`npm test`（2,299 通過、1 項 Linux 專用測試跳過）、`git diff --check` 通過。以 `node --test --test-name-pattern='ISSUE-187' dist/test/{card-delivery-precheck,card-notify,team-task-engine}.test.js` 定向驗證 12 項全過。將檔案數早停暫時移除後，`node --test --test-name-pattern='21 files with invalid UTF-8' dist/test/team-task-engine.test.js` 如預期 exit 1（verify 誤派 1 次，預期 0 次），還原後通過。81,000 個 `0xe9` 的 `invalid.txt` fixture 同一份 patch 兩端皆量到 81,131 字元，超過 1,131。
+- **審查修正（2026-11-24）：**見 ISSUE-208／209。前輪唯讀 review 全套初跑 2,288 通過、11 項因暫存副本缺 `src`／`skills` 失敗、1 項跳過，補齊後 11 項分組重跑通過；唯讀 verify 首跑有 1 項 Grok turn budget 逾時，單檔重跑 34/34、全套重跑 2,299 通過、1 項跳過。逾時根因未確認。本輪 `npm run typecheck`、`npm run lint`、`npm run build`、`npm test`、`git diff --check` 均通過。完整測試 2,301 通過、0 失敗、1 項 Linux 專用測試跳過；`node --test --test-name-pattern=ISSUE-187 dist/test/{card-delivery-precheck,team-task-engine}.test.js` 的 14 項定向案例均通過。
+- **暫存語意修正（2026-11-24）：**見 ISSUE-210。來源 repo 設定只用於建立實際會暫存的 blobs；patch 則在隔離環境讀取交付 tree 和其中的 attributes。macOS arm64 上 `npm run typecheck`、`npm run lint`、`npm run build`、`npm test`、`git diff --check` 均通過。完整測試 2,303 通過、0 失敗、1 項 Linux 專用測試跳過；`node --test --test-name-pattern=ISSUE-187 dist/test/{card-delivery-precheck,team-task-engine}.test.js` 定向 16 項全過。
+- **部署與驗收：**原始碼在本機 worktree，執行中的 bridge 未部署本文變更、未重啟。待部署重啟後，以專用沙盒 repo 的超限卡片查核 verify 零派送、`notify` 收到完整量測、未提交交付與 worktree 保留，以及未自動 commit／開 PR。PR 服務實際輸出的差異、CRLF 正規化後派送 verify，以及缺少 base 時成功卡片的通知也待實機比對。
 
 
 ## ISSUE-186：team discuss 唯讀同儕討論與缺空格提示

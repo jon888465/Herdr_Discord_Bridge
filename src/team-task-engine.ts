@@ -1,3 +1,5 @@
+import { deliveryLimitMessage } from "./card-review-fetch.js";
+import { redactSecrets } from "./redact.js";
 import { randomUUID, createHash } from "node:crypto";
 import path from "node:path";
 import {
@@ -180,7 +182,7 @@ export class TeamTaskEngine {
           {
             ...input,
             codingHooks: input.coding
-              ? this.codingHooks(input.taskId)
+              ? this.codingHooks(input.taskId, input.precheckDelivery)
               : undefined,
             signal: controller.signal,
             hookFinal: this.hookFinal,
@@ -344,7 +346,11 @@ export class TeamTaskEngine {
     this.executions.set(input.taskId, { controller, done });
     return done;
   }
-  private codingHooks(taskId: string) {
+  private codingHooks(
+    taskId: string,
+    precheckDelivery: TeamTaskInput["precheckDelivery"],
+  ) {
+    let stop: string | undefined;
     const current = () => {
       const task = this.store.get(taskId);
       if (!task.coding) throw new Error("coding task state is missing");
@@ -426,7 +432,8 @@ export class TeamTaskEngine {
         }
         assertIndependentReview(authors, worker);
       },
-      onAssignmentDone: (
+      deliveryStop: () => stop,
+      onAssignmentDone: async (
         assignment: {
           id: string;
           coding?: { role: CodingArtifactRecord["role"] };
@@ -482,9 +489,23 @@ export class TeamTaskEngine {
             .map((artifact) => artifact.versionFingerprint),
         });
         const drifted = Boolean(settled.driftReason);
+        let precheckWarning: string | undefined;
+        if (assignment.coding.role === "implement" && precheckDelivery) {
+          try {
+            const exceeded = await precheckDelivery(coding.repository, version);
+            if (exceeded) stop = deliveryLimitMessage(exceeded);
+          } catch (error) {
+            const reason =
+              error instanceof Error
+                ? stripAnsi(error.message).split(/\r?\n/).find((line) => line.trim())
+                : undefined;
+            precheckWarning = `無法預檢 PR diff：${redactSecrets(reason ?? "未知錯誤").slice(0, 240)}`;
+          }
+        }
         const artifact: CodingArtifactRecord = {
           id: `a-${assignment.id}-${coding.artifacts.length + 1}`,
           assignmentId: assignment.id,
+          ...(precheckWarning ? { precheckWarning } : {}),
           role: assignment.coding.role,
           versionFingerprint: settled.versionFingerprint,
           mode: version.mode,

@@ -3,6 +3,7 @@
 // 通知失敗一律不影響 autopick、card loop、card merge。
 
 import { createHash } from "node:crypto";
+import { deliveryLimitNotification } from "./card-review-fetch.js";
 import { isCardId, parseNotifyTarget, type Card } from "./card.js";
 import type { LogEntry } from "./card-ledger.js";
 import type { CardStore } from "./card-store.js";
@@ -79,6 +80,7 @@ const EVENTS = new Set([
   "ci_result",
   "merged",
   "failed",
+  "precheck_warning",
   "autopick_stopped",
   "merge_blocked",
   "loop_stopped",
@@ -146,6 +148,19 @@ export function classifyRoleRejection(text: string): string {
 
 /** 通知只放分類過的一句原因，不放流程紀錄原文（可能含卡片內容或 finding 全文）。 */
 export function notificationReason(event: LogEntry): string {
+  if (event.event === "precheck_warning") {
+    const label = "無法預檢 PR diff";
+    if (event.text === `${label}：git merge-base 無法執行（本機缺少 PR base commit）`)
+      return `${label}：本機缺少 PR base commit`;
+    const operation = /^無法預檢 PR diff：(git (?:rev-parse|init|merge-base|read-tree|update-index|add|diff)|gh (?:api|pr|repo)) /.exec(event.text)?.[1];
+    return operation
+      ? `${label}：${operation} 失敗，流程照常繼續`
+      : `${label}：流程照常繼續，原因見任務紀錄`;
+  }
+  if (event.event === "failed") {
+    const limit = deliveryLimitNotification(event.text);
+    if (limit) return limit;
+  }
   if (event.event === "failed" && event.text.includes("卡片角色指定無效："))
     return classifyRoleRejection(event.text);
   if (event.event === "review_verdict")

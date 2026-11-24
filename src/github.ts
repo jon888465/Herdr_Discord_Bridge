@@ -190,6 +190,30 @@ export async function getDefaultBranch(
   return out;
 }
 
+/** Resolve the live base used by card pr without fetching or modifying local refs. */
+export async function cardPullRequestBaseHead(
+  exec: Exec,
+  repo: GithubRepo,
+  branch: string,
+): Promise<string> {
+  const open = (await findPullRequests(exec, repo, branch)).find(
+    (pr) => pr.state === "OPEN",
+  );
+  const base = open
+    ? (await pullRequestMergeState(exec, repo, open.number)).base
+    : await getDefaultBranch(exec, repo);
+  if (!BASE_BRANCH.test(base) || base.includes(".."))
+    throw new GithubError("unexpected", "could not determine the PR base branch");
+  const sha = (await run(
+    exec, "gh",
+    ["api", `repos/${slug(repo)}/git/ref/heads/${base}`, "--jq", ".object.sha"],
+    "gh_failed",
+  )).trim();
+  if (!/^[0-9a-f]{40}$/.test(sha))
+    throw new GithubError("unexpected", "could not determine the PR base commit");
+  return sha;
+}
+
 export interface BranchFacts {
   headSha: string;
   /** 比基準多幾個 commit。 */

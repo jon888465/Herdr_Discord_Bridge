@@ -7,6 +7,7 @@
 // - 一張卡有多個任務時，只有最後一個任務完成才會變 `done`；較早的任務只記事件。
 // - 只處理 `in_progress` 且有 `tasks` 的卡片；人已經改動狀態的卡片不碰。
 
+import { createHash } from "node:crypto";
 import { ensureCardsDirectory } from "./card-directory.js";
 import { LEDGER_MAX_FILE_BYTES, type Card } from "./card.js";
 import type { CardAssignment } from "./card-assignments.js";
@@ -17,6 +18,7 @@ export interface TaskSnapshot {
   state: string;
   detail?: string;
   finishedAt?: string;
+  precheckWarnings?: { id: string; reason: string }[];
   /** journal 中第一次進入目前終止狀態的事件 sequence（非終止狀態時沒有）。 */
   terminalSequence?: number;
 }
@@ -54,6 +56,9 @@ export function taskSourceFrom(store: TeamTaskStore): TaskSource {
         state: task.state,
         detail: task.detail,
         finishedAt: task.finishedAt,
+        precheckWarnings: task.coding?.artifacts.flatMap(({ id, precheckWarning }) =>
+          precheckWarning ? [{ id, reason: precheckWarning }] : [],
+        ),
       };
       if (terminalTask(task.state)) {
         const index = store
@@ -97,7 +102,18 @@ function syncCard(
   let changed = false;
   for (const [index, taskId] of ids.entries()) {
     const task = tasks.get(taskId);
-    if (!task || !TERMINAL.has(task.state)) continue;
+    if (!task) continue;
+    for (const { id, reason } of task.precheckWarnings ?? []) {
+      const logged = store.recordEvent(card.id, {
+        event: "precheck_warning",
+        eventId: `precheck-${createHash("sha256").update(`${taskId}/${id}`).digest("hex").slice(0, 40)}`,
+        time: now(),
+        reason,
+      });
+      if (!logged.ok) problems.push(`${card.id}：${logged.error}`);
+      else if (logged.added > 0) changed = true;
+    }
+    if (!TERMINAL.has(task.state)) continue;
     const eventId = `${taskId}-${task.terminalSequence ?? "final"}`;
     const time = eventTime(task.finishedAt, now);
     const logged = store.recordEvent(
