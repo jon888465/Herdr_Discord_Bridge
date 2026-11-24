@@ -85,6 +85,7 @@ import {
   prepareCardWorktree,
 } from "./card-worktree-flow.js";
 import { startAgentInPane } from "./agent-start.js";
+import { withDefaultModel } from "./default-launch.js";
 import { doneAsReady, waitUntilReady } from "./agent-ready.js";
 import { settleWorkingAgent } from "./lead-settle.js";
 import {
@@ -997,7 +998,16 @@ export async function handleCommand(
                 recordRoleStrict: options.recordRoleStrict,
                 onRoleAssigned: options.onRoleAssigned,
                 panePort: runtime.herdr,
-                startAgent: (input) => startAgentInPane(runtime.herdr, input),
+                startAgent: (input) =>
+                  startAgentInPane(
+                    runtime.herdr,
+                    withDefaultModel(
+                      runtime.pool?.profiles ??
+                        runtime.config.agentProfiles ??
+                        [],
+                      input,
+                    ),
+                  ),
                 runTurn: async (agent, prompt, timeoutMs) => {
                   const turn = await runTeamTurn(
                     agent,
@@ -1091,7 +1101,16 @@ export async function handleCommand(
                 recordRoleStrict: options.recordRoleStrict,
                 onRoleAssigned: options.onRoleAssigned,
                 panePort: runtime.herdr,
-                startAgent: (input) => startAgentInPane(runtime.herdr, input),
+                startAgent: (input) =>
+                  startAgentInPane(
+                    runtime.herdr,
+                    withDefaultModel(
+                      runtime.pool?.profiles ??
+                        runtime.config.agentProfiles ??
+                        [],
+                      input,
+                    ),
+                  ),
                 runTurn: async (agent, prompt, timeoutMs) => {
                   const turn = await runTeamTurn(
                     agent,
