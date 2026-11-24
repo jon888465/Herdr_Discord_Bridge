@@ -1,5 +1,28 @@
 # Known Issues
 
+## ISSUE-213：遠端寫入的交付已被 bridge commit，autopick 接著 commit 時以「沒有需要提交的修改」判失敗
+
+更新日期：2026-11-24。狀態：**待調查**（現象已確認；**未修正**）。
+
+- **使用者可見症狀（2026-11-24 06:16 UTC，沙盒卡 S1，L0）：**task `completed`、驗收 `ok=True`，卡片卻在 autopick 的 commit 步驟失敗：`失敗：autopick_failed；原因：commit：這個版本已經 commit 了，沒有需要提交的修改`（06:16:47），卡片紀錄為失敗。
+- **預期行為：**task 成功時，卡片流程應繼續（L0 停在 commit，更高層級再 push、開 PR），而不是因為「已經 commit 過」判失敗。
+- **已確認（2026-11-24，只讀）：**implement 派到遠端 machine 的 pi；遠端寫入流程把 patch 套用到本機 worktree 後由 bridge **自己 commit**（`hdb remote implement (…)`，artifact `mode: committed`），所以 autopick 接著執行 `card commit` 時沒有未提交的修改。**這與預檢無關**（S1 的預檢放行）。
+- **未確認：**其他遠端寫入的卡（先前 2026-11-19 的驗收卡）當時 autopick 怎麼走到結束（我沒有核對）；L1、L2 時 push 與開 PR 是否也因同一原因停在這裡；`card commit` 的「已經 commit」判斷是不是故意設成失敗。
+- **同時觀察到、沒有查：**同一輪 bridge 日誌有 `autopick Lead cleanup REQ-20261124-precheck-s1-within-limit: lookup or close failed`（Lead workspace 的清理失敗），原因不明。
+- **可能的修法（未做、未決定）：**autopick 的 commit 步驟遇到「HEAD 已包含這次 task 的交付」時視為已完成並繼續下一步，而不是失敗；要先確認這不會掩蓋真正沒有交付的情況。
+
+## ISSUE-212：遠端 codex 的 verify 報告，`codingResult` 沒有被記錄，verify 一直是「未通過」
+
+更新日期：2026-11-24。狀態：**待調查**（現象已確認；**成因是推測，未修正**）。
+
+- **使用者可見症狀（2026-11-24 06:10 至 06:15 UTC，沙盒卡 S1）：**task 內的 verify 派到遠端 machine 的 codex，兩次（`verify-s1`、重試的 `verify-s1-retry`）報告文字都寫了「檢查命令與退出碼：…0」與「測試結果：通過」，但 bridge 記錄的 verify artifact 是 `verified: False`、`commands: 0`，驗收不會算通過；Lead 因此多排了一次重試，最後改派**本機**的 codex 做 verify，才記錄到 `verified: True`、3 條命令，驗收 `ok=True`。
+- **預期行為：**遠端 verify 的 `codingResult.commands`（含退出碼）被解析並記錄。
+- **已確認：**兩份遠端 verify 報告的 JSON，照 bridge 收到的原樣，**都含換行字元、都無法直接解析為 JSON**（我用 JSON 解析器測試，兩份都失敗）；本機 verify 的 artifact 正常記錄。報告內容本身是通過的（退出碼 0）。
+- **推測（沒有驗證）：**遠端 codex 的回覆是從畫面讀取的（遠端沒有本機的 hook 或 rollout 路徑，ISSUE-175 記過遠端 codex 的 session 在遠端），報告最後的 `codingResult` 那一行很長，被終端機折行插入換行，弄壞 JSON；本機路徑用 hook 的完整訊息，不受折行影響（ISSUE-086）。
+- **未確認：**折行是不是唯一原因；遠端 codex 當 review 時是否也有同樣問題（S1 的遠端 review 有 `pass` 且 `independentReview: true`，但 review 的 verdict 不一定走同一個欄位）；命令越短是否越不會折行。
+- **影響：**遠端 verify 在命令很長時可能一律不被記錄，Lead 只能重試或改派本機；沒有被當成通過也沒有被默默忽略（驗收仍然要求有成功的 verify）。
+- **相關：**ISSUE-086（本機以 hook 完整訊息避免折行）、ISSUE-175（遠端 codex 的 session 身分）、ISSUE-186（回覆取框）。
+
 ## ISSUE-211：卡片 `roles` 指定遠端的 pi 時，驗證仍要求本機有 pi profile，撿卡即被拒絕
 
 更新日期：2026-11-24。狀態：**已修正、待驗收**（根因已確認；程式與自動化測試通過；**尚未部署、未實機驗收**）。
@@ -44,7 +67,7 @@
 - **實機觀察（2026-11-24 03:40 UTC，同一張卡重跑，bridge 為含此修正的 main `bca83e6`）：**`verify-precheck` 由新啟動的 claude Worker 執行並完成，沒有 `profile configuration changed`。**這只是單一樣本**：我無法回頭確認那個 workspace ID 帶不帶舊綁定，所以不能說修正擋住了那個特定情境；狀態維持「已修正、待驗收」。
 ## ISSUE-206：卡片剛撿起、worktree 建好後任務沒有啟動：`Agent is working`（Lead 的第一個 prompt 沒送出）
 
-更新日期：2026-11-24。狀態：**待調查**（現象與時間線已確認；**丟出這句的位置與 Herdr 的錯誤碼未確認，未修正**）。
+更新日期：2026-11-24。狀態：**已修正、待驗收**（根因由讀碼確認、與所有證據吻合，**但沒有直接觀察到**；程式與自動化測試通過；**尚未部署、未實機驗收**）。先前：待調查（成因未確認）。
 
 - **使用者可見症狀（2026-11-24 02:18 UTC，`REQ-20261123-precheck-diff-size`，使用者放行後第一次撿卡，bridge 為含 #358、#359 的 main `e144dff` 重啟後）：**autopick 02:18:00 撿起卡片；02:18:18 建立 worktree（基準 `a3c391be67ce`，就是當時的 main，基準正確）；**02:18:21 以 `assign：worktree 已建立…但任務沒有啟動：Agent is working` 失敗**，卡片仍是 `ready`，沒有開 PR、沒有任何 Worker。同一輪 bridge 日誌有兩次「已自動跳過 codex 的更新提示」（autopick 的 Lead workspace 與卡片 workspace 各一個 codex）。
 - **預期行為：**Lead 剛跳過更新選單後可能短暫 `working`，bridge 應該等它穩定再送第一個 prompt（ISSUE-185）或在被拒時有上限地重試（ISSUE-137），任務正常啟動。
@@ -55,6 +78,12 @@
 - **驗證：**尚無（只有觀察，沒有重現、沒有修正）。
 - **相關：**ISSUE-185（Lead 剛就緒送提示撞到 `working`，`agent is busy`，已修正、待驗收）、ISSUE-137（第一個 prompt 在 Herdr 登記前被拒，`agent_not_ready`，已修正）。
 - **後續觀察（2026-11-24）：**重啟重跑後連續 2 次撿卡（02:34、03:06 UTC）Lead 都正常啟動、第一個 prompt 送出。**這不代表已解決**：失敗那次（02:18）是該 bridge 重啟後的第一次撿卡，之後才連續成功 2 次，樣本太少，不能估計發生頻率；成因與錯誤碼仍未確認，狀態維持待調查。
+- **第二次發生（2026-11-24 06:24 UTC，ISSUE-187 的沙盒驗收卡 S4，本機 codex 當 Lead）：**worktree 06:24:15 建好、06:24:18 以同一句 `任務沒有啟動：Agent is working` 失敗（同樣是 3 秒）；失敗後 Lead 的 codex pane 是 `done`、輸入框是空的，第一個 prompt 從沒送出。**當天的撿卡次數統計：**7 次啟動，2 次失敗（02:18、06:24），5 次成功（02:34、03:06、06:07、06:17、06:20）；樣本仍小，不能估計比例。
+- **更正我先前的推論：**上面第一次記載寫「比較像 Herdr 拒絕第一個 prompt 的回應」，**這是錯的**。這句訊息是 bridge 自己的：`TeamTaskEngine.reserve()`（`src/team-task-engine.ts`）用**傳進 `tasks.run` 的 Lead 記錄**檢查狀態，不是 `idle`／`done` 就丟 `Agent is ${agent_status}`；同一個函式的 `agent is busy` 才是 ISSUE-185 的 `assertAgentAvailable`。
+- **根因（2026-11-24 讀碼確認）：**`startTeamTask`（`src/main.ts`）在呼叫 `tasks.run` 之前，用 `settleWorkingAgent` 等 Lead 穩定（ISSUE-185，#337），**但只把結果拿去做 `assertAgentAvailable` 的斷言**；接著 `tasks.run({ …, lead, … })` 與回傳值用的仍是函式開頭一次讀到的 `lead`。所以只要 Lead 在最初讀到時是 `working`（codex 跳過更新選單後載入工作階段），settle 會等它變 `idle`（約 2 到 3 秒）、斷言通過，引擎卻拿著過期、仍是 `working` 的記錄立刻丟 `Agent is working`。這同時解釋了：失敗在 worktree 建好後約 3 秒、事後 pane 是 `done` 且輸入框是空的、不是每次發生（只有最初讀到時剛好還是 `working` 才會）。**沒有直接觀察：**bridge 沒有記錄傳進引擎的記錄狀態，所以這是「讀碼確認、與證據吻合」，不是日誌證明。**ISSUE-185 的修正（#337）因此只修了一半，沒有測試涵蓋 `startTeamTask` 把誰交給引擎。**
+- **修正（2026-11-24，原始碼）：**`startTeamTask` 把 settle 的結果存成 `readyLead`，同一份用在 `assertAgentAvailable`、`tasks.run` 的 `lead` 與函式的回傳值。其餘用到 `lead` 的地方只讀 pane、cwd 等不隨狀態變的欄位，沒有動。一般 `team ask`（沒有 cardId）不 settle，行為不變。
+- **測試（2026-11-24，本機 macOS，worktree）：**新增 4 項。`test/team-task-engine.test.ts` 1 項（引擎契約：過期的 `working` 記錄被同步拒絕且不留預留，已穩定的同一個 Lead 可以執行）；`test/start-team-task-wiring.test.ts` 3 項（`startTeamTask` 保存 settle 結果並用於斷言、把它交給 `tasks.run`、把它回傳）。**限制：**`startTeamTask` 沒有匯出，接線只能用原始碼樣式比對檢查，不是實際執行。修正前這 3 項接線測試失敗（引擎契約測試本來就通過，因為引擎行為沒變）；暫時把 `tasks.run` 改回傳舊的 `lead`：1 項失敗，已還原。完整 `npm test` 2318 項、通過 2317、失敗 0、略過 1；typecheck、lint 通過。
+- **未驗證：**部署後這個失敗是否不再發生（它是間歇性的，要累積足夠多次撿卡才有意義）；沒有 cardId 的 `team ask` 若 Lead 剛好是 `working` 仍會被拒絕，那是設計（只有卡片指派才等穩定）。
 ## ISSUE-205：2026-11-03 建立的 Team task 卡在 `cancelling`，每次 bridge 重啟都只被對帳一次，從沒結束
 
 更新日期：2026-11-24。狀態：**待調查**（現象已確認；**成因未確認，未修正**）。
@@ -273,7 +302,7 @@
 
 合併入口的本機查核與待補線上證據見 [main 合併入口稽核](merge-gates.md)。
 
-更新日期：2026-11-24。狀態：**已修正、待驗收**（REQ-20261123-precheck-diff-size）。
+更新日期：2026-11-24。狀態：**已修正、部分實機驗收**（REQ-20261123-precheck-diff-size；**超限的兩種情境已在遠端寫入的交付上實機驗收**，其餘見最後一則）。先前：已修正、待驗收。
 
 **使用者可見症狀（2026-11-23，`REQ-20261120-team-discuss`，PR #338）：**implement（約 18 分鐘）、verify、遠端 review 都完成並通過後，autopick commit 並開出 PR，卻在 PR 層級的 `card review` 以「review 沒有進行：PR 的 diff 有 93947 字元，超過 review 上限 80000；請 Lead 把需求重新切分成較小的部分」停手，卡片流程等人。PR 實際是 +1859／-42、16 個檔案（新檔案 `src/team-discuss.ts` 854 行、`test/team-discuss.test.ts` 735 行）。
 
@@ -316,6 +345,15 @@
 - **暫存語意修正（2026-11-24）：**見 ISSUE-210。來源 repo 設定只用於建立實際會暫存的 blobs；patch 則在隔離環境讀取交付 tree 和其中的 attributes。macOS arm64 上 `npm run typecheck`、`npm run lint`、`npm run build`、`npm test`、`git diff --check` 均通過。完整測試 2,303 通過、0 失敗、1 項 Linux 專用測試跳過；`node --test --test-name-pattern=ISSUE-187 dist/test/{card-delivery-precheck,team-task-engine}.test.js` 定向 16 項全過。
 - **部署與驗收：**預檢已隨 PR #364 合併（main `b936074`），**2026-11-24 05:17 UTC 已部署重啟**（build 內有預檢模組與 `precheckDelivery` 接線，bridge 已連線）；**尚未實機驗收**。接下來要以專用沙盒 repo 的超限卡片查核 verify 零派送、`notify` 收到完整量測、未提交交付與 worktree 保留，以及未自動 commit／開 PR。PR 服務實際輸出的差異、CRLF 正規化後派送 verify，以及缺少 base 時成功卡片的通知也待實機比對。
 - **沙盒驗收進度（2026-11-24，使用者要求 S1 到 S5，implement 用 遠端 machine 的 pi、reviewer 用 遠端 machine 的 codex；沙盒 repo 是先前遠端寫入驗收用過的那個，專案設 L0）：**設計為 5 個情境：S1 未超限、S2 diff 字元超限、S3 檔案數超限、S4 `core.autocrlf=true` 的 CRLF（用本機 codex，因為遠端寫入是 `git apply` 後由 bridge commit，不走 `git add` 的正規化）、S5 與 PR 服務實際輸出對照（需要 L1）。**S1 在撿卡時被角色驗證擋下**（`implement：agent pi 未開放`，成因與修正見 ISSUE-211），所以**目前一個情境都還沒有執行，預檢仍然沒有實機驗收**。
+- **沙盒驗收結果（2026-11-24 06:07 至 06:24 UTC，沙盒 repo `hdb-write-sandbox`、專案 L0，bridge 為含 #366 的 main；`implement` 用遠端 machine 的 pi、task 內 `review` 用遠端 machine 的 codex）：**
+  - **S1（未超限，通過預檢的部分）：**implement 派到遠端 pi 並由 bridge 在本機 commit `docs/s1.txt`（一行）；預檢**沒有擋下、沒有警告**，verify 被派送；review 為 `pass`（獨立）。但**遠端 codex 的兩次 verify 都沒有被記錄**（ISSUE-212），Lead 改派本機 verify 後記錄為通過，task `completed`、驗收 `ok=True`；卡片隨後在 autopick 的 commit 步驟失敗（ISSUE-213）。S1 原訂的「verify 恰派送 1 次」因 ISSUE-212 不成立，與預檢無關。
+  - **S2（diff 字元超限，通過）：**只有 `implement` 被派送；task 以 `PR 預檢超限 MAX_REVIEW_DIFF_CHARS：實測 81143 字元，上限 80000，超過 1143；成果已保留` 失敗（超過量等於實測值減 80,000）；review、verify 都是 `pending`；`docs/s2-big.txt`（81,001 位元組）保留在 worktree；沒有 push、沒有 PR（沙盒 repo 的 PR 數沒變、遠端只有 `main`）。
+  - **S3（檔案數超限，通過）：**同樣只有 `implement` 被派送；`PR 預檢超限 MAX_REVIEW_FILES：實測 21 個檔案，上限 20，超過 1；成果已保留`；`docs/s3` 的 21 個檔案保留；沒有 push、沒有 PR。
+  - **S4（CRLF）沒有執行：**撿卡後 3 秒以 `Agent is working` 失敗（ISSUE-206 的第二次發生，成因已在同一天讀碼確認並修正，待部署）。**S5（與 PR 服務實際輸出對照，需要 L1）沒有執行。**
+  - **這些結果回答的先前未知：**預檢**確實**會在遠端寫入的交付上被觸發（S2、S3 有明確的停止訊息，不再只是讀碼推測）；遠端 pi 能用單一 shell 指令產生 81,001 位元組與 21 個檔案，Lead 沒有縮小或拆分。
+  - **要修正的驗收條件：**卡片原本寫「沒有 commit」，**對遠端寫入是寫錯的**：遠端寫入流程是把 patch 套用到本機 worktree 後由 bridge 自己 commit（`hdb remote implement (…)`），發生在預檢**之前**，預檢擋下的是後續的 verify、autopick 的 commit、push 與 PR。S2、S3 的 worktree 因此各有一個這樣的本機 commit。
+  - **通知：**卡片紀錄 S2、S3 各有「Discord 通知已送出」，這是 bridge 的記錄；**通知文字實際是否含上限名稱與實測值，我沒有在 Discord 上看過**，待使用者確認。
+  - **仍未驗證：**CRLF 不被誤擋（ISSUE-210，S4）；與 PR 服務實際 diff 輸出的對照（F3，S5）；缺少 base 時的通知送達；任務內 fix 後重算；本機寫入者（非遠端）的超限路徑。
 ## ISSUE-186：team discuss 唯讀同儕討論與缺空格提示
 
 更新日期：2026-11-23。狀態：**重新開啟／待調查（agy 同儕不穩定地被標 `incomplete`：2026-11-23 05:15 UTC 又出現，根因未確認，見「agy 再度未完成」那則）；另有一種**不同機制**的現象（claude 漏寫開頭標記）根因已確認、已修正、待驗收，見最後一則；主路徑的 Discord 實機驗收（2026-11-23）與先前的修正歷史保留如下**。先前：已驗收（Discord thread 主路徑，範圍有限，見下方「Discord 實機驗收」）；再先前：已修正、待驗收。需求 REQ-20261120-team-discuss。
@@ -371,7 +409,7 @@
 
 ## ISSUE-185：卡片指派的 Lead 剛就緒就送提示，撞到跳過更新選單後短暫的 `working`，任務沒有啟動（`agent is busy`）
 
-更新日期：2026-11-23。狀態：已修正、待驗收（原始碼、自動化測試與探針通過；**尚未部署重跑、未實機驗收**）。
+更新日期：2026-11-24。狀態：**只修了一半，已重新開啟**：#337 的「等 Lead 穩定」有部署並在多次撿卡生效，但 2026-11-24 發現等完之後交給引擎的仍是過期的 `working` 記錄，任務照樣被拒絕（ISSUE-206，已修正、待驗收）。先前：已修正、待驗收（原始碼、自動化測試與探針通過）。
 
 **使用者可見症狀（2026-11-23 01:19 UTC，`REQ-20261120-team-discuss` 第七次嘗試，ISSUE-181／183／184 的修正都已部署）：**worktree 建好、兩個 Lead（codex）都成功跳過更新選單且事後是 `done`，但 autopick 以「worktree 已建立…但任務沒有啟動：agent is busy (wAB:p1); wait for it to settle before assigning another prompt」失敗；卡片仍是 `ready`，要重試得重啟 bridge（autopick 的 `attempted` 集合在記憶體，見 `src/autopick.ts`）。前一輪（2026-11-20）同一條路徑是成功的，所以是不穩定的。
 

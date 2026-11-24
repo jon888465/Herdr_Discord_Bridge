@@ -204,7 +204,7 @@ mapping 過期時，一律 fail closed。
 
 共用 `waitUntilReady` 用於 autopick 來源 Lead、worktree Lead、fresh role／單一 coding profile Worker；persistent profile pool 亦接入此等待。`card review` 的 reviewer 與 `card fix` 的 fixer 也用它，且只在等待就緒這一步把 `done` 當 `idle`（ISSUE-173，2026-11-19，已修正、待驗收；codex 的 hook 只回報 session，狀態由畫面推斷，剛啟動可能顯示 done）。只有預期 CLI 已被辨識且 idle／done（呼叫端明確選用 doneAsReady）才就緒；pane／terminal／workspace／CLI 被替換即失敗。就緒不保證 Herdr 已登記 active named agent，首次 prompt 的有界 agent_not_ready 重試仍見 ISSUE-137。
 
-卡片指派（有 cardId）的 Lead 在送第一個提示前若狀態是 `working`，先每 500 ms 重讀、最多等 15 秒讓它穩定（跳過更新選單後 codex 會短暫 working）；逾時仍 working 才以 busy 拒絕，一般 `team ask` 不受影響（ISSUE-185，2026-11-23，已修正、待驗收）。
+卡片指派（有 cardId）的 Lead 在送第一個提示前若狀態是 `working`，先每 500 ms 重讀、最多等 15 秒讓它穩定（跳過更新選單後 codex 會短暫 working）；逾時仍 working 才以 busy 拒絕，一般 `team ask` 不受影響（ISSUE-185，2026-11-23，已修正、待驗收）。**等穩定之後的那一份記錄，才是交給引擎與回傳給呼叫端的記錄**（ISSUE-206，2026-11-24，已修正、待驗收）：`TeamTaskEngine` 用傳進去的 Lead 記錄檢查狀態（不是 `idle`／`done` 就丟 `Agent is <狀態>`），若傳的是最初讀到、仍是 `working` 的記錄，即使 Lead 已經穩定也會被拒絕、任務沒有啟動。
 
 卡片 worktree 的 Lead 在 `agent.start` 回傳時只要不是 `idle`／`done`（含 `working`、`blocked`、啟動初期的 `unknown`）就先等就緒再判斷，不直接判未就緒（ISSUE-183，2026-11-20，已修正、待驗收）。
 

@@ -196,6 +196,31 @@ test("ISSUE-124 Worker 逾時後 Lead 彙整丟出非逾時錯誤，引擎最後
   }
 });
 
+/**
+ * ISSUE-206：引擎用「傳進來的 Lead 記錄」檢查狀態。`startTeamTask` 先等 Lead 穩定，卻把原本那份仍是 working 的記錄
+ * 交給引擎，所以引擎丟出 `Agent is working`，任務沒有啟動。這裡記錄引擎的契約：過期的 working 記錄一律拒絕，
+ * 已穩定（idle）的同一個 Lead 就能執行，所以呼叫端必須傳 settle 之後的記錄。
+ */
+test("the engine rejects a Lead record that still says working and runs the same Lead once its record is settled (ISSUE-206)", async () => {
+  const f = fixture();
+  try {
+    // run 在預留階段是同步丟出錯誤，所以包一層 async 函式讓 rejects 接得到。
+    await assert.rejects(
+      async () => f.engine.run({ ...input, taskId: "task-stale-lead", lead: { ...lead, agent_status: "working" } }),
+      /Agent is working/,
+    );
+    assert.equal(f.streams.size, 0, "被拒絕時不能留下預留");
+    // 測試環境的 promptAgent 以 input.taskId 查 task，所以成功的那次用預設的 taskId。
+    const settled = await f.engine.run({
+      ...input,
+      lead: { ...lead, agent_status: "idle" },
+    });
+    assert.equal(settled.state, "completed");
+  } finally {
+    f.close();
+  }
+});
+
 test("durable dynamic multi-round task persists plans, reports, journal and frozen identity", async () => {
   const f = fixture();
   try {

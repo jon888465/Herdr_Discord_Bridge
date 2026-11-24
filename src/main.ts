@@ -2441,18 +2441,18 @@ async function startTeamTask(
   if (remoteRoles.length) workers.push(...remoteRoleTargets(cardRoleContext(runtime), workspaceId));
   assertCodingRoster(coding, workers.length);
   // ISSUE-185：卡片指派的 Lead 剛就緒時可能還在短暫 working，先等它穩定；一般 `team ask` 遇到真的忙碌仍立即拒絕。
-  assertAgentAvailable(
-    cardId
-      ? await settleWorkingAgent(
-          async () =>
-            (await runtime.herdr.listAgentsWithWorkspaceNames()).find(
-              (agent) => agent.pane_id === lead.pane_id,
-            ),
-          lead,
-        )
-      : lead,
-    runtime,
-  );
+  // ISSUE-206：要把「等穩定之後的記錄」交給引擎與回傳值。引擎用傳進去的記錄檢查狀態，原本傳的是最初讀到、
+  // 仍是 working 的 `lead`，引擎丟出 `Agent is working`，任務沒有啟動。
+  const readyLead = cardId
+    ? await settleWorkingAgent(
+        async () =>
+          (await runtime.herdr.listAgentsWithWorkspaceNames()).find(
+            (agent) => agent.pane_id === lead.pane_id,
+          ),
+        lead,
+      )
+    : lead;
+  assertAgentAvailable(readyLead, runtime);
 
   const taskId = `task-${randomUUID()}`;
   if (!runtime.tasks) throw new Error("Team Task Engine unavailable");
@@ -2467,7 +2467,7 @@ async function startTeamTask(
         threadId: context.routing.threadId,
       },
       prompt,
-      lead,
+      lead: readyLead,
       workers,
       replan: true,
       ...(coding ? { coding: true } : {}),
@@ -2692,7 +2692,7 @@ async function startTeamTask(
   );
   // Register/persist before the receipt. A delivery failure must not orphan execution.
   void running.catch((error) => console.error(safeError(error)));
-  return { taskId, lead, workers, staleWorkers, running };
+  return { taskId, lead: readyLead, workers, staleWorkers, running };
 }
 
 async function teamAsk(
