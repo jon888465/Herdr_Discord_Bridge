@@ -10,7 +10,7 @@
 - **未確認：**其他遠端寫入的卡（先前 2026-11-19 的驗收卡）當時 autopick 怎麼走到結束（我沒有核對）；L1、L2 時 push 與開 PR 是否也因同一原因停在這裡；`card commit` 的「已經 commit」判斷是不是故意設成失敗。
 - **同時觀察到、沒有查：**同一輪 bridge 日誌有 `autopick Lead cleanup REQ-20261124-precheck-s1-within-limit: lookup or close failed`（Lead workspace 的清理失敗），原因不明。
 - **可能的修法（未做、未決定）：**autopick 的 commit 步驟遇到「HEAD 已包含這次 task 的交付」時視為已完成並繼續下一步，而不是失敗；要先確認這不會掩蓋真正沒有交付的情況。
-
+- **範圍的觀察（2026-11-24，沙盒卡 S4、S5）：**寫入者是**本機** codex 時，task 完成後 autopick 的 commit 步驟正常（`committed`），L1 的 S5 還繼續 push 並開出 PR；所以這個問題只影響**遠端寫入**（bridge 已先 commit）的卡片，不影響本機寫入的卡片。
 ## ISSUE-212：遠端 codex 的 verify 報告，`codingResult` 沒有被記錄，verify 一直是「未通過」
 
 更新日期：2026-11-24。狀態：**待調查**（現象已確認；**成因是推測，未修正**）。
@@ -25,7 +25,7 @@
 
 ## ISSUE-211：卡片 `roles` 指定遠端的 pi 時，驗證仍要求本機有 pi profile，撿卡即被拒絕
 
-更新日期：2026-11-24。狀態：**已修正、待驗收**（根因已確認；程式與自動化測試通過；**尚未部署、未實機驗收**）。
+更新日期：2026-11-24。狀態：**已驗收（範圍有限，見最後一則）**（根因已確認；程式與自動化測試通過；2026-11-24 已部署並在沙盒驗收卡 S1 到 S3 實機驗證）。先前：已修正、待驗收。
 
 - **使用者可見症狀（2026-11-24 05:42 UTC，ISSUE-187 的沙盒驗收卡 S1，`roles: {implement: "<machine>:pi:", …}`）：**autopick 撿起卡片後立刻 `autopick_stopped`：`卡片角色指定無效：implement：agent pi 未開放（需要已配置且符合角色開放條件的 profile）`；沒有建立 worktree、任務沒有啟動。當時 遠端 machine 的 `cardReview.kinds` 已開放 `pi`、`write` 已暫時打開。
 - **預期行為：**遠端機器開放的 kind，不需要本機也配置它；本機沒有 pi（使用者刻意把本機的 pi profile 註解掉），遠端有，卡片應能指定遠端的 pi。
@@ -35,13 +35,13 @@
 - **測試（2026-11-24，本機 macOS，worktree）：**新增 `test/card-role-remote-implicit.test.ts` 9 項（本機沒有 pi 時遠端 pi 的 implement 與 reviewer 被接受且快照可重驗；機器的 kinds／write／toolchain 閘門仍生效；`local:pi` 仍被拒絕；指定 model 被拒絕；本機有同 kind 但只有 analysis 能力的 profile 時仍被拒絕、有 implementation 能力的 profile 時用它而不補隱含的；Team 選取清單不會遮蔽隱含 profile；Lead 候選與目標含隱含 profile 並遵守機器閘門；有本機 profile 時只有一個候選；斷線的機器不提供也不接受）。**修正前** 4 項失敗（5 項保護測試本來就該過）；暫時讓隱含 profile 永遠不產生：4 項失敗；暫時讓它即使本機已有同 kind 也補：2 項失敗；皆已還原。完整 `npm test` 2314 項、通過 2313、失敗 0、略過 1；typecheck、lint 通過。既有的角色與遠端測試沒有任何一項需要修改。
 - **副作用（沒有避開，使用者需要知道）：**隱含 profile 也進入 **Lead 的遠端候選**，所以本機沒有、遠端開放的 kind（目前是 遠端 machine 的 pi）會出現在**所有** coding 任務 Lead 可選的候選裡，不只是有 `roles` 的卡。寫入角色（implement／fixer）仍需要 `write: true`（預設關閉）；但唯讀角色（diagnose／review／verify）會多一個 pi 選項，而 **pi 當唯讀角色沒有實機驗過**（只驗過 implement 與 fixer，2026-11-19）。如果要避免，需要另外做「只對卡片 `roles` 明列的遠端 kind 才補隱含 profile」，這次沒有做。
 - **未驗證：**部署後 `<machine>:pi` 的卡片實際被接受並把 implement 派到遠端 pi（ISSUE-187 的沙盒驗收 S1 到 S3 會一起驗到）；隱含 profile 是否讓遠端啟動缺少某些本機 profile 才有的啟動參數（pi 的 `args` 本來就是空陣列，其他 kind 沒有驗）；多台遠端機器同時開放同一個 kind 時的行為。
-- **環境（暫時，驗收後還原）：**使用者本機設定為了這輪驗收**暫時**加了 遠端 machine 的 `write: true`、打開本機被註解掉的 pi profile（這項在選定修法後就不再需要）、加入沙盒專案（L0）；備份在設定目錄，驗收完全部還原並重啟。**目前執行中的 bridge 仍是舊版，且仍帶著暫時打開的 pi profile。**
+- **環境：**使用者本機設定為了這輪驗收**暫時**加了遠端 machine 的 `write: true`、沙盒專案（L0，S5 時 L1）；一度為了繞過這個問題暫時打開被註解掉的本機 pi profile（選定修法後已還原）。**2026-11-24 驗收結束後全部還原**（設定檔與驗收前的備份逐位元組相同）。
 - **相關：**ISSUE-171（遠端寫入角色）、ISSUE-187（預檢，這是它的沙盒驗收被擋下的原因）。
-
+- **實機驗收（2026-11-24 06:07 至 06:23 UTC，沙盒卡 S1、S2、S3，`roles: {implement: "<machine>:pi:", …}`，本機沒有 pi profile）：**三張卡都通過角色驗證（修正前 S1 在撿卡的同一秒被拒絕）；implement 派到遠端 pi 並由 bridge 在本機 commit；task 內 `review` 指定的遠端 codex 與 Lead 的計畫也都照卡片的角色指定執行。**範圍：**驗證的是 implement 與 review 在遠端 pi／codex；**沒有驗證**：pi 當唯讀角色（diagnose、review、verify）、這個副作用下 Lead 在沒有 `roles` 的卡自選遠端 pi 的行為（隱含 profile 會出現在所有 coding 任務 Lead 的遠端候選中）、多台遠端機器開放同一個 kind。
 ## ISSUE-210：PR 預檢快照與 card commit 的暫存正規化不同
 
-2026-11-24，**已修正、待驗收**。在 macOS fixture 設 `core.autocrlf=true`，新增 9,500 行 `aaaaaa\r\n`。前輪審查的 `review-crlf.txt` 量到 85,646 字元，實際 Git add 的 patch 為 76,146；本輪用 `added.txt` 在修正前重現 85,628 實測與 76,128 預期，定向測試 exit 1。根因是同一套隔離設定也用來暫存，漏掉來源 repo 的 blob 正規化，誤擋 verify。修正後沿 `card commit` 的 Git add 暫存工作樹內容，索引與新 Git 物件均在暫存區，再以交付 tree 的獨立索引套用 patch attributes。修正途中直接比較兩個 tree 讀不到交付的 `-diff`，回歸測試 exit 1，改用載入交付 tree 的索引後通過。CRLF 預檢與實際暫存 patch 均為 76,128，verify 派送一次。另核對同路徑 staged／unstaged 的工作樹版本經來源 clean filter 後一致，且來源索引、Git 物件和檔案維持原樣。驗證與部署狀態見 ISSUE-187。
-
+2026-11-24，**已修正、已實機驗收（範圍有限，見最後一則）**。在 macOS fixture 設 `core.autocrlf=true`，新增 9,500 行 `aaaaaa\r\n`。前輪審查的 `review-crlf.txt` 量到 85,646 字元，實際 Git add 的 patch 為 76,146；本輪用 `added.txt` 在修正前重現 85,628 實測與 76,128 預期，定向測試 exit 1。根因是同一套隔離設定也用來暫存，漏掉來源 repo 的 blob 正規化，誤擋 verify。修正後沿 `card commit` 的 Git add 暫存工作樹內容，索引與新 Git 物件均在暫存區，再以交付 tree 的獨立索引套用 patch attributes。修正途中直接比較兩個 tree 讀不到交付的 `-diff`，回歸測試 exit 1，改用載入交付 tree 的索引後通過。CRLF 預檢與實際暫存 patch 均為 76,128，verify 派送一次。另核對同路徑 staged／unstaged 的工作樹版本經來源 clean filter 後一致，且來源索引、Git 物件和檔案維持原樣。驗證與部署狀態見 ISSUE-187。
+- **實機驗收（2026-11-24 07:00 UTC，沙盒卡 S4，沙盒 repo `core.autocrlf=true`，本機 codex 寫入，bridge 含 #364 到 #368）：**同一份 9,500 行 CRLF 的檔案，預檢量到 **76,149 字元**、沒有擋下；卡片 commit 之後實際對 base 的 patch 也是 **76,149 字元**，commit 內的檔案 66,500 位元組、0 行含 CR（已正規化）。**範圍：**只驗了一個檔案、一個 `autocrlf=true` 的來源 repo、本機寫入者；遠端寫入是 `git apply` 後 commit，不走 `git add` 的正規化，是另一種語意，沒有驗；其他 `core.*` 設定沒有驗。
 ## ISSUE-209：autopick 成功時未通知 PR 預檢無法執行
 
 2026-11-24，**已修正、待驗收**。ISSUE-187 的前輪審查發現，本機缺少 PR base 時，警告只在實作 artifact 和 `card assign` 的回覆裡；autopick 捨棄成功指派的回覆，後續 review／verify 仍成功卻無通知。卡片同步現在從 artifact 記入去重的警告事件，沿用卡片 `notify` 路由；通知顯示缺少 base 或安全分類，完整原因留在 artifact。macOS 的 L1 autopick 回歸以真實 scheduler、卡片同步及 notifier，搭配模擬 console／通知端，證實 review／verify 成功且流程到達 PR，警告送達配置的目標一次。首次測試的卡片目錄模式為 0755，被安全檢查拒絕；改為正常的 0700 後通過。在暫存編譯副本停用警告事件同步，定向測試如預期 exit 1（事件 0 筆，預期 1 筆），還原後 exit 0。驗證命令與部署狀態見 ISSUE-187。
@@ -89,6 +89,7 @@
 - **Worker 版的修正（2026-11-24，原始碼）：**重讀到的記錄若是 `working`，用同一個 `settleWorkingAgent` 等它穩定，再用穩定的記錄（重新核對 machine／agent／pane／terminal／session 身分）交出去；逾時仍 `working` 就照實交出去，由引擎拒絕（行為與以前相同）。新增可注入的 `settle` 選項只供測試縮短時限。
 - **Worker 版的測試（2026-11-24，本機 macOS，worktree）：**新增 `test/fresh-worker-settle.test.ts` 3 項（全程 idle 照常回傳；就緒判定後重讀到 `working` 時等穩定並回傳 idle 的記錄；一直 `working` 時逾時並照實回傳 `working`）。暫時讓它不用穩定的記錄：第 2 項失敗，已還原。完整 `npm test` 2321 項、通過 2320、失敗 0、略過 1；typecheck、lint 通過。**測試用假的埠模擬「就緒判定後重讀到 working」，沒有真的 codex。**
 - **仍未驗證：**部署後這兩種（Lead、Worker）失敗是否都不再發生；遠端 Worker、`pool` 的持久 profile Worker 走的是別的路徑（`pool.acquire` 有自己的忙碌檢查，`profile Agent is working`），沒有查它們是否有同樣的競態。
+- **部署後的觀察（2026-11-24）：**Lead 版（#367）與 Worker 版（#368）都部署之後（06:58 UTC 起）連續 2 次撿卡（07:00 的 S4、07:05 的 S5）Lead 與 Worker 都正常啟動。**樣本很小，這不代表已解決**：這個失敗是間歇性的，當天部署前 7 次撿卡有 2 次 Lead 版失敗、1 次 Worker 版失敗；狀態維持「已修正、待驗收」，要累積更多次撿卡才有意義。
 ## ISSUE-205：2026-11-03 建立的 Team task 卡在 `cancelling`，每次 bridge 重啟都只被對帳一次，從沒結束
 
 更新日期：2026-11-24。狀態：**待調查**（現象已確認；**成因未確認，未修正**）。
@@ -307,7 +308,7 @@
 
 合併入口的本機查核與待補線上證據見 [main 合併入口稽核](merge-gates.md)。
 
-更新日期：2026-11-24。狀態：**已修正、部分實機驗收**（REQ-20261123-precheck-diff-size；**超限的兩種情境已在遠端寫入的交付上實機驗收**，其餘見最後一則）。先前：已修正、待驗收。
+更新日期：2026-11-24。狀態：**已驗收（範圍有限，見最後一則）**（REQ-20261123-precheck-diff-size；2026-11-24 已部署，沙盒驗收 S1 到 S5 都已執行）。先前：已修正、部分實機驗收；再先前：已修正、待驗收。
 
 **使用者可見症狀（2026-11-23，`REQ-20261120-team-discuss`，PR #338）：**implement（約 18 分鐘）、verify、遠端 review 都完成並通過後，autopick commit 並開出 PR，卻在 PR 層級的 `card review` 以「review 沒有進行：PR 的 diff 有 93947 字元，超過 review 上限 80000；請 Lead 把需求重新切分成較小的部分」停手，卡片流程等人。PR 實際是 +1859／-42、16 個檔案（新檔案 `src/team-discuss.ts` 854 行、`test/team-discuss.test.ts` 735 行）。
 
@@ -354,11 +355,14 @@
   - **S1（未超限，通過預檢的部分）：**implement 派到遠端 pi 並由 bridge 在本機 commit `docs/s1.txt`（一行）；預檢**沒有擋下、沒有警告**，verify 被派送；review 為 `pass`（獨立）。但**遠端 codex 的兩次 verify 都沒有被記錄**（ISSUE-212），Lead 改派本機 verify 後記錄為通過，task `completed`、驗收 `ok=True`；卡片隨後在 autopick 的 commit 步驟失敗（ISSUE-213）。S1 原訂的「verify 恰派送 1 次」因 ISSUE-212 不成立，與預檢無關。
   - **S2（diff 字元超限，通過）：**只有 `implement` 被派送；task 以 `PR 預檢超限 MAX_REVIEW_DIFF_CHARS：實測 81143 字元，上限 80000，超過 1143；成果已保留` 失敗（超過量等於實測值減 80,000）；review、verify 都是 `pending`；`docs/s2-big.txt`（81,001 位元組）保留在 worktree；沒有 push、沒有 PR（沙盒 repo 的 PR 數沒變、遠端只有 `main`）。
   - **S3（檔案數超限，通過）：**同樣只有 `implement` 被派送；`PR 預檢超限 MAX_REVIEW_FILES：實測 21 個檔案，上限 20，超過 1；成果已保留`；`docs/s3` 的 21 個檔案保留；沒有 push、沒有 PR。
-  - **S4（CRLF）還沒有跑到預檢：**第一次撿卡後 3 秒以 `Agent is working` 失敗（ISSUE-206 Lead 版，已修正並部署）；重跑時 Lead 正常啟動，但本機 codex helper 這個 **Worker** 在 06:48:22 以同一句失敗（ISSUE-206 Worker 版，已修正，待部署）。**S5（與 PR 服務實際輸出對照，需要 L1）還沒有執行。**
+  - **S4（CRLF，通過）：**前兩次撿卡分別被 ISSUE-206 的 Lead 版與 Worker 版擋下（修正後第三次才跑到）。沙盒 repo 設 `core.autocrlf=true`，本機 codex 產生 9,500 行 `aaaaaa\r\n` 的單一檔案：工作樹檔案 **76,000 位元組、9,500 行都含 `\r`**；預檢**沒有擋下、沒有警告**，verify（記錄為通過）與 review（`pass`）照常；**預檢量到 76,149 字元，與實際 commit 之後對 base 的 patch（76,149 字元）完全一致**；commit 內的檔案是 66,500 位元組、**0 行含 CR**（已被 `git add` 正規化）。若用未正規化的語意會量到約 85,649 而被誤擋。（**卡片原本把工作樹檔案大小寫成 66,500 位元組是我的算術錯誤**，Lead 的計畫更正為 76,000；66,500 是正規化之後的大小。）
+  - **S5（接近上限、與 PR 服務實際輸出對照，通過；沙盒專案暫時 L1）：**本機 codex 產生 79,001 位元組的單一檔案；預檢量到 **79,164 字元**（低於 80,000）放行、verify 通過、review `pass`、task 完成，卡片 commit、push 並在沙盒 repo 開出 PR #4（沒有合併）。**GitHub 對這個 PR 實際回傳的 diff 是 79,164 位元組＝79,164 字元，與預檢量到的完全一致**（F3 的對照在這一個輸入上成立）。驗收後 PR #4 已關閉、遠端分支已刪除。
   - **這些結果回答的先前未知：**預檢**確實**會在遠端寫入的交付上被觸發（S2、S3 有明確的停止訊息，不再只是讀碼推測）；遠端 pi 能用單一 shell 指令產生 81,001 位元組與 21 個檔案，Lead 沒有縮小或拆分。
   - **要修正的驗收條件：**卡片原本寫「沒有 commit」，**對遠端寫入是寫錯的**：遠端寫入流程是把 patch 套用到本機 worktree 後由 bridge 自己 commit（`hdb remote implement (…)`），發生在預檢**之前**，預檢擋下的是後續的 verify、autopick 的 commit、push 與 PR。S2、S3 的 worktree 因此各有一個這樣的本機 commit。
   - **通知：**卡片紀錄 S2、S3 各有「Discord 通知已送出」，這是 bridge 的記錄；**通知文字：使用者在 Discord 上確認內容看起來正確（2026-11-24）。**
   - **仍未驗證：**CRLF 不被誤擋（ISSUE-210，S4）；與 PR 服務實際 diff 輸出的對照（F3，S5）；缺少 base 時的通知送達；任務內 fix 後重算；本機寫入者（非遠端）的超限路徑。
+- **沙盒驗收的總結與範圍（2026-11-24）：**已在實機驗證：預檢會在**遠端寫入**的交付上被觸發並依兩種上限提早停下（S2、S3）；未超限時不干擾（S1、S4、S5）；CRLF 以來源 repo 的 `git add` 語意量測，與實際 commit 的 patch 一致（S4）；量到的字元數與 PR 服務實際的 diff 一致（S5，單一輸入）。**沒有驗證：**缺少 base 時的「無法預檢」通知送達（ISSUE-209）、任務內 fix 之後重算、本機 `.git/info/attributes` 的 `-diff` 規則（ISSUE-208）、**本機寫入者**的超限路徑（S2、S3 的寫入者都是遠端）、rename 與多 PR 的情況、S5 以外大小的 PR 服務對照。
+- **驗收環境的還原（2026-11-24）：**驗收用的暫時設定已全部還原：使用者的 `config.json` 與 `policy.yml` 與驗收前的備份**逐位元組相同**（拿掉遠端 machine 的 `write: true`、沙盒專案；pi profile 維持註解掉）、沙盒 repo 的 `core.autocrlf` 已取消、5 張沙盒卡的 worktree、Lead workspace 與本機卡片分支已清理、沙盒 PR #4 已關閉且遠端分支已刪（沙盒遠端只剩 `main`）；bridge 已重啟載入還原後的設定。
 ## ISSUE-186：team discuss 唯讀同儕討論與缺空格提示
 
 更新日期：2026-11-23。狀態：**重新開啟／待調查（agy 同儕不穩定地被標 `incomplete`：2026-11-23 05:15 UTC 又出現，根因未確認，見「agy 再度未完成」那則）；另有一種**不同機制**的現象（claude 漏寫開頭標記）根因已確認、已修正、待驗收，見最後一則；主路徑的 Discord 實機驗收（2026-11-23）與先前的修正歷史保留如下**。先前：已驗收（Discord thread 主路徑，範圍有限，見下方「Discord 實機驗收」）；再先前：已修正、待驗收。需求 REQ-20261120-team-discuss。
