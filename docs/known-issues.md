@@ -1,5 +1,20 @@
 # Known Issues
 
+## ISSUE-207：pool 裡舊 workspace 的綁定（pane 已不存在、設定指紋是舊格式）讓 claude Worker 永遠啟動不了：`profile configuration changed`
+
+更新日期：2026-11-24。狀態：**已修正、待驗收**（根因有證據、一個前提是推論；程式與自動化測試通過；**尚未部署、未實機驗收**）。
+
+- **使用者可見症狀（2026-11-24 02:49 UTC，`REQ-20261123-precheck-diff-size` 重跑，bridge 為 main `0fa5b04`）：**task 的 `verify-precheck`（claude）在 `implement-precheck` 完成後 1 秒內 `failed`，原因 `profile configuration changed; explicitly bind the desired session`；claude Worker 根本沒啟動。Lead 的規劃迴圈在有指派失敗時中止，task 於 02:51:53 `failed`，`acceptance` 原因：`no passing review for the current version; unhandled findings; no successful verification for the current version`；卡片以 `autopick_stopped` 失敗。實作與 review 都已完成，只差 verify 無法啟動。
+- **預期行為：**claude Worker 能照目前設定啟動，verify 正常執行。
+- **已確認（2026-11-24，讀碼與只讀查 pool 狀態）：**(1) 這句訊息由 `AgentPool.acquire`（`src/agent-pool.ts`）丟出：綁定存在、而且其設定指紋與目前 profile 不同。(2) 該卡的 workspace 在 pool 裡有 `claude` 的綁定：綁定的 pane 現在**不存在**、綁定記著一個有 session ID 的 claude Agent、**指紋沒有 `model` 欄位**（舊格式）。(3) 設定從 2026-11-20 起固定 `model: sonnet`，而這輪 claude 根本沒啟動過，所以這個綁定一定**早於這輪**。(4) pool 裡 59 個 claude 綁定，40 個沒有 `model` 欄位（11/11 固定 model 之前建立），19 個有。(5) **根因：**`acquire` 把「指紋不同」的檢查放在「綁定的 pane 是否還活著」之前；綁定的 pane 已不存在時，後面本來就會啟動新 session 並覆寫綁定，但被前面的指紋檢查擋掉了。
+- **推論（沒有直接證據）：**舊綁定是因為 **workspace ID 被重複使用**才碰到新卡的 workspace；我沒有辦法證明那個 ID 先前真的存在過另一個 workspace。另外 pool 從不清理已關閉 workspace 的綁定（目前 231 個 session、114 個 team 紀錄），所以任何重複使用的 ID 都可能撞到舊綁定；只有 claude 中箭是因為只有它的設定在綁定建立之後改過（固定 model），codex 的 profile 沒有 `model`，指紋沒變。
+- **修正（2026-11-24，原始碼）：**`acquire` 先讀即時的 Agent 清單，找綁定的 pane；**指紋不同只在 pane 還活著時才拒絕**（那時才有 session 被誤用的風險，維持要明確重新綁定）。pane 已不存在就沒有 session 可重用，照新設定啟動新 session，綁定換成新的指紋與 pane。`uncertain`（啟動送達不確定）的綁定不論 pane 在不在都仍然拒絕。
+- **測試（2026-11-24，本機 macOS，worktree）：**`test/agent-pool.test.ts` 新增 3 項（pane 已不在且設定改過：啟動新 session、continuity 為 `new-session`、綁定換成新指紋與新 pane；pane 還活著且設定改過：仍拒絕、不另開 pane、綁定沒被動；`uncertain` 綁定在 pane 不在時仍拒絕）。**修正前**第一項失敗（另兩項本來就該通過）；修正後 `agent-pool` 37 項全過，完整 `npm test` 2288 項、通過 2287、失敗 0、略過 1；typecheck、lint 通過。
+- **未驗證：**部署重啟後，在 workspace ID 帶有舊綁定的卡上 claude Worker 是否能正常啟動並完成 verify（這個情境沒有辦法預先製造，要等再碰到）；有沒有其他路徑也會被舊綁定擋住（`refreshSession`、`bind` 沒有檢查）；舊綁定要不要在 workspace 關閉時清理（沒有做，是另一個設計問題）。
+- **觀察到、沒有處理：**只要**一個**指派失敗，Lead 的規劃迴圈就中止並收尾（這次 review 已經完成、有 finding，但沒有機會修）；這與 ISSUE-191 的 overflow 早停不同，是原本的設計，沒有調查是否合理。
+- **復原方式（沿用 ISSUE-185／206 的記載）：**失敗的卡要清理 worktree、刪卡片分支、**重啟 bridge**（autopick 的 `attempted` 在記憶體）後才會被重撿。這輪 implement 與 review 的產出可能值得保留（review 的 finding 還沒處理）。
+- **相關：**ISSUE-165（codex session 不可信時的重用規則）、ISSUE-206（同一張卡先前的 Lead 啟動失敗，成因不同）。
+
 ## ISSUE-206：卡片剛撿起、worktree 建好後任務沒有啟動：`Agent is working`（Lead 的第一個 prompt 沒送出）
 
 更新日期：2026-11-24。狀態：**待調查**（現象與時間線已確認；**丟出這句的位置與 Herdr 的錯誤碼未確認，未修正**）。

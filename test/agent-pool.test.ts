@@ -94,6 +94,91 @@ test("acquire starts once, release preserves context, restart reuses the identif
   }
 });
 
+/**
+ * ISSUE-207：workspace ID 被重複使用時，pool 裡留著舊 workspace 的綁定（pane 早已不存在、設定指紋是舊格式）。
+ * 指紋檢查排在「綁定的 pane 是否還活著」之前，舊綁定一旦指紋對不上就永遠啟動不了，任務的 Worker 取用直接失敗
+ * （`profile configuration changed; explicitly bind the desired session`）。pane 已不在就沒有 session 可重用，
+ * 設定變更與它無關，應該照新設定啟動新 session；pane 還活著時才需要明確重新綁定。
+ */
+test("a stale binding whose pane is gone starts a fresh session under the new configuration instead of failing (ISSUE-207)", async () => {
+  const f = fixture();
+  try {
+    f.pool.select("w1", "helper", true);
+    await f.pool.acquire("w1", "helper", lead, "a");
+    f.pool.release("a");
+    assert.equal(f.starts, 1);
+    // 舊 workspace 的 pane 已經不在了；設定也已經改過（例如後來才固定了 model）。
+    f.set([lead]);
+    const pool = new AgentPool(
+      f.file,
+      [{ ...profile, model: "different" }],
+      f.port,
+      ["w1"],
+    );
+    const acquired = await pool.acquire("w1", "helper", lead, "b");
+    assert.equal(acquired.continuity, "new-session");
+    assert.equal(f.starts, 2);
+    // 綁定已換成新設定的指紋與新 pane，下一次取用不會再被當成設定變更。
+    const saved = JSON.parse(readFileSync(f.file, "utf8")).sessions["w1/helper"];
+    assert.equal(saved.paneId, acquired.agent.pane_id);
+    assert.match(saved.fingerprint, /"model":"different"/);
+  } finally {
+    f.close();
+  }
+});
+
+test("a changed configuration with the bound pane still alive keeps requiring an explicit rebind and never starts another pane (ISSUE-207)", async () => {
+  const f = fixture();
+  try {
+    f.pool.select("w1", "helper", true);
+    const first = (await f.pool.acquire("w1", "helper", lead, "a")).agent;
+    f.pool.release("a");
+    f.set([lead, first]);
+    const pool = new AgentPool(
+      f.file,
+      [{ ...profile, model: "different" }],
+      f.port,
+      ["w1"],
+    );
+    await assert.rejects(
+      pool.acquire("w1", "helper", lead, "b"),
+      /configuration changed/,
+    );
+    assert.equal(f.starts, 1);
+    const saved = JSON.parse(readFileSync(f.file, "utf8")).sessions["w1/helper"];
+    assert.equal(saved.paneId, first.pane_id, "綁定沒有被改動");
+    assert.doesNotMatch(saved.fingerprint, /different/);
+  } finally {
+    f.close();
+  }
+});
+
+test("an uncertain binding is still refused even when its pane is gone (ISSUE-207 keeps the existing guard)", async () => {
+  const f = fixture();
+  try {
+    f.pool.select("w1", "helper", true);
+    const acquired = await f.pool.acquire("w1", "helper", lead, "a");
+    f.pool.release("a");
+    const state = JSON.parse(readFileSync(f.file, "utf8"));
+    state.sessions["w1/helper"] = {
+      ...state.sessions["w1/helper"],
+      uncertain: true,
+      paneId: acquired.agent.pane_id,
+    };
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(f.file, JSON.stringify(state));
+    f.set([lead]);
+    const pool = new AgentPool(f.file, [profile], f.port, ["w1"]);
+    await assert.rejects(
+      pool.acquire("w1", "helper", lead, "b"),
+      /previous startup delivery is uncertain/,
+    );
+    assert.equal(f.starts, 1);
+  } finally {
+    f.close();
+  }
+});
+
 test("changed or busy session fails closed; missing metadata is never same-session", async () => {
   const f = fixture();
   try {

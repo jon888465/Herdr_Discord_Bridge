@@ -292,12 +292,15 @@ export class AgentPool {
         throw new Error(
           "previous startup delivery is uncertain; inspect and explicitly bind a live Agent before retrying",
         );
-      if (binding && binding.fingerprint !== JSON.stringify(p))
+      const live = await this.herdr.listAgentsWithWorkspaceNames();
+      const prior = live.find((a) => a.pane_id === binding?.paneId);
+      // ISSUE-207：設定變更只在綁定的 pane 還活著時才需要明確重新綁定（有 session 可能被誤用）。
+      // pane 已不在（例如 workspace ID 被重複使用、留著舊 workspace 的綁定）就沒有 session 可重用，
+      // 往下照新設定啟動新 session，綁定會被新的指紋與 pane 取代。
+      if (prior && binding && binding.fingerprint !== JSON.stringify(p))
         throw new Error(
           "profile configuration changed; explicitly bind the desired session",
         );
-      const live = await this.herdr.listAgentsWithWorkspaceNames();
-      const prior = live.find((a) => a.pane_id === binding?.paneId);
       if (prior) {
         // codex 的 Herdr session 不可信（見 refreshSession），登記時沒有 session 的 codex pane，之後 Herdr 才回報
         // 一個 session id，不能因此被當成「身分變了」而拒絕：不比對、也不採用這個 session，continuity 維持 unknown，
