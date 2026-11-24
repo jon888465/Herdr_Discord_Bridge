@@ -1,4 +1,7 @@
-import { MAX_REVIEW_DIFF_CHARS, MAX_REVIEW_FILES } from "./card-review-fetch.js";
+import {
+  MAX_REVIEW_DIFF_CHARS,
+  MAX_REVIEW_FILES,
+} from "./card-review-fetch.js";
 import { sameAgentSession } from "./response-stream.js";
 import type { AgentRecord } from "./types.js";
 import {
@@ -341,13 +344,18 @@ function extractObjects(value: string): unknown[] {
 }
 
 export function parseCodingResult(report: string): CodingResult | undefined {
+  // A terminal capture can contain an echoed transport/prompt object before the
+  // final answer.  The marker boundary normally removes it; when a legacy
+  // screen capture loses that boundary, keep scanning and use the last valid
+  // codingResult rather than letting the example in the prompt win.
+  let result: CodingResult | undefined;
   for (const value of extractObjects(report)) {
     if (!value || typeof value !== "object" || !("codingResult" in value))
       continue;
     const raw = (value as { codingResult?: unknown }).codingResult;
-    if (!raw || typeof raw !== "object") return undefined;
+    if (!raw || typeof raw !== "object") continue;
     const item = raw as Record<string, unknown>;
-    if (!CODING_ROLES.includes(item.kind as CodingRole)) return undefined;
+    if (!CODING_ROLES.includes(item.kind as CodingRole)) continue;
     const findings = Array.isArray(item.findings) ? item.findings : [];
     if (
       findings.length > 32 ||
@@ -360,7 +368,7 @@ export function parseCodingResult(report: string): CodingResult | undefined {
           typeof (finding as { summary?: unknown }).summary !== "string",
       )
     )
-      return undefined;
+      continue;
     const commands = Array.isArray(item.commands) ? item.commands : [];
     if (
       commands.length > 20 ||
@@ -374,15 +382,15 @@ export function parseCodingResult(report: string): CodingResult | undefined {
           !Number.isInteger((command as { exitCode?: unknown }).exitCode),
       )
     )
-      return undefined;
+      continue;
     const files = Array.isArray(item.files) ? item.files : [];
-    if (files.some((file) => typeof file !== "string")) return undefined;
+    if (files.some((file) => typeof file !== "string")) continue;
     let verdict = item.verdict as ReviewVerdict | undefined;
     if (
       verdict !== undefined &&
       !["pass", "changes_requested", "inconclusive"].includes(verdict)
     )
-      return undefined;
+      continue;
     const parsedFindings = findings.map((finding) => ({
       id: (finding as { id: string }).id,
       summary: (finding as { summary: string }).summary.slice(0, 500),
@@ -390,7 +398,7 @@ export function parseCodingResult(report: string): CodingResult | undefined {
     if (verdict === "pass" && parsedFindings.length) verdict = "inconclusive";
     if (verdict === "changes_requested" && !parsedFindings.length)
       verdict = "inconclusive";
-    return {
+    result = {
       kind: item.kind as CodingRole,
       verdict,
       findings: parsedFindings,
@@ -401,7 +409,7 @@ export function parseCodingResult(report: string): CodingResult | undefined {
       files: files.map(String),
     };
   }
-  return undefined;
+  return result;
 }
 
 export function inWriteScope(file: string, scopes: string[]): boolean {
