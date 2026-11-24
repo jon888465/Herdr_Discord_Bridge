@@ -4,6 +4,7 @@ import type { AgentStartPort } from "./agent-start.js";
 import { closeReviewerPane } from "./review-pane.js";
 import { assertFreshProfile, machineOfActor } from "./card-role-assignment.js";
 import { hasAgentSession, sameAgentSession } from "./response-stream.js";
+import { settleWorkingAgent } from "./lead-settle.js";
 import type { AgentRecord } from "./types.js";
 
 export function assertReadyIdentity(
@@ -62,6 +63,8 @@ export async function startFreshProfileSession(
     modelMatches: (model: string) => boolean;
     note: (message: string) => void;
     retainLaunchError: (error: unknown) => boolean;
+    /** 重讀到 working 時等它穩定的時限與輪詢間隔（測試用；預設見 `settleWorkingAgent`）。 */
+    settle?: { timeoutMs?: number; pollMs?: number };
   },
 ) {
   assertFreshProfile(profile);
@@ -135,7 +138,18 @@ export async function startFreshProfileSession(
     );
     if (!live) throw new Error("卡片角色就緒後 pane 已不存在");
     assertReadyIdentity(started, live, profile.kind, lead.workspace_id);
-    ready.agent = live;
+    // ISSUE-206：剛啟動的 codex 載入工作階段時會短暫 working；就緒判定之後重讀到的這一瞬間若是 working，
+    // 交給引擎的記錄就是 working，引擎立刻丟 `Agent is working`。先等它穩定，再用穩定的記錄（重新核對身分）。
+    const settled = await settleWorkingAgent(
+      async () =>
+        (await port.listAgentsWithWorkspaceNames()).find(
+          (a) => a.pane_id === started.pane_id,
+        ),
+      live,
+      options?.settle,
+    );
+    assertReadyIdentity(started, settled, profile.kind, lead.workspace_id);
+    ready.agent = settled;
     if (
       profile.model &&
       ready.agent.model &&
