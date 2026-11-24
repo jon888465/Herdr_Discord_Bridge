@@ -239,6 +239,8 @@ function fixture(t: TestContext) {
       guildId: "guild",
       channelId: "thread-100",
       author: { id: "user" },
+      // 真實的 Discord 訊息一定有 attachments（ISSUE-190：team ask／discuss 先檢查它）。
+      attachments: new Map(),
       channel: {
         id: "thread-100",
         parentId: "channel-10",

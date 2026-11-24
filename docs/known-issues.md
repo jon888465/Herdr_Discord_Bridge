@@ -114,7 +114,7 @@
 
 ## ISSUE-190：`team ask`／`team discuss` 透過 Discord 傳檔案或圖片，附件被默默丟掉，Agent 沒有讀取
 
-更新日期：2026-11-23。狀態：待調查（使用者回報；現象與原因已由讀碼確認；**尚未修正，修法待使用者決定**）。
+更新日期：2026-11-24。狀態：**選項 1 已修正、待驗收**（原始碼與自動化測試通過；**尚未部署、未實機驗收**）；**選項 2、3（真的把附件交給 Agent）沒有做，各另開需求卡（`draft`）**。先前：待調查（使用者回報；現象與原因已由讀碼確認；修法待使用者決定）。
 
 **使用者可見症狀（2026-11-23，使用者回報）：**188（`team discuss` 的 Lead 提示）看起來正常，但現在透過 Discord 下 `team ask`、`team discuss` 時，訊息附上檔案或圖片，回答完全沒有讀取附件、沒有看檔案內容。同樣的附件對單一 Agent 的一般訊息是會被讀取的。
 
@@ -132,8 +132,10 @@
 2. **`team ask` 支援附件**：Lead 與被派工的 Worker 的提示都帶附件路徑（沿用 `askAgent` 的準備與提示，遠端 Worker 用既有的遠端交付）；要決定誰負責存檔、存到哪個 cwd、Worker 不支援圖片時怎麼辦。
 3. **`team discuss` 支援附件**：同儕與 Lead 都看得到附件，但要先解決存檔位置與唯讀指紋的衝突（例如存到 bridge 自己的狀態目錄而不是 Lead 的 cwd），並把附件內容當不可信資料。
 4. 1 先做，2、3 另開需求卡。我傾向 1 加上 2 的設計討論，3 最後。
-**下一步：**使用者決定方向後開需求卡或直接修；在那之前，**請不要依賴 `team ask`／`team discuss` 讀附件**，需要 Agent 看檔案或圖片時，改對單一 Agent 用一般訊息傳送。
-
+**下一步：**部署重啟後從 Discord 對 `team ask`、`team discuss` 各帶一個附件實測拒絕訊息；選項 2、3 的需求卡由使用者決定何時放行。**在選項 2、3 完成前，請不要依賴 `team ask`／`team discuss` 讀附件**，需要 Agent 看檔案或圖片時，改對單一 Agent 用一般訊息傳送。
+**修正（2026-11-24，使用者選修法 1；原始碼，尚未部署）：**`src/main.ts` 新增 `rejectTeamAttachments`，在 `team` 指令的 `ask` 與 `discuss` 兩個分支**最先**呼叫：訊息帶任何附件（`context.message.attachments.size`）就丟出 `team <ask|discuss> 目前不支援附件（檔案或圖片），Agent 不會讀取；請拿掉附件再下指令，或改用一般訊息把附件傳給單一 Agent。`，不再往下建立任務或討論。其他 `team` 子指令與沒有附件的 `team ask`／`team discuss` 行為不變。`team ask --coding` 與 `team ask` 同一個分支，所以一併被擋。console 的訊息沒有附件，不受影響。
+**測試（2026-11-24，本機 macOS，worktree）：**新增 `test/team-attachments-main.test.ts` 7 項（`ask`、`discuss` 各：帶 1 個附件、帶 3 個附件都在存取 runtime 之前被拒絕並說明；沒有附件時不會被這個檢查擋下；其他 `team` 子指令不受影響）。先寫測試，尚未實作時 4 項失敗；暫時拿掉 `ask` 的那行呼叫，2 項失敗，已還原且逐字相同。既有 `team-discuss` 測試的假 Discord 訊息沒有 `attachments` 欄位（真實訊息一定有），補上空的 `attachments` 後完整 `npm test`（2026-11-24）2285 項、通過 2284、失敗 0、略過 1；typecheck、lint 通過。
+**未驗證：**Discord 端到端（真的從 Discord 對 `team ask`／`team discuss` 帶附件看到這則訊息）；Discord 附件是否在訊息分派到 `team` 指令之前就被別處處理（讀碼沒有發現，沒有實測）；訊息只有附件、沒有任何文字時的路徑；`/herdr` 斜線或前綴以外的入口（沒有發現其他入口）。選項 2、3 沒有做：`team ask` 附件（Lead 與 Worker 都帶路徑，遠端 Worker 用既有遠端交付）與 `team discuss` 附件（存放位置要避開 Lead 的 cwd 以免破壞唯讀指紋，內容要當不可信資料）各是需求卡 `REQ-20261124-team-ask-attachments`、`REQ-20261124-team-discuss-attachments`（卡片檔在 bridge 的 state 目錄，不在 repo 內；狀態 `draft`，未放行）。
 ## ISSUE-189：Team 名單殘留一個失效 Worker，整個 `team ask` 直接失敗
 
 更新日期：2026-11-23。狀態：已修正、待驗收（原始碼與自動化測試完成；**執行中的 bridge 尚未重啟，未在 Discord 實機驗收**）。
