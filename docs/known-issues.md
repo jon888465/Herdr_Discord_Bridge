@@ -1,5 +1,19 @@
 # Known Issues
 
+## ISSUE-216：遠端寫入的卡，遠端 verify 看不到 bridge 的 commit，Lead 反覆追加驗證直到規劃輪數用完
+
+2026-11-25。狀態：**待調查**（現象在同一張卡重現 2 次；根因只有推論，沒有查證）。
+
+**症狀（2026-11-25，沙盒卡 `REQ-20261125-issue213-remote-commit`，沙盒 repo L0，implement／review／verify 都派遠端 machine）：**遠端 implement 完成、bridge 已在本機 commit，task 卻沒有完成。第 1 次：第一個 verify 完成後 Lead 追加 `verify-s6-followup`，在遠端 codex 上 `working` 超過 27 分鐘沒結果，使用者同意後取消。第 2 次（重啟後重跑）：10 個指派全部完成，但 Lead 一直追加驗證，約 27 分鐘後 `Lead reached the planning round limit; task remains incomplete`，卡片 autopick 停手（09:10 UTC）。
+
+**預期行為：**review 與 verify 各跑一次，task 完成後 autopick 繼續 commit 步驟。
+
+**目前的推論（未查證）：**從 Lead 畫面讀到的追加理由是「review 回報 HEAD 只含 `docs/s6.txt`，但後來的 verifier 看到 HEAD 是空的 hdb 快照 commit，`git diff-tree` 沒有路徑」。也就是遠端 verifier 跑在快照 repo，那裡的 HEAD 不是 bridge 在本機做的 commit，無法確認交付範圍，Lead 因此不斷追加驗證。尚未核對遠端快照的實際內容，也不知道 ISSUE-212（遠端 codex verify 報告遺失）是否同源。
+
+**影響：**遠端寫入的卡在 verify 階段可能到不了 `completed`，ISSUE-213 的 autopick commit 步驟修正因此沒被驗到。
+
+**未驗證／下一步：**(1) 查遠端快照的 git 狀態與 verify 提示；(2) 用 `verify: local:codex` 重跑同一張卡，確認改成本機 verify 就能完成（這輪進行中）；(3) 決定是否要在 bridge 對遠端 verify 提供 bridge commit 的資訊，或限制 Lead 的追加次數。
+
 ## ISSUE-215：看板按 ready 因沒有 notify 被擋、列表不顯示 req id
 
 2026-11-25。狀態：**已驗收（使用者實機確認）**（程式與自動化測試完成；2026-11-25 已合併 #373 並重啟 bridge 部署）。先前：已修正、待驗收。
@@ -40,6 +54,7 @@
 - **同時觀察到、沒有查：**同一輪 bridge 日誌有 `autopick Lead cleanup REQ-20261124-precheck-s1-within-limit: lookup or close failed`（Lead workspace 的清理失敗），原因不明。
 - **驗證（2026-11-25，macOS）：**npm run typecheck、npm run lint、npm test 通過；完整測試 2,326 通過、0 失敗、1 跳過。新增測試證明精確交付只回報既有 commit，不產生重複 commit，額外工作樹修改仍被拒絕。\n- **修正（2026-11-25）：**card commit 在驗證指紋相同、HEAD 相對基準的路徑恰好等於交付檔案，且沒有額外 staged、unstaged 或未追蹤內容時，回傳既有 HEAD 作為已提交結果；否則拒絕。autopick 沿原流程記錄提交並繼續。
 - **範圍的觀察（2026-11-24，沙盒卡 S4、S5）：**寫入者是**本機** codex 時，task 完成後 autopick 的 commit 步驟正常（`committed`），L1 的 S5 還繼續 push 並開出 PR；所以這個問題只影響**遠端寫入**（bridge 已先 commit）的卡片，不影響本機寫入的卡片。
+- **部署後的驗收嘗試（2026-11-25，bridge 含 #376 `d9bd255`，沙盒卡 `REQ-20261125-issue213-remote-commit`）：沒有驗到。**遠端寫入的前提成立：bridge 已在本機 worktree 自己 commit（`hdb remote implement`，只新增 `docs/s6.txt`，工作樹乾淨）。但兩次都沒有走到 autopick 的 commit 步驟：task 在 verify 階段沒有完成（第 1 次遠端 verify 卡住 27 分鐘後取消，第 2 次規劃輪數用完），見 ISSUE-216。**這既沒有證明修正有效，也沒有證明無效。**下一輪改成 `verify: local:codex` 再試。
 ## ISSUE-212：遠端 codex 的 verify 報告，`codingResult` 沒有被記錄，verify 一直是「未通過」
 
 更新日期：2026-11-24。狀態：**已修正、待驗收**（本輪完成可重跑的 S1 情境重建與自動化回歸；歷史原件仍缺，遠端部署／實機驗收未完成）。
