@@ -167,12 +167,46 @@ test("something already staged is never mixed into the commit", () => {
   }
 });
 
-test("a version that is already committed is not committed twice", () => {
+test("an already committed verified delivery completes without a duplicate commit", () => {
+  const f = fixture();
+  try {
+    const first = f.run();
+    const version = versionFromBaseline(
+      f.task.coding!.baseline,
+      captureCodingTree(f.repo),
+    );
+    const alreadyCommitted = commitVerifiedVersion(
+      {
+        card,
+        branch: BRANCH,
+        worktreePath: f.repo,
+        task: {
+          ...f.task,
+          coding: {
+            ...f.task.coding!,
+            versionFingerprint: version.fingerprint,
+          },
+        },
+      },
+    );
+    assert.equal(alreadyCommitted.alreadyCommitted, true);
+    assert.equal(alreadyCommitted.sha, first.sha);
+    assert.deepEqual(alreadyCommitted.files, ["feature.txt"]);
+    assert.equal(git(f.repo, ["rev-list", "--count", "HEAD"]).trim(), "2");
+  } finally {
+    f.close();
+  }
+});
+
+test("an already committed delivery with extra changes is rejected", () => {
   const f = fixture();
   try {
     f.run();
-    assert.throws(() => f.run(), /驗證之後被改動|已經 commit|沒有任何要提交/);
-    assert.equal(git(f.repo, ["rev-list", "--count", "HEAD"]).trim(), "2");
+    writeFileSync(join(f.repo, "extra.txt"), "unverified\n");
+    assert.throws(
+      () => f.run(),
+      /驗證之後被改動/,
+    );
   } finally {
     f.close();
   }

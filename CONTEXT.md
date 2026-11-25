@@ -217,3 +217,4 @@ ISSUE-152（2026-11-12）：Linux X11／ibus 的中文貼上及獨立英文 UTF-
 ISSUE-152 重新開啟（2026-11-12）：launcher 03:43:22Z 實機無法輸入注音，root XIM_SERVERS 有殘留但實際 selection owner=0。readiness 改用 Python 3／libX11 查 live owner；手動方案成功歷史保留，launcher 修正待實機重驗。
 
 ISSUE-152 launcher 第二次驗收（2026-11-12）：使用者確認 live-owner 修正後注音恢復，範圍為本機 Linux X11＋ibus workaround；上游原生 decoder／macOS 中文輸入未驗收。
+\n- ISSUE-213：遠端寫入已由 bridge 提交時，card commit 精確核對交付版本後視為成功；端到端 autopick 待驗收。詳見 docs/known-issues.md。\n
