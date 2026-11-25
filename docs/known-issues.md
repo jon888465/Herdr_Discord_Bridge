@@ -29,14 +29,14 @@
 
 ## ISSUE-213：遠端寫入的交付已被 bridge commit，autopick 接著 commit 時以「沒有需要提交的修改」判失敗
 
-更新日期：2026-11-24。狀態：**待調查**（現象已確認；**未修正**）。
+更新日期：2026-11-25。狀態：**已修正、待驗收**（自動測試通過，遠端寫入的 autopick 端到端尚未驗收）。
 
 - **使用者可見症狀（2026-11-24 06:16 UTC，沙盒卡 S1，L0）：**task `completed`、驗收 `ok=True`，卡片卻在 autopick 的 commit 步驟失敗：`失敗：autopick_failed；原因：commit：這個版本已經 commit 了，沒有需要提交的修改`（06:16:47），卡片紀錄為失敗。
 - **預期行為：**task 成功時，卡片流程應繼續（L0 停在 commit，更高層級再 push、開 PR），而不是因為「已經 commit 過」判失敗。
 - **已確認（2026-11-24，只讀）：**implement 派到遠端 machine 的 pi；遠端寫入流程把 patch 套用到本機 worktree 後由 bridge **自己 commit**（`hdb remote implement (…)`，artifact `mode: committed`），所以 autopick 接著執行 `card commit` 時沒有未提交的修改。**這與預檢無關**（S1 的預檢放行）。
 - **未確認：**其他遠端寫入的卡（先前 2026-11-19 的驗收卡）當時 autopick 怎麼走到結束（我沒有核對）；L1、L2 時 push 與開 PR 是否也因同一原因停在這裡；`card commit` 的「已經 commit」判斷是不是故意設成失敗。
 - **同時觀察到、沒有查：**同一輪 bridge 日誌有 `autopick Lead cleanup REQ-20261124-precheck-s1-within-limit: lookup or close failed`（Lead workspace 的清理失敗），原因不明。
-- **可能的修法（未做、未決定）：**autopick 的 commit 步驟遇到「HEAD 已包含這次 task 的交付」時視為已完成並繼續下一步，而不是失敗；要先確認這不會掩蓋真正沒有交付的情況。
+- **驗證（2026-11-25，macOS）：**npm run typecheck、npm run lint、npm test 通過；完整測試 2,326 通過、0 失敗、1 跳過。新增測試證明精確交付只回報既有 commit，不產生重複 commit，額外工作樹修改仍被拒絕。\n- **修正（2026-11-25）：**card commit 在驗證指紋相同、HEAD 相對基準的路徑恰好等於交付檔案，且沒有額外 staged、unstaged 或未追蹤內容時，回傳既有 HEAD 作為已提交結果；否則拒絕。autopick 沿原流程記錄提交並繼續。
 - **範圍的觀察（2026-11-24，沙盒卡 S4、S5）：**寫入者是**本機** codex 時，task 完成後 autopick 的 commit 步驟正常（`committed`），L1 的 S5 還繼續 push 並開出 PR；所以這個問題只影響**遠端寫入**（bridge 已先 commit）的卡片，不影響本機寫入的卡片。
 ## ISSUE-212：遠端 codex 的 verify 報告，`codingResult` 沒有被記錄，verify 一直是「未通過」
 

@@ -43,6 +43,7 @@ export interface CommitOutcome {
   files: string[];
   fingerprint: string;
   taskId: string;
+  alreadyCommitted?: true;
 }
 
 export const deliveryAddArgs = (files: readonly string[]): string[] =>
@@ -134,8 +135,42 @@ export function commitVerifiedVersion(
     throw new Error(
       "worktree 的內容和通過驗證的版本不同（驗證之後被改動過）；請重新跑 review 與驗證，或自行處理",
     );
-  if (version.mode === "committed")
-    throw new Error("這個版本已經 commit 了，沒有需要提交的修改");
+  if (version.mode === "committed") {
+    const committedPaths = deps
+      .git(worktreePath, [
+        "diff",
+        "--name-only",
+        "-z",
+        coding.baseline.headSha,
+        version.headSha,
+      ])
+      .split("\0")
+      .filter(Boolean)
+      .sort();
+    const expectedPaths = [...version.deliveryPaths].sort();
+    const staged = deps
+      .git(worktreePath, ["diff", "--cached", "--name-only", "-z"])
+      .split("\0")
+      .filter(Boolean);
+    if (
+      committedPaths.join("\0") !== expectedPaths.join("\0") ||
+      staged.length ||
+      version.untracked.length ||
+      version.stagedDiffSha256 !== coding.baseline.stagedDiffSha256 ||
+      version.unstagedDiffSha256 !== coding.baseline.unstagedDiffSha256
+    )
+      throw new Error(
+        "HEAD 已包含驗證版本，但提交範圍或工作樹另有變更，無法安全完成整合",
+      );
+    return {
+      sha: version.headSha,
+      branch,
+      files: expectedPaths,
+      fingerprint: version.fingerprint,
+      taskId: task.taskId,
+      alreadyCommitted: true,
+    };
+  }
   if (version.mode === "mixed")
     throw new Error(
       "worktree 同時有已 commit 與未提交的修改，無法只 commit 驗證過的部分；請自行處理",
