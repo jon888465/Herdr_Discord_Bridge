@@ -192,7 +192,7 @@ export function cardViewLines(
   for (let i = first; i < Math.min(state.rows.length, first + room); i++) {
     const row = state.rows[i]!;
     const line = truncateToWidth(
-      `${i === state.cursor ? ">" : " "} ${cardMark(row)} ${row.status.padEnd(11)} ${row.title}`,
+      `${i === state.cursor ? ">" : " "} ${cardMark(row)} ${row.status.padEnd(11)} ${row.id}  ${row.title}`,
       max,
     );
     lines.push(i === state.cursor ? `\x1b[7m${line}\x1b[0m` : line);

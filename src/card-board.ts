@@ -150,7 +150,7 @@ export function applyEdit(
   return result.ok ? { ok: true } : { ok: false, error: result.error };
 }
 
-/** 把 draft 類的卡設成 ready；沒有 notify 不放行（AGENTS.md、ISSUE-121）。 */
+/** 把 draft 類的卡設成 ready；沒有 notify 或 project 仍放行，只回傳警告（ISSUE-121、ISSUE-215）。 */
 export function markReady(
   store: CardStore,
   id: string,
@@ -166,25 +166,24 @@ export function markReady(
       ok: false,
       error: "停手的卡不能由看板改成 ready；請改完內容後照既有流程重送",
     };
-  if (!current.card.notify)
-    return {
-      ok: false,
-      error:
-        "沒有 notify：先填 notify（discord:<thread id> 或 agent:<pane id>:<terminal id>:<agent>）再放行",
-    };
   const result = store.update(id, current.hash, (card) => ({
     ...card,
     status: "ready",
     updated: today > card.updated ? today : card.updated,
   }));
   if (!result.ok) return { ok: false, error: result.error };
-  return current.card.project || current.card.projects?.length
-    ? { ok: true }
-    : {
-        ok: true,
-        warning:
-          "這張卡沒有 project，bridge 不會自動撿卡（要自動撿請先填 project）",
-      };
+  const warnings: string[] = [];
+  if (!current.card.project && !current.card.projects?.length)
+    warnings.push(
+      "這張卡沒有 project，bridge 不會自動撿卡（要自動撿請先填 project）",
+    );
+  if (!current.card.notify)
+    warnings.push(
+      "沒有 notify，進度與失敗都不會通知任何人（之後補填也不會補發已處理的事件）",
+    );
+  return warnings.length
+    ? { ok: true, warning: warnings.join("；") }
+    : { ok: true };
 }
 
 const STATUS_ORDER = [

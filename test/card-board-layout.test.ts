@@ -180,3 +180,16 @@ test("一般終端尺寸不受影響：24 列時清單仍是 visibleRows，兩�
   assert.equal(listRoom(3, 4), 0);
   assert.equal(listRoom(1, 2), 0);
 });
+
+test("Card 列表每一列都顯示 req id，不只選中那列（ISSUE-215）", () => {
+  const lines = cardViewLines(
+    { rows: cardRows(3), cursor: 0, errors: 0, message: "" },
+    100,
+    24,
+  );
+  for (let i = 0; i < 3; i++)
+    assert.ok(
+      lines.some((l) => l.includes(`REQ-20261116-card${i}  卡片 ${i}`)),
+      `第 ${i} 列沒有 id`,
+    );
+});
