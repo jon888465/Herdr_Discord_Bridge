@@ -14,6 +14,8 @@
 
 **未驗證／下一步：**(1) 查遠端快照的 git 狀態與 verify 提示；(2) 用 `verify: local:codex` 重跑同一張卡，確認改成本機 verify 就能完成（這輪進行中）；(3) 決定是否要在 bridge 對遠端 verify 提供 bridge commit 的資訊，或限制 Lead 的追加次數。
 
+**補充（2026-11-25）：**同一張卡改成 `verify: local:codex` 重跑（第三次），task 在約 5 分鐘內完成（implement 遠端 pi、review 遠端 codex、verify 本機 codex，各一次，Lead 沒有追加驗證），所以問題出在**遠端 verify**這條路徑，與卡片內容本身無關。這只是 1 個樣本，根因仍未查證。
+
 ## ISSUE-215：看板按 ready 因沒有 notify 被擋、列表不顯示 req id
 
 2026-11-25。狀態：**已驗收（使用者實機確認）**（程式與自動化測試完成；2026-11-25 已合併 #373 並重啟 bridge 部署）。先前：已修正、待驗收。
@@ -45,7 +47,7 @@
 
 ## ISSUE-213：遠端寫入的交付已被 bridge commit，autopick 接著 commit 時以「沒有需要提交的修改」判失敗
 
-更新日期：2026-11-25。狀態：**已修正、待驗收**（自動測試通過，遠端寫入的 autopick 端到端尚未驗收）。
+更新日期：2026-11-25。狀態：**已驗收（範圍有限，見最後一則）**（#376 已部署；2026-11-25 沙盒實機重跑通過，只驗了一個樣本、L0 路徑）。先前：已修正、待驗收。
 
 - **使用者可見症狀（2026-11-24 06:16 UTC，沙盒卡 S1，L0）：**task `completed`、驗收 `ok=True`，卡片卻在 autopick 的 commit 步驟失敗：`失敗：autopick_failed；原因：commit：這個版本已經 commit 了，沒有需要提交的修改`（06:16:47），卡片紀錄為失敗。
 - **預期行為：**task 成功時，卡片流程應繼續（L0 停在 commit，更高層級再 push、開 PR），而不是因為「已經 commit 過」判失敗。
@@ -55,6 +57,8 @@
 - **驗證（2026-11-25，macOS）：**npm run typecheck、npm run lint、npm test 通過；完整測試 2,326 通過、0 失敗、1 跳過。新增測試證明精確交付只回報既有 commit，不產生重複 commit，額外工作樹修改仍被拒絕。\n- **修正（2026-11-25）：**card commit 在驗證指紋相同、HEAD 相對基準的路徑恰好等於交付檔案，且沒有額外 staged、unstaged 或未追蹤內容時，回傳既有 HEAD 作為已提交結果；否則拒絕。autopick 沿原流程記錄提交並繼續。
 - **範圍的觀察（2026-11-24，沙盒卡 S4、S5）：**寫入者是**本機** codex 時，task 完成後 autopick 的 commit 步驟正常（`committed`），L1 的 S5 還繼續 push 並開出 PR；所以這個問題只影響**遠端寫入**（bridge 已先 commit）的卡片，不影響本機寫入的卡片。
 - **部署後的驗收嘗試（2026-11-25，bridge 含 #376 `d9bd255`，沙盒卡 `REQ-20261125-issue213-remote-commit`）：沒有驗到。**遠端寫入的前提成立：bridge 已在本機 worktree 自己 commit（`hdb remote implement`，只新增 `docs/s6.txt`，工作樹乾淨）。但兩次都沒有走到 autopick 的 commit 步驟：task 在 verify 階段沒有完成（第 1 次遠端 verify 卡住 27 分鐘後取消，第 2 次規劃輪數用完），見 ISSUE-216。**這既沒有證明修正有效，也沒有證明無效。**下一輪改成 `verify: local:codex` 再試。
+- **實機驗收（2026-11-25 09:14 至 09:19 UTC，沙盒卡 `REQ-20261125-issue213-remote-commit`，沙盒 repo L0，bridge 含 #376 `d9bd255`，隔著兩次未完成的嘗試之後第三次）：通過。**implement 派到遠端 machine 的 pi，bridge 在本機 worktree 自己 commit；task `completed`（09:19:21）後 autopick 在 09:19:24 記錄 `committed`（head `9ba8ff4`），**沒有**再出現「這個版本已經 commit 了，沒有需要提交的修改」。commit 只新增 `docs/s6.txt`（一行 `s6 remote commit`），本機工作樹乾淨，沒有 push、沒有開 PR（L0）。驗收後已清理 worktree、刪除沙盒本機卡片分支。
+- **範圍與限制：**只有 1 個樣本；只驗 L0（停在 commit）；L1 的 push 與開 PR、L2 的 review 迴圈、`card commit` 在其他「已 commit」情境（例如遠端產出含額外檔案時必須拒絕）都沒有實機驗；這次通過時 verify 指派的是**本機** codex（`verify: local:codex`），因為前兩次用遠端 verify 沒能完成（ISSUE-216，仍待調查），所以遠端 verify 路徑沒有驗到。
 ## ISSUE-212：遠端 codex 的 verify 報告，`codingResult` 沒有被記錄，verify 一直是「未通過」
 
 更新日期：2026-11-24。狀態：**已修正、待驗收**（本輪完成可重跑的 S1 情境重建與自動化回歸；歷史原件仍缺，遠端部署／實機驗收未完成）。
