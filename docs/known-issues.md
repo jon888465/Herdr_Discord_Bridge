@@ -1,5 +1,16 @@
 # Known Issues
 
+## ISSUE-214：遠端 Worker 通過就緒檢查後，重讀到 working 使 verify 在派送前失敗
+
+更新日期：2026-11-25。狀態：**已修正、待驗收**（現場狀態轉換未留存）。
+
+- **實機事件：**ISSUE-212 重送卡的遠端 review 通過後，08:04:19 UTC，指向遠端 codex 的 `verify-s1-live` 記下 `assignment_failed`、原因 `Agent is working`；沒有該 assignment 的啟動、派送或報告。08:04:41 task 因該版沒有成功驗證而失敗。
+- **已重現的機制：**`src/remote-snapshot.ts` 的 `startRemoteRole` 通過 `waitUntilReady` 後重新讀取 live Agent，核對身分後直接回傳；引擎的 `reserve` 看見 working 立即拒絕。同一個遠端 Agent 即使下一次讀取就會 idle，也沒有機會派送。ISSUE-206 的本機 Worker 穩定等待沒有涵蓋這個入口。當時沒有逐次狀態資料，無法判定該遠端 codex 忙了多久。
+- **對照驗證（2026-11-24，macOS）：**以 `node <暫存探針>.mjs` 執行現有 remote-snapshot 測試的假遠端埠，啟用 toolchain，呼叫實際 `startRemoteRole(verify)` 與 `TeamTaskEngine.reserve`。啟動狀態 idle、重讀仍 idle 時保留成功；同一身分重讀依序提供 working、idle 時，第一次即得到 `Agent is working`（探針 exit 1），第二個 idle 未被讀取。此對照未啟動真實遠端 CLI。
+- **修正（2026-11-25）：**遠端啟動路徑沿用本機的穩定等待，最多等約 15 秒，並重新核對取得的 Worker 身分與 model。持續忙碌照原規則拒絕派送。
+- **驗證（2026-11-25，macOS）：**`npm run typecheck`、`npm run lint`、`npm run build`、`git diff --check` 通過。遠端快照與本機 Worker 就緒測試 11 項全過，涵蓋遠端短暫 working 及 terminal 被替換。`npm test` 2324 項通過、0 項失敗、1 項跳過。
+- **待驗收：**修正尚未部署或重啟。部署後用遠端 verify 實測，並完成 ISSUE-212 的長命令與退出碼驗收。
+
 ## ISSUE-213：遠端寫入的交付已被 bridge commit，autopick 接著 commit 時以「沒有需要提交的修改」判失敗
 
 更新日期：2026-11-24。狀態：**待調查**（現象已確認；**未修正**）。

@@ -8,6 +8,7 @@ import path from "node:path";
 import type { AgentProfile } from "./agent-pool.js";
 import { doneAsReady, waitUntilReady } from "./agent-ready.js";
 import { assertFreshProfile } from "./card-role-assignment.js";
+import { settleWorkingAgent } from "./lead-settle.js";
 import { assertReadyIdentity, type RoleCleanupReason } from "./card-role-session.js";
 import { captureCodingTree, digest } from "./coding-version.js";
 import { remoteTrustEditor } from "./remote-agy-trust.js";
@@ -216,11 +217,17 @@ export async function startRemoteRole(
     const port = deps.panePort(id);
     const ready = await waitUntilReady({ panePort: doneAsReady(port), role: "Worker", expectedKind: profile.kind }, { paneId: started.pane_id, terminalId: started.terminal_id }, started.agent_status === "done" ? { ...started, agent_status: "idle" } : started);
     if (!ready.ok) throw new RemoteFailure("Worker 沒有就緒", ready.reason);
-    const live = (await port.listAgentsWithWorkspaceNames()).find((a) => a.pane_id === started.pane_id);
+    const readWorker = async () =>
+      (await port.listAgentsWithWorkspaceNames()).find((a) => a.pane_id === started.pane_id);
+    const live = await readWorker();
     if (!live) throw new RemoteFailure("Worker 就緒後 pane 已不存在");
     assertReadyIdentity(started, live, profile.kind, ws.workspaceId, id);
-    if (profile.model && live.model && live.model !== profile.model) throw new RemoteFailure("身分不符", "model");
-    agent = { ...live, machine: id, profileId: profile.id, ...(profile.model ? { model: profile.model, modelEvidence: "launch" } : {}) };
+    // ISSUE-214: startup can briefly report working after the readiness check.
+    const settled = await settleWorkingAgent(readWorker, live);
+    input.signal?.throwIfAborted();
+    assertReadyIdentity(live, settled, profile.kind, ws.workspaceId, id);
+    if (profile.model && settled.model && settled.model !== profile.model) throw new RemoteFailure("身分不符", "model");
+    agent = { ...settled, machine: id, profileId: profile.id, ...(profile.model ? { model: profile.model, modelEvidence: "launch" } : {}) };
   } catch (error) {
     if (error instanceof RemoteFailure && error.uncertain) st.uncertain = true;
     const reason = error instanceof RemoteFailure ? error.label : input.signal?.aborted ? "已取消" : /身分已改變/.test(String(error)) ? "身分不符" : "準備失敗";
