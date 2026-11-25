@@ -20,6 +20,7 @@ import { TeamTaskEngine } from "../src/team-task-engine.js";
 import { TeamTaskStore } from "../src/team-task-store.js";
 import {
   parseAssignmentPlan,
+  unwrapCodexJson,
   validateAssignmentPlan,
 } from "../src/team-orchestration.js";
 import {
@@ -122,6 +123,30 @@ test("general plans ignore coding fields and keep the original instruction", () 
       ),
     /single writer/,
   );
+});
+
+test("ISSUE-212: remote codex hard-wrap preserves long commands and selects the final result", () => {
+  const command = "npm run verify  --filter  'long name'  &&  node --test  test/a.test.ts";
+  const json = JSON.stringify({
+    codingResult: { kind: "verify", commands: [{ command, exitCode: 7 }] },
+  });
+  const split = json.indexOf("long name");
+  const wrapped = `${json.slice(0, split)}\r\n  ${json.slice(split)}`;
+  const report = `echoed prompt example ${JSON.stringify({
+    codingResult: { kind: "verify", commands: [{ command: "npm test" }] },
+  })}\n${unwrapCodexJson(wrapped)}`;
+  const parsed = parseCodingResult(report);
+  assert.deepEqual(parsed?.commands, [{ command, exitCode: 7 }]);
+  assert.equal(parsed?.kind, "verify");
+});
+
+test("ISSUE-212: missing command or exit code remains unrecorded", () => {
+  assert.equal(parseCodingResult(JSON.stringify({
+    codingResult: { kind: "verify", commands: [{ command: "npm test" }] },
+  })), undefined);
+  assert.equal(parseCodingResult(JSON.stringify({
+    codingResult: { kind: "verify", commands: [{ command: "npm test", exitCode: "0" }] },
+  })), undefined);
 });
 
 test("unknown and same-session reviewers are rejected before they count as review", () => {

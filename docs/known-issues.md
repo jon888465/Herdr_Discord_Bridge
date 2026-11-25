@@ -13,14 +13,16 @@
 - **範圍的觀察（2026-11-24，沙盒卡 S4、S5）：**寫入者是**本機** codex 時，task 完成後 autopick 的 commit 步驟正常（`committed`），L1 的 S5 還繼續 push 並開出 PR；所以這個問題只影響**遠端寫入**（bridge 已先 commit）的卡片，不影響本機寫入的卡片。
 ## ISSUE-212：遠端 codex 的 verify 報告，`codingResult` 沒有被記錄，verify 一直是「未通過」
 
-更新日期：2026-11-24。狀態：**待調查**（現象已確認；**成因是推測，未修正**）。
+更新日期：2026-11-24。狀態：**已修正、待驗收**（本輪完成可重跑的 S1 情境重建與自動化回歸；歷史原件仍缺，遠端部署／實機驗收未完成）。
 
 - **使用者可見症狀（2026-11-24 06:10 至 06:15 UTC，沙盒卡 S1）：**task 內的 verify 派到遠端 machine 的 codex，兩次（`verify-s1`、重試的 `verify-s1-retry`）報告文字都寫了「檢查命令與退出碼：…0」與「測試結果：通過」，但 bridge 記錄的 verify artifact 是 `verified: False`、`commands: 0`，驗收不會算通過；Lead 因此多排了一次重試，最後改派**本機**的 codex 做 verify，才記錄到 `verified: True`、3 條命令，驗收 `ok=True`。
 - **預期行為：**遠端 verify 的 `codingResult.commands`（含退出碼）被解析並記錄。
-- **已確認：**兩份遠端 verify 報告的 JSON，照 bridge 收到的原樣，**都含換行字元、都無法直接解析為 JSON**（我用 JSON 解析器測試，兩份都失敗）；本機 verify 的 artifact 正常記錄。報告內容本身是通過的（退出碼 0）。
-- **推測（沒有驗證）：**遠端 codex 的回覆是從畫面讀取的（遠端沒有本機的 hook 或 rollout 路徑，ISSUE-175 記過遠端 codex 的 session 在遠端），報告最後的 `codingResult` 那一行很長，被終端機折行插入換行，弄壞 JSON；本機路徑用 hook 的完整訊息，不受折行影響（ISSUE-086）。
-- **未確認：**折行是不是唯一原因；遠端 codex 當 review 時是否也有同樣問題（S1 的遠端 review 有 `pass` 且 `independentReview: true`，但 review 的 verdict 不一定走同一個欄位）；命令越短是否越不會折行。
+- **已確認：**兩份遠端 verify 報告的 JSON，照 bridge 收到的原樣，**都含換行字元、都無法直接解析為 JSON**（我用 JSON 解析器測試，兩份都失敗）；本機 verify 的 artifact 正常記錄。報告內容本身是通過的（退出碼 0）。歷史完整 report bytes、原始長命令與 artifact 原件沒有保存，因此不能把歷史推測當成首個變化點。
+- **本輪 S1 情境重建（非歷史原件）：**以遠端 Codex 終端 fallback 的 CRLF＋兩格續行縮排重建長命令，命令含引號與連續空白，並在同一擷取文字前置提示詞範例；解析後逐字保留 command 與整數 exitCode（重建使用 exitCode 7 以確認非零如實記錄）。同時覆蓋缺 command、缺 exitCode；兩者均不產生有效結果。
+- **根因／修正範圍（本輪讀碼與重建確認）：**marker 邊界仍是第一層選取；Codex 終端 fallback 才使用 `unwrapCodexJson`。解析器改為在遺留擷取含多個 JSON 物件時繼續掃描，採用最後一個完整且欄位有效的 `codingResult`，避免提示詞範例先命中；不放寬缺欄位或整數 exitCode 驗證。非零 exitCode 仍記錄且 `verificationPassed` 維持 false。遠端實機的實際首個換行層仍未證實。
+- **未確認／未驗收：**歷史折行是否唯一原因；遠端 codex 當 review 是否同樣受影響；wubuntu 遠端 Codex 實機完成一次 verify、部署 bridge 版本與 artifact 逐字核對仍待 Lead／環境可達後驗證。命令越短是否越不會折行也未宣稱。
 - **影響：**遠端 verify 在命令很長時可能一律不被記錄，Lead 只能重試或改派本機；沒有被當成通過也沒有被默默忽略（驗收仍然要求有成功的 verify）。
+- **測試（2026-11-24，本輪）：**`npm run build`、`npm run typecheck`、`npm run lint` 通過；`node --test dist/test/coding-workflow.test.js` 41/41 通過，涵蓋長命令逐字保留、CRLF／續行折行、提示詞混入、缺 command、缺 exitCode 及非零退出碼。完整 `npm test` 曾執行但在 300 秒上限內因既有長時間／時序測試失敗並逾時（含 Grok marker、數個 coding workflow timeout；非 ISSUE-212 定向測試），故不能宣稱完整套件通過；需 Lead 重跑或分批確認。
 - **相關：**ISSUE-086（本機以 hook 完整訊息避免折行）、ISSUE-175（遠端 codex 的 session 身分）、ISSUE-186（回覆取框）。
 
 ## ISSUE-211：卡片 `roles` 指定遠端的 pi 時，驗證仍要求本機有 pi profile，撿卡即被拒絕
