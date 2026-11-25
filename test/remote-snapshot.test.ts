@@ -94,13 +94,14 @@ const ROOT = "/home/pod/r";
 const [SHA, TREE] = ["1".repeat(40), "2".repeat(40)];
 const profile = validateProfiles([{ id: "claude", kind: "claude", model: "opus" }])[0]!;
 const podAgent = { pane_id: "pod:w3:p1", terminal_id: "pod:t", workspace_id: "pod:w3", tab_id: "", agent: "claude", agent_status: "idle" };
-type Opts = { failOn?: string; cutOn?: string; status?: string[]; digests?: string[]; toolchain?: boolean; abortOn?: string; wsFails?: boolean; found?: number[] };
+type Opts = { failOn?: string; cutOn?: string; status?: string[]; digests?: string[]; toolchain?: boolean; abortOn?: string; wsFails?: boolean; found?: number[]; workerReads?: (typeof podAgent)[] };
 
 /** fake pod：failOn 回 exit 1，cutOn 斷線（uncertain），abortOn 觸發取消。 */
 function harness(o: Opts = {}) {
   const ac = new AbortController();
   const [log, found, status, digests] = [[] as string[], [...(o.found ?? [1])], [...(o.status ?? ["", ""])], [...(o.digests ?? ["d0"])]];
   const cwds: string[] = [];
+  const workerReads = [...(o.workerReads ?? [])];
   let exists = false;
   const exec: RemoteExec = async (argv, _ms, stdin) => {
     const j = argv.join(" ");
@@ -126,7 +127,7 @@ function harness(o: Opts = {}) {
     closeWorkspace: async (_m, id) => void log.push(`close:${id}`),
     closeWorkspaceLabeled: async () => (log.push("closeLabeled"), found.shift() ?? 0),
     sleep: async () => {},
-    panePort: () => ({ request: async () => ({}), listAgentsWithWorkspaceNames: async () => [podAgent] }),
+    panePort: () => ({ request: async () => ({}), listAgentsWithWorkspaceNames: async () => [workerReads.shift() ?? podAgent] }),
     startAgent: async (i) => (log.push(`start:${i.paneId}:${i.args?.join(" ")}`), podAgent),
     snapshot: () => ({ sha: SHA, tree: TREE, ref: "refs/hdb-snapshot/0123456789abcdef", bundle: "/tmp/b", bytes: 1, digest: "d0", dispose: () => void log.push("dispose") }),
     treeDigest: () => digests.shift() ?? "d0",
@@ -149,6 +150,22 @@ test("remote role: completed／before_dispatch_failure close and remove, blocked
   }
   await rejects(harness().start("verify"), fixed(/verify 不可用/));
   await (await harness({ toolchain: true }).start("verify")).cleanup();
+});
+
+test("ISSUE-214: remote verify waits for a briefly working Worker", async () => {
+  const h = harness({ toolchain: true, workerReads: [{ ...podAgent, agent_status: "working" }, podAgent] });
+  const session = await h.start("verify");
+  eq(session.agent.agent_status, "idle");
+  await session.cleanup();
+});
+
+test("ISSUE-214: remote verify rejects a replaced terminal after settling", async () => {
+  const h = harness({
+    toolchain: true,
+    workerReads: [{ ...podAgent, agent_status: "working" }, { ...podAgent, terminal_id: "pod:replacement" }],
+  });
+  await rejects(h.start("verify"), fixed(/身分不符/));
+  eq(h.log, OK_LOG);
 });
 
 test("remote role failures: fixed labels, snapshot disposed, no local start, pod dir removed when certain, kept when uncertain", async () => {
