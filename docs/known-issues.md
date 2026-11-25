@@ -26,6 +26,10 @@
 
 更新日期：2026-11-24。狀態：**已修正、待驗收**（本輪完成可重跑的 S1 情境重建與自動化回歸；歷史原件仍缺，遠端部署／實機驗收未完成）。
 
+- **部署（2026-11-25 09:18 台北時間）：**本機 main 已同步 GitHub main 的 PR #370（`e45f801`），`npm run build` 通過後重啟 bridge。新程序確認 Discord Gateway 已連線、Herdr watcher 已啟動，遠端 verify 所用機器已連線。長命令與退出碼的端到端驗收仍待執行。
+
+- **重送卡停手（2026-11-24 08:04 UTC）：**遠端 pi 的修正保留於卡片分支 commit `9819218`，遠端 codex 獨立 review 為 `pass`。派送遠端 `verify-s1-live` 回報 `Agent is working`，沒有 verify artifact；原因未確認，task 驗收失敗。實作者回報定向測試 41/41，完整測試有時序測試失敗且 300 秒逾時。本輪未部署或重啟；仍需對同版重跑完整測試與遠端長命令驗收。
+- **派工紀錄（2026-11-24 07:39 UTC）：**首張修正卡通過 `scripts/herdr-card-check`，但缺少指派入口要求的 `## 描述`，在 assign 階段停止，未派送 Worker。原卡保留失敗紀錄，改用含描述與驗收條件的 `REQ-20261124-issue212-remote-verify-retry` 重送；此事件未驗證遠端 verify。
 - **使用者可見症狀（2026-11-24 06:10 至 06:15 UTC，沙盒卡 S1）：**task 內的 verify 派到遠端 machine 的 codex，兩次（`verify-s1`、重試的 `verify-s1-retry`）報告文字都寫了「檢查命令與退出碼：…0」與「測試結果：通過」，但 bridge 記錄的 verify artifact 是 `verified: False`、`commands: 0`，驗收不會算通過；Lead 因此多排了一次重試，最後改派**本機**的 codex 做 verify，才記錄到 `verified: True`、3 條命令，驗收 `ok=True`。
 - **預期行為：**遠端 verify 的 `codingResult.commands`（含退出碼）被解析並記錄。
 - **已確認：**兩份遠端 verify 報告的 JSON，照 bridge 收到的原樣，**都含換行字元、都無法直接解析為 JSON**（我用 JSON 解析器測試，兩份都失敗）；本機 verify 的 artifact 正常記錄。報告內容本身是通過的（退出碼 0）。歷史完整 report bytes、原始長命令與 artifact 原件沒有保存，因此不能把歷史推測當成首個變化點。
