@@ -1,5 +1,21 @@
 # Known Issues
 
+## ISSUE-215：看板按 ready 因沒有 notify 被擋、列表不顯示 req id
+
+2026-11-25。狀態：**已修正、待驗收**（程式與自動化測試完成；未部署、未實機驗收）。
+
+**症狀：**(1) 在卡片看板（TUI）對 `draft` 卡按 `r`，卡片沒有 `notify` 時被拒絕（`沒有 notify：先填 notify … 再放行`）；使用者回報：沒有 `notify` 只是沒有通知，不應該擋。實例：`REQ-20261107-codex-update-recheck` 建於 2026-11-07，ISSUE-121 的規則同日加入，這張卡從來沒填過 `notify`。(2) 列表每一列只顯示標記、狀態與標題，req id 只在選中列下方一行淡色文字，不易看到。
+
+**預期行為：**沒有 `notify` 仍可放行，看板在訊息列警告「沒有 notify，進度與失敗都不會通知任何人」；每一列都顯示 req id。
+
+**已確認根因（讀碼，2026-11-25）：**`src/card-board.ts` 的 `markReady` 對空 `notify` 直接回 `ok: false`（ISSUE-121 當時的決定）；`src/card-board-machines.ts` 的 `cardViewLines` 每列只畫 `cardMark`、`status`、`title`。
+
+**修正（2026-11-25）：**`markReady` 不再因沒有 `notify` 拒絕，改與「沒有 project」的警告合併回傳（以 `；` 連接）；`cardViewLines` 每列在狀態與標題之間加 `id`（兩個空格分隔，仍依寬度截斷）。`herdr-card-check` 對 `ready` 且沒有 `notify` 的 `WARN` 與 AGENTS.md 的「Agent 寫卡必須填 notify」規則不變（那是 Agent 的作業規則；沒有 `notify` 時 bridge 仍不通知任何人，包含失敗與停止事件）。
+
+**測試（2026-11-25，本機，`npm run build`、`npm run lint` 通過）：**`node --test` 看板相關 4 個檔案 34 項通過；改寫 `test/card-board.test.ts`「放行：沒有 notify 仍放行，只回傳警告」；新增 `test/card-board-layout.test.ts`「每一列都顯示 req id」。
+
+**未驗證／下一步：**看板實機操作（`r` 放行無 `notify` 的卡、列表顯示 id 在窄終端機的截斷效果）尚未驗收，需 bridge 重啟載入新看板；未做全套測試與 CI。
+
 ## ISSUE-214：遠端 Worker 通過就緒檢查後，重讀到 working 使 verify 在派送前失敗
 
 更新日期：2026-11-25。狀態：**已修正、待驗收**（現場狀態轉換未留存）。
@@ -1057,7 +1073,7 @@
 - 可編輯：status 為 `draft`、`discussing`、`refined`、`recorded`；以及 `ready`／`in_progress` 且最後一筆流程紀錄是 `failed`、`autopick_stopped`、`loop_stopped`（bridge 已停手）。停手的卡只開放改標題、`notify`、流程紀錄之前的正文，不能由看板改 status。
 - 唯讀：其餘 `ready`、`in_progress`、`done`、`cancelled`。bridge 會寫同一個檔，且執行中的任務不會讀到改過的描述。
 - 只改 `title`、`notify` 與「## 流程紀錄」之前的正文，流程紀錄以後原封不動；寫入走 `CardStore.update` 的雜湊比對，檔案在讀取後被改過就放棄；寫入前重讀並重新檢查可編輯性。
-- 設成 `ready` 只限 draft 類，沒有 `notify` 一律拒絕（ISSUE-121）。
+- 設成 `ready` 只限 draft 類；沒有 `notify` 原本一律拒絕（ISSUE-121），2026-11-25 改為放行並警告（ISSUE-215）。
 - 可新增 draft 卡（id `REQ-<日期>-<slug>`，不覆蓋既有檔案）。
 - 鍵：`j`／`k`／上下鍵逐列移動；PageUp／PageDown 一次移一頁（一頁 = 目前可見列數 `visibleRows(高度)` = 高度減 5、至少 3，且至少 1 列），到頭到底停住；Home 跳第一張、End 跳最後一張，認得 `\x1b[H`、`\x1b[1~`、`\x1b[7~`、`\x1bOH`（Home）與 `\x1b[F`、`\x1b[4~`、`\x1b[8~`、`\x1bOF`（End）、`\x1b[5~`／`\x1b[6~`（PgUp／PgDn）；清單為空時游標停在 0；`$EDITOR` 開啟中不處理移動鍵；`e`／Enter 編輯（開 `$EDITOR`）、`n` 新增、`r` 設為 ready、`q`／Ctrl-C 離開；每 3 秒重讀。移動邏輯是純函式 `boardKeyAction`／`moveCursor`／`visibleRows`（2026-11-16 新增，卡片 REQ-20261116-card-board-paging）；render 的捲動視窗與翻頁共用 `visibleRows`，視窗由游標推導，跳頁後選取列仍在畫面內。
 

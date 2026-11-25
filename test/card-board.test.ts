@@ -123,18 +123,23 @@ test("停手的卡：可改文字，不能放行", () => {
   assert.equal(result.ok, false);
 });
 
-test("放行：沒有 notify 拒絕，有 notify 才變 ready", () => {
+test("放行：沒有 notify 仍放行，只回傳警告（ISSUE-215）", () => {
   const { store, dir } = setup();
   put(dir, ID, "draft");
-  const refused = markReady(store, ID, "2026-11-14");
-  assert.equal(refused.ok, false);
-  assert.match(refused.ok ? "" : refused.error, /notify/);
-  put(dir, "REQ-20261101-noted", "refined", "notify: discord:123\n");
-  // 這張卡沒有 project：仍可放行，只是附警告（ISSUE-161）。
-  assert.equal(markReady(store, "REQ-20261101-noted", "2026-11-14").ok, true);
-  const read = store.read("REQ-20261101-noted");
+  const result = markReady(store, ID, "2026-11-14");
+  assert.equal(result.ok, true);
+  assert.match(result.ok ? (result.warning ?? "") : "", /notify/);
+  const read = store.read(ID);
   assert.ok(read.ok);
   assert.equal(read.card.status, "ready");
+  // 有 notify 的卡不會有 notify 警告（沒有 project 仍有 project 警告）。
+  put(dir, "REQ-20261101-noted", "refined", "notify: discord:123\n");
+  const noted = markReady(store, "REQ-20261101-noted", "2026-11-14");
+  assert.equal(noted.ok, true);
+  assert.doesNotMatch(noted.ok ? (noted.warning ?? "") : "", /notify/);
+  const read2 = store.read("REQ-20261101-noted");
+  assert.ok(read2.ok);
+  assert.equal(read2.card.status, "ready");
 });
 
 test("新增 draft：id 帶日期與 slug，已存在不覆蓋", () => {
