@@ -20,6 +20,7 @@ import { TeamTaskEngine } from "../src/team-task-engine.js";
 import { TeamTaskStore } from "../src/team-task-store.js";
 import {
   parseAssignmentPlan,
+  repairCodexCommandJson,
   unwrapCodexJson,
   validateAssignmentPlan,
 } from "../src/team-orchestration.js";
@@ -138,6 +139,27 @@ test("ISSUE-212: remote codex hard-wrap preserves long commands and selects the 
   const parsed = parseCodingResult(report);
   assert.deepEqual(parsed?.commands, [{ command, exitCode: 7 }]);
   assert.equal(parsed?.kind, "verify");
+});
+
+test("ISSUE-212: 遠端 codex 畫面吃掉跳脫反斜線＋折行時，補回命令與退出碼（2026-11-26 實機報告原樣）", () => {
+  const report = [
+    "  Test result: Passed; all checks exited 0.",
+    "",
+    '  {"codingResult":{"kind":"verify","commands":[{"command":"git show --stat HEAD","exitCode":0},{"command":"test "$(cat',
+    "  docs/s7.txt)\" = 's7 remote verify'\",\"exitCode\":0},{\"command\":\"test \"$(tail -c 1 docs/s7.txt | wc -l | tr -d ' ')\" =",
+    '  1","exitCode":0}]}}',
+  ].join("\n");
+  assert.equal(parseCodingResult(report), undefined);
+  assert.equal(parseCodingResult(unwrapCodexJson(report)), undefined);
+  const parsed = parseCodingResult(repairCodexCommandJson(report));
+  assert.equal(parsed?.kind, "verify");
+  assert.deepEqual(parsed?.commands, [
+    { command: "git show --stat HEAD", exitCode: 0 },
+    { command: "test \"$(cat docs/s7.txt)\" = 's7 remote verify'", exitCode: 0 },
+    { command: "test \"$(tail -c 1 docs/s7.txt | wc -l | tr -d ' ')\" = 1", exitCode: 0 },
+  ]);
+  // 缺退出碼仍然不記錄
+  assert.equal(parseCodingResult(repairCodexCommandJson('{"codingResult":{"kind":"verify","commands":[{"command":"test "x"","exitCode":"0"}]}}')), undefined);
 });
 
 test("ISSUE-212: missing command or exit code remains unrecorded", () => {

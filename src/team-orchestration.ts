@@ -1094,6 +1094,17 @@ export function unwrapCodexJson(value: string): string {
   return result;
 }
 
+/** ISSUE-212：remote codex 的終端畫面把回覆當 markdown 轉譯，跳脫的 `\"` 被顯示成 `"`，命令裡的雙引號因此沒有跳脫，
+ * 整段 JSON 不合法，unwrapCodexJson 也因引號計數錯亂接不回折行。只在兩種解析都失敗時使用：
+ * 以 `{"command":"…","exitCode":N}` 的結構為界，把中間的折行（換行加兩格縮排）接回、把引號補上跳脫。
+ * 折行處補一個空格（codex 依字詞折行；單一超長字詞硬折的情況會多一個空格，只影響記錄的命令文字，不影響退出碼）。 */
+export function repairCodexCommandJson(value: string): string {
+  return value.replace(/\{"command":"([\s\S]*?)","exitCode":(-?\d+)\}/g, (_match, command: string, exitCode: string) => {
+    const joined = command.replace(/\r?\n {2}/g, (_m, offset: number, whole: string) => (offset > 0 && /\s/.test(whole[offset - 1] ?? " ") ? "" : " "));
+    return `{"command":${JSON.stringify(joined)},"exitCode":${exitCode}}`;
+  });
+}
+
 function bounded(value: string, maxChars: number): string {
   return stripAnsi(value || "")
     .trim()
