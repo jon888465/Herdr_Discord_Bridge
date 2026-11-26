@@ -101,6 +101,64 @@ export interface CreatedWorktree {
   branch: string;
   rootPaneId: string;
   tabId?: string;
+  /**
+   * ISSUE-221：這次 `worktree.create` 讓 Herdr 一併開出來的 repo 主 checkout workspace（建立前沒有、建立後多出，
+   * 而且不是 linked worktree）。建立前就存在的（使用者自己開的）不會出現在這裡，bridge 不處理。
+   */
+  openedRepoWorkspaceId?: string;
+}
+
+interface ListedWorkspace {
+  workspace_id?: unknown;
+  pane_count?: unknown;
+  agent_status?: unknown;
+  worktree?: { is_linked_worktree?: unknown; repo_root?: unknown; checkout_path?: unknown };
+}
+
+async function listWorkspaces(port: WorktreePort): Promise<ListedWorkspace[] | undefined> {
+  try {
+    const result = record(await port.request("workspace.list", {}, { retries: 0 }));
+    return Array.isArray(result.workspaces) ? (result.workspaces as ListedWorkspace[]) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isRepoMainWorkspace(workspace: ListedWorkspace, repoPath: string): boolean {
+  const info = workspace.worktree;
+  return (
+    !!info &&
+    info.is_linked_worktree === false &&
+    (info.repo_root === repoPath || info.checkout_path === repoPath)
+  );
+}
+
+/**
+ * 關掉 bridge 當初讓 Herdr 開出來的 repo 主 workspace。只在它仍然是「沒有 agent 的單一 pane」時才關
+ * （使用者後來接手用了就不碰）；任何不確定或失敗都保留，只回傳原因。
+ */
+export async function closeBridgeRepoWorkspace(
+  port: WorktreePort,
+  workspaceId: string,
+  repoPath: string,
+): Promise<"closed" | "gone" | "kept"> {
+  const listed = await listWorkspaces(port);
+  if (!listed) return "kept";
+  const found = listed.find((workspace) => workspace.workspace_id === workspaceId);
+  if (!found) return "gone";
+  const status = found.agent_status;
+  if (
+    !isRepoMainWorkspace(found, repoPath) ||
+    found.pane_count !== 1 ||
+    !(status === undefined || status === "unknown")
+  )
+    return "kept";
+  try {
+    await port.request("workspace.close", { workspace_id: workspaceId }, { retries: 0 });
+    return "closed";
+  } catch {
+    return "kept";
+  }
 }
 
 /**
@@ -114,6 +172,7 @@ export async function createWorktree(
   assertRepoPath(input.repoPath);
   assertBranch(input.branch);
   if (input.base !== undefined) assertBase(input.base);
+  const before = await listWorkspaces(port);
   let response: unknown;
   try {
     response = await port.request(
@@ -141,12 +200,27 @@ export async function createWorktree(
       "unexpected_response",
       "unexpected worktree.create response: missing workspace, path or root pane",
     );
+  // ISSUE-221：Herdr 在沒有該 repo 主 workspace 時會一併開一個；只有「建立前沒有、建立後多出」的才算 bridge 開的。
+  let openedRepoWorkspaceId: string | undefined;
+  if (before) {
+    const known = new Set(before.map((workspace) => workspace.workspace_id));
+    const after = await listWorkspaces(port);
+    const opened = (after ?? []).filter(
+      (workspace) =>
+        typeof workspace.workspace_id === "string" &&
+        !known.has(workspace.workspace_id) &&
+        workspace.workspace_id !== workspaceId &&
+        isRepoMainWorkspace(workspace, input.repoPath),
+    );
+    if (opened.length === 1) openedRepoWorkspaceId = opened[0]!.workspace_id as string;
+  }
   return {
     workspaceId,
     path: worktreePath,
     branch: text(worktree.branch) ?? input.branch,
     rootPaneId,
     tabId: text(record(result.tab).tab_id),
+    ...(openedRepoWorkspaceId ? { openedRepoWorkspaceId } : {}),
   };
 }
 

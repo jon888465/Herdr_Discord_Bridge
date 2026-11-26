@@ -6,6 +6,7 @@ import {
   WorktreeError,
   branchForCard,
   checkWorktreeSupport,
+  closeBridgeRepoWorkspace,
   createWorktree,
   listWorktrees,
   removeWorktree,
@@ -68,7 +69,9 @@ test("createWorktree sends only the safe parameters and returns where the work w
     repoPath: "/Users/example/git_wk/repo",
     branch: "card/REQ-20261102-a",
   });
-  assert.deepEqual(port.calls, [
+  // ISSUE-221：建立前先列一次 workspace（用來判斷 repo 主 workspace 是不是這次才開出來的）；列不出來就不猜。
+  assert.deepEqual(port.calls.map((call) => call.method), ["workspace.list", "worktree.create"]);
+  assert.deepEqual(port.calls.filter((call) => call.method === "worktree.create"), [
     {
       method: "worktree.create",
       params: {
@@ -94,7 +97,7 @@ test("an explicit base is passed through, and trust_repository, force and path a
     branch: "card/REQ-20261102-a",
     base: "origin/main",
   });
-  const params = port.calls[0].params;
+  const params = port.calls.find((call) => call.method === "worktree.create")!.params;
   assert.equal(params.base, "origin/main");
   for (const key of ["trust_repository", "force", "path", "label"])
     assert.equal(Object.hasOwn(params, key), false, key);
@@ -312,4 +315,59 @@ test("checkWorktreeSupport reports an unreachable Herdr instead of throwing", as
   const result = await checkWorktreeSupport(port);
   assert.equal(result.ok, false);
   assert.match(result.ok ? "" : result.reason, /ENOENT/);
+});
+
+const REPO = "/Users/example/git_wk/repo";
+const ws = (id: string, over: Record<string, unknown> = {}) => ({
+  workspace_id: id,
+  pane_count: 1,
+  agent_status: "unknown",
+  worktree: { is_linked_worktree: false, repo_root: REPO, checkout_path: REPO },
+  ...over,
+});
+
+test("ISSUE-221: createWorktree 只把「建立前沒有、建立後多出」的 repo 主 workspace 當成 bridge 開的", async () => {
+  let listed = 0;
+  const port = fakePort((call) => {
+    if (call.method === "workspace.list") return { workspaces: listed++ === 0 ? [ws("w3", { worktree: undefined })] : [ws("w3", { worktree: undefined }), ws("w8"), ws("w9", { worktree: { is_linked_worktree: true, repo_root: REPO } })] };
+    return created;
+  });
+  const result = await createWorktree(port, { repoPath: REPO, branch: "card/REQ-20261103-one" });
+  assert.equal(result.openedRepoWorkspaceId, "w8");
+
+  // 使用者原本就開著的主 workspace：建立前後都在，不算 bridge 開的。
+  const existing = fakePort((call) => (call.method === "workspace.list" ? { workspaces: [ws("w8"), ws("w9", { worktree: { is_linked_worktree: true, repo_root: REPO } })] } : created));
+  assert.equal((await createWorktree(existing, { repoPath: REPO, branch: "card/REQ-20261103-one" })).openedRepoWorkspaceId, undefined);
+
+  // 列不出 workspace：不猜，當作沒有。
+  const broken = fakePort((call) => {
+    if (call.method === "workspace.list") throw new Error("boom");
+    return created;
+  });
+  assert.equal((await createWorktree(broken, { repoPath: REPO, branch: "card/REQ-20261103-one" })).openedRepoWorkspaceId, undefined);
+
+  // 別的 repo 多出來的 workspace 不算。
+  let n = 0;
+  const other = fakePort((call) => (call.method === "workspace.list" ? { workspaces: n++ === 0 ? [] : [ws("w8", { worktree: { is_linked_worktree: false, repo_root: "/elsewhere" } })] } : created));
+  assert.equal((await createWorktree(other, { repoPath: REPO, branch: "card/REQ-20261103-one" })).openedRepoWorkspaceId, undefined);
+});
+
+test("ISSUE-221: closeBridgeRepoWorkspace 只關仍是空的單一 pane 主 workspace；有 agent、多 pane、已是 linked 或對不上 repo 就保留", async () => {
+  const run = async (workspace: Record<string, unknown> | undefined) => {
+    const port = fakePort((call) => (call.method === "workspace.list" ? { workspaces: workspace ? [workspace] : [] } : {}));
+    const outcome = await closeBridgeRepoWorkspace(port, "w8", REPO);
+    return { outcome, closed: port.calls.filter((c) => c.method === "workspace.close").map((c) => c.params.workspace_id) };
+  };
+  assert.deepEqual(await run(ws("w8")), { outcome: "closed", closed: ["w8"] });
+  assert.deepEqual(await run(undefined), { outcome: "gone", closed: [] });
+  assert.deepEqual(await run(ws("w8", { agent_status: "working" })), { outcome: "kept", closed: [] });
+  assert.deepEqual(await run(ws("w8", { pane_count: 2 })), { outcome: "kept", closed: [] });
+  assert.deepEqual(await run(ws("w8", { worktree: { is_linked_worktree: true, repo_root: REPO } })), { outcome: "kept", closed: [] });
+  assert.deepEqual(await run(ws("w8", { worktree: { is_linked_worktree: false, repo_root: "/elsewhere" } })), { outcome: "kept", closed: [] });
+  // 關閉被 Herdr 拒絕（例如仍有 linked worktree）：保留，不丟錯。
+  const refusing = fakePort((call) => {
+    if (call.method === "workspace.list") return { workspaces: [ws("w8")] };
+    throw new Error("workspace_group_close_required");
+  });
+  assert.equal(await closeBridgeRepoWorkspace(refusing, "w8", REPO), "kept");
 });

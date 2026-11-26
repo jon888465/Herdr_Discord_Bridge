@@ -86,13 +86,14 @@ test("prepare creates the worktree, records it, starts the same kind of Agent, a
   assert.deepEqual(log, [
     "repoRoot:/Users/example/git_wk/repo/src",
     "ping",
+    "workspace.list",
     "worktree.create",
     "record",
     "authorize:w9",
     "startAgent:claude@w9:p1",
     "switch:w9:w9:p1",
   ]);
-  assert.deepEqual(requests[1], {
+  assert.deepEqual(requests.find((request) => request.method === "worktree.create"), {
     method: "worktree.create",
     params: {
       cwd: "/Users/example/git_wk/repo",
@@ -483,4 +484,43 @@ test("ISSUE-221: 沒有來源 workspace（自動撿卡的 worktree 卡）時，�
   assert.equal(result.workspaceId, "w9");
   assert.equal(recorded[0]?.workspaceId, "w9");
   assert.equal(recorded[0]?.sourceWorkspaceId, "w9");
+});
+
+test("ISSUE-221: prepare 把 bridge 開的 repo 主 workspace 記起來；cleanup 在最後一個 worktree 移除後關掉它", async () => {
+  const marked: Array<[string, string]> = [];
+  const requests: Array<{ method: string; params?: Record<string, unknown> }> = [];
+  const { deps } = setup();
+  const port = deps.port;
+  let listed = 0;
+  deps.port = {
+    request: async <T>(method: string, params?: Record<string, unknown>) => {
+      if (method === "workspace.list")
+        return { workspaces: listed++ === 0 ? [] : [{ workspace_id: "w8", pane_count: 1, agent_status: "unknown", worktree: { is_linked_worktree: false, repo_root: "/Users/example/git_wk/repo" } }] } as T;
+      return port.request<T>(method, params);
+    },
+  };
+  deps.worktrees = { ...deps.worktrees, markRepoWorkspace: (repo, id) => void marked.push([repo, id]) };
+  await prepareCardWorktree(deps, CARD);
+  assert.deepEqual(marked, [["/Users/example/git_wk/repo", "w8"]]);
+
+  const closed: string[] = [];
+  const entry = { cardId: CARD, workspaceId: "w9", sourceWorkspaceId: "w3", path: "/Users/example/.herdr/worktrees/repo/x", repoPath: "/Users/example/git_wk/repo", branch: `card/${CARD}`, createdAt: "2026-11-03T08:00:00Z" };
+  const result = await cleanupCardWorktree(
+    {
+      port: {
+        request: async <T>(method: string, params?: Record<string, unknown>) => {
+          requests.push({ method, params });
+          if (method === "workspace.list") return { workspaces: [{ workspace_id: "w8", pane_count: 1, agent_status: "unknown", worktree: { is_linked_worktree: false, repo_root: "/Users/example/git_wk/repo" } }] } as T;
+          if (method === "workspace.close") closed.push(String(params?.workspace_id));
+          return { path: entry.path } as T;
+        },
+      },
+      worktrees: { active: () => entry, markRemoved: () => {}, releaseRepoWorkspace: () => "w8" },
+      deauthorize: () => {},
+      now: () => "2026-11-03T09:00:00Z",
+    },
+    CARD,
+  );
+  assert.equal(result.removed, true);
+  assert.deepEqual(closed, ["w8"]);
 });

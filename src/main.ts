@@ -3294,6 +3294,10 @@ function lazyCardWorktrees() {
       at: string,
     ) => open().record(input, at),
     markRemoved: (cardId: string, at: string) => open().markRemoved(cardId, at),
+    markRepoWorkspace: (repoPath: string, workspaceId: string) =>
+      open().markRepoWorkspace(repoPath, workspaceId),
+    releaseRepoWorkspace: (repoPath: string) =>
+      open().releaseRepoWorkspace(repoPath),
   };
 }
 
