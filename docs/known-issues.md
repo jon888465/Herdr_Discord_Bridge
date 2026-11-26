@@ -1,5 +1,19 @@
 # Known Issues
 
+## ISSUE-224：遠端 codex 的 review／fix 回覆，自由文字含雙引號時 JSON 解析失敗
+
+2026-11-26。狀態：**已修正、待驗收**（程式與自動化測試完成；實機尚未驗收，bridge 未重啟）。來源：ISSUE-212 第二個根因的延伸（那次只修了 verify 的 `commands`），使用者同意（2026-11-26）處理 `card-review`／`card-fix`。
+
+**症狀（推論，沒有實際失敗樣本）：**遠端 codex 的回覆走終端畫面 fallback，畫面把跳脫的 `\"` 顯示成 `"`。review 的 `criteria[].reason`、`findings[].summary` 與 fix 的 `skipped[].reason` 都是自由文字，含雙引號時整份 JSON 不合法；`unwrapCodexJson` 以引號計數判斷「是否在字串內」，引號數量錯亂後折行也接不回來。結果是 review 被判 `inconclusive`（「reviewer 的回覆不是單一 JSON 物件」）或 fix 被整份拒絕。這與 ISSUE-212 的機制相同，但 2026-11-26 的實機只在 verify 的 `commands` 看到，review／fix 沒有觀察到失敗樣本。
+
+**預期行為：**自由文字含雙引號、折行時，補回後仍通過原本所有欄位驗證。
+
+**修正（2026-11-26）：**`src/team-orchestration.ts` 新增 `repairJsonStrings`，`src/card-review.ts` 的 `parseReviewReply` 與 `src/card-fix.ts` 的 `parseFixReply` 在「嚴格解析」與 `unwrapCodexJson` 都失敗後才多試一次。它掃描字串並追蹤結構（目前在物件或陣列、這個字串是不是 key）：key 的結尾後面必須是 `:`；值的結尾後面是 `}`、`]`，或 `,` 加「物件裡的下一個 `"key":`／陣列裡的下一個元素」；其他字串內的引號補上跳脫，字串內的折行（換行加兩格縮排）接回（折行處補一個空格）。合法 JSON 不會被改動。結果仍要通過原本所有欄位驗證（verdict、criteria 筆數、finding 欄位、fixed／skipped 對得上 open finding），不放寬驗收。第一版只看「後面是不是 `,` 加引號」，被我自己的測試（內文 `"id", "name"`）打掉，才改成追蹤結構。
+
+**測試（2026-11-26，本機，`npm run build`、`npm run lint` 通過）：**完整測試 2343 項，2342 通過、0 失敗、1 跳過。新增：review 的 `reason` 與 `summary` 含雙引號（含 `"id", "name"` 這種內文）加折行後仍通過驗證，verdict 不合法或結構不完整仍拒絕；fix 的 `skipped` 說明含雙引號仍通過、沒交代 open finding 仍拒絕；`repairJsonStrings` 本身：合法 JSON 不動、陣列裡的字串元素不被當內文、結構壞掉修不起來。
+
+**未驗證／限制：**實機（沒有穩定重現方式；要等遠端 codex 真的回含雙引號的 review 才看得到）；啟發式：內文剛好寫得像 `", "key": ` 仍可能誤判，所以結果仍要通過原欄位驗證才採用；`team-task-engine` 的 verify `commands` 仍用 ISSUE-212 的 `repairCodexCommandJson`，沒有改成這個；其他遠端 codex 回覆路徑（例如 Lead 的計畫 JSON）沒有套用；markdown 轉譯會吃掉其他字元（例如反斜線開頭的其他標點）沒有調查。
+
 ## ISSUE-223：遠端 machine 斷線時，卡片 review／角色指定的拒絕訊息寫成「machine 未開放卡片 review」
 
 2026-11-26。狀態：**已修正、待驗收**（程式與自動化測試完成；實機尚未驗收，bridge 未重啟）。來源：2026-11-26 驗 ISSUE-143 的失敗路徑時，把 agy-machine 在 bridge 端斷線後跑 `card review`，回 `遠端 review 失敗：machine 未開放卡片 review`。

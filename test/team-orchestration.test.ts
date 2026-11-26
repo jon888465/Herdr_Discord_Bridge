@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { AgentRecord } from "../src/types.js";
 import { HerdrError } from "../src/herdr.js";
 import { roleEvent } from "../src/card-events.js";
+import { repairJsonStrings } from "../src/team-orchestration.js";
 import {
   runTeamTask,
   parseAssignmentPlan,
@@ -1294,4 +1295,16 @@ test("ISSUE-137 Lead and Worker first prompt readiness retries do not block the 
   );
   assert.equal(prompts.filter(([target]) => target === lead.pane_id).length, 2);
   assert.equal(rejected.size, 2);
+});
+
+test("ISSUE-224: repairJsonStrings 不動合法 JSON，陣列裡的字串元素不被當成內文，內文裡「引號加逗號加引號」不被當成結尾", () => {
+  const valid = JSON.stringify({ fixed: ["F1", "F2"], skipped: [{ id: "F3", reason: 'a "q" b' }], n: 1, ok: true });
+  assert.equal(repairJsonStrings(valid), valid);
+  assert.deepEqual(JSON.parse(repairJsonStrings('{"fixed": ["F1", "F2"], "skipped": []}')), { fixed: ["F1", "F2"], skipped: [] });
+  // 值裡面的 "id", "name" 在物件中，逗號後面不是 "key": 所以不是結尾。
+  assert.deepEqual(JSON.parse(repairJsonStrings('{"reason": "欄位 "id", "name" 都在", "n": 2}')), { reason: '欄位 "id", "name" 都在', n: 2 });
+  // 折行（換行加兩格縮排）在字串內接回，結構之間的換行不動。
+  assert.deepEqual(JSON.parse(repairJsonStrings('{\n  "a": "x\n  y"\n}')), { a: "x y" });
+  // 結構真的壞掉就修不起來，由呼叫端拒絕。
+  assert.throws(() => JSON.parse(repairJsonStrings('{"a": "x", "b"')));
 });

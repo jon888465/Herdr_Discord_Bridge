@@ -238,3 +238,12 @@ test("a reason that looks like it holds a secret is replaced by the fixed messag
   const result = parseFixReply(reply({ fixed: ["F1"], skipped: [{ id: "F2", reason: `token ${secret}` }] }), ["F1", "F2"]);
   assert.deepEqual(result, { ok: true, fixed: ["F1"], skipped: [{ id: "F2", reason: SUMMARY_OMITTED }] });
 });
+
+test("ISSUE-224: skipped 的說明含雙引號、跳脫被畫面吃掉時，補回後仍通過驗證", () => {
+  const strict = reply({ fixed: ["F1"], skipped: [{ id: "F2", reason: '需要人決定 "是否保留" 欄位' }] });
+  const unescaped = strict.replace(/\\"/g, '"');
+  assert.throws(() => JSON.parse(unescaped));
+  assert.deepEqual(parseFixReply(unescaped, ["F1", "F2"]), { ok: true, fixed: ["F1"], skipped: [{ id: "F2", reason: '需要人決定 "是否保留" 欄位' }] });
+  // 沒交代 open finding 仍然拒絕。
+  assert.equal(parseFixReply(reply({ fixed: ["F1"], skipped: [] }).replace(/\\"/g, '"'), ["F1", "F2"]).ok, false);
+});

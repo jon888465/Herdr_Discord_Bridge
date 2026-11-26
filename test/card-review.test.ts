@@ -319,3 +319,20 @@ test("a valid reply is never altered by the unwrapping, and a newline inside a s
   const result = parseReviewReply(bad, context);
   assert.equal(result.ok, false);
 });
+
+test("ISSUE-224: 自由文字含雙引號、跳脫被畫面吃掉＋折行時，補回後仍通過所有欄位驗證", () => {
+  const strict = reply({
+    criteria: CRITERIA.map((_, i) => ({ index: i + 1, status: "met", reason: i === 0 ? '輸出 "a.csv" 檔，欄位 "id", "name" 都在' : "符合" })),
+    findings: [{ severity: "low", path: "src/export.ts", summary: '欄位 "name" 與 "id" 順序相反' }],
+  });
+  // 畫面把 \" 顯示成 "，而且長行在兩格縮排處折行。
+  const unescaped = strict.replace(/\\"/g, '"').replace("順序相反", "順序\n  相反");
+  assert.throws(() => JSON.parse(unescaped));
+  const result = parsed(unescaped);
+  assert.equal(result.batch.findings[0]?.summary, '欄位 "name" 與 "id" 順序 相反');
+  assert.equal(result.criteria[0]?.status, "met");
+  // 修補不放寬驗證：verdict 不合法或結構不完整仍然拒絕。
+  const bad = reply({ verdict: "maybe" }).replace(/\\"/g, '"');
+  assert.equal(parseReviewReply(bad, context).ok, false);
+  assert.equal(parseReviewReply('{"verdict": "pass", "criteria": [ {"index": 1, "reason": "x "y" z"} ', context).ok, false);
+});

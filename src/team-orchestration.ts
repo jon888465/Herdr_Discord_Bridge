@@ -1112,6 +1112,83 @@ export function repairCodexCommandJson(value: string): string {
   });
 }
 
+/**
+ * ISSUE-224：遠端 codex 的終端畫面把跳脫的 `\"` 顯示成 `"`（markdown 轉譯），自由文字欄位（review 的 reason／summary、
+ * fix 的說明）含雙引號時整份 JSON 不合法，`unwrapCodexJson` 的引號計數也跟著錯亂。只在嚴格解析與 `unwrapCodexJson`
+ * 都失敗後才用：掃描字串，把「字串內、不是結構上的結尾」的引號補上跳脫，並把字串內的折行（換行加兩格縮排）接回。
+ * 結尾的判斷要看結構（追蹤目前在物件還是陣列、這個字串是不是 key）：
+ * key 的結尾後面必須是 `:`；值的結尾後面是 `}`、`]`，或 `,` 加「物件裡的下一個 `"key":`／陣列裡的下一個元素」。
+ * 這是啟發式：內文剛好寫得像 `", "key": ` 仍可能誤判，所以結果仍要通過原本所有欄位驗證。
+ */
+export function repairJsonStrings(value: string): string {
+  let out = "";
+  let inString = false;
+  let isKey = false;
+  let keyNext = false;
+  const stack: Array<"o" | "a"> = [];
+  const skipSpace = (from: number): number => {
+    let i = from;
+    while (i < value.length && /\s/.test(value[i]!)) i += 1;
+    return i;
+  };
+  const closes = (index: number): boolean => {
+    let i = skipSpace(index + 1);
+    if (i >= value.length) return true;
+    const c = value[i]!;
+    if (isKey) return c === ":";
+    if (c === "}" || c === "]") return true;
+    if (c !== ",") return false;
+    i = skipSpace(i + 1);
+    if (i >= value.length) return true;
+    if (stack.at(-1) === "o") return /^"[^"\\]{1,80}"\s*:/.test(value.slice(i, i + 90));
+    return /["{\[\-0-9]/.test(value[i]!) || /^(true|false|null)\b/.test(value.slice(i, i + 5));
+  };
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index]!;
+    if (!inString) {
+      out += char;
+      if (char === '"') {
+        inString = true;
+        isKey = keyNext && stack.at(-1) === "o";
+      } else if (char === "{") {
+        stack.push("o");
+        keyNext = true;
+      } else if (char === "[") {
+        stack.push("a");
+        keyNext = false;
+      } else if (char === "}" || char === "]") {
+        stack.pop();
+        keyNext = false;
+      } else if (char === ",") keyNext = stack.at(-1) === "o";
+      else if (char === ":") keyNext = false;
+      continue;
+    }
+    if (char === "\\") {
+      out += char + (value[index + 1] ?? "");
+      index += 1;
+      continue;
+    }
+    if (char === "\r" || char === "\n") {
+      const end = char === "\r" && value[index + 1] === "\n" ? index + 1 : index;
+      if (value.slice(end + 1, end + 3) === "  ") {
+        out += /\s$/.test(out) ? "" : " ";
+        index = end + 2;
+        continue;
+      }
+    }
+    if (char === '"') {
+      if (closes(index)) {
+        out += char;
+        inString = false;
+        keyNext = false;
+      } else out += '\\"';
+      continue;
+    }
+    out += char;
+  }
+  return out;
+}
+
 function bounded(value: string, maxChars: number): string {
   return stripAnsi(value || "")
     .trim()
