@@ -476,3 +476,11 @@ test("update prompt skipped before agentReady", async (t) => {
   assert.equal((await prepareCardWorktree(deps, CARD)).agentReady, true);
   assert.deepEqual(log.slice(-4), ["agent.read", "pane.send_keys2", "agent.read", "switch:w9:w9:p1"]);
 });
+
+test("ISSUE-221: 沒有來源 workspace（自動撿卡的 worktree 卡）時，索引的 sourceWorkspaceId 記成 worktree 自己的 workspace", async () => {
+  const { deps, recorded } = setup({ sourceWorkspaceId: undefined });
+  const result = await prepareCardWorktree(deps, CARD);
+  assert.equal(result.workspaceId, "w9");
+  assert.equal(recorded[0]?.workspaceId, "w9");
+  assert.equal(recorded[0]?.sourceWorkspaceId, "w9");
+});
