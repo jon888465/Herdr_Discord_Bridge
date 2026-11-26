@@ -92,7 +92,7 @@
 - **實機驗收（2026-11-25 09:14 至 09:19 UTC，沙盒卡 `REQ-20261125-issue213-remote-commit`，沙盒 repo L0，bridge 含 #376 `d9bd255`，隔著兩次未完成的嘗試之後第三次）：通過。**implement 派到遠端 machine 的 pi，bridge 在本機 worktree 自己 commit；task `completed`（09:19:21）後 autopick 在 09:19:24 記錄 `committed`（head `9ba8ff4`），**沒有**再出現「這個版本已經 commit 了，沒有需要提交的修改」。commit 只新增 `docs/s6.txt`（一行 `s6 remote commit`），本機工作樹乾淨，沒有 push、沒有開 PR（L0）。驗收後已清理 worktree、刪除沙盒本機卡片分支。
 - **範圍與限制：**只有 1 個樣本；只驗 L0（停在 commit）；L1 的 push 與開 PR、L2 的 review 迴圈、`card commit` 在其他「已 commit」情境（例如遠端產出含額外檔案時必須拒絕）都沒有實機驗；這次通過時 verify 指派的是**本機** codex（`verify: local:codex`），因為前兩次用遠端 verify 沒能完成（ISSUE-216，仍待調查），所以遠端 verify 路徑沒有驗到。
 - **L1 實機驗收（2026-11-26 01:36 至 01:56 UTC，沙盒卡 `REQ-20261126-issue213-l1-remote`，沙盒 repo 暫設 L1（驗完已改回 L0），bridge 含 #383（`c5410b0`），implement／review／verify 都派遠端 machine）：通過。**implement 派遠端 pi、review／verify 派遠端 codex 各一次；task `completed`（01:54:53）→ `committed`（01:55:53，head `7788ebd`，只新增 `docs/s9.txt`）→ `pr_opened`（01:56:02，沙盒 repo 的 PR #5，base `main`、head 為卡片分支、一個 commit `hdb remote implement`、只改 `docs/s9.txt`）。bridge 沒有 merge（L1 由人 merge）；沒有出現「這個版本已經 commit 了」。第一次嘗試（01:36）在 assign 就失敗，原因是 ISSUE-217（與本問題無關），修正後重跑通過。
-- **範圍與限制（更新）：**L0 與 L1 各 1 個樣本；L2 的 review 迴圈與自動 merge 沒驗；「遠端產出含額外檔案必須拒絕」沒有實機驗；沙盒 PR #5 與遠端分支 `card/REQ-20261126-issue213-l1-remote` 留給人處理（尚未關閉或刪除）；沒有 CI（沙盒 repo 沒有 workflow），所以「CI 回報」這段沒驗到。
+- **範圍與限制（更新）：**L0 與 L1 各 1 個樣本；L2 的 review 迴圈與自動 merge 沒驗；「遠端產出含額外檔案必須拒絕」沒有實機驗；沙盒 PR #5 與遠端、本機分支 `card/REQ-20261126-issue213-l1-remote` 驗完後已由使用者同意關閉並刪除；沒有 CI（沙盒 repo 沒有 workflow），所以「CI 回報」這段沒驗到。
 
 ## ISSUE-212：遠端 codex 的 verify 報告，`codingResult` 沒有被記錄，verify 一直是「未通過」
 
