@@ -113,7 +113,7 @@
 - **L2 實機驗收（2026-11-26 03:42 至 05:47 UTC，沙盒卡，沙盒 repo 暫設 L2（驗完已改回 L0），implement／review／verify 都派遠端 machine，bridge 含 #386）：通過到「review 通過、等 CI 逾時、沒有 merge」，沒有驗到真的 merge。**卡片 `REQ-20261126-issue213-l2-remote-c`：task `completed` 05:16:02 → `committed` 05:16:11（head `f42443d`，只新增 `docs/s12.txt`）→ `pr_opened` 05:16:19（沙盒 PR #7）→ 遠端 reviewer 第 1 輪 `pass`（05:17:38）→ `card loop --merge` 等 CI；沙盒 repo 沒有 workflow，所以一直是「沒有檢查」，30 分鐘後 `loop_stopped`（05:47:19，autopick 記 `等 CI 逾時，沒有 merge；review 已通過`），PR 仍是 OPEN。符合 SPEC：沒有任何檢查不會 merge。
 - **review 迴圈的另一個觀察（卡片設計，不是 bridge 錯誤）：**第一張卡 `REQ-20261126-issue213-l2-remote` 的驗收條件寫成 bridge 流程步驟（committed、review 迴圈執行、merge 被拒），遠端 reviewer 只看得到 PR 的 diff，兩輪＋手動一輪共三輪都對三條條件回「無法判斷」，判定 `inconclusive`，loop 在「同一個 head 連續 2 次 inconclusive」停下，總上限 3 輪用完。reviewer 的回覆本身解析正常。**寫沙盒驗收卡時，驗收條件要寫成 PR diff 就能判斷的內容。**
 - **未解釋的一次失敗（只有 1 個樣本，原因未查）：**`REQ-20261126-issue213-l2-remote-b` 第二次撿卡建好 worktree 後，Lead 的啟動命令 `codex --add-dir <repo>/.git/worktrees/<name>` 回 `No such file or directory (os error 2)`，autopick 記 `Lead 尚未就緒，任務沒有啟動`；事後該目錄存在。可能是我手動移除再重建同名 worktree 造成的時序問題，沒有驗證。改用新卡 id（`-c`）重撿即通過。
-- **範圍與限制（更新）：**L0、L1、L2（到等 CI 逾時）各 1 個樣本；沒驗到：L2 的真的 merge（需要沙盒 repo 有 CI 並讓檢查通過，使用者選擇不加）、review 發現 finding 後的 fix 迴圈、遠端產出含額外檔案必須拒絕。沙盒 PR #6、#7 與其遠端分支尚未關閉或刪除（等使用者同意）。
+- **範圍與限制（更新）：**L0、L1、L2（到等 CI 逾時）各 1 個樣本；沒驗到：L2 的真的 merge（需要沙盒 repo 有 CI 並讓檢查通過，使用者選擇不加）、review 發現 finding 後的 fix 迴圈、遠端產出含額外檔案必須拒絕。沙盒 PR #6、#7 與其遠端、本機分支驗完後已由使用者同意關閉並刪除（沙盒遠端只剩 `main`）。
 
 ## ISSUE-212：遠端 codex 的 verify 報告，`codingResult` 沒有被記錄，verify 一直是「未通過」
 
