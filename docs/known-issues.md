@@ -16,7 +16,7 @@
 
 ## ISSUE-223：遠端 machine 斷線時，卡片 review／角色指定的拒絕訊息寫成「machine 未開放卡片 review」
 
-2026-11-26。狀態：**已修正、待驗收**（#399 部署後實機驗證發現卡片角色指定那一段沒生效；第二版修正與測試完成，第二版尚未部署與實機驗收）。來源：2026-11-26 驗 ISSUE-143 的失敗路徑時，把 agy-machine 在 bridge 端斷線後跑 `card review`，回 `遠端 review 失敗：machine 未開放卡片 review`。
+2026-11-26。狀態：**已驗收（範圍有限，見最後一則）**（第一版實機失敗；第二版 #401 已部署，2026-11-26 實機通過卡片角色指定那一段，1 個樣本）。來源：2026-11-26 驗 ISSUE-143 的失敗路徑時，把 agy-machine 在 bridge 端斷線後跑 `card review`，回 `遠端 review 失敗：machine 未開放卡片 review`。
 
 **症狀：**machine 只是斷線（連線後就可用），訊息卻像是設定沒開放，容易誤以為是 config 問題；也沒有說「不會 fallback 到本機」。
 
@@ -31,6 +31,8 @@
 **未驗證／限制：**實機（部署後再斷線一次跑 `card review` 看訊息）；候選清單（Lead 可選的遠端目標）斷線時仍是不列出，沒有改；其他斷線相關訊息（例如 `remote verify`）沒有逐一檢查。
 - **第一版的實機結果（2026-11-26 09:05 UTC，bridge 含 #399，沙盒卡 `REQ-20261126-disconnected-msg`，把遠端 machine 在 bridge 端斷線後被自動撿卡）：卡片角色指定那一段沒有生效。**卡片記的原因仍是 `卡片角色指定無效：reviewer：machine 未開放卡片 review（<id>）`，不是「已斷線」。**根因（我的錯）：**第一版的條件是「斷線且 `remoteMachines` 裡有它」，但實際的 `cardRoleContext`（`src/main.ts`）在 machine 斷線時把它從 `remoteMachines` 排除，條件永遠不成立；我的單元測試用的 context 是「`remoteMachines` 仍含它、只標 `isDisconnected`」，形狀和實機不同，所以測試過了、實機沒過。`card review` 那一段（`src/card-review-wiring.ts`）只看 `isDisconnected`，不受影響，但這次沒有實機跑到它。
 - **第二版修正（2026-11-26）：**`src/card-role-assignment.ts` 的 `remoteReviewMachine` 改成只要 `isDisconnected(machine)` 就回「已斷線」（走到這裡的 machine 已通過「存在於設定」的檢查）；測試新增實際形狀（斷線的 machine 被排除出 `remoteMachines`）回「已斷線」、沒斷線卻不在清單回「未開放」。完整測試與 lint 通過（見下方測試數字）。
+- **第二版實機驗收（2026-11-26 09:17 UTC，bridge 含 #401 `ad93584`，沙盒卡 `REQ-20261126-disconnected-msg2`，沙盒 repo L0）：卡片角色指定那一段通過。**把遠端 machine 在 bridge 端斷線後，reviewer 指到它的卡被自動撿卡檢查拒絕，卡片記 `失敗：autopick_stopped；原因：卡片角色指定無效：reviewer：machine 已斷線（<id>），不會 fallback 到本機，連線後再重試`（第一版同樣情境是「machine 未開放卡片 review」）。沒有任何 worktree 或 agent 被啟動。驗完先把測試卡設成 `cancelled` 再重新連線（上一輪沒這樣做，重新連線後該測試卡被正常撿起並跑到 commit，需要清理），重新連線後狀態回到 connected、`machine-disconnected.json` 為空。
+- **範圍與限制（更新）：**只驗了卡片角色指定（撿卡前檢查）這一段、1 個樣本；`card review` 指令那一段（`src/card-review-wiring.ts`，只看 `isDisconnected`）沒有實機跑到；通知（Discord）上顯示的固定標籤版本沒有核對；候選清單斷線時仍不列出，沒改。
 
 ## ISSUE-222：Herdr 因建 worktree 連帶開出的 repo 主 workspace，bridge 清理後沒有關
 
@@ -918,7 +920,7 @@
 
 ## ISSUE-172：CI 偶發失敗：`F7: concurrent writers keep both entries`（remote agy 信任並行寫入）
 
-更新日期：2026-11-19。狀態：待調查（偶發，只出現一次；原因未確認）。
+更新日期：2026-11-26。狀態：**重新開啟／待調查**（偶發，2026-11-19 與 2026-11-26 各一次；第二次留下診斷線索，原因仍未確認）。
 
 **症狀（2026-11-19，GitHub Actions，ubuntu-latest、Node 22）：**純文件 PR 的 CI 在 `test/remote-agy-trust.test.ts` 的 `F7: concurrent writers keep both entries` 失敗：兩個並行的 `editRemoteAgyTrust`（用真的 sh 與 `mkdir` 鎖）寫入後，設定檔的 `trustedWorkspaces` 只剩一筆（預期兩筆，少了其中一個目錄），斷言 `deepStrictEqual`。同一次執行的 macOS 通過。最近 30 次 CI 只有這一次不是成功，所以是偶發。該 PR 只改文件，與這次的程式無關。
 
@@ -929,6 +931,12 @@
 **重現嘗試（2026-11-19，本機 macOS，只跑這一個測試）：**預設 `sh` 300 次、加 12 個吃 CPU 的程序 300 次、`sh` 換成 `/bin/dash`（ubuntu 的 /bin/sh）並加負載 300 次，共 900 次 0 失敗；**沒有重現**，所以不能判斷是腳本缺陷還是 Linux 時序。觀察：正常的一次執行約 1.1 秒（一個寫入者等鎖約 1 秒、拿到 exit 15 後重讀再寫），而 CI 失敗那次整個測試只花 68 毫秒，兩個寫入者沒有任何等鎖，這與正常時序不同，但原因未知。腳本的鎖與雜湊檢查我讀過一遍，看不出會漏項的路徑。
 
 **目前沒有修正。**重跑 CI 的權限（個人存取權杖）不夠，改以推新 commit 觸發。**已做（診斷，不改行為）：**該測試改成失敗時把線索放進斷言訊息：兩次 `editRemoteAgyTrust` 的回傳值、每次 sh 呼叫的種類／起訖時間／結束碼／讀到的雜湊、備份目錄清單與設定檔內容（用刻意改壞斷言確認訊息真的會印出；其餘 15 項 remote-agy-trust 測試與 `npm run lint` 通過）。**下一步：**等這個測試在 CI 再偶發失敗，用印出的時序判斷是 F9、鎖之外的競態還是測試時序；在那之前狀態維持待調查。
+
+**第二次發生（2026-11-26 09:21 UTC，GitHub Actions，ubuntu-latest、Node 22，同一次執行的 macOS 通過）：**又是純文件 PR（ISSUE-223 的驗收紀錄，PR #402），同一個測試失敗，`trustedWorkspaces` 只剩 `acme__repo__bbbbbbbbbb`，少了另一個目錄。**這次診斷訊息有印出來了：**測試整體約 55 毫秒（正常約 1.1 秒）；兩個寫入者讀到同一個雜湊 `f643c1de`——`w0 read +0..+8ms`、`w1 read +1..+10ms`，兩者的讀取時間重疊；接著兩個都用 `expect=f643c1de` 寫入，`w0 write +8..+49ms`、`w1 write +10..+49ms`，**兩次都回 `code=0`**（沒有任何一個拿到「雜湊不符」的 exit 15、也沒有等鎖）。兩次 `editRemoteAgyTrust` 都回 true。
+**判讀（推論，未驗證）：**兩個寫入者的「讀取、比對雜湊、寫入」時間區間重疊卻都成功，表示它們沒有互斥——不是 ISSUE-143 F9 那種「過期鎖被兩個等待者同時回收」（這個測試沒有製造過期的鎖，而且兩者根本沒有等待），比較像是鎖的取得（`mkdir`）在這次的時序下沒有排他，或雜湊檢查與覆寫之間有可被插入的空隙（check-then-write 沒有被鎖保護到）。**這比第一次的猜測更偏向腳本的真缺陷，但我沒有讀腳本去確認，也沒有重現。**
+**影響（若是真缺陷）：**遠端 machine 上同時有兩張卡寫 agy 信任設定時，其中一筆可能被覆蓋掉，agy 在那個目錄會停在信任提示；這與 ISSUE-143 F9 的已知限制同類，但觸發條件更寬（不需要過期的鎖）。
+**CI 處理：**重跑 CI 的權限（個人存取權杖）不夠，這次以推新 commit（本次的紀錄更新）觸發重跑。
+**下一步：**讀 `editRemoteAgyTrust` 的 sh 腳本與 `mkdir` 鎖，對照上面兩個寫入者的時序，判斷互斥為何沒成立；用這次的時序（兩邊都在 +0..+10ms 內讀、+8..+10ms 起寫）設計能穩定重現的測試；在那之前狀態維持待調查，**不要把它當成「重跑就好」**。
 
 ## ISSUE-171：遠端 machine 不能擔任 implement／fixer（寫入角色）
 
