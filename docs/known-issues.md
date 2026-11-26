@@ -1,5 +1,19 @@
 # Known Issues
 
+## ISSUE-220：profile Worker 的 pane 只顯示 `codex·worker`，看不出擔任的角色
+
+2026-11-26。狀態：**已修正、待驗收**（程式與單元測試完成；實機尚未驗收，bridge 未重啟）。使用者提出（2026-11-26）：「pane 名稱可以看到 codex·worker 但不知道他是什麼角色，pane 名稱感覺可以換成 w3:p1，tab 名稱則是擔任角色」。
+
+**症狀：**`team`／card task 的 profile Worker pane 與 tab 名稱都是 `<kind>·worker`。`worker` 是建立 pane 時寫死的字串；真正的角色（implement、review、verify、diagnose）是 Lead 排指派時才決定，pane 建好之後才知道，所以名稱上看不到。
+
+**預期行為：**pane 名稱是 pane id（例如 `w3:p1`）；tab 名稱是擔任的角色。
+
+**修正（2026-11-26）：**(1) `src/herdr.ts` 的 `startProfile` 建立 pane 時，pane 名稱改為 pane id，並記下這個 client 自己建立的 tab（pane id → tab id）；tab 名稱先維持 `<kind>·worker`。(2) 指派開始、角色已知時（`src/team-orchestration.ts` 在 `onAssignmentStart` 之後呼叫新的 `labelWorker`，由 `src/main.ts` 接到 `HerdrClient.labelWorkerRole`）：bridge 自己建立的 tab 把 tab 名稱改成角色（例如 `verify`）；沒有自己的 tab（分割在 Lead 的 tab 裡，tab 是共用的）就**不動 tab**，把角色接在 pane 名稱後面（`<pane id>·<角色>`，例如 `w3:p2·review`）。非 coding 的一般 `team ask` 沒有角色，標成 `worker`。(3) 純顯示：改名失敗只警告，不影響任務（沿用既有 `nameAgentPane` 的做法）。
+
+**測試（2026-11-26，本機，`npm run build`、`npm run lint` 通過）：**`pane-split`＋`cli-adapter`＋`team-orchestration`＋`team-task-engine`＋`coding-workflow` 共 163 項通過；新增測試涵蓋：建立時 pane 名稱是 pane id、tab 名稱維持 `<kind>·worker`；有自己的 tab 時只改 tab；共用 tab 時只改 pane 名稱（接上角色）；改名失敗不丟錯。
+
+**未驗證／限制：**實機（部署後看 Herdr 的 pane 與 tab 顯示）；沒有 orchestration 層測試確認指派開始時真的呼叫 `labelWorker`（呼叫處包在 try/catch，只靠型別與建置驗證）；遠端 machine 上的 Worker 走另一條建立路徑（`startRemoteRole`，workspace label 是 `task-<hash>`），沒有調整，也不知道經 hub 對遠端 pane 改名是否生效；Lead 與 autopick 的 pane 名稱沒改；同一個 pane 被重用在不同角色時，tab 名稱會被後一個角色覆蓋（顯示的是最近一次的角色）；agy／pi 等其他種類沒有逐一驗證是否支援改名。
+
 ## ISSUE-219：遠端 verify 一再沒被記錄 evidence 時，Lead 沒有上限地追加驗證，直到規劃輪數用完
 
 2026-11-26。狀態：**已修正、待驗收**（程式與單元測試完成；引擎層端到端與實機尚未驗收，bridge 未重啟）。是 ISSUE-216 一直沒處理的「Lead 追加次數沒有上限」。

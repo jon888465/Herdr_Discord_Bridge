@@ -133,6 +133,8 @@ export async function nameAgentPane(
   input: Parameters<typeof agentDisplayName>[0],
   /** 只傳這次 `createAgentPane` 自己建立的 tab；分割出的 pane 不傳，不會動任何 tab。 */
   tabId?: string,
+  /** 指定 pane 的名稱（預設與 tab 相同，是 `<kind>·<role>`）；tab 名稱不受影響。 */
+  paneLabel?: string,
 ): Promise<void> {
   const label = agentDisplayName(input);
   if (tabId) {
@@ -153,13 +155,35 @@ export async function nameAgentPane(
       "pane.rename",
       {
         pane_id: paneId,
-        label,
+        label: paneLabel ?? label,
       },
       { retries: 0 },
     );
   } catch (error) {
     console.warn(
       `Agent pane label unavailable (${paneId}): ${error instanceof Error ? error.message : "unknown error"}`,
+    );
+  }
+}
+
+/**
+ * 指派開始、角色已知時標出角色（只影響顯示，失敗只警告）：bridge 自己建立的 tab 把 tab 名稱改成角色；
+ * 沒有自己的 tab（分割在 Lead 的 tab 裡，tab 是共用的，不能改）就把角色接在 pane 名稱後面（`<pane id>·<role>`）。
+ */
+export async function labelWorkerRole(
+  port: PaneCreationPort,
+  paneId: string,
+  role: string,
+  ownTabId?: string,
+): Promise<void> {
+  try {
+    if (ownTabId)
+      await port.request("tab.rename", { tab_id: ownTabId, label: role }, { retries: 0 });
+    else
+      await port.request("pane.rename", { pane_id: paneId, label: `${paneId}·${role}` }, { retries: 0 });
+  } catch (error) {
+    console.warn(
+      `Worker role label unavailable (${paneId}): ${error instanceof Error ? error.message : "unknown error"}`,
     );
   }
 }
