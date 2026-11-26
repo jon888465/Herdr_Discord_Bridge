@@ -12,7 +12,9 @@ import {
   parseCodingResult,
   sessionIdentity,
   settleReadonlyVersion,
+  UNRECORDED_VERIFY_LIMIT,
   VERSION_CAPTURE_OVERFLOW,
+  unrecordedVerifyCount,
   type AssignmentCoding,
   type CodingArtifactRecord,
 } from "./coding-workflow.js";
@@ -593,8 +595,12 @@ export class TeamTaskEngine {
       unrecoverable: () => {
         const task = this.store.get(taskId);
         const version = current();
-        return version.overflow || task.coding!.baseline.overflow
-          ? VERSION_CAPTURE_OVERFLOW
+        if (version.overflow || task.coding!.baseline.overflow)
+          return VERSION_CAPTURE_OVERFLOW;
+        // ISSUE-219：同版本 verify 一再沒被記錄 evidence，再追加驗證只會用光規劃輪數。
+        return unrecordedVerifyCount(task.coding!, version.fingerprint) >=
+          UNRECORDED_VERIFY_LIMIT
+          ? "verify evidence repeatedly not recorded"
           : undefined;
       },
       assess: () => {
