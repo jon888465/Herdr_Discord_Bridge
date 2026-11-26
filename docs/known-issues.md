@@ -2,7 +2,7 @@
 
 ## ISSUE-216：遠端寫入的卡，遠端 verify 看不到 bridge 的 commit，Lead 反覆追加驗證直到規劃輪數用完
 
-2026-11-26 更新。狀態：**已修正、機制部分實機驗收；整張卡仍未能完成**（#379 已部署；遠端 verify 現在看得到 bridge 的 commit，但同一張卡因 ISSUE-212 再度停在規劃輪數上限）。先前：待調查（現象在同一張卡重現 2 次）。
+2026-11-26 更新。狀態：**已驗收（範圍有限，見最後一則）**（#379 已部署；2026-11-26 與 ISSUE-212 的修正一起在沙盒實機重跑通過）。先前：機制部分實機驗收，整張卡因 ISSUE-212 未能完成。先前：待調查（現象在同一張卡重現 2 次）。
 
 **症狀（2026-11-25，沙盒卡 `REQ-20261125-issue213-remote-commit`，沙盒 repo L0，implement／review／verify 都派遠端 machine）：**遠端 implement 完成、bridge 已在本機 commit，task 卻沒有完成。第 1 次：第一個 verify 完成後 Lead 追加 `verify-s6-followup`，在遠端 codex 上 `working` 超過 27 分鐘沒結果，使用者同意後取消。第 2 次（重啟後重跑）：10 個指派全部完成，但 Lead 一直追加驗證，約 27 分鐘後 `Lead reached the planning round limit; task remains incomplete`，卡片 autopick 停手（09:10 UTC）。
 
@@ -29,6 +29,7 @@
 - 結束後已清理沙盒 worktree 並刪除本機卡片分支 `card/REQ-20261126-issue216-remote-verify`（唯一的獨有 commit 是上述 bridge commit）。沒有 push、沒有 PR。
 - **仍未驗證：**修掉 ISSUE-212 之後遠端 verify 能否讓 task 完成；Lead 追加次數沒有上限的問題（本次追加到規劃輪數上限才停）。
 - **後續（2026-11-26）：**ISSUE-212 找到第二個原因（遠端畫面把跳脫的雙引號顯示成未跳脫）並加了容錯解析，待部署後以同一張沙盒卡重驗整條遠端 verify 路徑。
+- **整張卡實機通過（2026-11-26 01:24 至 01:30 UTC，沙盒卡 `REQ-20261126-issue212-remote-verify`，沙盒 repo L0，bridge 含 #379 與 #381（`fda3ecc`），implement／review／verify 都派遠端 machine）：**遠端 implement／review／verify 各一次，Lead 沒有追加驗證，task 約 5.5 分鐘完成並停在 commit（head `5c32209`）。verify artifact 的 `headSha` 是 bridge 的 commit、`deliveryPaths` 是 `["docs/s8.txt"]`，`evidence: recorded`（命令解析見 ISSUE-212）。範圍：1 個樣本、L0；Lead 追加驗證沒有次數上限的問題沒有處理，這次是 Lead 沒有追加才通過；ISSUE-213 的 L1／L2 路徑仍沒驗。沙盒 worktree 與本機卡片分支已清理，沒有 push、沒有 PR。
 
 ## ISSUE-215：看板按 ready 因沒有 notify 被擋、列表不顯示 req id
 
@@ -75,7 +76,7 @@
 - **範圍與限制：**只有 1 個樣本；只驗 L0（停在 commit）；L1 的 push 與開 PR、L2 的 review 迴圈、`card commit` 在其他「已 commit」情境（例如遠端產出含額外檔案時必須拒絕）都沒有實機驗；這次通過時 verify 指派的是**本機** codex（`verify: local:codex`），因為前兩次用遠端 verify 沒能完成（ISSUE-216，仍待調查），所以遠端 verify 路徑沒有驗到。
 ## ISSUE-212：遠端 codex 的 verify 報告，`codingResult` 沒有被記錄，verify 一直是「未通過」
 
-更新日期：2026-11-26。狀態：**已修正、待驗收**（2026-11-26 第二輪：找到第二個原因並加上容錯解析；遠端實機尚未重跑，bridge 未重啟）。2026-11-26 稍早曾重新開啟（#370 已部署後實機再次發生）。先前：已修正、待驗收。更新日期原為 2026-11-24。（本輪完成可重跑的 S1 情境重建與自動化回歸；歷史原件仍缺，遠端部署／實機驗收未完成）。
+更新日期：2026-11-26。狀態：**已驗收（範圍有限，見最後一則）**（#381 已部署；2026-11-26 沙盒實機重跑通過，只驗了 1 個樣本）。先前：已修正、待驗收。2026-11-26 稍早曾重新開啟（#370 已部署後實機再次發生）。先前：已修正、待驗收。更新日期原為 2026-11-24。（本輪完成可重跑的 S1 情境重建與自動化回歸；歷史原件仍缺，遠端部署／實機驗收未完成）。
 
 - **部署（2026-11-25 09:18 台北時間）：**本機 main 已同步 GitHub main 的 PR #370（`e45f801`），`npm run build` 通過後重啟 bridge。新程序確認 Discord Gateway 已連線、Herdr watcher 已啟動，遠端 verify 所用機器已連線。長命令與退出碼的端到端驗收仍待執行。
 
@@ -96,6 +97,8 @@
 - **修正（2026-11-26）：**`src/team-orchestration.ts` 新增 `repairCodexCommandJson`，`src/team-task-engine.ts` 在「原文」與 `unwrapCodexJson` 都解析失敗後才多試一次：以 `{"command":"…","exitCode":N}` 的結構為界，把折行（換行加兩格縮排）接回、補上引號跳脫，再交給原本的 `parseCodingResult` 驗證。退出碼仍須是整數、命令仍須非空且不超過 500 字元；缺欄位或退出碼不是整數仍不記錄。折行處補一個空格（codex 依字詞折行），極少數超長字詞硬折會多一個空格，只影響記錄的命令文字。**只涵蓋 verify 的 `commands`；`card-review`／`card-fix` 的 JSON 若含未跳脫引號仍會失敗，未處理。**
 - **測試（2026-11-26，本機，`npm run build`、`npm run lint` 通過）：**`coding-workflow`＋`team-orchestration`＋`team-task-engine` 115 項通過；新增「遠端 codex 畫面吃掉跳脫反斜線＋折行時，補回命令與退出碼」使用 2026-11-26 實機報告原樣（修正前三種解析都得到 undefined；修正後得到 3 條命令、退出碼都是 0，命令文字含 `test "$(cat docs/s7.txt)" = '…'`）。另用該次完整報告檔手動跑過一次，結果相同。
 - **未驗證：**遠端實機（部署後以遠端 verify 重跑沙盒卡，確認 verify artifact 記錄 `commands`、task 完成、Lead 不追加）；`\"` 被 markdown 轉譯是推論，沒有取得原始 bytes；其他被 markdown 轉譯吃掉的字元（例如反斜線開頭的其他標點、`*`、底線）可能有類似問題，沒有調查；Lead 追加驗證沒有次數上限的問題未處理。
+- **實機驗收（2026-11-26 01:24 至 01:30 UTC，沙盒卡 `REQ-20261126-issue212-remote-verify`，沙盒 repo L0，bridge 含 #379 與 #381（`fda3ecc`），implement／review／verify 都派遠端 machine）：通過。**Lead 派 implement、review、verify 各一次，沒有追加驗證；task 約 5.5 分鐘完成（`completed` 01:29:40，autopick `committed` 01:29:56，head `5c32209`，commit 只新增 `docs/s8.txt`）。遠端 verify 報告的 `codingResult` 原文**與上次一樣是不合法 JSON**（命令內雙引號未跳脫、折行；以 JSON 解析器確認失敗），經 `repairCodexCommandJson` 後 verify artifact 記錄 3 條命令（`git show --stat HEAD`、兩條含雙引號的 `test …`，退出碼都是 0）、`evidence: recorded`。這同時證明遠端 verify 看得到 bridge 的 commit（`headSha` 是該 commit、`deliveryPaths` 是 `docs/s8.txt`）。
+- **範圍與限制：**只有 1 個樣本、L0 路徑；命令文字有一處由 bridge 補空格還原折行，沒有逐字核對成與遠端原命令完全相同（這次的三條命令還原後與卡片指定的一致）；`card-review`／`card-fix` 的 JSON 若含未跳脫引號仍會失敗，沒有驗；markdown 轉譯吃掉跳脫反斜線仍是推論；其他字元（反斜線開頭的其他標點等）沒有調查。
 
 ## ISSUE-211：卡片 `roles` 指定遠端的 pi 時，驗證仍要求本機有 pi profile，撿卡即被拒絕
 
