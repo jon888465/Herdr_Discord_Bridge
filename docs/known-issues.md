@@ -1,5 +1,19 @@
 # Known Issues
 
+## ISSUE-222：Herdr 因建 worktree 連帶開出的 repo 主 workspace，bridge 清理後沒有關
+
+2026-11-26。狀態：**已修正、待驗收**（程式與自動化測試完成；實機尚未驗收，bridge 未重啟）。使用者決定（2026-11-26）：「我手動開的不處理，只處理 bridge 開的」。來源是 ISSUE-221 的觀察（`herdr worktree create` 會連帶開出 repo 的主 checkout workspace，每個 repo 一個，worktree 移除後仍留著）。
+
+**症狀：**每個 repo 第一次建卡片 worktree 後，Herdr 多出一個以 repo 目錄名命名、沒有 agent 的空 workspace；`card cleanup` 只移除 worktree，不處理它，需要手動 `herdr workspace close`。
+
+**預期行為：**bridge 讓 Herdr 開出來的，在這個 repo 最後一個 bridge worktree 清掉時由 bridge 關掉；使用者自己開的 repo workspace 一律不碰。
+
+**修正（2026-11-26）：**(1) `src/worktree.ts` 的 `createWorktree` 在 `worktree.create` 前後各列一次 workspace，**只有「建立前沒有、建立後多出」且是 repo 主 checkout（`is_linked_worktree: false`、`repo_root`／`checkout_path` 等於這個 repo）的**才算 bridge 開的（`openedRepoWorkspaceId`）；建立前就存在的（使用者自己開的）不記；列不出來或結果不唯一就不猜。(2) `src/card-worktrees.ts` 的索引檔多一個選填的 `repoWorkspaces`（repo 路徑 → workspace id），`markRepoWorkspace` 記下、`releaseRepoWorkspace` 只在這個 repo 已沒有任何作用中 worktree 時交出一次並清除標記；舊檔沒有這個欄位照常載入，壞掉的標記略過。(3) `prepareCardWorktree` 記下標記；`cleanupCardWorktree` 在 worktree 移除成功後，若這是這個 repo 最後一個作用中的 worktree，就用 `closeBridgeRepoWorkspace` 關掉它。關閉前再確認：它仍存在、仍是這個 repo 的主 checkout（非 linked）、**只有一個 pane 且沒有 agent**（使用者後來接手用了就保留）；Herdr 拒絕關閉或任何不確定就保留，不影響 worktree 的清理結果。(4) `src/main.ts` 的 `lazyCardWorktrees` 轉接兩個新方法（少了這個會靜默不生效）。
+
+**測試（2026-11-26，本機，`npm run build`、`npm run lint` 通過）：**完整測試 2341 項，2340 通過、0 失敗、1 跳過。新增：`createWorktree` 只把建立後多出的 repo 主 workspace 當 bridge 開的（使用者原本就開著的、列不出來、別的 repo 多出來的都不算）；`closeBridgeRepoWorkspace` 只關空的單一 pane 主 workspace（有 agent、多 pane、linked、對不上 repo、已不存在、Herdr 拒絕都保留）；索引標記在還有作用中 worktree 時不交出、最後一個移除後交出一次、重載後仍在；`prepareCardWorktree`／`cleanupCardWorktree` 串起來。三個既有測試改了預期（建立 worktree 前多一次 `workspace.list`）。
+
+**未驗證／限制：**實機（部署後跑一張沙盒卡，確認 worktree 清掉後 repo 主 workspace 也被關）；Herdr 會不會重用使用者自己開的主 workspace 只驗證了它重用自己開的那一個，所以「建立前就存在」的判斷是靠 workspace 列表前後比對，不是靠 Herdr 的說明；同一 repo 兩張卡同時進行時，第二張建立時主 workspace 已存在，只有第一張記標記，所以由「最後一個清掉」的卡關閉（依 repo 的作用中 worktree 判斷，不依卡）；bridge 重啟後標記從索引檔還原；只處理 `card cleanup` 路徑，沒有 `card cleanup` 而被手動用 `herdr worktree remove` 移除的 worktree 不會觸發關閉；先前（ISSUE-221 實驗）手動關掉的不受影響。
+
 ## ISSUE-221：自動撿卡對 worktree 卡開兩個 agent，第一個只是閒置
 
 2026-11-26。狀態：**已驗收（範圍有限，見最後一則）**（第一版實機失敗；第二版 #392 已部署，2026-11-26 沙盒實機重跑通過，只驗了 1 個樣本）。使用者提問（2026-11-26）：「autopick 需要都開一個 agent 嗎？它不能跟 Lead 一起用嗎？」

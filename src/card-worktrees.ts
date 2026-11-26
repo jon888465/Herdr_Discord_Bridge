@@ -28,6 +28,8 @@ export interface CardWorktree {
 interface FileShape {
   version: 1;
   worktrees: CardWorktree[];
+  /** ISSUE-221：bridge 讓 Herdr 開出來的 repo 主 workspace（repo 路徑 → workspace id）；使用者自己開的不記。 */
+  repoWorkspaces?: Record<string, string>;
 }
 
 const TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
@@ -89,6 +91,7 @@ function assertEntry(item: unknown, label: string): CardWorktree {
 
 export class CardWorktreeStore {
   private worktrees: CardWorktree[] = [];
+  private repoWorkspaces: Record<string, string> = {};
 
   constructor(private readonly file: string) {
     let text: string;
@@ -123,6 +126,31 @@ export class CardWorktreeStore {
       }
       this.worktrees.push(entry);
     }
+    // 壞掉的紀錄直接略過（只是清理用的標記，不該讓索引載入失敗）。
+    if (parsed.repoWorkspaces && typeof parsed.repoWorkspaces === "object")
+      for (const [repo, workspaceId] of Object.entries(parsed.repoWorkspaces))
+        if (absolute(repo) && typeof workspaceId === "string" && WORKSPACE_ID.test(workspaceId))
+          this.repoWorkspaces[repo] = workspaceId;
+  }
+
+  /** 記下「這個 repo 的主 workspace 是 bridge 讓 Herdr 開出來的」。 */
+  markRepoWorkspace(repoPath: string, workspaceId: string): void {
+    if (!absolute(repoPath) || !WORKSPACE_ID.test(workspaceId)) return;
+    this.repoWorkspaces[repoPath] = workspaceId;
+    this.save();
+  }
+
+  /**
+   * 這個 repo 已沒有任何作用中的 worktree 時，交出（並清掉）bridge 開的主 workspace id 讓呼叫端關掉；
+   * 還有別的卡在用、或不是 bridge 開的，回傳 undefined。
+   */
+  releaseRepoWorkspace(repoPath: string): string | undefined {
+    const id = this.repoWorkspaces[repoPath];
+    if (!id) return undefined;
+    if (this.worktrees.some((entry) => entry.repoPath === repoPath && !entry.removedAt)) return undefined;
+    delete this.repoWorkspaces[repoPath];
+    this.save();
+    return id;
   }
 
   list(): CardWorktree[] {
@@ -187,7 +215,11 @@ export class CardWorktreeStore {
     const directory = path.dirname(this.file);
     fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
     const temp = `${this.file}.${randomUUID()}.tmp`;
-    const body: FileShape = { version: 1, worktrees: this.worktrees };
+    const body: FileShape = {
+      version: 1,
+      worktrees: this.worktrees,
+      ...(Object.keys(this.repoWorkspaces).length ? { repoWorkspaces: this.repoWorkspaces } : {}),
+    };
     try {
       fs.writeFileSync(temp, `${JSON.stringify(body, null, 2)}\n`, {
         mode: 0o600,

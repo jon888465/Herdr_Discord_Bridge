@@ -161,3 +161,22 @@ test("latest prefers the active worktree, else the most recent removed one, else
   assert.equal(store.latest("REQ-20261103-one")?.workspaceId, "w12");
   assert.equal(store.latest("REQ-20261103-one")?.removedAt, undefined);
 });
+
+test("ISSUE-221: bridge 開的 repo 主 workspace 標記：還有作用中的 worktree 就不交出，最後一個移除後交出一次，重載後仍保留標記", () => {
+  const f = file();
+  const store = new CardWorktreeStore(f);
+  const repo = entry.repoPath;
+  store.record(entry, T1);
+  store.record({ ...entry, cardId: "REQ-20261103-two", workspaceId: "w10", branch: "card/REQ-20261103-two", path: `${entry.path}-two` }, T1);
+  store.markRepoWorkspace(repo, "w8");
+  assert.equal(store.releaseRepoWorkspace(repo), undefined, "還有作用中的 worktree");
+  store.markRemoved(entry.cardId, T2);
+  assert.equal(new CardWorktreeStore(f).releaseRepoWorkspace(repo), undefined, "還剩一個，重載後標記仍在但不交出");
+  store.markRemoved("REQ-20261103-two", T2);
+  const reloaded = new CardWorktreeStore(f);
+  assert.equal(reloaded.releaseRepoWorkspace(repo), "w8");
+  assert.equal(reloaded.releaseRepoWorkspace(repo), undefined, "只交出一次");
+  assert.equal(new CardWorktreeStore(f).releaseRepoWorkspace(repo), undefined, "標記已清除並寫回檔案");
+  // 沒標記過（使用者自己開的主 workspace）永遠不交出。
+  assert.equal(new CardWorktreeStore(f).releaseRepoWorkspace("/Users/example/git_wk/other"), undefined);
+});

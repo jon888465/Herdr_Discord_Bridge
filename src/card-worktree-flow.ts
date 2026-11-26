@@ -10,6 +10,7 @@ import { createHash } from "node:crypto";
 import {
   branchForCard,
   checkWorktreeSupport,
+  closeBridgeRepoWorkspace,
   createWorktree,
   removeWorktree,
   type WorktreePort,
@@ -51,7 +52,7 @@ export interface PrepareDeps {
    * 沒有提供就維持只看啟動回傳的狀態。逾時或仍 blocked 時回傳 undefined，沿用原本「還沒準備好、不啟動任務」的處理。
    */
   awaitReady?(agent: AgentRecord): Promise<AgentRecord | undefined>;
-  worktrees: Pick<CardWorktreeStore, "active" | "record">;
+  worktrees: Pick<CardWorktreeStore, "active" | "record"> & Partial<Pick<CardWorktreeStore, "markRepoWorkspace">>;
   authorize(workspaceId: string): void;
   switchRoute(workspaceId: string, agent: AgentRecord): void;
   now(): string;
@@ -118,6 +119,13 @@ export async function prepareCardWorktree(
       created.path,
     );
   }
+  // ISSUE-221：Herdr 連帶開出來的 repo 主 workspace 記起來，最後一張卡清理時由 bridge 關掉（使用者自己開的不記）。
+  if (created.openedRepoWorkspaceId)
+    try {
+      deps.worktrees.markRepoWorkspace?.(repoPath, created.openedRepoWorkspaceId);
+    } catch {
+      /* 只是清理標記 */
+    }
   deps.authorize(created.workspaceId);
   let agent: AgentRecord;
   try {
@@ -175,7 +183,7 @@ export function agentNameForCard(cardId: string): string {
 
 export interface CleanupDeps {
   port: WorktreePort & { cleanupWorkspaceTrust?(cardId: string, cwd: string): void };
-  worktrees: Pick<CardWorktreeStore, "active" | "markRemoved">;
+  worktrees: Pick<CardWorktreeStore, "active" | "markRemoved"> & Partial<Pick<CardWorktreeStore, "releaseRepoWorkspace">>;
   deauthorize(workspaceId: string): void;
   now(): string;
 }
@@ -215,5 +223,12 @@ export async function cleanupCardWorktree(
   deps.port.cleanupWorkspaceTrust?.(cardId, entry.path);
   deps.worktrees.markRemoved(cardId, deps.now());
   deps.deauthorize(entry.workspaceId);
+  // ISSUE-221：這個 repo 最後一個 worktree 清掉後，關掉 bridge 當初讓 Herdr 開出來的主 workspace（使用者自己開的不碰）。
+  try {
+    const repoWorkspace = deps.worktrees.releaseRepoWorkspace?.(entry.repoPath);
+    if (repoWorkspace) await closeBridgeRepoWorkspace(deps.port, repoWorkspace, entry.repoPath);
+  } catch {
+    /* 清理的附帶步驟，失敗不影響 worktree 的清理結果 */
+  }
   return { removed: true, ...info };
 }
