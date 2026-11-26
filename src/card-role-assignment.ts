@@ -200,6 +200,9 @@ export function preflightRoles(
   return { roles: structuredClone(roles), candidates, ...(remoteMachines.length ? { remoteMachines } : {}) };
 }
 function remoteReviewMachine(role: CardRole, c: RoleConstraint, context: RoleContext): RemoteReviewMachine {
+  // 斷線的 machine 與「沒開放」是兩回事：前者連線後就可用，訊息要說清楚（不會 fallback 本機）。
+  if (c.machine && context.isDisconnected?.(c.machine) && context.remoteMachines?.some((m) => m.id === c.machine))
+    roleError(role, `machine 已斷線（${c.machine}），不會 fallback 到本機，連線後再重試`);
   const remote = context.remoteMachines?.find((m) => m.id === c.machine && !context.isDisconnected?.(m.id));
   if (!remote || (c.agent && !remote.kinds.includes(c.agent))) roleError(role, `machine 未開放卡片 review（${c.machine}）`);
   if ((role === "implement" || role === "fixer") && !remote.write) roleError(role, `remote ${role} 不可用：machine ${c.machine} 沒有開放寫入（cardReview.write）`);

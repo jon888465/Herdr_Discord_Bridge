@@ -244,6 +244,8 @@ test("wiring: frozen remote snapshot needs the running config to open the machin
     ...extra,
   }, card, { round: 1 });
   await rejects(run({ roleContext: closed, remote: h.remote }), (e: unknown) => /machine 未開放卡片 review/.test(String(e)) && !/pod/.test(String(e)));
+  // 斷線與「沒開放」要分開說：斷線訊息要說會不會 fallback、怎麼處理，且不帶 machine 名稱。
+  await rejects(run({ roleContext: { ...context, isDisconnected: (id: string) => id === "pod" }, remote: h.remote }), (e: unknown) => /machine 已斷線，不會 fallback 到本機/.test(String(e)) && !/未開放|pod/.test(String(e)));
   await rejects(run({ roleContext: context }), /remote reviewer 介面不存在/);
   equal(fetched as number, 0);
   // 舊快照允許 agy，目前配置只開放 codex：啟動前拒絕，固定標籤、不啟動任何東西。

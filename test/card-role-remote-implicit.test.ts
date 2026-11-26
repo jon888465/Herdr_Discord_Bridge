@@ -96,5 +96,5 @@ test("with a local profile of the kind there is exactly one candidate and no imp
 test("a disconnected machine offers neither candidates nor acceptance", () => {
   const down = { ...context, isDisconnected: (id: string) => id === "pod" };
   eq(remoteRoleCandidates(down), []);
-  throws(() => preflightRoles({ implement: { machine: "pod", agent: "pi" } }, down), /machine 未開放卡片 review/);
+  throws(() => preflightRoles({ implement: { machine: "pod", agent: "pi" } }, down), /machine 已斷線（pod），不會 fallback 到本機/);
 });
