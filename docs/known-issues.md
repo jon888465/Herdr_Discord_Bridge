@@ -18,6 +18,7 @@
   - **反例（使用者手動開的）：**我先手動開一個 repo workspace（`w78`，標籤 `user-sandbox`），再跑卡片 `REQ-20261126-issue222-user-workspace`：建 worktree 時 Herdr 重用 `w78`，索引**沒有**記標記；task 完成並 `committed`（head `523a07c`）；`card cleanup` 之後 `w78` 仍在，沒有被關。（之後由我手動關掉這個測試用 workspace。）
   - 這同時驗證了 Herdr 會重用使用者自己開的主 checkout workspace（先前只驗證過重用自己開的那一個，現在補上，1 個樣本）。
 - **範圍與限制（更新）：**各 1 個樣本、L0；同一 repo 兩張卡同時進行（最後一張才關）、使用者在 bridge 開的 workspace 裡開 agent 或多 pane 後的保留（只有單元測試）、手動用 `herdr worktree remove` 移除的情況，沒有實機驗；沙盒測試用分支已刪，遠端只剩 `main`。
+- **L1 再驗一次（2026-11-26 08:28 至 08:32 UTC，沙盒卡 `REQ-20261126-l1-no-source-ws`，沙盒 repo 暫設 L1（驗完改回 L0），bridge 含 #395（`bf3edce`），implement 派遠端 pi、review／verify 派本機 codex）：**`card cleanup` 之後 Herdr 只剩使用者的 4 個 workspace（連帶開出的 repo 主 workspace 被關），沒有殘留。累計 bridge 開的主 workspace 關閉：2 次。
 
 ## ISSUE-221：自動撿卡對 worktree 卡開兩個 agent，第一個只是閒置
 
@@ -40,6 +41,8 @@
 - **第二版實機驗收（2026-11-26 07:13 至 07:16 UTC，沙盒卡 `REQ-20261126-issue221-single-agent-b`，沙盒 repo L0，bridge 含 #390、#391、#392（`9af6fbe`），implement 派遠端 pi、review／verify 派本機 codex）：通過。**autopick 沒有建任何來源 workspace、沒有啟動多餘的 agent，`autopick_picked` 後直接建 worktree workspace（`w72`，一個 codex 當 Lead）；task `completed`（07:15:46）→ `committed`（07:16:14，head `fc97e6e`，只新增 `docs/s14.txt`），沒有 `autopick_failed`，也就是沒有來源 workspace 要關、沒有 `workspace_group_close_required`。**沒有來源 workspace 後 `card assign` 不需要 `wk use` 路由，實機確認。**
 - **觀察（Herdr 的行為，不是 bridge 建的）：**worktree 建好後 Herdr 自己多出一個以 repo 目錄名命名的 workspace（`w71`，沒有 agent、沒有 autopick 標籤），是 Herdr 為同 repo 的 linked worktree 開的主要（主 checkout）workspace。**已用 Herdr CLI 單獨重現（2026-11-26，Herdr 0.9.5，沒有經過 bridge）：**在沒有該 repo workspace 的狀態下，`herdr worktree create --cwd <repo> --branch <b>`（與 bridge 的 `worktree.create` 同樣的參數）會同時開出 linked worktree workspace，和一個以 repo 目錄名命名、`is_linked_worktree: false` 的主 checkout workspace；再建第二個 worktree 時**重用同一個**主 workspace，沒有再多開。所以不是每張卡多留一個，而是**每個 repo 一個**，只要還有 linked worktree 就一直在；worktree 移除後它仍留著，需要手動關（`herdr workspace close`）。bridge 目前不會清它。**使用者決定（2026-11-26）：使用者自己手動開的 workspace 不處理，只處理 bridge 開的。**所以做法是只清「這次 `worktree.create` 才開出來」的主 workspace（建立前沒有、建立後多出的 `is_linked_worktree: false` 且 repo 相同的那個），使用者原本就開著的 repo workspace（例如已開著的主 checkout workspace）一律不碰；實作與驗收見下一個 PR／issue 更新（目前尚未實作）。目前的處理：沙盒驗收後手動關掉；實驗用的臨時 worktree、分支與 workspace 已清掉。
 - **範圍與限制（更新）：**1 個樣本、L0；只驗 L0（停在 commit），L1／L2 在 worktree 卡且無來源 workspace 時的 push、PR、loop 沒重跑；readonly 卡沒實測；Herdr 自建的 repo workspace 沒有清理。
+- **L1 實機驗收（2026-11-26 08:28 至 08:32 UTC，沙盒卡 `REQ-20261126-l1-no-source-ws`，沙盒 repo 暫設 L1（驗完改回 L0），bridge 含 #395（`bf3edce`），implement 派遠端 pi、review／verify 派本機 codex）：通過。**沒有來源 workspace 的 worktree 卡在 L1 走到底：task `completed`（08:30:41）→ `committed`（08:31:11，head `4ec33f7`）→ `pr_opened`（08:31:19，沙盒 PR #9，base `main`、只含 `docs/s18.txt` 一個 commit），沒有 `autopick_failed`。執行期間每 3 秒取樣 workspace：只有 worktree workspace 與 Herdr 連帶開出的 repo 主 workspace，沒有 autopick 來源 workspace。bridge 沒有 merge（L1 由人 merge）。
+- **範圍（更新）：**L0 與 L1 各 1 個樣本；L2（review 迴圈與 merge）在沒有來源 workspace 時沒重跑；readonly 卡沒實測。
 
 ## ISSUE-220：profile Worker 的 pane 只顯示 `codex·worker`，看不出擔任的角色
 
@@ -187,6 +190,7 @@
 - **review 迴圈的另一個觀察（卡片設計，不是 bridge 錯誤）：**第一張卡 `REQ-20261126-issue213-l2-remote` 的驗收條件寫成 bridge 流程步驟（committed、review 迴圈執行、merge 被拒），遠端 reviewer 只看得到 PR 的 diff，兩輪＋手動一輪共三輪都對三條條件回「無法判斷」，判定 `inconclusive`，loop 在「同一個 head 連續 2 次 inconclusive」停下，總上限 3 輪用完。reviewer 的回覆本身解析正常。**寫沙盒驗收卡時，驗收條件要寫成 PR diff 就能判斷的內容。**
 - **未解釋的一次失敗（只有 1 個樣本，原因未查）：**`REQ-20261126-issue213-l2-remote-b` 第二次撿卡建好 worktree 後，Lead 的啟動命令 `codex --add-dir <repo>/.git/worktrees/<name>` 回 `No such file or directory (os error 2)`，autopick 記 `Lead 尚未就緒，任務沒有啟動`；事後該目錄存在。可能是我手動移除再重建同名 worktree 造成的時序問題，沒有驗證。改用新卡 id（`-c`）重撿即通過。
 - **範圍與限制（更新）：**L0、L1、L2（到等 CI 逾時）各 1 個樣本；沒驗到：L2 的真的 merge（需要沙盒 repo 有 CI 並讓檢查通過，使用者選擇不加）、review 發現 finding 後的 fix 迴圈、遠端產出含額外檔案必須拒絕。沙盒 PR #6、#7 與其遠端、本機分支驗完後已由使用者同意關閉並刪除（沙盒遠端只剩 `main`）。
+- **L1 在無來源 workspace 的 worktree 卡上重跑（2026-11-26 08:28 至 08:32 UTC，沙盒卡 `REQ-20261126-l1-no-source-ws`，沙盒 repo 暫設 L1（驗完改回 L0），bridge 含 #395（`bf3edce`），implement 派遠端 pi、review／verify 派本機 codex）：通過。**遠端 pi 寫入、bridge 本機 commit、push 並開 PR（沙盒 PR #9，只含 `docs/s18.txt`），沒有「這個版本已經 commit 了」；與 2026-11-26 01:46 的 L1 驗收（ISSUE-217 修正後）相比，這次 autopick 沒有來源 workspace（ISSUE-221）。1 個樣本。沙盒 PR #9 與分支留待使用者同意後清理。
 
 ## ISSUE-212：遠端 codex 的 verify 報告，`codingResult` 沒有被記錄，verify 一直是「未通過」
 
