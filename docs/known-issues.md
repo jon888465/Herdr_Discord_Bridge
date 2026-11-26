@@ -2,7 +2,7 @@
 
 ## ISSUE-218：Herdr 重用 workspace id，worktree 索引裡別張卡的過期紀錄擋住新卡（`workspace … is already recorded`）
 
-2026-11-26。狀態：**已修正、待驗收**（程式與自動化測試完成；實機尚未驗收，bridge 未重啟）。與 ISSUE-217 同源（Herdr 重用 workspace id），是第二個受影響的地方。
+2026-11-26。狀態：**已驗收（範圍有限，見最後一則）**（#386 已部署；2026-11-26 重跑時同一個 workspace id 不再被擋）。先前：已修正、待驗收。與 ISSUE-217 同源（Herdr 重用 workspace id），是第二個受影響的地方。
 
 **症狀（2026-11-26 04:01 UTC，沙盒卡 `REQ-20261126-issue213-l2-remote-b`，L2）：**自動撿卡建好 worktree（workspace `w6T`）後，寫入 worktree 索引失敗：`workspace w6T is already recorded。bridge 不會追蹤它，需要手動清理`，卡片仍是 `ready`，需要手動清理已建好的 worktree。
 
@@ -15,6 +15,8 @@
 **測試（2026-11-26，本機，`npm run build`、`npm run lint` 通過）：**`card-worktrees`、`card-worktree*`、`card-cleanup*` 共 54 項通過；新增測試涵蓋：目錄還在時另一張卡被拒、目錄不見後過期紀錄被標記移除且新紀錄進入、同一張卡不會被當成過期。
 
 **未驗證／限制：**實機（部署後重跑會落在舊 id 的卡）；索引裡其他過期的作用中紀錄不會被主動清掉，只在 id 被重用時才處理；`removedAt` 設成新記錄的時間，不是目錄實際消失的時間；其他以 workspace id 為鍵的狀態（例如 Agent pool 的 team，見 ISSUE-217）沒有逐一盤點。
+- **實機驗收（2026-11-26 05:08 UTC，重啟部署 #386 後）：**卡片 `REQ-20261126-issue213-l2-remote-b` 重撿，在 workspace `w6T`（索引裡有 2026-11-12 另一張卡的過期紀錄）建 worktree 並寫入索引成功（`worktree_created`），不再出現 `already recorded`。範圍：1 個樣本；第一次失敗時留下的未入索引 worktree 無法用 `card cleanup` 清（沒有作用中紀錄），是手動用 `git worktree remove` 清掉的。
+
 ## ISSUE-217：Herdr 重用 workspace id，狀態檔裡舊 team 含已移除的 profile，卡片任務啟動失敗 `unknown Agent profile`
 
 2026-11-26。狀態：**已驗收（範圍有限，見最後一則）**（#383 已部署；2026-11-26 同一張沙盒卡重跑通過）。先前：已修正、待驗收。
@@ -108,6 +110,10 @@
 - **範圍與限制：**只有 1 個樣本；只驗 L0（停在 commit）；L1 的 push 與開 PR、L2 的 review 迴圈、`card commit` 在其他「已 commit」情境（例如遠端產出含額外檔案時必須拒絕）都沒有實機驗；這次通過時 verify 指派的是**本機** codex（`verify: local:codex`），因為前兩次用遠端 verify 沒能完成（ISSUE-216，仍待調查），所以遠端 verify 路徑沒有驗到。
 - **L1 實機驗收（2026-11-26 01:36 至 01:56 UTC，沙盒卡 `REQ-20261126-issue213-l1-remote`，沙盒 repo 暫設 L1（驗完已改回 L0），bridge 含 #383（`c5410b0`），implement／review／verify 都派遠端 machine）：通過。**implement 派遠端 pi、review／verify 派遠端 codex 各一次；task `completed`（01:54:53）→ `committed`（01:55:53，head `7788ebd`，只新增 `docs/s9.txt`）→ `pr_opened`（01:56:02，沙盒 repo 的 PR #5，base `main`、head 為卡片分支、一個 commit `hdb remote implement`、只改 `docs/s9.txt`）。bridge 沒有 merge（L1 由人 merge）；沒有出現「這個版本已經 commit 了」。第一次嘗試（01:36）在 assign 就失敗，原因是 ISSUE-217（與本問題無關），修正後重跑通過。
 - **範圍與限制（更新）：**L0 與 L1 各 1 個樣本；L2 的 review 迴圈與自動 merge 沒驗；「遠端產出含額外檔案必須拒絕」沒有實機驗；沙盒 PR #5 與遠端、本機分支 `card/REQ-20261126-issue213-l1-remote` 驗完後已由使用者同意關閉並刪除；沒有 CI（沙盒 repo 沒有 workflow），所以「CI 回報」這段沒驗到。
+- **L2 實機驗收（2026-11-26 03:42 至 05:47 UTC，沙盒卡，沙盒 repo 暫設 L2（驗完已改回 L0），implement／review／verify 都派遠端 machine，bridge 含 #386）：通過到「review 通過、等 CI 逾時、沒有 merge」，沒有驗到真的 merge。**卡片 `REQ-20261126-issue213-l2-remote-c`：task `completed` 05:16:02 → `committed` 05:16:11（head `f42443d`，只新增 `docs/s12.txt`）→ `pr_opened` 05:16:19（沙盒 PR #7）→ 遠端 reviewer 第 1 輪 `pass`（05:17:38）→ `card loop --merge` 等 CI；沙盒 repo 沒有 workflow，所以一直是「沒有檢查」，30 分鐘後 `loop_stopped`（05:47:19，autopick 記 `等 CI 逾時，沒有 merge；review 已通過`），PR 仍是 OPEN。符合 SPEC：沒有任何檢查不會 merge。
+- **review 迴圈的另一個觀察（卡片設計，不是 bridge 錯誤）：**第一張卡 `REQ-20261126-issue213-l2-remote` 的驗收條件寫成 bridge 流程步驟（committed、review 迴圈執行、merge 被拒），遠端 reviewer 只看得到 PR 的 diff，兩輪＋手動一輪共三輪都對三條條件回「無法判斷」，判定 `inconclusive`，loop 在「同一個 head 連續 2 次 inconclusive」停下，總上限 3 輪用完。reviewer 的回覆本身解析正常。**寫沙盒驗收卡時，驗收條件要寫成 PR diff 就能判斷的內容。**
+- **未解釋的一次失敗（只有 1 個樣本，原因未查）：**`REQ-20261126-issue213-l2-remote-b` 第二次撿卡建好 worktree 後，Lead 的啟動命令 `codex --add-dir <repo>/.git/worktrees/<name>` 回 `No such file or directory (os error 2)`，autopick 記 `Lead 尚未就緒，任務沒有啟動`；事後該目錄存在。可能是我手動移除再重建同名 worktree 造成的時序問題，沒有驗證。改用新卡 id（`-c`）重撿即通過。
+- **範圍與限制（更新）：**L0、L1、L2（到等 CI 逾時）各 1 個樣本；沒驗到：L2 的真的 merge（需要沙盒 repo 有 CI 並讓檢查通過，使用者選擇不加）、review 發現 finding 後的 fix 迴圈、遠端產出含額外檔案必須拒絕。沙盒 PR #6、#7 與其遠端分支尚未關閉或刪除（等使用者同意）。
 
 ## ISSUE-212：遠端 codex 的 verify 報告，`codingResult` 沒有被記錄，verify 一直是「未通過」
 
