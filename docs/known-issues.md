@@ -1,5 +1,20 @@
 # Known Issues
 
+## ISSUE-218：Herdr 重用 workspace id，worktree 索引裡別張卡的過期紀錄擋住新卡（`workspace … is already recorded`）
+
+2026-11-26。狀態：**已修正、待驗收**（程式與自動化測試完成；實機尚未驗收，bridge 未重啟）。與 ISSUE-217 同源（Herdr 重用 workspace id），是第二個受影響的地方。
+
+**症狀（2026-11-26 04:01 UTC，沙盒卡 `REQ-20261126-issue213-l2-remote-b`，L2）：**自動撿卡建好 worktree（workspace `w6T`）後，寫入 worktree 索引失敗：`workspace w6T is already recorded。bridge 不會追蹤它，需要手動清理`，卡片仍是 `ready`，需要手動清理已建好的 worktree。
+
+**預期行為：**別張卡留在索引裡的過期紀錄不擋新卡。
+
+**已確認根因（2026-11-26 查索引檔與讀碼）：**`src/card-worktrees.ts` 的 `record()` 拒絕「同一個 workspace id 已有作用中紀錄」。索引（`card-worktrees.json`，當時 157 筆）裡 `w6T` 有一筆 2026-11-12 的卡 `REQ-20261111-remote-in-task-roles`，`removedAt` 是空的（仍算作用中），但它的 worktree 目錄已經不存在（在 bridge 之外被移除，沒有走 `card cleanup`）。Herdr 把 `w6T` 重新發給新的 workspace，就撞上這筆過期紀錄。
+
+**修正（2026-11-26）：**`record()` 遇到同 workspace id 的作用中紀錄時：屬於**同一張卡**或**目錄仍然存在**就照舊拒絕；屬於別張卡且目錄已不存在，就把那筆標成已移除（`removedAt` 設為這次記錄的時間，歷史保留）再記新的。「同一張卡只能有一個作用中 worktree」的規則不變。
+
+**測試（2026-11-26，本機，`npm run build`、`npm run lint` 通過）：**`card-worktrees`、`card-worktree*`、`card-cleanup*` 共 54 項通過；新增測試涵蓋：目錄還在時另一張卡被拒、目錄不見後過期紀錄被標記移除且新紀錄進入、同一張卡不會被當成過期。
+
+**未驗證／限制：**實機（部署後重跑會落在舊 id 的卡）；索引裡其他過期的作用中紀錄不會被主動清掉，只在 id 被重用時才處理；`removedAt` 設成新記錄的時間，不是目錄實際消失的時間；其他以 workspace id 為鍵的狀態（例如 Agent pool 的 team，見 ISSUE-217）沒有逐一盤點。
 ## ISSUE-217：Herdr 重用 workspace id，狀態檔裡舊 team 含已移除的 profile，卡片任務啟動失敗 `unknown Agent profile`
 
 2026-11-26。狀態：**已驗收（範圍有限，見最後一則）**（#383 已部署；2026-11-26 同一張沙盒卡重跑通過）。先前：已修正、待驗收。

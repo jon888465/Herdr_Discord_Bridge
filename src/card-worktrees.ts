@@ -161,12 +161,14 @@ export class CardWorktreeStore {
       )
     )
       throw new Error(`card ${entry.cardId} already has an active worktree`);
-    if (
-      this.worktrees.some(
-        (item) => item.workspaceId === entry.workspaceId && !item.removedAt,
-      )
-    )
-      throw new Error(`workspace ${entry.workspaceId} is already recorded`);
+    // ISSUE-218：Herdr 會重用 workspace id。別張卡的作用中紀錄若 worktree 目錄已經不存在，那筆是過期的
+    // （目錄被手動或在 bridge 之外移除），標記為已移除後再記新的；目錄還在就仍然拒絕。
+    for (const item of this.worktrees) {
+      if (item.workspaceId !== entry.workspaceId || item.removedAt) continue;
+      if (item.cardId === entry.cardId || fs.existsSync(item.path))
+        throw new Error(`workspace ${entry.workspaceId} is already recorded`);
+      item.removedAt = at;
+    }
     this.worktrees.push(entry);
     this.save();
   }

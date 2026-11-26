@@ -60,6 +60,31 @@ test("a card can have only one active worktree, and a second record is refused",
   assert.equal(fs.readFileSync(f, "utf8"), before);
 });
 
+test("ISSUE-218: 重用的 workspace id，別張卡的過期紀錄（目錄已不存在）被標記移除；目錄還在就拒絕", () => {
+  const f = file();
+  const store = new CardWorktreeStore(f);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "card-wt-dir-"));
+  store.record({ ...entry, path: dir }, T1);
+  // 目錄還在：另一張卡不能用同一個 workspace id。
+  assert.throws(
+    () => store.record({ ...entry, cardId: "REQ-20261103-two", branch: "card/REQ-20261103-two" }, T2),
+    /already recorded/,
+  );
+  // 目錄不見了：過期紀錄標記為已移除，新的記得進去，歷史保留。
+  fs.rmSync(dir, { recursive: true });
+  store.record({ ...entry, cardId: "REQ-20261103-two", branch: "card/REQ-20261103-two", path: `${dir}-two` }, T2);
+  const all = store.list();
+  assert.equal(all.length, 2);
+  assert.equal(all[0]?.removedAt, T2);
+  assert.equal(all[1]?.removedAt, undefined);
+  assert.deepEqual(store.activeWorkspaceIds(), ["w9"]);
+  // 同一張卡自己的作用中紀錄永遠不會被當成過期。
+  assert.throws(
+    () => store.record({ ...entry, cardId: "REQ-20261103-two", branch: "card/REQ-20261103-two", path: `${dir}-three` }, T2),
+    /already has an active worktree/,
+  );
+});
+
 test("markRemoved ends the worktree, frees the card for a new one, and keeps the history", () => {
   const f = file();
   const store = new CardWorktreeStore(f);
