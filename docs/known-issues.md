@@ -2,7 +2,7 @@
 
 ## ISSUE-222：Herdr 因建 worktree 連帶開出的 repo 主 workspace，bridge 清理後沒有關
 
-2026-11-26。狀態：**已修正、待驗收**（程式與自動化測試完成；實機尚未驗收，bridge 未重啟）。使用者決定（2026-11-26）：「我手動開的不處理，只處理 bridge 開的」。來源是 ISSUE-221 的觀察（`herdr worktree create` 會連帶開出 repo 的主 checkout workspace，每個 repo 一個，worktree 移除後仍留著）。
+2026-11-26。狀態：**已驗收（範圍有限，見最後一則）**（#395 已部署；2026-11-26 沙盒實機正例與反例都通過，各 1 個樣本）。先前：已修正、待驗收。使用者決定（2026-11-26）：「我手動開的不處理，只處理 bridge 開的」。來源是 ISSUE-221 的觀察（`herdr worktree create` 會連帶開出 repo 的主 checkout workspace，每個 repo 一個，worktree 移除後仍留著）。
 
 **症狀：**每個 repo 第一次建卡片 worktree 後，Herdr 多出一個以 repo 目錄名命名、沒有 agent 的空 workspace；`card cleanup` 只移除 worktree，不處理它，需要手動 `herdr workspace close`。
 
@@ -13,6 +13,11 @@
 **測試（2026-11-26，本機，`npm run build`、`npm run lint` 通過）：**完整測試 2341 項，2340 通過、0 失敗、1 跳過。新增：`createWorktree` 只把建立後多出的 repo 主 workspace 當 bridge 開的（使用者原本就開著的、列不出來、別的 repo 多出來的都不算）；`closeBridgeRepoWorkspace` 只關空的單一 pane 主 workspace（有 agent、多 pane、linked、對不上 repo、已不存在、Herdr 拒絕都保留）；索引標記在還有作用中 worktree 時不交出、最後一個移除後交出一次、重載後仍在；`prepareCardWorktree`／`cleanupCardWorktree` 串起來。三個既有測試改了預期（建立 worktree 前多一次 `workspace.list`）。
 
 **未驗證／限制：**實機（部署後跑一張沙盒卡，確認 worktree 清掉後 repo 主 workspace 也被關）；Herdr 會不會重用使用者自己開的主 workspace 只驗證了它重用自己開的那一個，所以「建立前就存在」的判斷是靠 workspace 列表前後比對，不是靠 Herdr 的說明；同一 repo 兩張卡同時進行時，第二張建立時主 workspace 已存在，只有第一張記標記，所以由「最後一個清掉」的卡關閉（依 repo 的作用中 worktree 判斷，不依卡）；bridge 重啟後標記從索引檔還原；只處理 `card cleanup` 路徑，沒有 `card cleanup` 而被手動用 `herdr worktree remove` 移除的 worktree 不會觸發關閉；先前（ISSUE-221 實驗）手動關掉的不受影響。
+- **實機驗收（2026-11-26 07:46 至 07:54 UTC，bridge 含 #395 `bf3edce`，沙盒 repo L0，implement 派遠端 pi、review／verify 派本機 codex，Herdr 0.9.5）：**
+  - **正例（bridge 開的）：**卡片 `REQ-20261126-issue222-repo-workspace` 建 worktree 時，Herdr 連帶開出 repo 主 workspace（`w76`）；索引檔的 `repoWorkspaces` 記下 `{repo: w76}`；task 完成並 `committed`（head `a03379e`）；`card cleanup` 之後 `w76` 被關掉、標記清除，Herdr 只剩使用者的 4 個 workspace。
+  - **反例（使用者手動開的）：**我先手動開一個 repo workspace（`w78`，標籤 `user-sandbox`），再跑卡片 `REQ-20261126-issue222-user-workspace`：建 worktree 時 Herdr 重用 `w78`，索引**沒有**記標記；task 完成並 `committed`（head `523a07c`）；`card cleanup` 之後 `w78` 仍在，沒有被關。（之後由我手動關掉這個測試用 workspace。）
+  - 這同時驗證了 Herdr 會重用使用者自己開的主 checkout workspace（先前只驗證過重用自己開的那一個，現在補上，1 個樣本）。
+- **範圍與限制（更新）：**各 1 個樣本、L0；同一 repo 兩張卡同時進行（最後一張才關）、使用者在 bridge 開的 workspace 裡開 agent 或多 pane 後的保留（只有單元測試）、手動用 `herdr worktree remove` 移除的情況，沒有實機驗；沙盒測試用分支已刪，遠端只剩 `main`。
 
 ## ISSUE-221：自動撿卡對 worktree 卡開兩個 agent，第一個只是閒置
 
