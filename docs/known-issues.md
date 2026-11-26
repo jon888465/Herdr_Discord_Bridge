@@ -15,7 +15,7 @@
 **測試（2026-11-26，本機，`npm run build`、`npm run lint` 通過）：**`agent-pool.test` 38 項、`coding-roster`＋`team*` 共 180 項通過；新增「舊 team 含 config 已移除的 profile 時，roster 略過它」。
 
 **未驗證／限制：**實機（部署後重跑同一張沙盒卡，已知會落在這類舊 id）；狀態檔裡這些過期 team 條目沒有清除（只是不再擋任務）；其他直接呼叫 `profile(id)` 而不經 `roster()` 的路徑（例如 `acquire`）遇到過期 id 仍會丟錯，沒有逐一檢查。
-- **實機驗收（2026-11-26 01:46 UTC 重啟後重跑）：**這次任務落在 workspace `w6P`，狀態檔裡 `w6P` 同樣有舊 team `[helper, reviewer, claude, agy]`；bridge console 出現 `agent pool: workspace w6P 的 team 含已不存在的 profile claude，略過`，任務正常啟動並完成（見 ISSUE-213 的 L1 驗收）。範圍：1 個樣本；狀態檔的過期 team 條目仍在（`w6M`、`w6P` 都還有），只是不再擋任務；不經 `roster()` 的路徑沒有驗。**另記一個觀察（未調查）：**重啟後約 7 分鐘才撿起卡片（console 沒有任何報錯），先前約 1 分鐘；原因不明，只有 1 個樣本。
+- **實機驗收（2026-11-26 01:46 UTC 重啟後重跑）：**這次任務落在 workspace `w6P`，狀態檔裡 `w6P` 同樣有舊 team `[helper, reviewer, claude, agy]`；bridge console 出現 `agent pool: workspace w6P 的 team 含已不存在的 profile claude，略過`，任務正常啟動並完成（見 ISSUE-213 的 L1 驗收）。範圍：1 個樣本；狀態檔的過期 team 條目仍在（`w6M`、`w6P` 都還有），只是不再擋任務；不經 `roster()` 的路徑沒有驗。**另記一個觀察（未調查）：**重啟後約 7 分鐘才撿起卡片（console 沒有任何報錯），先前約 1 分鐘；原因不明，只有 1 個樣本。**推論（2026-11-26 讀碼，沒有量過耗時、沒有重現，使用者決定先觀察不修）：**每分鐘的撿卡掃描（`src/main.ts` 的 sweep）先對每張卡呼叫 `closeAutopickLead`，之後才 `picker.tick()`；狀態是 `done`／`cancelled` 且帶 `autopick_workspace_id` 的卡（當時 43 張）各自呼叫一次 `listWorkspaces()`（`src/card-cleanup.ts`），而 hub 版會把請求一併發給遠端 machine（`src/machines.ts` 的 `aggregate`）；遠端重啟後重連中或剛斷線時單次呼叫可能很慢，累計可能拖上數分鐘。旁證：重啟後 console 出現過 `machine … unreachable (using last known state)` 才 `connected`；本機 `herdr workspace list` 只要約 17 毫秒。**下次碰到時記錄：**重啟時間與卡片 `autopick_picked` 事件的時間差、當時 console 的遠端重連訊息、帶 `autopick_workspace_id` 的 `done`／`cancelled` 卡數量。可能的修法（未做）：每次掃描只呼叫一次 `listWorkspaces()` 供所有卡共用，並讓 `picker.tick()` 不被清理迴圈擋住。
 
 ## ISSUE-216：遠端寫入的卡，遠端 verify 看不到 bridge 的 commit，Lead 反覆追加驗證直到規劃輪數用完
 
