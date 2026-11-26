@@ -1238,7 +1238,7 @@ export async function handleCommand(
           // 自動撿卡的 worktree 卡：來源只是放 repo 的 workspace，沒有 agent（見 WorktreeSource）。
           const source = autopickSources.get(card.id);
           const { workspaceId, lead } = source
-            ? { workspaceId: source.workspaceId, lead: sourceLeadRecord(source) }
+            ? { workspaceId: undefined, lead: sourceLeadRecord(source) }
             : await activeLeadFor(context, runtime);
           return prepareCardWorktree(
             {
@@ -1265,7 +1265,7 @@ export async function handleCommand(
               authorize: (id) =>
                 authorizeBridgeWorkspace(
                   runtime.config.allowedWorkspaceIds,
-                  workspaceId,
+                  workspaceId ?? "",
                   id,
                 ),
               switchRoute: (_workspaceId, agent) => {

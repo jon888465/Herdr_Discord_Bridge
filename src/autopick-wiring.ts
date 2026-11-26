@@ -15,11 +15,12 @@ import type { AgentRecord } from "./types.js";
 export const AUTOPICK_USER = "autopick";
 
 /**
- * worktree 卡（非 readonly）的來源：autopick 只開一個放 repo 的 workspace，不再在裡面多啟動一個 Lead agent。
+ * worktree 卡（非 readonly）的來源：autopick 不再為它開 workspace、也不啟動 agent。
  * `card assign --worktree` 只需要來源的工作目錄與 agent 種類，真正的 Lead 是它在 worktree workspace 啟動的那一個。
+ * 不開來源 workspace 的原因：Herdr 對同一個 repo 的 workspace 分組，第一個（主要）workspace 在還有 linked
+ * worktree workspace 時不能單獨關閉（`workspace_group_close_required`），來源 workspace 一旦變成主要的就關不掉。
  */
 export interface WorktreeSource {
-  workspaceId: string;
   repoPath: string;
   kind: string;
 }
@@ -29,7 +30,7 @@ export function sourceLeadRecord(source: WorktreeSource): AgentRecord {
   return {
     pane_id: "",
     terminal_id: "",
-    workspace_id: source.workspaceId,
+    workspace_id: "",
     tab_id: "",
     agent: source.kind,
     agent_status: "idle",
@@ -99,6 +100,14 @@ export function createAutopickSteps(deps: AutopickWiringDeps): AutopickSteps {
       if (!stat.isDirectory())
         throw new Error(`repo 路徑不是資料夾：${job.repoPath}`);
 
+      if (job.card.mode !== "readonly" && deps.registerWorktreeSource) {
+        // 有 worktree 的卡：不開來源 workspace、不啟動 agent；真正的 Lead 由 `card assign --worktree` 在 worktree workspace 啟動。
+        deps.registerWorktreeSource(job.card.id, {
+          repoPath: job.repoPath,
+          kind: job.lead,
+        });
+        return { close: async () => {} };
+      }
       const label = autopickLeadLabel(job.lead, job.card.id);
       const created = (await deps.port.request("workspace.create", {
         cwd: job.repoPath,
@@ -141,16 +150,6 @@ export function createAutopickSteps(deps: AutopickWiringDeps): AutopickSteps {
       };
       try {
         deps.recordLeadWorkspace(job.card.id, workspaceId, label);
-        if (job.card.mode !== "readonly" && deps.registerWorktreeSource) {
-          // 有 worktree 的卡：真正的 Lead 由 `card assign --worktree` 在 worktree workspace 啟動，這裡不再多開一個。
-          deps.registerWorktreeSource(job.card.id, {
-            workspaceId,
-            repoPath: job.repoPath,
-            kind: job.lead,
-          });
-          await deps.command(`wk use ${workspaceId}`);
-          return { close };
-        }
         const lead = await startAgentInPane(deps.port, {
           paneId,
           kind: job.lead,

@@ -459,26 +459,34 @@ test("Lead uses only the known Codex update skip and waits after it", async () =
   assert.deepEqual(h.commands, ["wk use w9", "agent use w9:p1"]);
 });
 
-test("worktree 卡：來源 workspace 只登記，不啟動 agent、不 agent use；readonly 卡仍照舊啟動 Lead", async () => {
+test("worktree 卡：不開來源 workspace、不啟動 agent、不 wk use／agent use，只登記來源；readonly 卡仍照舊啟動 Lead", async () => {
   const registered: Array<[string, unknown]> = [];
-  const h = harness({ registerWorktreeSource: (id, source) => void registered.push([id, source]) });
+  const h = harness({
+    registerWorktreeSource: (id, source) => void registered.push([id, source]),
+    recordLeadWorkspace: () => assert.fail("沒有來源 workspace 可記錄"),
+  });
   const lead = await h.steps.startLead(job({ lead: "codex" }));
-  assert.ok(!h.requests.some((r) => r.method === "agent.start"), "不再多啟動一個 agent");
-  assert.deepEqual(h.commands, ["wk use w9"]);
-  assert.deepEqual(registered, [["REQ-20261105-x", { workspaceId: "w9", repoPath: os.tmpdir(), kind: "codex" }]]);
+  assert.deepEqual(h.requests, [], "不建 workspace、不啟動 agent");
+  assert.deepEqual(h.commands, []);
+  assert.deepEqual(registered, [["REQ-20261105-x", { repoPath: os.tmpdir(), kind: "codex" }]]);
   await lead.close();
-  assert.ok(h.requests.some((r) => r.method === "workspace.close" && r.params?.workspace_id === "w9"));
+  assert.deepEqual(h.requests, [], "沒有 workspace 可關");
 
   const ro = harness({ registerWorktreeSource: () => assert.fail("readonly 不登記來源") });
   await ro.steps.startLead(job({ card: { id: "REQ-20261105-r", mode: "readonly" } as Card }));
+  assert.ok(ro.requests.some((r) => r.method === "workspace.create"));
   assert.ok(ro.requests.some((r) => r.method === "agent.start"));
   assert.deepEqual(ro.commands, ["wk use w9", "agent use w9:p1"]);
 });
 
+test("worktree 卡仍先檢查 repo 路徑，不存在就拒絕", async () => {
+  const h = harness({ registerWorktreeSource: () => assert.fail("不該登記") });
+  await assert.rejects(h.steps.startLead(job({ repoPath: "/no/such/repo" })), /repo 路徑不存在/);
+});
+
 test("來源紀錄只提供 prepareCardWorktree 讀的欄位：工作目錄與 agent 種類", () => {
-  const lead = sourceLeadRecord({ workspaceId: "w9", repoPath: "/repo", kind: "codex" });
+  const lead = sourceLeadRecord({ repoPath: "/repo", kind: "codex" });
   assert.equal(lead.foreground_cwd, "/repo");
   assert.equal(lead.cwd, "/repo");
   assert.equal(lead.agent, "codex");
-  assert.equal(lead.workspace_id, "w9");
 });

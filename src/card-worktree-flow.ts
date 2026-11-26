@@ -34,7 +34,8 @@ export interface PrepareDeps {
   /** 目前 thread 的 active Agent（呼叫端已解析並驗證過授權）。 */
   lead: AgentRecord;
   /** thread 目前路由的 workspace；新 worktree workspace 的授權以它為前提。 */
-  sourceWorkspaceId: string;
+  /** 沒有來源 workspace（自動撿卡的 worktree 卡）時不給，索引記成 worktree 自己的 workspace。 */
+  sourceWorkspaceId?: string;
   /** 取得某目錄所在 git repo 的根目錄；不是 git repo 回傳 undefined。 */
   repoRoot(directory: string): Promise<string | undefined>;
   /** 取得某目錄目前的 HEAD sha；失敗回傳 undefined。 */
@@ -103,7 +104,7 @@ export async function prepareCardWorktree(
       {
         cardId,
         workspaceId: created.workspaceId,
-        sourceWorkspaceId: deps.sourceWorkspaceId,
+        sourceWorkspaceId: deps.sourceWorkspaceId ?? created.workspaceId,
         path: created.path,
         repoPath,
         branch: created.branch,

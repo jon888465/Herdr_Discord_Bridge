@@ -2,17 +2,22 @@
 
 ## ISSUE-221：自動撿卡對 worktree 卡開兩個 agent，第一個只是閒置
 
-2026-11-26。狀態：**已修正、待驗收**（程式與自動化測試完成；實機尚未驗收，bridge 未重啟）。使用者提問（2026-11-26）：「autopick 需要都開一個 agent 嗎？它不能跟 Lead 一起用嗎？」
+2026-11-26。狀態：**已修正、待驗收**（第一版實機失敗，第二版程式與自動化測試完成；第二版實機尚未驗收，bridge 未重啟）。使用者提問（2026-11-26）：「autopick 需要都開一個 agent 嗎？它不能跟 Lead 一起用嗎？」
 
 **症狀：**每張 worktree 卡的自動撿卡會啟動兩個 agent：第一個在原 repo 目錄的 workspace（`autopick-<kind>-<card>`），第二個由 `card assign --worktree` 在新 worktree workspace 啟動；task 的 Lead 是第二個。console 的 `agent.prompt` 全部送到 worktree 的 pane，autopick 那個 pane 狀態一直是 `done`，沒被 prompt 過。每次多一個 agent 進程、多一次啟動與更新提示處理、多一個要清理的 workspace。
 
 **已確認根因（2026-11-26 讀碼）：**autopick 走與人手動相同的 console 流程（`wk use`、`agent use`、`card assign --worktree`）。`prepareCardWorktree` 只讀「目前選中的 Lead」的**工作目錄**與 **agent 種類**（用來決定 repo 與在 worktree 啟動同種 agent），所以 autopick 先開了一個真的 agent 提供這兩個值。不能直接把它當 task Lead：它跑在原 repo 目錄，沒有隔離。
 
-**修正（2026-11-26）：**`src/autopick-wiring.ts` 的 `startLead`：非 readonly 的卡（有 worktree）只建 workspace、登記來源（`registerWorktreeSource`，內容是 workspace、repo 路徑、agent 種類）並 `wk use`，**不再啟動 agent、不 `agent use`**；`src/main.ts` 的 `prepareWorktree` 看到該卡有登記的來源，就用 `sourceLeadRecord`（只含工作目錄與種類的紀錄）取代 `activeLeadFor`，其餘流程不變；task 的 Lead 仍是 worktree workspace 裡新啟動的那一個。**readonly 卡沒有 worktree，沒有第二個 agent，仍照舊啟動 Lead**。來源登記在自動撿卡回報結果時清掉；沒有提供 `registerWorktreeSource` 的呼叫端行為與以前相同。
+**第一版修正（2026-11-26，#391，實機失敗，見下）：**`src/autopick-wiring.ts` 的 `startLead`：非 readonly 的卡（有 worktree）只建 workspace、登記來源（`registerWorktreeSource`，內容是 workspace、repo 路徑、agent 種類）並 `wk use`，**不再啟動 agent、不 `agent use`**；`src/main.ts` 的 `prepareWorktree` 看到該卡有登記的來源，就用 `sourceLeadRecord`（只含工作目錄與種類的紀錄）取代 `activeLeadFor`，其餘流程不變；task 的 Lead 仍是 worktree workspace 裡新啟動的那一個。**readonly 卡沒有 worktree，沒有第二個 agent，仍照舊啟動 Lead**。來源登記在自動撿卡回報結果時清掉；沒有提供 `registerWorktreeSource` 的呼叫端行為與以前相同。
 
 **測試（2026-11-26，本機，`npm run build`、`npm run lint` 通過）：**完整測試 2335 項，2334 項通過、0 失敗（另有 1 項被跳過）；`autopick-wiring`＋`autopick` 60 項通過；新增測試涵蓋：worktree 卡不啟動 agent、不 `agent use`、登記來源、關閉時關掉 workspace；readonly 卡仍啟動 Lead 且不登記；來源紀錄只含工作目錄與種類。
 
 **未驗證／限制：**實機（部署後跑一張 worktree 沙盒卡，確認 task 正常完成、console 只出現一次 agent 啟動與一次更新提示跳過）；沒有針對 `main.ts` 裡 `prepareWorktree` 的分支寫測試（只有型別、建置與 wiring 單元測試）；來源 workspace 仍會建立（一個放 repo 的閒置 shell，沒有 agent），沒有把它也省掉，因為 `autopick_workspace_*` 欄位、清理（`closeAutopickLead`）與索引的 `sourceWorkspaceId` 都綁在它上面；Lead 就緒檢查現在只剩 worktree 那個 agent（`card assign` 已會在它沒就緒時回報「任務沒有啟動」）。
+- **第一版的實機結果（2026-11-26 06:56 至 07:00 UTC，沙盒卡 `REQ-20261126-issue221-single-agent`，L0，bridge 含 #391）：**ISSUE-221 本身有效——只出現兩個 workspace（來源 `w6Y` 沒有 agent、worktree `w6Z` 有一個 codex），task 完成並 `committed`（head `67aca4d`）。但 autopick 在最後關來源 workspace 時失敗：`herdr workspace.close: workspace_group_close_required workspace has linked worktree workspaces; use --group`，卡片記 `autopick_failed`（停在 `commit`，交付本身已完成）。
+- **第二個根因（2026-11-26 實驗確認一半）：**Herdr 0.9.5 依 repo 把 workspace 分組；組內**第一個（主要）workspace** 在還有 linked worktree workspace 時不能單獨關閉。實驗：在同一個 repo 另開一個臨時 workspace（`w60`）可以單獨關掉，主要的 `w6Y` 不行。**推論（未驗證）：**先前的 autopick 來源 workspace 能關，是因為組裡一直有別的常駐 workspace（先前漏關的 autopick workspace）當主要；我在 2026-11-26 清掉那些閒置 workspace 後，新的來源 workspace 才變成主要。也就是說，舊流程依賴「有人漏關」才不失敗。
+- **第二版修正（2026-11-26，本 PR）：**worktree 卡**完全不建來源 workspace**：`startLead` 只登記來源（工作目錄與 agent 種類，`WorktreeSource` 不再有 workspace id），不建 workspace、不啟動 agent、不 `wk use`、不記 `autopick_workspace_*`，`close` 是空操作；`prepareCardWorktree` 的 `sourceWorkspaceId` 改為選填，沒有來源時索引記成 worktree 自己的 workspace id（欄位仍是合法的 workspace id，不需要遷移索引）。`worktree.create` 本來就只吃 repo 路徑，不依賴來源 workspace。readonly 卡仍照舊建 workspace 並啟動 Lead（沒有 worktree，不會被 linked worktree 擋住）。
+- **測試（第二版，2026-11-26，本機，`npm run build`、`npm run lint` 通過）：**完整測試 2337 項，2336 通過、0 失敗、1 跳過；新增／改寫：worktree 卡不建 workspace、不啟動 agent、不下任何指令、不記 workspace、關閉是空操作；readonly 卡仍照舊；repo 路徑不存在仍拒絕；`prepareCardWorktree` 沒有來源 workspace 時索引記 worktree 自己的 id。
+- **新的限制：**沒有來源 workspace 後，autopick 的 console 使用者沒有 `wk use` 的路由，`card assign` 是否都不需要路由只靠讀碼（`prepareWorktree` 已改走來源紀錄）與下一次實機驗證；`autopick_workspace_*` 欄位對 worktree 卡不再寫入，`closeAutopickLead` 對它們沒有東西可關；readonly 卡仍有「來源 workspace 是主要時關不掉」的同樣風險（readonly 沒有 linked worktree，所以不會觸發，沒有實測）。
 
 ## ISSUE-220：profile Worker 的 pane 只顯示 `codex·worker`，看不出擔任的角色
 
