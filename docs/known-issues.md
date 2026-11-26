@@ -2,7 +2,7 @@
 
 ## ISSUE-217：Herdr 重用 workspace id，狀態檔裡舊 team 含已移除的 profile，卡片任務啟動失敗 `unknown Agent profile`
 
-2026-11-26。狀態：**已修正、待驗收**（程式與自動化測試完成；本機實機重跑尚未驗收，bridge 未重啟）。
+2026-11-26。狀態：**已驗收（範圍有限，見最後一則）**（#383 已部署；2026-11-26 同一張沙盒卡重跑通過）。先前：已修正、待驗收。
 
 **症狀（2026-11-26 01:36 UTC，沙盒卡 `REQ-20261126-issue213-l1-remote`，專案 L1）：**自動撿卡建好 worktree 後，`card assign --worktree --coding` 失敗：`unknown Agent profile: claude`，卡片仍是 `ready`；在新 workspace 手動 `card assign <id> --coding` 也一樣失敗（可重現）。前幾張卡同樣流程、同樣 roles 都能啟動。
 
@@ -15,6 +15,7 @@
 **測試（2026-11-26，本機，`npm run build`、`npm run lint` 通過）：**`agent-pool.test` 38 項、`coding-roster`＋`team*` 共 180 項通過；新增「舊 team 含 config 已移除的 profile 時，roster 略過它」。
 
 **未驗證／限制：**實機（部署後重跑同一張沙盒卡，已知會落在這類舊 id）；狀態檔裡這些過期 team 條目沒有清除（只是不再擋任務）；其他直接呼叫 `profile(id)` 而不經 `roster()` 的路徑（例如 `acquire`）遇到過期 id 仍會丟錯，沒有逐一檢查。
+- **實機驗收（2026-11-26 01:46 UTC 重啟後重跑）：**這次任務落在 workspace `w6P`，狀態檔裡 `w6P` 同樣有舊 team `[helper, reviewer, claude, agy]`；bridge console 出現 `agent pool: workspace w6P 的 team 含已不存在的 profile claude，略過`，任務正常啟動並完成（見 ISSUE-213 的 L1 驗收）。範圍：1 個樣本；狀態檔的過期 team 條目仍在（`w6M`、`w6P` 都還有），只是不再擋任務；不經 `roster()` 的路徑沒有驗。**另記一個觀察（未調查）：**重啟後約 7 分鐘才撿起卡片（console 沒有任何報錯），先前約 1 分鐘；原因不明，只有 1 個樣本。
 
 ## ISSUE-216：遠端寫入的卡，遠端 verify 看不到 bridge 的 commit，Lead 反覆追加驗證直到規劃輪數用完
 
@@ -90,6 +91,9 @@
 - **部署後的驗收嘗試（2026-11-25，bridge 含 #376 `d9bd255`，沙盒卡 `REQ-20261125-issue213-remote-commit`）：沒有驗到。**遠端寫入的前提成立：bridge 已在本機 worktree 自己 commit（`hdb remote implement`，只新增 `docs/s6.txt`，工作樹乾淨）。但兩次都沒有走到 autopick 的 commit 步驟：task 在 verify 階段沒有完成（第 1 次遠端 verify 卡住 27 分鐘後取消，第 2 次規劃輪數用完），見 ISSUE-216。**這既沒有證明修正有效，也沒有證明無效。**下一輪改成 `verify: local:codex` 再試。
 - **實機驗收（2026-11-25 09:14 至 09:19 UTC，沙盒卡 `REQ-20261125-issue213-remote-commit`，沙盒 repo L0，bridge 含 #376 `d9bd255`，隔著兩次未完成的嘗試之後第三次）：通過。**implement 派到遠端 machine 的 pi，bridge 在本機 worktree 自己 commit；task `completed`（09:19:21）後 autopick 在 09:19:24 記錄 `committed`（head `9ba8ff4`），**沒有**再出現「這個版本已經 commit 了，沒有需要提交的修改」。commit 只新增 `docs/s6.txt`（一行 `s6 remote commit`），本機工作樹乾淨，沒有 push、沒有開 PR（L0）。驗收後已清理 worktree、刪除沙盒本機卡片分支。
 - **範圍與限制：**只有 1 個樣本；只驗 L0（停在 commit）；L1 的 push 與開 PR、L2 的 review 迴圈、`card commit` 在其他「已 commit」情境（例如遠端產出含額外檔案時必須拒絕）都沒有實機驗；這次通過時 verify 指派的是**本機** codex（`verify: local:codex`），因為前兩次用遠端 verify 沒能完成（ISSUE-216，仍待調查），所以遠端 verify 路徑沒有驗到。
+- **L1 實機驗收（2026-11-26 01:36 至 01:56 UTC，沙盒卡 `REQ-20261126-issue213-l1-remote`，沙盒 repo 暫設 L1（驗完已改回 L0），bridge 含 #383（`c5410b0`），implement／review／verify 都派遠端 machine）：通過。**implement 派遠端 pi、review／verify 派遠端 codex 各一次；task `completed`（01:54:53）→ `committed`（01:55:53，head `7788ebd`，只新增 `docs/s9.txt`）→ `pr_opened`（01:56:02，沙盒 repo 的 PR #5，base `main`、head 為卡片分支、一個 commit `hdb remote implement`、只改 `docs/s9.txt`）。bridge 沒有 merge（L1 由人 merge）；沒有出現「這個版本已經 commit 了」。第一次嘗試（01:36）在 assign 就失敗，原因是 ISSUE-217（與本問題無關），修正後重跑通過。
+- **範圍與限制（更新）：**L0 與 L1 各 1 個樣本；L2 的 review 迴圈與自動 merge 沒驗；「遠端產出含額外檔案必須拒絕」沒有實機驗；沙盒 PR #5 與遠端、本機分支 `card/REQ-20261126-issue213-l1-remote` 驗完後已由使用者同意關閉並刪除；沒有 CI（沙盒 repo 沒有 workflow），所以「CI 回報」這段沒驗到。
+
 ## ISSUE-212：遠端 codex 的 verify 報告，`codingResult` 沒有被記錄，verify 一直是「未通過」
 
 更新日期：2026-11-26。狀態：**已驗收（範圍有限，見最後一則）**（#381 已部署；2026-11-26 沙盒實機重跑通過，只驗了 1 個樣本）。先前：已修正、待驗收。2026-11-26 稍早曾重新開啟（#370 已部署後實機再次發生）。先前：已修正、待驗收。更新日期原為 2026-11-24。（本輪完成可重跑的 S1 情境重建與自動化回歸；歷史原件仍缺，遠端部署／實機驗收未完成）。
