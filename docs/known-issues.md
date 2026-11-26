@@ -16,7 +16,7 @@
 
 ## ISSUE-223：遠端 machine 斷線時，卡片 review／角色指定的拒絕訊息寫成「machine 未開放卡片 review」
 
-2026-11-26。狀態：**已修正、待驗收**（#399 部署後實機驗證發現卡片角色指定那一段沒生效；第二版修正與測試完成，第二版尚未部署與實機驗收）。來源：2026-11-26 驗 ISSUE-143 的失敗路徑時，把 agy-machine 在 bridge 端斷線後跑 `card review`，回 `遠端 review 失敗：machine 未開放卡片 review`。
+2026-11-26。狀態：**已驗收（範圍有限，見最後一則）**（第一版實機失敗；第二版 #401 已部署，2026-11-26 實機通過卡片角色指定那一段，1 個樣本）。來源：2026-11-26 驗 ISSUE-143 的失敗路徑時，把 agy-machine 在 bridge 端斷線後跑 `card review`，回 `遠端 review 失敗：machine 未開放卡片 review`。
 
 **症狀：**machine 只是斷線（連線後就可用），訊息卻像是設定沒開放，容易誤以為是 config 問題；也沒有說「不會 fallback 到本機」。
 
@@ -31,6 +31,8 @@
 **未驗證／限制：**實機（部署後再斷線一次跑 `card review` 看訊息）；候選清單（Lead 可選的遠端目標）斷線時仍是不列出，沒有改；其他斷線相關訊息（例如 `remote verify`）沒有逐一檢查。
 - **第一版的實機結果（2026-11-26 09:05 UTC，bridge 含 #399，沙盒卡 `REQ-20261126-disconnected-msg`，把遠端 machine 在 bridge 端斷線後被自動撿卡）：卡片角色指定那一段沒有生效。**卡片記的原因仍是 `卡片角色指定無效：reviewer：machine 未開放卡片 review（<id>）`，不是「已斷線」。**根因（我的錯）：**第一版的條件是「斷線且 `remoteMachines` 裡有它」，但實際的 `cardRoleContext`（`src/main.ts`）在 machine 斷線時把它從 `remoteMachines` 排除，條件永遠不成立；我的單元測試用的 context 是「`remoteMachines` 仍含它、只標 `isDisconnected`」，形狀和實機不同，所以測試過了、實機沒過。`card review` 那一段（`src/card-review-wiring.ts`）只看 `isDisconnected`，不受影響，但這次沒有實機跑到它。
 - **第二版修正（2026-11-26）：**`src/card-role-assignment.ts` 的 `remoteReviewMachine` 改成只要 `isDisconnected(machine)` 就回「已斷線」（走到這裡的 machine 已通過「存在於設定」的檢查）；測試新增實際形狀（斷線的 machine 被排除出 `remoteMachines`）回「已斷線」、沒斷線卻不在清單回「未開放」。完整測試與 lint 通過（見下方測試數字）。
+- **第二版實機驗收（2026-11-26 09:17 UTC，bridge 含 #401 `ad93584`，沙盒卡 `REQ-20261126-disconnected-msg2`，沙盒 repo L0）：卡片角色指定那一段通過。**把遠端 machine 在 bridge 端斷線後，reviewer 指到它的卡被自動撿卡檢查拒絕，卡片記 `失敗：autopick_stopped；原因：卡片角色指定無效：reviewer：machine 已斷線（<id>），不會 fallback 到本機，連線後再重試`（第一版同樣情境是「machine 未開放卡片 review」）。沒有任何 worktree 或 agent 被啟動。驗完先把測試卡設成 `cancelled` 再重新連線（上一輪沒這樣做，重新連線後該測試卡被正常撿起並跑到 commit，需要清理），重新連線後狀態回到 connected、`machine-disconnected.json` 為空。
+- **範圍與限制（更新）：**只驗了卡片角色指定（撿卡前檢查）這一段、1 個樣本；`card review` 指令那一段（`src/card-review-wiring.ts`，只看 `isDisconnected`）沒有實機跑到；通知（Discord）上顯示的固定標籤版本沒有核對；候選清單斷線時仍不列出，沒改。
 
 ## ISSUE-222：Herdr 因建 worktree 連帶開出的 repo 主 workspace，bridge 清理後沒有關
 
