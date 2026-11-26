@@ -129,6 +129,7 @@ export function classifyRoleRejection(text: string): string {
     "remote 寫入尚未支援",
     "remote verify 不可用",
     "machine 未開放卡片 review",
+    "machine 已斷線",
   ])
     if (detail!.startsWith(label)) return `卡片角色指定無效：${role}：${label}`;
   if (detail!.startsWith("卡片流程尚未支援 machine "))

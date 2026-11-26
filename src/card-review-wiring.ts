@@ -122,6 +122,8 @@ export async function reviewCardPullRequest(
   const [owner, repo] = pr.repo.split("/");
   // 卡片 reviewer 在 remote：執行中的 config 也必須仍開放這台機器（REQ-20261111-remote-agy-role）。
   const remote = snapshot?.roles.reviewer?.machine?.replace(/^local$/, "");
+  if (remote && deps.roleContext?.isDisconnected?.(remote))
+    throw new Error("遠端 review 失敗：machine 已斷線，不會 fallback 到本機，連線後再重試");
   if (remote && !deps.roleContext?.remoteMachines?.some((m) => m.id === remote))
     throw new Error("遠端 review 失敗：machine 未開放卡片 review");
   if (remote && !deps.remote) throw new Error("remote reviewer 介面不存在，不開始 review");

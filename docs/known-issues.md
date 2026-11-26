@@ -1,5 +1,21 @@
 # Known Issues
 
+## ISSUE-223：遠端 machine 斷線時，卡片 review／角色指定的拒絕訊息寫成「machine 未開放卡片 review」
+
+2026-11-26。狀態：**已修正、待驗收**（程式與自動化測試完成；實機尚未驗收，bridge 未重啟）。來源：2026-11-26 驗 ISSUE-143 的失敗路徑時，把 agy-machine 在 bridge 端斷線後跑 `card review`，回 `遠端 review 失敗：machine 未開放卡片 review`。
+
+**症狀：**machine 只是斷線（連線後就可用），訊息卻像是設定沒開放，容易誤以為是 config 問題；也沒有說「不會 fallback 到本機」。
+
+**預期行為：**斷線與「沒開放」分開說：斷線時訊息說明 machine 已斷線、不會 fallback 到本機、連線後再重試。
+
+**已確認根因（讀碼）：**`src/card-review-wiring.ts` 與 `src/card-role-assignment.ts` 的檢查只看「目前可用的 remote machine 清單裡有沒有它」，而 `cardRoleContext` 在 machine 斷線時把它從清單排除，所以斷線與沒開放得到同一則訊息。
+
+**修正（2026-11-26）：**`card review`（`src/card-review-wiring.ts`）在 machine 斷線時回 `遠端 review 失敗：machine 已斷線，不會 fallback 到本機，連線後再重試`（和原本一樣不帶 machine 名稱）；卡片角色指定（`src/card-role-assignment.ts` 的 `remoteReviewMachine`）對「設定有開放但目前斷線」的 machine 回 `machine 已斷線（<id>），不會 fallback 到本機，連線後再重試`；`src/card-notify.ts` 的固定標籤清單加入 `machine 已斷線`，讓通知也顯示這個原因而不是籠統的「卡片角色指定無效」。真的沒開放（config 沒設或 agent 種類不符）的訊息不變。
+
+**測試（2026-11-26，本機，`npm run build`、`npm run lint` 通過）：**完整測試 2341 項，2340 通過、0 失敗、1 跳過。新增／改寫：`card review` 斷線時回「已斷線」且不含「未開放」與 machine 名稱；角色指定對斷線 machine 回「已斷線（pod）」（原測試預期「未開放」，改成新訊息）；沒開放的情況仍回「未開放」。
+
+**未驗證／限制：**實機（部署後再斷線一次跑 `card review` 看訊息）；候選清單（Lead 可選的遠端目標）斷線時仍是不列出，沒有改；其他斷線相關訊息（例如 `remote verify`）沒有逐一檢查。
+
 ## ISSUE-222：Herdr 因建 worktree 連帶開出的 repo 主 workspace，bridge 清理後沒有關
 
 2026-11-26。狀態：**已驗收（範圍有限，見最後一則）**（#395 已部署；2026-11-26 沙盒實機正例與反例都通過，各 1 個樣本）。先前：已修正、待驗收。使用者決定（2026-11-26）：「我手動開的不處理，只處理 bridge 開的」。來源是 ISSUE-221 的觀察（`herdr worktree create` 會連帶開出 repo 的主 checkout workspace，每個 repo 一個，worktree 移除後仍留著）。
