@@ -2,7 +2,7 @@
 
 ## ISSUE-216：遠端寫入的卡，遠端 verify 看不到 bridge 的 commit，Lead 反覆追加驗證直到規劃輪數用完
 
-2026-11-26 更新。狀態：**已修正、待實機驗收**（機制已在本機重現並修正；遠端實機尚未重跑）。先前：待調查（現象在同一張卡重現 2 次）。
+2026-11-26 更新。狀態：**已修正、機制部分實機驗收；整張卡仍未能完成**（#379 已部署；遠端 verify 現在看得到 bridge 的 commit，但同一張卡因 ISSUE-212 再度停在規劃輪數上限）。先前：待調查（現象在同一張卡重現 2 次）。
 
 **症狀（2026-11-25，沙盒卡 `REQ-20261125-issue213-remote-commit`，沙盒 repo L0，implement／review／verify 都派遠端 machine）：**遠端 implement 完成、bridge 已在本機 commit，task 卻沒有完成。第 1 次：第一個 verify 完成後 Lead 追加 `verify-s6-followup`，在遠端 codex 上 `working` 超過 27 分鐘沒結果，使用者同意後取消。第 2 次（重啟後重跑）：10 個指派全部完成，但 Lead 一直追加驗證，約 27 分鐘後 `Lead reached the planning round limit; task remains incomplete`，卡片 autopick 停手（09:10 UTC）。
 
@@ -21,6 +21,13 @@
 **修正（2026-11-26，使用者選方案 1）：**`src/remote-snapshot.ts` 的 `createLocalSnapshot` 在「tree 等於 HEAD tree 且 HEAD 尚未推到 origin」時直接以 HEAD 當快照 sha；HEAD 已在 origin 時仍建快照 commit（否則 bundle 為空）。快照 sha 與 tree 的比對、取回與套用流程不變。測試：`test/remote-snapshot.test.ts` 新增「工作樹乾淨且 HEAD 未推送時快照就是 HEAD；已推送時仍建快照 commit」；`npm run build`、`npm run lint` 通過；遠端相關測試（`*remote*`、`card-role*`）242 項通過（2026-11-26，本機）。
 
 **未驗證：**遠端實機：沙盒卡以遠端 verify 重跑是否在約 5 分鐘內完成、Lead 不再追加驗證（需部署後驗證，目前 bridge 未重啟、仍是舊行為）；ISSUE-212 是否同源；第一個 review 當時為何說 HEAD 含 `docs/s6.txt`；Lead 追加次數沒有上限的問題未處理。
+
+**實機驗收（2026-11-26 00:54 至 01:07 UTC，沙盒卡 `REQ-20261126-issue216-remote-verify`，沙盒 repo L0，bridge 含 #379 `0f1ba56`，implement／review／verify 都派遠端 machine）：**
+- **機制修正有效：**bridge 本機 commit（`698e3cc`，只新增 `docs/s7.txt`）後，遠端 review 與 verify 的報告都寫「added in HEAD commit 698e3cc」；verify artifact 的 `headSha` 是該 commit、`deliveryPaths` 是 `["docs/s7.txt"]`。Lead 沒有再因「HEAD 是空的快照 commit」追加驗證。
+- **task 仍未完成：**Lead 又追加了 5 個 verify（`verify-s7-evidence`、`-current`、`-gate`、`-minimal`、`-structured`），01:07:33 UTC `Lead reached the planning round limit; task remains incomplete`，autopick 停手。原因不是快照：每個 verify artifact 都是 `evidence: missing`、`commands: []`、`verificationPassed: false`。第一個 verify 的報告其實寫了「all checks exited 0」，結尾的 `codingResult` JSON 含**折行**（`"test "$(cat` 後換行）且**命令內的雙引號沒有跳脫**，無法解析成 JSON，所以 commands 記為空。這就是 ISSUE-212 的症狀，**ISSUE-212 在 #370 已部署後仍會發生**，已重新開啟。
+- **所以原本的推論只對一半：**空快照 commit 確實存在並已修掉，但它不是 task 卡住的唯一原因；遠端 verify 即使看得到交付，仍因報告無法解析而無法通過。
+- 結束後已清理沙盒 worktree 並刪除本機卡片分支 `card/REQ-20261126-issue216-remote-verify`（唯一的獨有 commit 是上述 bridge commit）。沒有 push、沒有 PR。
+- **仍未驗證：**修掉 ISSUE-212 之後遠端 verify 能否讓 task 完成；Lead 追加次數沒有上限的問題（本次追加到規劃輪數上限才停）。
 
 ## ISSUE-215：看板按 ready 因沒有 notify 被擋、列表不顯示 req id
 
@@ -67,7 +74,7 @@
 - **範圍與限制：**只有 1 個樣本；只驗 L0（停在 commit）；L1 的 push 與開 PR、L2 的 review 迴圈、`card commit` 在其他「已 commit」情境（例如遠端產出含額外檔案時必須拒絕）都沒有實機驗；這次通過時 verify 指派的是**本機** codex（`verify: local:codex`），因為前兩次用遠端 verify 沒能完成（ISSUE-216，仍待調查），所以遠端 verify 路徑沒有驗到。
 ## ISSUE-212：遠端 codex 的 verify 報告，`codingResult` 沒有被記錄，verify 一直是「未通過」
 
-更新日期：2026-11-24。狀態：**已修正、待驗收**（本輪完成可重跑的 S1 情境重建與自動化回歸；歷史原件仍缺，遠端部署／實機驗收未完成）。
+更新日期：2026-11-26。狀態：**重新開啟（待調查）**（2026-11-26 實機再次發生，#370 已部署）。先前：已修正、待驗收。更新日期原為 2026-11-24。（本輪完成可重跑的 S1 情境重建與自動化回歸；歷史原件仍缺，遠端部署／實機驗收未完成）。
 
 - **部署（2026-11-25 09:18 台北時間）：**本機 main 已同步 GitHub main 的 PR #370（`e45f801`），`npm run build` 通過後重啟 bridge。新程序確認 Discord Gateway 已連線、Herdr watcher 已啟動，遠端 verify 所用機器已連線。長命令與退出碼的端到端驗收仍待執行。
 
@@ -82,6 +89,8 @@
 - **影響：**遠端 verify 在命令很長時可能一律不被記錄，Lead 只能重試或改派本機；沒有被當成通過也沒有被默默忽略（驗收仍然要求有成功的 verify）。
 - **測試（2026-11-24，本輪）：**`npm run build`、`npm run typecheck`、`npm run lint` 通過；`node --test dist/test/coding-workflow.test.js` 41/41 通過，涵蓋長命令逐字保留、CRLF／續行折行、提示詞混入、缺 command、缺 exitCode 及非零退出碼。完整 `npm test` 曾執行但在 300 秒上限內因既有長時間／時序測試失敗並逾時（含 Grok marker、數個 coding workflow timeout；非 ISSUE-212 定向測試），故不能宣稱完整套件通過；需 Lead 重跑或分批確認。
 - **相關：**ISSUE-086（本機以 hook 完整訊息避免折行）、ISSUE-175（遠端 codex 的 session 身分）、ISSUE-186（回覆取框）。
+- **重新開啟（2026-11-26 00:58 至 01:07 UTC，bridge 含 #370 與 #379，沙盒卡 `REQ-20261126-issue216-remote-verify`）：**遠端 codex 的 verify 報告再次無法記錄。報告文字寫「Passed; all checks exited 0」，結尾 `codingResult` 的 `commands` 內容被終端**折行**（`"test "$(cat` 後換行 `docs/s7.txt)"`），且命令字串裡的雙引號**沒有跳脫**（`"test "$(cat docs/s7.txt)" = 's7 remote verify'"`），所以不是合法 JSON；bridge 記錄的 verify artifact 為 `evidence: missing`、`commands: []`、`verificationPassed: false`，6 個遠端 verify 全部如此，Lead 追加到規劃輪數上限，task 失敗（見 ISSUE-216）。**這和 2026-11-24 的症狀一致，#370 的「掃描多個 JSON 物件」沒有涵蓋「命令含未跳脫的雙引號」。**
+- **新線索（未查證）：**這次 verify 指令要求的命令本身含雙引號（`test "$(cat …)" = '…'`）；codex 把它們寫進 JSON 字串時沒有跳脫，與折行無關也會解析失敗。是否為 codex 的輸出習慣、或終端顯示吃掉了反斜線，尚未查證。下一步：保存一份完整的遠端 verify 原始報告 bytes，區分「模型沒跳脫」與「顯示層遺失反斜線」；並考慮在 verify 提示明確要求命令字串用單引號或避免雙引號，或讓解析器容錯。
 
 ## ISSUE-211：卡片 `roles` 指定遠端的 pi 時，驗證仍要求本機有 pi profile，撿卡即被拒絕
 
