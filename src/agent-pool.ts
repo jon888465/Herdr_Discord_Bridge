@@ -178,7 +178,14 @@ export class AgentPool {
     this.save();
   }
   roster(workspace: string): AgentRecord[] {
-    return this.members(workspace).map((id) => {
+    // ISSUE-217：Herdr 會重用 workspace id，狀態檔裡舊 team 可能列了現在 config 已沒有的 profile；
+    // 這些 id 略過並記錄，不讓整個任務因 `unknown Agent profile` 啟動失敗。
+    const known = this.members(workspace).filter((id) => {
+      const exists = this.profiles.some((p) => p.id === id);
+      if (!exists) console.error(`agent pool: workspace ${workspace} 的 team 含已不存在的 profile ${id}，略過`);
+      return exists;
+    });
+    return known.map((id) => {
       const p = this.profile(id);
       return {
         pane_id: `profile:${id}`,

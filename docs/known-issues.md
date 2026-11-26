@@ -1,5 +1,21 @@
 # Known Issues
 
+## ISSUE-217：Herdr 重用 workspace id，狀態檔裡舊 team 含已移除的 profile，卡片任務啟動失敗 `unknown Agent profile`
+
+2026-11-26。狀態：**已修正、待驗收**（程式與自動化測試完成；本機實機重跑尚未驗收，bridge 未重啟）。
+
+**症狀（2026-11-26 01:36 UTC，沙盒卡 `REQ-20261126-issue213-l1-remote`，專案 L1）：**自動撿卡建好 worktree 後，`card assign --worktree --coding` 失敗：`unknown Agent profile: claude`，卡片仍是 `ready`；在新 workspace 手動 `card assign <id> --coding` 也一樣失敗（可重現）。前幾張卡同樣流程、同樣 roles 都能啟動。
+
+**預期行為：**狀態檔裡舊 team 列了現在 config 已沒有的 profile 時，略過它，任務照常啟動。
+
+**已確認根因（2026-11-26 查狀態檔與讀碼）：**Herdr 會重用 workspace id；這次新 worktree 的 workspace 是 `w6M`，而 Agent pool 狀態檔（`agent-pool.json`）裡早就有 `w6M` 的舊 team `[helper, reviewer, claude, agy]`（舊 session 留下）。config 的 `claude` profile 已在 2026-11-20 移除，`roster()` 對 team 的每個 id 呼叫 `profile(id)`，找不到就丟 `unknown Agent profile: claude`。前幾張卡的 workspace id（`w6A` 到 `w6J`）是沒用過的新 id，team 是 `[helper, reviewer, agy]`，所以沒遇到。與專案等級（L1）無關。
+
+**修正（2026-11-26）：**`src/agent-pool.ts` 的 `roster()` 略過 config 已不存在的 profile id 並在 console 記錄（`agent pool: workspace … 的 team 含已不存在的 profile …，略過`）；`members()`／`select` 的行為不變（`team select` 選一個不存在的 profile 仍然拒絕）。
+
+**測試（2026-11-26，本機，`npm run build`、`npm run lint` 通過）：**`agent-pool.test` 38 項、`coding-roster`＋`team*` 共 180 項通過；新增「舊 team 含 config 已移除的 profile 時，roster 略過它」。
+
+**未驗證／限制：**實機（部署後重跑同一張沙盒卡，已知會落在這類舊 id）；狀態檔裡這些過期 team 條目沒有清除（只是不再擋任務）；其他直接呼叫 `profile(id)` 而不經 `roster()` 的路徑（例如 `acquire`）遇到過期 id 仍會丟錯，沒有逐一檢查。
+
 ## ISSUE-216：遠端寫入的卡，遠端 verify 看不到 bridge 的 commit，Lead 反覆追加驗證直到規劃輪數用完
 
 2026-11-26 更新。狀態：**已驗收（範圍有限，見最後一則）**（#379 已部署；2026-11-26 與 ISSUE-212 的修正一起在沙盒實機重跑通過）。先前：機制部分實機驗收，整張卡因 ISSUE-212 未能完成。先前：待調查（現象在同一張卡重現 2 次）。
