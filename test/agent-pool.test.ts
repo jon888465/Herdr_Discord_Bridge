@@ -75,6 +75,20 @@ test("pool selection persists without starting a CLI; unselected/unauthorized ac
   }
 });
 
+test("ISSUE-217: 舊 team 含 config 已移除的 profile 時，roster 略過它而不是丟 unknown Agent profile", () => {
+  const f = fixture();
+  try {
+    const stale = new AgentPool(f.file, [profile, { id: "old", kind: "claude" }], f.port, ["w1"]);
+    stale.select("w1", "old", true);
+    stale.select("w1", "helper", true);
+    const current = new AgentPool(f.file, [profile], f.port, ["w1"]);
+    assert.deepEqual(current.members("w1"), ["old", "helper"]);
+    assert.deepEqual(current.roster("w1").map((r) => r.agent_name), ["helper"]);
+  } finally {
+    f.close();
+  }
+});
+
 test("acquire starts once, release preserves context, restart reuses the identified session", async () => {
   const f = fixture();
   try {
