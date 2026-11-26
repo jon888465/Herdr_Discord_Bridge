@@ -1,5 +1,19 @@
 # Known Issues
 
+## ISSUE-221：自動撿卡對 worktree 卡開兩個 agent，第一個只是閒置
+
+2026-11-26。狀態：**已修正、待驗收**（程式與自動化測試完成；實機尚未驗收，bridge 未重啟）。使用者提問（2026-11-26）：「autopick 需要都開一個 agent 嗎？它不能跟 Lead 一起用嗎？」
+
+**症狀：**每張 worktree 卡的自動撿卡會啟動兩個 agent：第一個在原 repo 目錄的 workspace（`autopick-<kind>-<card>`），第二個由 `card assign --worktree` 在新 worktree workspace 啟動；task 的 Lead 是第二個。console 的 `agent.prompt` 全部送到 worktree 的 pane，autopick 那個 pane 狀態一直是 `done`，沒被 prompt 過。每次多一個 agent 進程、多一次啟動與更新提示處理、多一個要清理的 workspace。
+
+**已確認根因（2026-11-26 讀碼）：**autopick 走與人手動相同的 console 流程（`wk use`、`agent use`、`card assign --worktree`）。`prepareCardWorktree` 只讀「目前選中的 Lead」的**工作目錄**與 **agent 種類**（用來決定 repo 與在 worktree 啟動同種 agent），所以 autopick 先開了一個真的 agent 提供這兩個值。不能直接把它當 task Lead：它跑在原 repo 目錄，沒有隔離。
+
+**修正（2026-11-26）：**`src/autopick-wiring.ts` 的 `startLead`：非 readonly 的卡（有 worktree）只建 workspace、登記來源（`registerWorktreeSource`，內容是 workspace、repo 路徑、agent 種類）並 `wk use`，**不再啟動 agent、不 `agent use`**；`src/main.ts` 的 `prepareWorktree` 看到該卡有登記的來源，就用 `sourceLeadRecord`（只含工作目錄與種類的紀錄）取代 `activeLeadFor`，其餘流程不變；task 的 Lead 仍是 worktree workspace 裡新啟動的那一個。**readonly 卡沒有 worktree，沒有第二個 agent，仍照舊啟動 Lead**。來源登記在自動撿卡回報結果時清掉；沒有提供 `registerWorktreeSource` 的呼叫端行為與以前相同。
+
+**測試（2026-11-26，本機，`npm run build`、`npm run lint` 通過）：**完整測試 2335 項，2334 項通過、0 失敗（另有 1 項被跳過）；`autopick-wiring`＋`autopick` 60 項通過；新增測試涵蓋：worktree 卡不啟動 agent、不 `agent use`、登記來源、關閉時關掉 workspace；readonly 卡仍啟動 Lead 且不登記；來源紀錄只含工作目錄與種類。
+
+**未驗證／限制：**實機（部署後跑一張 worktree 沙盒卡，確認 task 正常完成、console 只出現一次 agent 啟動與一次更新提示跳過）；沒有針對 `main.ts` 裡 `prepareWorktree` 的分支寫測試（只有型別、建置與 wiring 單元測試）；來源 workspace 仍會建立（一個放 repo 的閒置 shell，沒有 agent），沒有把它也省掉，因為 `autopick_workspace_*` 欄位、清理（`closeAutopickLead`）與索引的 `sourceWorkspaceId` 都綁在它上面；Lead 就緒檢查現在只剩 worktree 那個 agent（`card assign` 已會在它沒就緒時回報「任務沒有啟動」）。
+
 ## ISSUE-220：profile Worker 的 pane 只顯示 `codex·worker`，看不出擔任的角色
 
 2026-11-26。狀態：**已修正、待驗收**（程式與單元測試完成；實機尚未驗收，bridge 未重啟）。使用者提出（2026-11-26）：「pane 名稱可以看到 codex·worker 但不知道他是什麼角色，pane 名稱感覺可以換成 w3:p1，tab 名稱則是擔任角色」。

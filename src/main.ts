@@ -189,7 +189,7 @@ import {
   routeConsoleCommand,
   createConsoleContext,
 } from "./console.js";
-import { AUTOPICK_USER, createAutopickSteps } from "./autopick-wiring.js";
+import { AUTOPICK_USER, createAutopickSteps, sourceLeadRecord, type WorktreeSource } from "./autopick-wiring.js";
 import {
   leadRejectionEvent,
   createAutopicker,
@@ -1235,7 +1235,11 @@ export async function handleCommand(
           });
         },
         prepareWorktree: async (card) => {
-          const { workspaceId, lead } = await activeLeadFor(context, runtime);
+          // 自動撿卡的 worktree 卡：來源只是放 repo 的 workspace，沒有 agent（見 WorktreeSource）。
+          const source = autopickSources.get(card.id);
+          const { workspaceId, lead } = source
+            ? { workspaceId: source.workspaceId, lead: sourceLeadRecord(source) }
+            : await activeLeadFor(context, runtime);
           return prepareCardWorktree(
             {
               port: runtime.herdr,
@@ -3411,6 +3415,7 @@ const AUTOPICK_INTERVAL_MS = 60 * 1000;
  * 自動撿卡的排程（ISSUE-096）：每分鐘看一次政策檔選用專案裡有沒有 ready 的卡，一次只做一張。
  * 以另一個使用者 id（`autopick`）的本機 console 身分執行 `card …` 指令，不動到使用者自己的 console 路由。
  */
+const autopickSources = new Map<string, WorktreeSource>();
 const autopickSelections = new Map<
   string,
   { agent: string; leadSelection: "card" | "policy"; roles?: CardRoles }
@@ -3441,6 +3446,7 @@ function startAutopick(runtime: Runtime): () => void {
     }`;
     console.log(summary);
     autopickSelections.delete(result.cardId);
+    autopickSources.delete(result.cardId);
     if (result.outcome === "reached") return;
     const logged = new CardStore(rootDir).recordEvent(result.cardId, {
       event: "failed",
@@ -3482,6 +3488,7 @@ function startAutopick(runtime: Runtime): () => void {
       },
       port: runtime.herdr,
       command,
+      registerWorktreeSource: (id, source) => autopickSources.set(id, source),
       recordLeadWorkspace: (id, workspaceId, label) => {
         const result = new CardStore(rootDir, {
           maxFileBytes: LEDGER_MAX_FILE_BYTES,
