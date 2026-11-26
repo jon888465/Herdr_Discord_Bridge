@@ -97,4 +97,11 @@ test("a disconnected machine offers neither candidates nor acceptance", () => {
   const down = { ...context, isDisconnected: (id: string) => id === "pod" };
   eq(remoteRoleCandidates(down), []);
   throws(() => preflightRoles({ implement: { machine: "pod", agent: "pi" } }, down), /machine 已斷線（pod），不會 fallback 到本機/);
+  // ISSUE-223：實際的 cardRoleContext 在 machine 斷線時把它從 remoteMachines 排除（不是只標 isDisconnected），
+  // 這個形狀也要回「已斷線」而不是「未開放」（上一版只測了前者，實機仍回「未開放」）。
+  const real = { ...down, remoteMachines: (down.remoteMachines ?? []).filter((m) => m.id !== "pod") };
+  throws(() => preflightRoles({ implement: { machine: "pod", agent: "pi" } }, real), /machine 已斷線（pod），不會 fallback 到本機/);
+  // 沒斷線卻不在清單裡（設定沒開放）仍然回「未開放」。
+  const closed = { ...context, remoteMachines: (context.remoteMachines ?? []).filter((m) => m.id !== "pod") };
+  throws(() => preflightRoles({ implement: { machine: "pod", agent: "pi" } }, closed), /machine 未開放卡片 review（pod）/);
 });

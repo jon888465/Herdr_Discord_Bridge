@@ -201,7 +201,9 @@ export function preflightRoles(
 }
 function remoteReviewMachine(role: CardRole, c: RoleConstraint, context: RoleContext): RemoteReviewMachine {
   // 斷線的 machine 與「沒開放」是兩回事：前者連線後就可用，訊息要說清楚（不會 fallback 本機）。
-  if (c.machine && context.isDisconnected?.(c.machine) && context.remoteMachines?.some((m) => m.id === c.machine))
+  // 實際的 cardRoleContext 會把斷線的 machine 從 remoteMachines 排除，所以不能用 remoteMachines 判斷「設定有開放」；
+  // 走到這裡的 machine 已通過「存在於設定」的檢查，斷線就直接說斷線。
+  if (c.machine && context.isDisconnected?.(c.machine))
     roleError(role, `machine 已斷線（${c.machine}），不會 fallback 到本機，連線後再重試`);
   const remote = context.remoteMachines?.find((m) => m.id === c.machine && !context.isDisconnected?.(m.id));
   if (!remote || (c.agent && !remote.kinds.includes(c.agent))) roleError(role, `machine 未開放卡片 review（${c.machine}）`);
