@@ -58,7 +58,11 @@ export function createLocalSnapshot(cwd: string, git: LocalGit = localGit(cwd), 
     git(["read-tree", "HEAD"], env);
     git(["add", "-A"], env);
     const tree = git(["write-tree"], env).trim();
-    const sha = git(["commit-tree", "--no-gpg-sign", tree, "-p", "HEAD", "-m", "hdb snapshot"], IDENTITY).trim();
+    // ISSUE-216：工作樹乾淨（tree 等於 HEAD）且 HEAD 還沒推到 origin（例如 bridge 剛 commit 的遠端寫入交付）時，
+    // 直接用 HEAD 當快照；多包一層空的 hdb snapshot commit 會讓遠端 verifier 的 HEAD 看不到交付。
+    const head = git(["rev-parse", "HEAD", "HEAD^{tree}"]).trim().split("\n");
+    const cleanUnpublished = head[1] === tree && git(["rev-list", "-n1", "HEAD", "--not", "--remotes=origin"]).trim() !== "";
+    const sha = cleanUnpublished ? head[0]! : git(["commit-tree", "--no-gpg-sign", tree, "-p", "HEAD", "-m", "hdb snapshot"], IDENTITY).trim();
     if (!SHA.test(tree) || !SHA.test(sha)) throw new RemoteFailure("快照建立失敗", "sha");
     if (digestOf(cwd) !== before) throw new RemoteFailure("快照已作廢", "建立快照時本機工作樹改變");
     git(["update-ref", ref, sha]);

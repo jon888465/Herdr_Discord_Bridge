@@ -2,7 +2,7 @@
 
 ## ISSUE-216：遠端寫入的卡，遠端 verify 看不到 bridge 的 commit，Lead 反覆追加驗證直到規劃輪數用完
 
-2026-11-25。狀態：**待調查**（現象在同一張卡重現 2 次；根因只有推論，沒有查證）。
+2026-11-26 更新。狀態：**已修正、待實機驗收**（機制已在本機重現並修正；遠端實機尚未重跑）。先前：待調查（現象在同一張卡重現 2 次）。
 
 **症狀（2026-11-25，沙盒卡 `REQ-20261125-issue213-remote-commit`，沙盒 repo L0，implement／review／verify 都派遠端 machine）：**遠端 implement 完成、bridge 已在本機 commit，task 卻沒有完成。第 1 次：第一個 verify 完成後 Lead 追加 `verify-s6-followup`，在遠端 codex 上 `working` 超過 27 分鐘沒結果，使用者同意後取消。第 2 次（重啟後重跑）：10 個指派全部完成，但 Lead 一直追加驗證，約 27 分鐘後 `Lead reached the planning round limit; task remains incomplete`，卡片 autopick 停手（09:10 UTC）。
 
@@ -15,6 +15,12 @@
 **未驗證／下一步：**(1) 查遠端快照的 git 狀態與 verify 提示；(2) 用 `verify: local:codex` 重跑同一張卡，確認改成本機 verify 就能完成（這輪進行中）；(3) 決定是否要在 bridge 對遠端 verify 提供 bridge commit 的資訊，或限制 Lead 的追加次數。
 
 **補充（2026-11-25）：**同一張卡改成 `verify: local:codex` 重跑（第三次），task 在約 5 分鐘內完成（implement 遠端 pi、review 遠端 codex、verify 本機 codex，各一次，Lead 沒有追加驗證），所以問題出在**遠端 verify**這條路徑，與卡片內容本身無關。這只是 1 個樣本，根因仍未查證。
+
+**已確認機制（2026-11-26，本機重現）：**`createLocalSnapshot` 一律建一個以 HEAD 為 parent、tree 為目前工作樹的 `hdb snapshot` commit。bridge 已 commit 遠端寫入交付後，工作樹是乾淨的，快照就是**空 commit**，遠端 verify／review 的 HEAD 是它：`git diff-tree HEAD` 沒有路徑，交付檔在 `HEAD^`。重現：臨時 repo 先 commit 新增 `docs/s6.txt`，建快照後在乾淨 clone 取出 bundle，HEAD 標題 `hdb snapshot`、`diff-tree HEAD` 為空、`diff-tree HEAD^` 有 `docs/s6.txt`。這與 Lead 畫面讀到的追加理由一致，但**沒有**逐段對上當時遠端 log，也沒有登入遠端查看實際內容。
+
+**修正（2026-11-26，使用者選方案 1）：**`src/remote-snapshot.ts` 的 `createLocalSnapshot` 在「tree 等於 HEAD tree 且 HEAD 尚未推到 origin」時直接以 HEAD 當快照 sha；HEAD 已在 origin 時仍建快照 commit（否則 bundle 為空）。快照 sha 與 tree 的比對、取回與套用流程不變。測試：`test/remote-snapshot.test.ts` 新增「工作樹乾淨且 HEAD 未推送時快照就是 HEAD；已推送時仍建快照 commit」；`npm run build`、`npm run lint` 通過；遠端相關測試（`*remote*`、`card-role*`）242 項通過（2026-11-26，本機）。
+
+**未驗證：**遠端實機：沙盒卡以遠端 verify 重跑是否在約 5 分鐘內完成、Lead 不再追加驗證（需部署後驗證，目前 bridge 未重啟、仍是舊行為）；ISSUE-212 是否同源；第一個 review 當時為何說 HEAD 含 `docs/s6.txt`；Lead 追加次數沒有上限的問題未處理。
 
 ## ISSUE-215：看板按 ready 因沒有 notify 被擋、列表不顯示 req id
 

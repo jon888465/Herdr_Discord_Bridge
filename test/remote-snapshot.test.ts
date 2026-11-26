@@ -59,6 +59,23 @@ test("local snapshot: branch/HEAD/index/refs untouched, untracked in, ignored ou
   done();
 });
 
+test("local snapshot: 工作樹乾淨且 HEAD 未推送時快照就是 HEAD；已推送時仍建快照 commit（ISSUE-216）", () => {
+  const { base, w, done } = repo();
+  git(w, "add", "-A");
+  git(w, "commit", "-qm", "delivery");
+  const head = git(w, "rev-parse", "HEAD").trim();
+  const clean = createLocalSnapshot(w);
+  clean.dispose();
+  equal(clean.sha, head);
+  equal(git(w, "log", "-1", "--format=%s", clean.sha).trim(), "delivery");
+  git(w, "push", "-q", "origin", "HEAD");
+  const pushed = createLocalSnapshot(w);
+  pushed.dispose();
+  ok(pushed.sha !== head);
+  equal(git(w, "log", "-1", "--format=%s", pushed.sha).trim(), "hdb snapshot");
+  done();
+});
+
 test("pod side (local git as pod): fixed transfer argv, HEAD/tree equal snapshot, no push; existing dir and sha mismatch refused; bad values refused first", async () => {
   const { base, w, done } = repo();
   fs.mkdirSync(`${base}/pod`);
