@@ -16,7 +16,7 @@ import {
   parseFindings,
 } from "./card-findings.js";
 import { redactSecrets } from "./redact.js";
-import { unwrapCodexJson } from "./team-orchestration.js";
+import { repairJsonStrings, unwrapCodexJson } from "./team-orchestration.js";
 
 /** 整個 loop 最多幾次 review（使用者 2026-11-04：先從 5 改成 3）。 */
 export const MAX_LOOP_ROUNDS = 3;
@@ -200,7 +200,12 @@ export function parseFixReply(text: string, openIds: string[]): ParsedFix {
     try {
       data = JSON.parse(unwrapCodexJson(body));
     } catch {
-      return fail("作者的回覆不是單一 JSON 物件");
+      try {
+        // ISSUE-224：自由文字含雙引號時畫面上的跳脫被吃掉，補回後再試；結果仍要通過下面所有欄位驗證。
+        data = JSON.parse(repairJsonStrings(body));
+      } catch {
+        return fail("作者的回覆不是單一 JSON 物件");
+      }
     }
   }
   if (typeof data !== "object" || data === null || Array.isArray(data))

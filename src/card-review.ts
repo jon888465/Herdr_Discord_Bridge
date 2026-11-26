@@ -28,7 +28,7 @@ import {
   reviewLimitError,
 } from "./card-review-fetch.js";
 import { redactSecrets } from "./redact.js";
-import { unwrapCodexJson } from "./team-orchestration.js";
+import { repairJsonStrings, unwrapCodexJson } from "./team-orchestration.js";
 
 export { MAX_REVIEW_DIFF_CHARS, MAX_REVIEW_FILES } from "./card-review-fetch.js";
 
@@ -240,7 +240,12 @@ export function parseReviewReply(
     try {
       data = JSON.parse(unwrapCodexJson(body));
     } catch {
-      return fail("reviewer 的回覆不是單一 JSON 物件");
+      try {
+        // ISSUE-224：自由文字含雙引號時畫面上的跳脫被吃掉，補回後再試；結果仍要通過下面所有欄位驗證。
+        data = JSON.parse(repairJsonStrings(body));
+      } catch {
+        return fail("reviewer 的回覆不是單一 JSON 物件");
+      }
     }
   }
   if (!isObject(data)) return fail("reviewer 的回覆不是 JSON 物件");
