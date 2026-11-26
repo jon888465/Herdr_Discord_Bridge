@@ -4,6 +4,8 @@ import {
   chooseSplitTarget,
   createAgentPane,
   directionFor,
+  labelWorkerRole,
+  nameAgentPane,
 } from "../src/pane-split.js";
 import { openReviewerPane } from "../src/review-pane.js";
 import type { AgentStartPort } from "../src/agent-start.js";
@@ -315,4 +317,25 @@ test("createAgentPane returns no tab id when the new pane is not in the expected
       (await createAgentPane({ request: request(good, tab) }, input)).tabId,
       undefined,
     );
+});
+
+test("worker 標示：pane 名稱用 pane id；角色已知時，自己建立的 tab 改 tab 名，共用 tab 只改 pane 名（接上角色）", async () => {
+  const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+  const port = {
+    request: async (method: string, params?: Record<string, unknown>) => (calls.push({ method, params: params ?? {} }), {}),
+  };
+  // 建立時：tab 仍是 <kind>·worker，pane 是 pane id。
+  await nameAgentPane(port as never, "w3:p2", { kind: "codex", role: "worker" }, "w3:t4", "w3:p2");
+  assert.deepEqual(calls.map((c) => [c.method, c.params.label]), [["tab.rename", "codex·worker"], ["pane.rename", "w3:p2"]]);
+  calls.length = 0;
+  // 角色已知，有自己的 tab：只改 tab。
+  await labelWorkerRole(port as never, "w3:p2", "verify", "w3:t4");
+  assert.deepEqual(calls.map((c) => [c.method, c.params]), [["tab.rename", { tab_id: "w3:t4", label: "verify" }]]);
+  calls.length = 0;
+  // 沒有自己的 tab（共用）：不動任何 tab，pane 名稱接上角色。
+  await labelWorkerRole(port as never, "w3:p2", "review");
+  assert.deepEqual(calls.map((c) => [c.method, c.params]), [["pane.rename", { pane_id: "w3:p2", label: "w3:p2·review" }]]);
+  // 改名失敗只警告，不丟錯。
+  const failing = { request: async () => { throw new Error("no such method"); } };
+  await labelWorkerRole(failing as never, "w3:p2", "verify", "w3:t4");
 });

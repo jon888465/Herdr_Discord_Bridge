@@ -2470,6 +2470,7 @@ async function startTeamTask(
       lead: readyLead,
       workers,
       replan: true,
+      labelWorker: (worker, role) => runtime.herdr.labelWorkerRole(worker.pane_id, role),
       ...(coding ? { coding: true } : {}),
       ...(coding && cardId
         ? {

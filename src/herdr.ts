@@ -7,7 +7,7 @@ import {
   detectIgnoredAddDir,
   extraLaunchArgsFor,
 } from "./cli-adapter.js";
-import { createAgentPane, nameAgentPane } from "./pane-split.js";
+import { createAgentPane, labelWorkerRole, nameAgentPane } from "./pane-split.js";
 import os from "node:os";
 import path from "node:path";
 import type {
@@ -256,6 +256,14 @@ export class HerdrClient {
     }));
   }
 
+  /** 這個 client 自己為 profile worker 建立的 tab（pane id → tab id），只有這些 tab 可以依角色改名。 */
+  private readonly ownWorkerTabs = new Map<string, string>();
+
+  /** 顯示用：指派開始時標出 worker 的角色；失敗只警告。 */
+  labelWorkerRole(paneId: string, role: string): Promise<void> {
+    return labelWorkerRole(this, paneId, role, this.ownWorkerTabs.get(paneId));
+  }
+
   async startProfile(
     lead: AgentRecord,
     profile: AgentProfile,
@@ -296,12 +304,15 @@ export class HerdrClient {
       pane.pane_id,
       typeof pane.terminal_id === "string" ? pane.terminal_id : undefined,
     );
+    // pane 名稱用 pane id（好對照指令與 log）；角色在指派開始時才知道，到時再標在 tab（或共用 tab 時標在 pane）。
     await nameAgentPane(
       this,
       pane.pane_id,
       { kind: profile.kind, role: "worker", model: profile.model },
       result.tabId,
+      pane.pane_id,
     );
+    if (result.tabId) this.ownWorkerTabs.set(pane.pane_id, result.tabId);
     // ISSUE-098：剛分割出來的 pane，shell 可能還沒初始化完，Herdr 會以 agent_pane_busy 拒絕
     // （「target pane … is not an available shell」，與 ISSUE-067 同一個錯誤）。這個錯誤代表什麼都還沒
     // 啟動，所以只對它短暫重試（有上限）；其他任何錯誤都立刻失敗，不重試。

@@ -136,6 +136,8 @@ export interface TeamTaskInput {
   remoteRoles?: object[];
   recordRoleStrict?: (identity: RoleIdentity) => void | Promise<void>;
   validateRoleActor?: (actor: AgentRecord) => Promise<void>;
+  /** 顯示用：指派開始、角色已知時標出 worker 的角色；失敗不影響任務。 */
+  labelWorker?: (worker: AgentRecord, role: string) => void | Promise<void>;
   onRoleAssigned?: (identity: RoleIdentity) => void;
   origin?: { guildId: string; channelId: string; threadId?: string };
   taskId: string;
@@ -689,6 +691,11 @@ async function runAssignment(
       );
     if (input.roleSnapshot) await input.validateRoleActor?.(worker);
     input.codingHooks?.onAssignmentStart(assignment, worker);
+    try {
+      await input.labelWorker?.(worker, assignment.coding?.role ?? "worker");
+    } catch {
+      /* 只是顯示名稱 */
+    }
     startedAt = Date.now();
     inTurn = true;
     const settled = await runTeamTurn(
