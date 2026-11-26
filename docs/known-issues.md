@@ -2,7 +2,7 @@
 
 ## ISSUE-221：自動撿卡對 worktree 卡開兩個 agent，第一個只是閒置
 
-2026-11-26。狀態：**已修正、待驗收**（第一版實機失敗，第二版程式與自動化測試完成；第二版實機尚未驗收，bridge 未重啟）。使用者提問（2026-11-26）：「autopick 需要都開一個 agent 嗎？它不能跟 Lead 一起用嗎？」
+2026-11-26。狀態：**已驗收（範圍有限，見最後一則）**（第一版實機失敗；第二版 #392 已部署，2026-11-26 沙盒實機重跑通過，只驗了 1 個樣本）。使用者提問（2026-11-26）：「autopick 需要都開一個 agent 嗎？它不能跟 Lead 一起用嗎？」
 
 **症狀：**每張 worktree 卡的自動撿卡會啟動兩個 agent：第一個在原 repo 目錄的 workspace（`autopick-<kind>-<card>`），第二個由 `card assign --worktree` 在新 worktree workspace 啟動；task 的 Lead 是第二個。console 的 `agent.prompt` 全部送到 worktree 的 pane，autopick 那個 pane 狀態一直是 `done`，沒被 prompt 過。每次多一個 agent 進程、多一次啟動與更新提示處理、多一個要清理的 workspace。
 
@@ -18,10 +18,13 @@
 - **第二版修正（2026-11-26，本 PR）：**worktree 卡**完全不建來源 workspace**：`startLead` 只登記來源（工作目錄與 agent 種類，`WorktreeSource` 不再有 workspace id），不建 workspace、不啟動 agent、不 `wk use`、不記 `autopick_workspace_*`，`close` 是空操作；`prepareCardWorktree` 的 `sourceWorkspaceId` 改為選填，沒有來源時索引記成 worktree 自己的 workspace id（欄位仍是合法的 workspace id，不需要遷移索引）。`worktree.create` 本來就只吃 repo 路徑，不依賴來源 workspace。readonly 卡仍照舊建 workspace 並啟動 Lead（沒有 worktree，不會被 linked worktree 擋住）。
 - **測試（第二版，2026-11-26，本機，`npm run build`、`npm run lint` 通過）：**完整測試 2337 項，2336 通過、0 失敗、1 跳過；新增／改寫：worktree 卡不建 workspace、不啟動 agent、不下任何指令、不記 workspace、關閉是空操作；readonly 卡仍照舊；repo 路徑不存在仍拒絕；`prepareCardWorktree` 沒有來源 workspace 時索引記 worktree 自己的 id。
 - **新的限制：**沒有來源 workspace 後，autopick 的 console 使用者沒有 `wk use` 的路由，`card assign` 是否都不需要路由只靠讀碼（`prepareWorktree` 已改走來源紀錄）與下一次實機驗證；`autopick_workspace_*` 欄位對 worktree 卡不再寫入，`closeAutopickLead` 對它們沒有東西可關；readonly 卡仍有「來源 workspace 是主要時關不掉」的同樣風險（readonly 沒有 linked worktree，所以不會觸發，沒有實測）。
+- **第二版實機驗收（2026-11-26 07:13 至 07:16 UTC，沙盒卡 `REQ-20261126-issue221-single-agent-b`，沙盒 repo L0，bridge 含 #390、#391、#392（`9af6fbe`），implement 派遠端 pi、review／verify 派本機 codex）：通過。**autopick 沒有建任何來源 workspace、沒有啟動多餘的 agent，`autopick_picked` 後直接建 worktree workspace（`w72`，一個 codex 當 Lead）；task `completed`（07:15:46）→ `committed`（07:16:14，head `fc97e6e`，只新增 `docs/s14.txt`），沒有 `autopick_failed`，也就是沒有來源 workspace 要關、沒有 `workspace_group_close_required`。**沒有來源 workspace 後 `card assign` 不需要 `wk use` 路由，實機確認。**
+- **觀察（Herdr 的行為，不是 bridge 建的）：**worktree 建好後 Herdr 自己多出一個以 repo 目錄名命名的 workspace（`w71`，沒有 agent、沒有 autopick 標籤），應該是 Herdr 為同 repo 的 linked worktree 開的主要 workspace（推論，沒有查 Herdr 文件）。bridge 不會清它；card cleanup 後它仍在，我手動關掉。這也解釋了先前「來源 workspace 關得掉」可能靠的是別的常駐 workspace。**每張 worktree 卡可能多留這個空 workspace（或 Herdr 重用同一個），尚未調查清楚，沒有處理。**
+- **範圍與限制（更新）：**1 個樣本、L0；只驗 L0（停在 commit），L1／L2 在 worktree 卡且無來源 workspace 時的 push、PR、loop 沒重跑；readonly 卡沒實測；Herdr 自建的 repo workspace 沒有清理。
 
 ## ISSUE-220：profile Worker 的 pane 只顯示 `codex·worker`，看不出擔任的角色
 
-2026-11-26。狀態：**已修正、待驗收**（程式與單元測試完成；實機尚未驗收，bridge 未重啟）。使用者提出（2026-11-26）：「pane 名稱可以看到 codex·worker 但不知道他是什麼角色，pane 名稱感覺可以換成 w3:p1，tab 名稱則是擔任角色」。
+2026-11-26。狀態：**已驗收（範圍有限，見最後一則）**（#390 已部署；2026-11-26 沙盒實機，本機 codex 的 review／verify worker 看到預期的名稱）。使用者提出（2026-11-26）：「pane 名稱可以看到 codex·worker 但不知道他是什麼角色，pane 名稱感覺可以換成 w3:p1，tab 名稱則是擔任角色」。
 
 **症狀：**`team`／card task 的 profile Worker pane 與 tab 名稱都是 `<kind>·worker`。`worker` 是建立 pane 時寫死的字串；真正的角色（implement、review、verify、diagnose）是 Lead 排指派時才決定，pane 建好之後才知道，所以名稱上看不到。
 
@@ -32,6 +35,8 @@
 **測試（2026-11-26，本機，`npm run build`、`npm run lint` 通過）：**`pane-split`＋`cli-adapter`＋`team-orchestration`＋`team-task-engine`＋`coding-workflow` 共 163 項通過；新增測試涵蓋：建立時 pane 名稱是 pane id、tab 名稱維持 `<kind>·worker`；有自己的 tab 時只改 tab；共用 tab 時只改 pane 名稱（接上角色）；改名失敗不丟錯。
 
 **未驗證／限制：**實機（部署後看 Herdr 的 pane 與 tab 顯示）；沒有 orchestration 層測試確認指派開始時真的呼叫 `labelWorker`（呼叫處包在 try/catch，只靠型別與建置驗證）；遠端 machine 上的 Worker 走另一條建立路徑（`startRemoteRole`，workspace label 是 `task-<hash>`），沒有調整，也不知道經 hub 對遠端 pane 改名是否生效；Lead 與 autopick 的 pane 名稱沒改；同一個 pane 被重用在不同角色時，tab 名稱會被後一個角色覆蓋（顯示的是最近一次的角色）；agy／pi 等其他種類沒有逐一驗證是否支援改名。
+- **實機驗收（2026-11-26 07:13 至 07:16 UTC，沙盒卡 `REQ-20261126-issue221-single-agent-b`，沙盒 repo L0，bridge 含 #390、#391、#392（`9af6fbe`），implement 派遠端 pi、review／verify 派本機 codex）：**每 3 秒取樣 pane 與 tab。本機 profile worker：(1) 分割在 Lead tab 的 worker（review）：pane 名稱先是 `w72:p2`，指派開始後變 `w72:p2·review`，tab 沒動；(2) 有自己 tab 的 worker（verify）：pane 名稱是 `w72:p3`，tab 名稱先是 `codex·worker`，指派開始後變 `verify`。符合預期設計。
+- **範圍與限制（更新）：**1 個樣本，只驗 review 與 verify；implement／diagnose 角色沒看到本機 worker；遠端 machine 的 worker 沒調整也沒驗；Lead pane 的名稱沒改（顯示 `None`）；同一 pane 被重用在不同角色時 tab 顯示最近一次，沒驗。
 
 ## ISSUE-219：遠端 verify 一再沒被記錄 evidence 時，Lead 沒有上限地追加驗證，直到規劃輪數用完
 
