@@ -10,11 +10,38 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import { startAgentInPane, type AgentStartPort } from "./agent-start.js";
 import type { AutopickJob, AutopickSteps } from "./autopick.js";
+import type { AgentRecord } from "./types.js";
 
 export const AUTOPICK_USER = "autopick";
 
+/**
+ * worktree 卡（非 readonly）的來源：autopick 只開一個放 repo 的 workspace，不再在裡面多啟動一個 Lead agent。
+ * `card assign --worktree` 只需要來源的工作目錄與 agent 種類，真正的 Lead 是它在 worktree workspace 啟動的那一個。
+ */
+export interface WorktreeSource {
+  workspaceId: string;
+  repoPath: string;
+  kind: string;
+}
+
+/** 給 `prepareCardWorktree` 用的來源紀錄：它只讀工作目錄與種類，不需要真的有一個執行中的 agent。 */
+export function sourceLeadRecord(source: WorktreeSource): AgentRecord {
+  return {
+    pane_id: "",
+    terminal_id: "",
+    workspace_id: source.workspaceId,
+    tab_id: "",
+    agent: source.kind,
+    agent_status: "idle",
+    cwd: source.repoPath,
+    foreground_cwd: source.repoPath,
+  };
+}
+
 export interface AutopickWiringDeps {
   validateJob?: (job: AutopickJob) => void;
+  /** 有提供時，worktree 卡的來源 workspace 不啟動 agent，改把來源登記起來（readonly 卡仍照舊啟動 Lead）。 */
+  registerWorktreeSource?: (cardId: string, source: WorktreeSource) => void;
   port: AgentStartPort;
   /** 以自動撿卡的身分執行一個 console 指令（例如 `card commit <id>`），回傳印出的文字；失敗丟錯誤。 */
   command(text: string): Promise<string>;
@@ -114,6 +141,16 @@ export function createAutopickSteps(deps: AutopickWiringDeps): AutopickSteps {
       };
       try {
         deps.recordLeadWorkspace(job.card.id, workspaceId, label);
+        if (job.card.mode !== "readonly" && deps.registerWorktreeSource) {
+          // 有 worktree 的卡：真正的 Lead 由 `card assign --worktree` 在 worktree workspace 啟動，這裡不再多開一個。
+          deps.registerWorktreeSource(job.card.id, {
+            workspaceId,
+            repoPath: job.repoPath,
+            kind: job.lead,
+          });
+          await deps.command(`wk use ${workspaceId}`);
+          return { close };
+        }
         const lead = await startAgentInPane(deps.port, {
           paneId,
           kind: job.lead,
