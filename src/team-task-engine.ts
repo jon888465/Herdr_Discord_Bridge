@@ -31,6 +31,7 @@ import {
   type OrchestrationEvent,
   type OrchestrationPort,
   type TeamTaskInput,
+  repairCodexCommandJson,
   unwrapCodexJson,
 } from "./team-orchestration.js";
 import {
@@ -477,7 +478,8 @@ export class TeamTaskEngine {
         const parsed =
           parseCodingResult(report) ??
           (isCodex(worker)
-            ? parseCodingResult(unwrapCodexJson(report))
+            ? (parseCodingResult(unwrapCodexJson(report)) ??
+              parseCodingResult(repairCodexCommandJson(report)))
             : undefined);
         const result =
           parsed?.kind === assignment.coding.role ? parsed : undefined;

@@ -28,6 +28,7 @@
 - **所以原本的推論只對一半：**空快照 commit 確實存在並已修掉，但它不是 task 卡住的唯一原因；遠端 verify 即使看得到交付，仍因報告無法解析而無法通過。
 - 結束後已清理沙盒 worktree 並刪除本機卡片分支 `card/REQ-20261126-issue216-remote-verify`（唯一的獨有 commit 是上述 bridge commit）。沒有 push、沒有 PR。
 - **仍未驗證：**修掉 ISSUE-212 之後遠端 verify 能否讓 task 完成；Lead 追加次數沒有上限的問題（本次追加到規劃輪數上限才停）。
+- **後續（2026-11-26）：**ISSUE-212 找到第二個原因（遠端畫面把跳脫的雙引號顯示成未跳脫）並加了容錯解析，待部署後以同一張沙盒卡重驗整條遠端 verify 路徑。
 
 ## ISSUE-215：看板按 ready 因沒有 notify 被擋、列表不顯示 req id
 
@@ -74,7 +75,7 @@
 - **範圍與限制：**只有 1 個樣本；只驗 L0（停在 commit）；L1 的 push 與開 PR、L2 的 review 迴圈、`card commit` 在其他「已 commit」情境（例如遠端產出含額外檔案時必須拒絕）都沒有實機驗；這次通過時 verify 指派的是**本機** codex（`verify: local:codex`），因為前兩次用遠端 verify 沒能完成（ISSUE-216，仍待調查），所以遠端 verify 路徑沒有驗到。
 ## ISSUE-212：遠端 codex 的 verify 報告，`codingResult` 沒有被記錄，verify 一直是「未通過」
 
-更新日期：2026-11-26。狀態：**重新開啟（待調查）**（2026-11-26 實機再次發生，#370 已部署）。先前：已修正、待驗收。更新日期原為 2026-11-24。（本輪完成可重跑的 S1 情境重建與自動化回歸；歷史原件仍缺，遠端部署／實機驗收未完成）。
+更新日期：2026-11-26。狀態：**已修正、待驗收**（2026-11-26 第二輪：找到第二個原因並加上容錯解析；遠端實機尚未重跑，bridge 未重啟）。2026-11-26 稍早曾重新開啟（#370 已部署後實機再次發生）。先前：已修正、待驗收。更新日期原為 2026-11-24。（本輪完成可重跑的 S1 情境重建與自動化回歸；歷史原件仍缺，遠端部署／實機驗收未完成）。
 
 - **部署（2026-11-25 09:18 台北時間）：**本機 main 已同步 GitHub main 的 PR #370（`e45f801`），`npm run build` 通過後重啟 bridge。新程序確認 Discord Gateway 已連線、Herdr watcher 已啟動，遠端 verify 所用機器已連線。長命令與退出碼的端到端驗收仍待執行。
 
@@ -91,6 +92,10 @@
 - **相關：**ISSUE-086（本機以 hook 完整訊息避免折行）、ISSUE-175（遠端 codex 的 session 身分）、ISSUE-186（回覆取框）。
 - **重新開啟（2026-11-26 00:58 至 01:07 UTC，bridge 含 #370 與 #379，沙盒卡 `REQ-20261126-issue216-remote-verify`）：**遠端 codex 的 verify 報告再次無法記錄。報告文字寫「Passed; all checks exited 0」，結尾 `codingResult` 的 `commands` 內容被終端**折行**（`"test "$(cat` 後換行 `docs/s7.txt)"`），且命令字串裡的雙引號**沒有跳脫**（`"test "$(cat docs/s7.txt)" = 's7 remote verify'"`），所以不是合法 JSON；bridge 記錄的 verify artifact 為 `evidence: missing`、`commands: []`、`verificationPassed: false`，6 個遠端 verify 全部如此，Lead 追加到規劃輪數上限，task 失敗（見 ISSUE-216）。**這和 2026-11-24 的症狀一致，#370 的「掃描多個 JSON 物件」沒有涵蓋「命令含未跳脫的雙引號」。**
 - **新線索（未查證）：**這次 verify 指令要求的命令本身含雙引號（`test "$(cat …)" = '…'`）；codex 把它們寫進 JSON 字串時沒有跳脫，與折行無關也會解析失敗。是否為 codex 的輸出習慣、或終端顯示吃掉了反斜線，尚未查證。下一步：保存一份完整的遠端 verify 原始報告 bytes，區分「模型沒跳脫」與「顯示層遺失反斜線」；並考慮在 verify 提示明確要求命令字串用單引號或避免雙引號，或讓解析器容錯。
+- **根因（2026-11-26 讀碼與用實機原始報告重現，推論部分已標明）：**遠端 codex 的報告走終端畫面 fallback（遠端沒有可讀的 rollout）。codex 的畫面把回覆當 markdown 轉譯，JSON 字串裡跳脫的 `\"` 依 markdown 規則顯示成 `"`（推論，沒有看到模型原始輸出；本機 verify 讀 rollout 原檔，所以沒有這個問題）。命令含雙引號時，`commands` 因此不是合法 JSON；而 `unwrapCodexJson` 以引號計數判斷「是否在字串內」，引號數量錯亂後折行也接不回來。與 #370 處理的「折行」是兩個獨立的原因，疊在一起。
+- **修正（2026-11-26）：**`src/team-orchestration.ts` 新增 `repairCodexCommandJson`，`src/team-task-engine.ts` 在「原文」與 `unwrapCodexJson` 都解析失敗後才多試一次：以 `{"command":"…","exitCode":N}` 的結構為界，把折行（換行加兩格縮排）接回、補上引號跳脫，再交給原本的 `parseCodingResult` 驗證。退出碼仍須是整數、命令仍須非空且不超過 500 字元；缺欄位或退出碼不是整數仍不記錄。折行處補一個空格（codex 依字詞折行），極少數超長字詞硬折會多一個空格，只影響記錄的命令文字。**只涵蓋 verify 的 `commands`；`card-review`／`card-fix` 的 JSON 若含未跳脫引號仍會失敗，未處理。**
+- **測試（2026-11-26，本機，`npm run build`、`npm run lint` 通過）：**`coding-workflow`＋`team-orchestration`＋`team-task-engine` 115 項通過；新增「遠端 codex 畫面吃掉跳脫反斜線＋折行時，補回命令與退出碼」使用 2026-11-26 實機報告原樣（修正前三種解析都得到 undefined；修正後得到 3 條命令、退出碼都是 0，命令文字含 `test "$(cat docs/s7.txt)" = '…'`）。另用該次完整報告檔手動跑過一次，結果相同。
+- **未驗證：**遠端實機（部署後以遠端 verify 重跑沙盒卡，確認 verify artifact 記錄 `commands`、task 完成、Lead 不追加）；`\"` 被 markdown 轉譯是推論，沒有取得原始 bytes；其他被 markdown 轉譯吃掉的字元（例如反斜線開頭的其他標點、`*`、底線）可能有類似問題，沒有調查；Lead 追加驗證沒有次數上限的問題未處理。
 
 ## ISSUE-211：卡片 `roles` 指定遠端的 pi 時，驗證仍要求本機有 pi profile，撿卡即被拒絕
 
