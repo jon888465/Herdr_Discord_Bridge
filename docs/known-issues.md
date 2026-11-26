@@ -1,5 +1,21 @@
 # Known Issues
 
+## ISSUE-219：遠端 verify 一再沒被記錄 evidence 時，Lead 沒有上限地追加驗證，直到規劃輪數用完
+
+2026-11-26。狀態：**已修正、待驗收**（程式與單元測試完成；引擎層端到端與實機尚未驗收，bridge 未重啟）。是 ISSUE-216 一直沒處理的「Lead 追加次數沒有上限」。
+
+**症狀：**2026-11-25（10 個指派、約 27 分鐘）與 2026-11-26 00:54 UTC（5 個追加 verify、約 13 分鐘）的沙盒卡，每個 verify artifact 都是 `evidence: missing`、`commands: []`，Lead 仍每輪追加新的 verify，直到 `Lead reached the planning round limit`（預設 8 輪）才失敗。
+
+**預期行為：**同一個版本上 verify 報告一再沒被記錄，是系統性問題（再跑同一個 verifier 也不會好），應提早停下並說明原因。
+
+**已確認根因（讀 `src/team-orchestration.ts`）：**空計畫有 `MAX_GATE_NOTICES = 2` 的限制，但 Lead 只要每輪都排新的 verify 就不受限，只受 `maxRounds`（預設 8）約束。
+
+**修正（2026-11-26，使用者同意方案 C）：**`src/coding-workflow.ts` 新增 `UNRECORDED_VERIFY_LIMIT = 2` 與 `unrecordedVerifyCount`（同版本指紋、`evidence: missing`、沒有 drift；該版本已有被記錄的 verify 就是 0）；`acceptanceReasons` 達上限時多一條原因（說明報告沒有可解析的命令與退出碼、重跑同一個 verifier 沒用、需要人工確認）；`src/team-task-engine.ts` 的 `unrecoverable` 回報該情況，沿用 ISSUE-191 的路徑結束規劃迴圈，由驗收閘門把原因寫進失敗訊息。已被記錄的 verify（包含命令非 0 的真實失敗）不計入，真實失敗的重排修正不受影響。
+
+**測試（2026-11-26，本機，`npm run build`、`npm run lint` 通過）：**`coding-workflow`＋`team-task-engine`＋`team-orchestration` 共 116 項通過；新增測試涵蓋：1 次 missing 不出現原因、2 次出現原因、有被記錄的失敗 verify 時不計、別的版本不計。
+
+**未驗證／限制：**沒有引擎層測試去模擬「Lead 在兩次 missing 之後又排 verify 而被引擎提早結束」，只測了計數與驗收原因；`unrecoverable` 路徑本身沿用 ISSUE-191 的既有測試。實機尚未驗收（需部署後讓遠端 verify 刻意記不到 evidence，目前沒有穩定重現方式；ISSUE-212 修正後這個情況變少）。上限 2 次是判斷值，沒有數據支持。暫時性失敗（例如遠端斷線）導致記不到時兩次就停，退回人工，不會 merge。ISSUE-216 補充的「Lead 追加次數沒有上限」現在由本 issue 處理，其餘（Lead 無證據地追加非 verify 的指派）沒有限制。
+
 ## ISSUE-218：Herdr 重用 workspace id，worktree 索引裡別張卡的過期紀錄擋住新卡（`workspace … is already recorded`）
 
 2026-11-26。狀態：**已驗收（範圍有限，見最後一則）**（#386 已部署；2026-11-26 重跑時同一個 workspace id 不再被擋）。先前：已修正、待驗收。與 ISSUE-217 同源（Herdr 重用 workspace id），是第二個受影響的地方。

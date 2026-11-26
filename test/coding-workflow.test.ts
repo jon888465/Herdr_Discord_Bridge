@@ -25,7 +25,9 @@ import {
   validateAssignmentPlan,
 } from "../src/team-orchestration.js";
 import {
+  UNRECORDED_VERIFY_LIMIT,
   acceptanceReasons,
+  unrecordedVerifyCount,
   assertIndependentReview,
   codingPlanningAddendum,
   codingWorkerAddendum,
@@ -160,6 +162,25 @@ test("ISSUE-212: 遠端 codex 畫面吃掉跳脫反斜線＋折行時，補回�
   ]);
   // 缺退出碼仍然不記錄
   assert.equal(parseCodingResult(repairCodexCommandJson('{"codingResult":{"kind":"verify","commands":[{"command":"test "x"","exitCode":"0"}]}}')), undefined);
+});
+
+test("ISSUE-219: 同版本 verify 一再沒記錄 evidence 達上限才出現停止原因；有記錄過的 verify（含失敗）不算", () => {
+  const verify = (id: string, evidence: "recorded" | "missing", extra: Record<string, unknown> = {}) =>
+    ({ id, assignmentId: id, role: "verify", versionFingerprint: "v1", evidence, commands: [], findingIds: [], ...extra }) as never;
+  const state = (artifacts: unknown[]) => ({ baseline: {}, artifacts, findings: [] }) as never;
+  const version = { fingerprint: "v1", deliveryPaths: [] } as never;
+  const marker = (artifacts: unknown[]) =>
+    acceptanceReasons(state(artifacts), version, []).filter((r) => r.includes("were not recorded"));
+  assert.equal(unrecordedVerifyCount(state([verify("a", "missing")]), "v1"), 1);
+  assert.equal(marker([verify("a", "missing")]).length, 0);
+  const two = marker([verify("a", "missing"), verify("b", "missing")]);
+  assert.equal(two.length, 1);
+  assert.match(two[0]!, /not recorded 2 times/);
+  assert.ok(UNRECORDED_VERIFY_LIMIT === 2);
+  // 已有被記錄的 verify（即使命令非 0、verificationPassed false）就是真的驗證失敗，不是記不到。
+  assert.equal(marker([verify("a", "missing"), verify("b", "missing"), verify("c", "recorded", { verificationPassed: false })]).length, 0);
+  // 別的版本的 missing 不算。
+  assert.equal(marker([verify("a", "missing"), verify("b", "missing", { versionFingerprint: "v0" })]).length, 0);
 });
 
 test("ISSUE-212: missing command or exit code remains unrecorded", () => {

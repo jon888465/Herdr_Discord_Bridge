@@ -493,6 +493,24 @@ function stableVerify(artifact: CodingArtifactRecord, fingerprint: string) {
 export const VERSION_CAPTURE_OVERFLOW =
   "version capture exceeded the read limit";
 
+/** ISSUE-219：同一個版本上，沒被記錄 evidence 的 verify 累計到這個數量，就不再讓 Lead 追加驗證。 */
+export const UNRECORDED_VERIFY_LIMIT = 2;
+
+/** 同一個版本指紋下，evidence 沒被記錄的 verify 次數；該版本已有被記錄的 verify（不論過不過）就是 0。 */
+export function unrecordedVerifyCount(
+  state: CodingTaskState,
+  fingerprint: string,
+): number {
+  const verifies = state.artifacts.filter(
+    (artifact) =>
+      artifact.role === "verify" &&
+      artifact.versionFingerprint === fingerprint &&
+      !artifact.driftReason,
+  );
+  if (verifies.some((artifact) => artifact.evidence === "recorded")) return 0;
+  return verifies.filter((artifact) => artifact.evidence === "missing").length;
+}
+
 export function acceptanceReasons(
   state: CodingTaskState,
   version: CodingVersion,
@@ -533,6 +551,11 @@ export function acceptanceReasons(
   );
   if (!verified)
     reasons.push("no successful verification for the current version");
+  const unrecorded = unrecordedVerifyCount(state, version.fingerprint);
+  if (unrecorded >= UNRECORDED_VERIFY_LIMIT)
+    reasons.push(
+      `verify reports for the current version were not recorded ${unrecorded} times (evidence missing: the report had no parseable commands/exit codes); running the same verifier again does not help, so the bridge stops planning more verifications and a human must check the delivery`,
+    );
   return reasons;
 }
 
