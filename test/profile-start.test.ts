@@ -78,7 +78,8 @@ test("profile startup uses explicit official socket IDs, literal argv and no mut
   assert.equal(calls[1].params.target_pane_id, lead.pane_id);
   assert.deepEqual(calls[2].params, {
     pane_id: "w1:p7",
-    label: "codex·worker·chosen-model",
+    // ISSUE-220：pane 名稱是 pane id；角色在指派開始時才標在 tab（或共用 tab 時接在 pane 名稱後）。
+    label: "w1:p7",
   });
   assert.deepEqual(calls[3].params.args, [
     "--literal-argument",
