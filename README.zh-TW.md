@@ -455,6 +455,8 @@ Coding 卡片 PR 預檢（ISSUE-187，已修正、待驗收）在每次 implemen
 
 遠端 Agent 預設只用 parser；在該 machine 設定 `hookSocket`（遠端的絕對路徑）後，bridge 會另外維持一條 `ssh -R <hookSocket>:<本機 hook socket>`（與 `-L` 分開，轉發失敗不會影響遠端控制），並在遠端建立 0700 目錄。遠端需安裝 `scripts/remote/herdr-discord-hook.py`（只需 Python 3，不需 Node），並註冊為該 CLI 的 `Stop` hook；agy 寫在 `~/.gemini/config/hooks.json`：`{ "herdr-discord-bridge": { "Stop": [{ "command": "/root/.local/bin/herdr-discord-hook.py --machine <id>", "timeout": 10, "type": "command" }] } }`。Claude／Codex 格式的 `Stop` 也接受。遠端腳本在遠端讀 agy transcript，不需要把檔案傳過 tunnel。
 
+**遠端 machine 自己也跑一個 bridge 時**（它已經有 `~/.config/herdr-discord-bridge/hooks.sock`，hook 也指向它），`hookSocket` 要用**另一個**路徑（例如 `.../hooks-remote.sock`），避免 `ssh -R` 綁到它的 socket；遠端 hook 腳本要登記成既有項目旁邊的**第二個** `Stop` 項目，例如 `env HERDR_DISCORD_HOOK_SOCKET=<hookSocket> /path/herdr-discord-hook.py --machine <id>`（`--machine` 前綴讓 pane id 不會和本機的撞號）。**Codex 要在 `/hooks` 裡信任之後才會執行 hook**，在那之前新項目會被默默略過（用 `codex exec` 驗過：不會卡住、也沒有事件）。**pi** 的 extension 也會送到 `~/.config/herdr-discord-bridge/extra-hook-targets.json` 列出的目標（`[{ "socket": "<hookSocket>", "machine": "<id>" }]`，每次事件重讀；ISSUE-226）。從遠端快速檢查通道：把 `{"hook_event_name":"Stop","session_id":"hooktest","last_assistant_message":"HOOKTEST-1"}` 送進 `HERDR_DISCORD_HOOK_SOCKET=<hookSocket> HERDR_PANE_ID=pTEST herdr-discord-hook.py --machine <id>`，在 bridge console 找 `hook Stop … pane=<id>:pTEST`。
+
 
 ### 卡片上的角色紀錄（ISSUE-127，2026-11-08，待實機驗收）
 
