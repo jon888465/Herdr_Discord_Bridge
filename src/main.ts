@@ -2065,7 +2065,6 @@ async function teamCommand(
       await teamAsk(args, context, runtime);
       return;
     case "discuss":
-      rejectTeamAttachments(context, "discuss");
       await teamDiscuss(args, context, runtime);
       return;
     default: {
@@ -2081,13 +2080,10 @@ async function teamCommand(
   }
 }
 
-/**
- * ISSUE-190：`team ask`／`team discuss` 的程式完全沒有處理附件，附件會被默默丟掉、Agent 照純文字回答。
- * 在支援之前先明確拒絕；一般訊息（單一 Agent）才會把附件存檔並交給 Agent。
- */
+/** ISSUE-190: team ask cannot deliver attachments to its Workers yet. */
 function rejectTeamAttachments(
   context: CommandContext,
-  command: "ask" | "discuss",
+  command: "ask",
 ): void {
   if (context.message.attachments.size)
     throw new Error(
@@ -2126,6 +2122,8 @@ async function teamDiscuss(
     if (bound) existing.push(bound);
   }
   const discussion = startDiscussion(input, lead, {
+    attachments: [...context.message.attachments.values()],
+    attachmentRoot: join(stateDirectory(), "discuss-attachments"),
     port: runtime.herdr,
     reserved: runtime.activeStreams,
     profiles: runtime.pool?.profiles ?? runtime.config.agentProfiles ?? [],

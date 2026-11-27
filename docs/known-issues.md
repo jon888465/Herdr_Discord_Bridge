@@ -537,7 +537,7 @@
 
 ## ISSUE-190：`team ask`／`team discuss` 透過 Discord 傳檔案或圖片，附件被默默丟掉，Agent 沒有讀取
 
-更新日期：2026-11-24。狀態：**選項 1 已修正、待驗收**（原始碼與自動化測試通過；**2026-11-24 已部署重啟（main `e144dff`），未實機驗收**）；**選項 2、3（真的把附件交給 Agent）沒有做，各另開需求卡（`draft`）**。先前：待調查（使用者回報；現象與原因已由讀碼確認；修法待使用者決定）。
+更新日期：2026-11-27。狀態：**選項 1（`team ask`）已修正、待驗收；選項 3（`team discuss` 附件）2026-11-27 已修正、待驗收；選項 2（`team ask` 附件）尚未實作。** 選項 1 曾於 2026-11-24 以 main `e144dff` 部署重啟。本輪選項 3 尚未部署或重啟執行中的 bridge。
 
 **使用者可見症狀（2026-11-23，使用者回報）：**188（`team discuss` 的 Lead 提示）看起來正常，但現在透過 Discord 下 `team ask`、`team discuss` 時，訊息附上檔案或圖片，回答完全沒有讀取附件、沒有看檔案內容。同樣的附件對單一 Agent 的一般訊息是會被讀取的。
 
@@ -548,17 +548,30 @@
 2. **`team ask` 與 `team discuss` 的程式（`src/team-orchestration.ts`、`src/team-turn.ts`、`src/team-discuss.ts` 與兩者在 `main.ts` 的入口）完全沒有處理附件**，只使用指令後面的純文字；附件既不被交付、也不被拒絕，所以是**默默丟掉**。
 3. 這**不是**近期上線的 #338（`team discuss`）或 #347（ISSUE-189）造成的回歸：用 `git log -S"attachments"` 查這三個 team 模組，沒有任何歷史紀錄顯示它們曾經處理過附件。
 
-**未確認：**使用者實際貼的附件類型與大小（沒有看到原訊息）；若要支援，各 Agent 種類對圖片與檔案的支援不同（既有的 `agentSupportsLocalImages`），`team ask` 的 Worker 可能在遠端機器（附件要用既有的遠端交付）；`team discuss` 的同儕是唯讀的，而附件存檔會在 Lead 的 cwd 底下新增 `.herdr-discord-bridge/attachments` 資料夾，可能讓「討論前後工作樹指紋」判定為有變動，與 ISSUE-186 的唯讀保證互相影響，沒有驗證；附件內容屬不可信資料，要不要與同儕輸出一樣用不可信圍欄包起來，沒有決定。
+**初次調查（2026-11-23）：**未取得原訊息的附件類型與大小。當時的一般附件路徑位於 Agent 的 cwd，不能直接用於唯讀討論。遠端 Worker 交付仍屬選項 2。
 
-**修法方向（只是選項，尚未選定）：**
+**2026-11-23 提出的選項（歷史）：**
 1. **先擋下並明說**：指令帶附件時直接回「`team ask`／`team discuss` 目前不支援附件，請改用一般訊息傳給單一 Agent」，不再默默丟掉。最小、最安全，但不讓附件可用。
 2. **`team ask` 支援附件**：Lead 與被派工的 Worker 的提示都帶附件路徑（沿用 `askAgent` 的準備與提示，遠端 Worker 用既有的遠端交付）；要決定誰負責存檔、存到哪個 cwd、Worker 不支援圖片時怎麼辦。
 3. **`team discuss` 支援附件**：同儕與 Lead 都看得到附件，但要先解決存檔位置與唯讀指紋的衝突（例如存到 bridge 自己的狀態目錄而不是 Lead 的 cwd），並把附件內容當不可信資料。
 4. 1 先做，2、3 另開需求卡。我傾向 1 加上 2 的設計討論，3 最後。
-**下一步：**部署重啟後從 Discord 對 `team ask`、`team discuss` 各帶一個附件實測拒絕訊息；選項 2、3 的需求卡由使用者決定何時放行。**在選項 2、3 完成前，請不要依賴 `team ask`／`team discuss` 讀附件**，需要 Agent 看檔案或圖片時，改對單一 Agent 用一般訊息傳送。
 **修正（2026-11-24，使用者選修法 1；原始碼，同日已部署）：**`src/main.ts` 新增 `rejectTeamAttachments`，在 `team` 指令的 `ask` 與 `discuss` 兩個分支**最先**呼叫：訊息帶任何附件（`context.message.attachments.size`）就丟出 `team <ask|discuss> 目前不支援附件（檔案或圖片），Agent 不會讀取；請拿掉附件再下指令，或改用一般訊息把附件傳給單一 Agent。`，不再往下建立任務或討論。其他 `team` 子指令與沒有附件的 `team ask`／`team discuss` 行為不變。`team ask --coding` 與 `team ask` 同一個分支，所以一併被擋。console 的訊息沒有附件，不受影響。
 **測試（2026-11-24，本機 macOS，worktree）：**新增 `test/team-attachments-main.test.ts` 7 項（`ask`、`discuss` 各：帶 1 個附件、帶 3 個附件都在存取 runtime 之前被拒絕並說明；沒有附件時不會被這個檢查擋下；其他 `team` 子指令不受影響）。先寫測試，尚未實作時 4 項失敗；暫時拿掉 `ask` 的那行呼叫，2 項失敗，已還原且逐字相同。既有 `team-discuss` 測試的假 Discord 訊息沒有 `attachments` 欄位（真實訊息一定有），補上空的 `attachments` 後完整 `npm test`（2026-11-24）2285 項、通過 2284、失敗 0、略過 1；typecheck、lint 通過。
-**未驗證：**Discord 端到端（真的從 Discord 對 `team ask`／`team discuss` 帶附件看到這則訊息）；Discord 附件是否在訊息分派到 `team` 指令之前就被別處處理（讀碼沒有發現，沒有實測）；訊息只有附件、沒有任何文字時的路徑；`/herdr` 斜線或前綴以外的入口（沒有發現其他入口）。選項 2、3 沒有做：`team ask` 附件（Lead 與 Worker 都帶路徑，遠端 Worker 用既有遠端交付）與 `team discuss` 附件（存放位置要避開 Lead 的 cwd 以免破壞唯讀指紋，內容要當不可信資料）各是需求卡 `REQ-20261124-team-ask-attachments`、`REQ-20261124-team-discuss-attachments`（卡片檔在 bridge 的 state 目錄，不在 repo 內；狀態 `draft`，未放行）。
+**2026-11-24 未驗證項目：**Discord 真實拒絕訊息、只有附件沒有文字，以及其他指令入口。當時選項 2、3 尚未實作。
+
+**選項 3 修正（2026-11-27，Linux 工作樹）：**Discord 訊息附件由 `src/main.ts` 傳入討論。`src/attachments.ts` 共用同步中繼資料驗證與有界下載。`src/team-discuss.ts` 在前置快照之後檢查暫存位置，解析實體路徑使其位於各參與者 cwd、foreground_cwd 和 Git 工作樹之外。每輪與 Lead 都收到同一段有圍欄的唯讀路徑與指示，無法看圖的 Lead 拒絕、同儕逐一說明跳過。完成、失敗、逾時或取消均清理暫存，清除失敗回報路徑與原因。
+
+**檔案與驗證（2026-11-27）：**測試在 `test/team-discuss-attachments.test.ts`、`test/team-discuss.test.ts`、`test/team-attachments-main.test.ts`。契約與索引同步於 `SPEC.md`、`docs/team-orchestration-spec.md`、`README.md`、`README.zh-TW.md`、`CONTEXT.md` 與本清單。
+
+- 初次測試建置時，fixture 回覆型別被 TypeScript 推斷成兩個固定字串，已改為 `Promise<string>`。初跑附件測試 13 項、12 通過、1 失敗：Grok 的純檔案回合未取得有效框，查明 fixture 未模擬 Grok 的方框輸出，已按既有終端解析格式修正。
+- 突變檢查：暫時停用 `verifyOutside` 的路徑比對，執行 `npm run build && node --test dist/test/team-discuss-attachments.test.js`，build 成功，13 項中 12 通過、1 如預期失敗（暫存位置在 cwd／工作樹內或指向其中的 symlink）。已逐位元還原實作。無附件提示與結果比對基準由 `ea4d4e7` 的原始實作產生，固定討論 ID 後比較。
+- 還原後 `npm run typecheck`、`npm run lint`（300 個 TypeScript 檔案）、`npm run build` 均成功。執行 `node --test dist/test/team-discuss-attachments.test.js dist/test/team-attachments-main.test.js dist/test/team-discuss.test.js`，40/40 通過。
+- 完整 `npm test`（Linux、Node v22.23.4）共 2,388 項，2,360 通過、28 失敗、0 取消、0 略過，exit 1。失敗包含 CLI adapter 的回合逾時、coding workflow 的 blocked 狀態、run.sh 啟動逾時、team questions 及 task engine 的斷言。全套未綠，這些失敗的共同根因未確認。
+- 單線抽驗 `node --test --test-concurrency=1 --test-name-pattern='Claude tools cannot complete|Grok boxed turn|same-session and unknown reviewers|unanswered questions expire|normalized CRLF|run.sh Herdr matrix -r --herdr' dist/test/cli-adapter.test.js dist/test/coding-workflow.test.js dist/test/run-sh-args.test.js dist/test/team-questions.test.js dist/test/team-task-engine.test.js`：6 項、4 通過、2 失敗。仍失敗的是 team questions 的 unanswered questions expire 與 task engine 的 normalized CRLF。另以 Node 模組載入器替換三個修改過的原始碼模組為基準 `ea4d4e7`，同兩項測試單線 2/2 通過。切回本輪 build 執行 `node --test --test-concurrency=1 --test-name-pattern='unanswered questions expire|normalized CRLF' dist/test/team-questions.test.js dist/test/team-task-engine.test.js`，1 通過、1 失敗；questions 案例仍在讀取缺少的結果時失敗。未確認是本卡造成，不調低時間或斷言標準。
+
+- 接手複驗（2026-11-27，macOS 本機，同一份程式 `e7276a9`）：`npm run build`、`npm run lint`（300 個 TypeScript 檔案）通過；完整 `npm test` 共 2,388 項，2,387 通過、0 失敗、1 跳過。上面 Linux 遠端機器的 28 項失敗在這裡**沒有重現**，所以那些失敗與這次變更無關的可能性高，但根因仍未確認；以 CI（ubuntu、macOS）結果為準，見 PR。
+**待驗收：**本輪未部署或重啟，舊訊息不會補送。部署重啟後從 Discord 新送 `team discuss`，同附可辨識的文字檔與圖片，確認每輪同儕與 Lead 引用實際內容，結果列出 `Worktree fingerprints matched`，再記錄日期、環境與結果。`team ask` 另需實測拒絕訊息，附件交付屬尚未實作的 `REQ-20261124-team-ask-attachments`。
+
 ## ISSUE-189：Team 名單殘留一個失效 Worker，整個 `team ask` 直接失敗
 
 更新日期：2026-11-23。狀態：已修正、待驗收（原始碼與自動化測試完成；**執行中的 bridge 尚未重啟，未在 Discord 實機驗收**）。
@@ -662,7 +675,7 @@
 - **驗收環境的還原（2026-11-24）：**驗收用的暫時設定已全部還原：使用者的 `config.json` 與 `policy.yml` 與驗收前的備份**逐位元組相同**（拿掉遠端 machine 的 `write: true`、沙盒專案；pi profile 維持註解掉）、沙盒 repo 的 `core.autocrlf` 已取消、5 張沙盒卡的 worktree、Lead workspace 與本機卡片分支已清理、沙盒 PR #4 已關閉且遠端分支已刪（沙盒遠端只剩 `main`）；bridge 已重啟載入還原後的設定。
 ## ISSUE-186：team discuss 唯讀同儕討論與缺空格提示
 
-更新日期：2026-11-23。狀態：**重新開啟／待調查（agy 同儕不穩定地被標 `incomplete`：2026-11-23 05:15 UTC 又出現，根因未確認，見「agy 再度未完成」那則）；另有一種**不同機制**的現象（claude 漏寫開頭標記）根因已確認、已修正、待驗收，見最後一則；主路徑的 Discord 實機驗收（2026-11-23）與先前的修正歷史保留如下**。先前：已驗收（Discord thread 主路徑，範圍有限，見下方「Discord 實機驗收」）；再先前：已修正、待驗收。需求 REQ-20261120-team-discuss。
+更新日期：2026-11-27。狀態：**重新開啟／待調查（agy 同儕不穩定地被標 `incomplete`：2026-11-23 05:15 UTC 又出現，根因未確認，見「agy 再度未完成」那則）；另有一種**不同機制**的現象（claude 漏寫開頭標記）根因已確認、已修正、待驗收，見最後一則；主路徑的 Discord 實機驗收（2026-11-23）與先前的修正歷史保留如下**。先前：已驗收（Discord thread 主路徑，範圍有限，見下方「Discord 實機驗收」）；再先前：已修正、待驗收。需求 REQ-20261120-team-discuss。
 
 - 症狀／根因：Discord 或 console 輸入 `team ask討論…` 時，切字保留了緊接的文字，Team dispatcher 落到通用 usage。一般 `team ask` 只用已配置的 Workers，單 Agent workspace 缺少獨立同儕討論與新 session 後備。ISSUE-185 是之前卡片指派的 Lead 就緒競態，與本指令實機驗收分開追蹤。
 - 修正／預期：`team discuss` 以本機 active Agent 彙整，優先使用 workspace 同儕，缺額由 Claude Sonnet、Codex、Agy 的新 session 補上。新增缺空格提示、額度與模型來源回報、獨立／匿名唯讀回合、工作樹指紋、workspace scope cancel 與 owned pane 清理。見 [SPEC](../SPEC.md#本機唯讀同儕討論)。
@@ -712,6 +725,7 @@
 - **診斷日誌的第一筆實證（2026-11-23 08:39 UTC，ISSUE-191 重跑的第一輪，task `task-762ce9df…` 的診斷指派逾時，bridge console 的 `[turn-timeout-diag]`）：**`agent: claude`、`lastStatus: idle`、`hookMode: wired`、`hook: {present: true, chars: 3230, begins: 0, ends: 1, frame: false}`、`transcript: none`；四個讀取來源（`recent_unwrapped`、`recent`、`visible`、`detection`）逾時當下都是 `begins: 0, ends: 0`（畫面內容在 08:00 與 08:39 之間已不同）。**這與上一則「claude 漏寫開頭標記」的根因一致**：hook 訊息有到、長度與 claude 逐字稿相同、只有結尾標記。指派等到 60 分鐘的回合上限才失敗（`Timed out waiting for current response…; no verified completion`）。
 - **修正 #355 的部署與驗證狀態（2026-11-23）：**含 #355 的 build 已於 08:44 UTC 部署（`dist` 內有 `extractUnopenedFrame`），之後的重跑沒有再遇到 claude 漏開頭標記，所以**修正尚未被真實情境觸發過，仍是「已修正、待驗收」**；agy 那種「標記成對卻判逾時」仍是根因未確認。
 
+- **討論附件的唯讀檢查（2026-11-27，ISSUE-190 選項 3，已修正、待驗收）：**Linux 自動化測試在每輪與 Lead 讀取期間比對 `inspectRepository` 指紋、唯讀權限與參與者外部的路徑；結束後結果仍顯示 `Worktree fingerprints matched`。突變與全套測試紀錄見 ISSUE-190。本輪未部署重啟，先前 Discord 無附件驗收不涵蓋此功能；同附文字檔與圖片的 Discord 實機驗收待辦。agy 的既有調查繼續獨立追蹤。
 
 ## ISSUE-185：卡片指派的 Lead 剛就緒就送提示，撞到跳過更新選單後短暫的 `working`，任務沒有啟動（`agent is busy`）
 

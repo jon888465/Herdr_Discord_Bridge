@@ -104,7 +104,7 @@ instances; legacy processes without the lock still require explicit migration.
 
 ## Team Discussion
 
-[`team discuss`](docs/team-orchestration-spec.md#local-read-only-discussion) is the local read-only peer workflow behind Discord and console. It uses the selected Lead, existing Team peers, fresh Sonnet/Codex/Agy fallback, anonymous critique, quota checks and before/after worktree evidence. See ISSUE-186 for implementation checks and pending live acceptance. Discuss keeps its active state in memory.
+[`team discuss`](docs/team-orchestration-spec.md#local-read-only-discussion) is the local read-only peer workflow behind Discord and console. It uses the selected Lead, existing Team peers, fresh Sonnet/Codex/Agy fallback, anonymous critique, quota checks and before/after worktree evidence. See ISSUE-186 for implementation checks and pending live acceptance. Discuss keeps its active state in memory. ISSUE-190 tracks read-only Discord attachments in every discussion round and Lead synthesis, pending deployment, restart and live acceptance. `team ask` still rejects attachments.
 
 ## Durable Tasks
 

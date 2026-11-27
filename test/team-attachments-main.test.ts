@@ -3,17 +3,20 @@ import assert from "node:assert/strict";
 import { handleCommand } from "../src/main.js";
 import { createConsoleContext } from "../src/console.js";
 
-/**
- * ISSUE-190：`team ask`／`team discuss` 的程式完全沒有處理附件，附件被默默丟掉，Agent 照純文字回答。
- * 選項 1：指令帶附件時直接拒絕並說明；附件是否真的交給 Agent 是後續需求（另開需求卡），這裡不處理。
- */
 type Runtime = Parameters<typeof handleCommand>[3];
 
 function contextWithAttachments(count: number) {
   const context = createConsoleContext(() => {});
-  const attachments = context.message.attachments as unknown as Map<string, object>;
+  const attachments = context.message.attachments as unknown as Map<
+    string,
+    object
+  >;
   for (let i = 0; i < count; i++)
-    attachments.set(`a${i}`, { id: `a${i}`, name: `f${i}.png`, contentType: "image/png" });
+    attachments.set(`a${i}`, {
+      id: `a${i}`,
+      name: `f${i}.png`,
+      contentType: "image/png",
+    });
   return context;
 }
 
@@ -27,34 +30,33 @@ const untouchable = new Proxy(
   },
 ) as Runtime;
 
-for (const command of ["ask", "discuss"] as const) {
-  test(`team ${command} with an attachment is rejected with a clear message before anything else runs`, async () => {
+for (const count of [1, 3]) {
+  test(`team ask rejects ${count} attachments before accessing runtime`, async () => {
     await assert.rejects(
-      handleCommand("team", [command, "請看附件"], contextWithAttachments(1), untouchable),
-      (error: Error) => {
-        assert.match(error.message, new RegExp(`team ${command} 目前不支援附件`));
-        assert.match(error.message, /一般訊息/);
-        assert.doesNotMatch(error.message, /runtime\./);
-        return true;
-      },
+      handleCommand(
+        "team",
+        ["ask", "請看附件"],
+        contextWithAttachments(count),
+        untouchable,
+      ),
+      /team ask 目前不支援附件.*一般訊息/,
     );
   });
+}
 
-  test(`team ${command} with several attachments is rejected the same way`, async () => {
+for (const [command, count] of [
+  ["ask", 0],
+  ["discuss", 1],
+] as const) {
+  test(`team ${command} with ${count} attachments proceeds to runtime`, async () => {
     await assert.rejects(
-      handleCommand("team", [command, "請看附件"], contextWithAttachments(3), untouchable),
-      new RegExp(`team ${command} 目前不支援附件`),
-    );
-  });
-
-  test(`team ${command} without attachments is not rejected for attachments`, async () => {
-    await assert.rejects(
-      handleCommand("team", [command, "純文字"], contextWithAttachments(0), untouchable),
-      (error: Error) => {
-        assert.doesNotMatch(error.message, /不支援附件/);
-        assert.match(error.message, /was touched/);
-        return true;
-      },
+      handleCommand(
+        "team",
+        [command, "topic"],
+        contextWithAttachments(count),
+        untouchable,
+      ),
+      /was touched/,
     );
   });
 }
