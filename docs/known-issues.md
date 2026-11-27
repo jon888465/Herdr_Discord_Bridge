@@ -1,5 +1,18 @@
 # Known Issues
 
+## ISSUE-226：遠端 machine 自己也跑 bridge 時，遠端 agent 的 hook 事件送不回本機 bridge
+
+2026-11-27。狀態：**已修正（pi）、部分實機驗收；codex 的遠端 hook 已登記但需使用者在 `/hooks` 信任，尚未驗收**。來源：使用者要求把遠端 machine 補上 hook（為了 ISSUE-225 遠端 Lead 要求 machine 必須有 hook），補的過程中發現的幾個狀況。
+
+**症狀（2026-11-27，讀遠端設定與程序，唯讀）：**(1) 遠端 machine **自己也跑一個 bridge**（有 `~/.config/herdr-discord-bridge/hooks.sock` 與 `send.sock`），它的 codex `Stop` hook 與 pi extension 都已登記並指向那個預設 socket，不是本機 bridge；(2) 如果在本機 bridge 的 `machines[].hookSocket` 用同一個路徑，`ssh -R` 會去綁那個已被占用的 socket；(3) 那些既有 hook 送出的 `paneId` 沒有 machine 前綴（`scripts/remote/herdr-discord-hook.py` 的 `--machine` 才有），本機 bridge 收到會與本機 pane id 撞號；(4) pi extension 只送預設 socket、沒有任何方式多送一個目標。
+
+**做法（2026-11-27）：**`hookSocket` 用另一個路徑（`…/hooks-remote.sock`），不動遠端 bridge 的 socket；遠端安裝 `herdr-discord-hook.py`（只是一個檔案）；codex 的 `hooks.json` 在既有 `Stop` 旁**新增第二個項目**（`env HERDR_DISCORD_HOOK_SOCKET=<hookSocket> …/herdr-discord-hook.py --machine <id>`，先備份原檔）；`scripts/pi/herdr-discord-bridge.ts` 新增讀 `~/.config/herdr-discord-bridge/extra-hook-targets.json`（`[{ "socket", "machine" }]`，每次事件重讀，檔案不存在或壞掉就與以前完全相同），額外目標的 `paneId` 帶 machine 前綴；遠端的 pi extension 換成新版（先備份）並寫入該檔。
+
+**測試（2026-11-27，本機，`npm run build`、`npm run lint` 通過）：**完整測試 2353 項，2352 通過、0 失敗、1 跳過；新增 `test/pi-hook-extra-targets.test.ts`（沒有設定檔只送預設 socket、有設定檔額外送到該 socket 且 paneId 帶前綴、不合法項目與壞掉的檔案被忽略、重複的預設 socket 不重送）。
+**實機結果（2026-11-27）：**(1) **通道**：在遠端用 `herdr-discord-hook.py --machine <id>` 送一個測試 Stop 事件，本機 bridge console 出現 `hook Stop session=hooktest pane=<id>:pTEST chars=19`，通過；遠端 bridge 自己的 `hooks.sock` 沒被動到。(2) **pi（真實事件）**：沙盒卡 `REQ-20261127-hook-verify`（遠端 pi 當 writer）執行期間，本機 bridge console 出現 `hook Stop session=<pi session 檔路徑> pane=<id>:wB:p1`，通過，1 個樣本。(3) **codex**：在遠端跑 `codex exec` 驗證，新項目沒有執行（codex 對新增的 hook 要求信任，`config.toml` 的 `hooks.state` 以「檔案:事件:群組:項目」為鍵記錄 `trusted_hash`），也沒有卡住啟動；**需要使用者在遠端 codex 的 `/hooks` 信任新項目**，之後再驗。我沒有自己改信任紀錄（那是繞過信任提示）。
+
+**未驗證／限制：**codex 的遠端 hook（等使用者信任後用真實 codex pane 驗）；claude 在遠端（沒有登記，目前遠端 machine 的 `cardReview.kinds` 只有 codex 與 pi）；pi 的 extension 目前只有 `agent_settled` 在 `tui` 模式才送事件；遠端使用者自己的 session（不是 bridge 派的）的最終回覆也會被送到本機 bridge（已知，是同一個使用者的機器，但要知道）；遠端 machine 的 hook 設定是手動做的，`REQ-20261127-hook-install` 卡要把它做成 `run.sh` 的一部分。
+
 ## ISSUE-225：卡片不能指定 Lead 跑在遠端 machine（功能需求，設計中）
 
 2026-11-27。狀態：**第 1 階段已實作、待驗收；設計 A 到 E 都已確認**（第 1 階段：解析與撿卡前檢查，不啟動任何遠端 Lead；第 2 階段起尚未開始）。使用者要求（2026-11-26）：卡片 `lead` 可以寫成 `agy-machine:agy:neon:medium`（遠端 machine 的 agy，model neon、effort medium）。需求卡 `REQ-20261127-remote-lead`（plugin 狀態目錄，不在 repo）。
