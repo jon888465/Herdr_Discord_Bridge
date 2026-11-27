@@ -59,7 +59,7 @@ test("cardReview.write：只接受布林，true 保留、false 省略，預設�
   assert.equal("write" in (review(false) ?? {}), false);
   assert.equal("write" in (review() ?? {}), false);
   for (const bad of ["yes", 1, null, {}])
-    assert.throws(() => review(bad), /toolchain and write, if set, must be booleans/);
+    assert.throws(() => review(bad), /toolchain, write and lead, if set, must be booleans/);
 });
 
 test("cardReview.toolchain: only a boolean is accepted, true is kept, false is omitted", () => {
@@ -72,7 +72,7 @@ test("cardReview.toolchain: only a boolean is accepted, true is kept, false is o
   assert.equal("toolchain" in (review(false) ?? {}), false);
   assert.equal("toolchain" in (review() ?? {}), false);
   for (const bad of ["yes", 1, null, {}])
-    assert.throws(() => review(bad), /toolchain and write, if set, must be booleans/);
+    assert.throws(() => review(bad), /toolchain, write and lead, if set, must be booleans/);
 });
 
 test("hub routes unprefixed ids to local and prefixed ids to the machine", async () => {
@@ -819,4 +819,14 @@ test("sshConfigHasHost 交給 ssh -G 判斷：hostname 與輸入不同才算已�
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("cardReview.lead：只接受布林，true 保留、false 省略，預設關閉（ISSUE-225）", () => {
+  const base = { id: "agy-machine", ssh: "agy-machine", socket: "/s.sock" };
+  const review = (lead?: unknown) =>
+    validateMachines([{ ...base, cardReview: { root: "/root/review", kinds: ["agy"], ...(lead === undefined ? {} : { lead }) } }])[0].cardReview;
+  assert.equal(review(true)?.lead, true);
+  assert.equal("lead" in (review(false) ?? {}), false);
+  assert.equal("lead" in (review() ?? {}), false);
+  for (const bad of ["yes", 1, null, {}]) assert.throws(() => review(bad), /lead, if set, must be booleans/);
 });

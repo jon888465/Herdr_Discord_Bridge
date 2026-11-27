@@ -189,6 +189,7 @@ import {
   routeConsoleCommand,
   createConsoleContext,
 } from "./console.js";
+import { preflightLead } from "./card-lead.js";
 import { AUTOPICK_USER, createAutopickSteps, sourceLeadRecord, type WorktreeSource } from "./autopick-wiring.js";
 import {
   leadRejectionEvent,
@@ -2341,7 +2342,7 @@ function remoteWriteDeps(hub: HerdrHub): RemoteRoleDeps {
 export function cardRoleContext(runtime: {
   herdr?: HerdrClient;
   config: {
-    machines: readonly { id: string; cardReview?: { kinds: readonly string[]; toolchain?: boolean; write?: boolean } }[];
+    machines: readonly { id: string; hookSocket?: string; cardReview?: { kinds: readonly string[]; toolchain?: boolean; write?: boolean; lead?: boolean } }[];
     agentProfiles?: Runtime["config"]["agentProfiles"];
   };
   pool?: { profiles: Runtime["config"]["agentProfiles"] };
@@ -2355,7 +2356,7 @@ export function cardRoleContext(runtime: {
     ...(runtime.config.machines.some((m) => m.cardReview)
       ? {
           remoteMachines: runtime.config.machines.flatMap((m) =>
-            m.cardReview && !(runtime.herdr instanceof HerdrHub && runtime.herdr.isDisconnected(m.id)) ? [{ id: m.id, kinds: [...m.cardReview.kinds], ...(m.cardReview.toolchain ? { toolchain: true } : {}), ...(m.cardReview.write ? { write: true } : {}) }] : [],
+            m.cardReview && !(runtime.herdr instanceof HerdrHub && runtime.herdr.isDisconnected(m.id)) ? [{ id: m.id, kinds: [...m.cardReview.kinds], ...(m.cardReview.toolchain ? { toolchain: true } : {}), ...(m.cardReview.lead ? { lead: true } : {}), ...(m.hookSocket ? { hook: true } : {}), ...(m.cardReview.write ? { write: true } : {}) }] : [],
           ),
         }
       : {}),
@@ -3512,9 +3513,10 @@ function startAutopick(runtime: Runtime): () => void {
       now: () => Date.now(),
     }),
     roleGate: (card) => {
-      if (!card.roles) return;
+      if (!card.roles && !card.leadSpec) return;
       try {
-        preflightRoles(card.roles, cardRoleContext(runtime));
+        if (card.leadSpec) preflightLead(card.leadSpec, cardRoleContext(runtime));
+        if (card.roles) preflightRoles(card.roles, cardRoleContext(runtime));
       } catch (error) {
         return error instanceof Error ? error.message : "卡片角色指定無效";
       }

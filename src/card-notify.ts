@@ -116,7 +116,7 @@ export function classifyRoleRejection(text: string): string {
   if (index < 0) return "卡片角色指定無效";
   const tail = text.slice(index + marker.length).split("；")[0] ?? "";
   const match =
-    /^(roles|implement|diagnose|review|verify|reviewer|fixer)：(.+)$/.exec(
+    /^(roles|lead|implement|diagnose|review|verify|reviewer|fixer)：(.+)$/.exec(
       tail,
     );
   if (!match) return "卡片角色指定無效";
@@ -130,6 +130,10 @@ export function classifyRoleRejection(text: string): string {
     "remote verify 不可用",
     "machine 未開放卡片 review",
     "machine 已斷線",
+    "machine 未開放遠端 Lead",
+    "machine 沒有設定 hookSocket",
+    "遠端 Lead 尚未實作",
+    "model／effort 指定尚未支援",
   ])
     if (detail!.startsWith(label)) return `卡片角色指定無效：${role}：${label}`;
   if (detail!.startsWith("卡片流程尚未支援 machine "))

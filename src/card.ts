@@ -1,4 +1,5 @@
 import { parseCardRoles, type CardRoles } from "./card-role-assignment.js";
+import { parseLead, type LeadSpec } from "./card-lead.js";
 import path from "node:path";
 import type { AutopickLead } from "./policy.js";
 
@@ -27,6 +28,8 @@ export interface Card {
   source?: string;
   notify?: string;
   lead?: AutopickLead;
+  /** ISSUE-225：`lead` 寫成 `machine:agent[:model[:effort]]` 時的完整指定（`lead` 仍是 agent 種類，舊程式照舊讀）。 */
+  leadSpec?: LeadSpec;
   /** `readonly`：只讀任務，自動撿卡不建 worktree、不走 coding／commit／PR 流程（ISSUE-162）。 */
   mode?: "readonly";
   roles?: CardRoles;
@@ -489,9 +492,12 @@ export function buildCard(
     }
     if (fields.has("lead")) {
       const value = asString("lead", fields.get("lead"));
-      if (!["claude", "codex", "agy", "pi"].includes(value))
-        reject("invalid lead; use claude, codex, agy or pi");
-      card.lead = value as AutopickLead;
+      const parsedLead = parseLead(value);
+      if (!parsedLead.ok) reject(parsedLead.error);
+      else {
+        card.lead = parsedLead.kind as AutopickLead;
+        if (parsedLead.spec) card.leadSpec = parsedLead.spec;
+      }
     }
     if (fields.has("mode")) {
       if (asString("mode", fields.get("mode")) !== "readonly")

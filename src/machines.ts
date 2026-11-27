@@ -25,7 +25,7 @@ export interface MachineConfig {
    */
   hookSocket?: string;
   /** 選填：開放卡片 reviewer 與 task 內唯讀角色；toolchain 為 true 才可分配 verify；write 為 true 才可分配 implement（ISSUE-171，預設關閉）。 */
-  cardReview?: { root: string; kinds: string[]; toolchain?: boolean; write?: boolean };
+  cardReview?: { root: string; kinds: string[]; toolchain?: boolean; write?: boolean; lead?: boolean };
 }
 
 /** 遠端 shell／git 參數：不可含 `..`、`.` 路徑段、控制字元、空白、shell 字元，路徑段不以 `-` 開頭。 */
@@ -38,16 +38,16 @@ export function unsafeRemoteValue(value: unknown): string | undefined {
 
 function validateCardReview(id: string, value: unknown): MachineConfig["cardReview"] {
   if (value === undefined) return undefined;
-  const { root, kinds, toolchain, write, ...rest } = (value ?? {}) as Record<string, unknown>;
+  const { root, kinds, toolchain, write, lead, ...rest } = (value ?? {}) as Record<string, unknown>;
   const list = Array.isArray(kinds) ? (kinds as string[]) : [];
   if (
     !value || Array.isArray(value) || Object.keys(rest).length || typeof root !== "string" || !root.startsWith("/") ||
     unsafeRemoteValue(root) || root.split("/").filter(Boolean).length < 2 || !list.length || new Set(list).size !== list.length ||
     list.some((kind) => !["claude", "codex", "agy", "pi"].includes(kind)) || (toolchain !== undefined && typeof toolchain !== "boolean") ||
-    (write !== undefined && typeof write !== "boolean")
+    (write !== undefined && typeof write !== "boolean") || (lead !== undefined && typeof lead !== "boolean")
   )
-    throw new Error(`machines[${id}].cardReview needs an absolute root (2+ segments) and kinds from claude, codex, agy, pi; toolchain and write, if set, must be booleans`);
-  return { root: root.replace(/\/+$/, ""), kinds: [...list], ...(toolchain ? { toolchain: true } : {}), ...(write ? { write: true } : {}) };
+    throw new Error(`machines[${id}].cardReview needs an absolute root (2+ segments) and kinds from claude, codex, agy, pi; toolchain, write and lead, if set, must be booleans`);
+  return { root: root.replace(/\/+$/, ""), kinds: [...list], ...(toolchain ? { toolchain: true } : {}), ...(write ? { write: true } : {}), ...(lead ? { lead: true } : {}) };
 }
 
 const MACHINE_ID = /^[A-Za-z][A-Za-z0-9_-]{1,31}$/;
