@@ -86,6 +86,7 @@ export function registeredEvents(file: string): Record<string, boolean> {
 export function hookStatusText(
   transport: Partial<Record<string, HookTransportMode>> | undefined,
   home = homedir(),
+  machines?: ReadonlyArray<{ id: string; hookSocket?: string }>,
 ): string {
   const files: Record<HookAgent, string> = {
     claude: join(home, ".claude", "settings.json"),
@@ -118,6 +119,11 @@ export function hookStatusText(
       `• **${kind}**：模式 \`${mode}\`｜Stop ${mark(reg.Stop)}｜PermissionRequest ${perm}（${files[kind]}）`,
     );
   }
+  // REQ-20261127-hook-install：遠端 machine 有沒有設 hookSocket（沒設就只能用畫面解析，而且不能當遠端 Lead）。
+  for (const machine of machines ?? [])
+    lines.push(
+      `• **遠端 machine ${machine.id}**：${machine.hookSocket ? "hookSocket ✅ 已設定" : "hookSocket ❌ 未設定（回覆只能用畫面解析）"}`,
+    );
   lines.push(
     "• 其他 CLI（grok…）目前只用 parser。",
     "• Codex 另需在 Codex 內輸入 `/hooks` 審查並信任 `Stop`；信任前不會執行。",

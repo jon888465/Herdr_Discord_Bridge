@@ -1,5 +1,18 @@
 # Known Issues
 
+## ISSUE-227：hook 要手動註冊，新增 machine 缺 hook 時靜默失效
+
+2026-11-27。狀態：**已修正（本機與遠端安裝、啟動警告）、待實機驗收；看板欄位與自我測試尚未做**。使用者要求（2026-11-27）：「git 拉下 bridge 專案執行 run.sh 時應該也要安裝 hook，不然新增 pod 後這就失效了也不知道」；決定：已安裝就不重裝、遠端預設也裝、安排各 agent 驗證、用特定訊息做通道自我測試。需求卡 `REQ-20261127-hook-install`（plugin 狀態目錄，不在 repo）。
+
+**症狀：**各 CLI 的 hook 都是人手動註冊（README），`run.sh` 完全不碰；新增一台遠端 machine 忘了裝或沒設 `hookSocket`，bridge 悄悄退回畫面解析，只有結果變差才會發現；讀碼沒有任何對缺 hook 的警告。
+
+**修正（2026-11-27）：**`src/hook-install.ts`（本機安裝、遠端安裝腳本與執行、報告格式、`machinesWithoutHook`）、`src/hook-install-cli.ts`（`--dry-run`、`--local-only`、`--config-dir`；結束碼一律 0）、`scripts/run.sh`（`-r`、relink、`--core -r` 的 build 之後呼叫，`--no-hooks` 略過）、`src/main.ts`（啟動時對沒設 `hookSocket` 的 machine 警告）、`src/hook-status.ts`（`hooks` 指令列出每台 machine 的 `hookSocket` 狀態）。行為與限制見 SPEC 與 README。
+
+**測試（2026-11-27，本機，`npm run build`、`npm run lint` 通過）：**完整測試 2364 項，2363 通過、0 失敗、1 跳過。新增 `test/hook-install.test.ts` 10 項：本機各 CLI（略過、補上並備份、冪等、dry-run 不寫檔、保留其他設定、Codex 信任提示、PermissionRequest 只提醒、agy 群組、pi 安裝／相同／更新、JSON 壞掉不覆寫、舊項目指向不存在的檔案）；**遠端腳本直接在本機用暫時 HOME 以 `python3 -` 真的執行**（安裝腳本與可執行權限、既有項目保留另加第二個、冪等、備份、Codex 信任判斷、dry-run 不寫檔、預設 socket 不加 env、壞 JSON 不覆寫）；`installRemoteHooks` 的 ssh 參數、沒設 `hookSocket` 只提示、失敗與無法解析的回傳；`hooks` 狀態文字。
+**實機（2026-11-27，只跑 `--dry-run`，沒有改任何檔案）：**對真實環境跑一次：本機 Claude、Codex、agy 判定已安裝，本機 pi 的 extension 判定「內容與本專案版本不同，會更新」（屬實，是 ISSUE-226 之前的舊版）；兩台遠端 machine 的腳本、hook、pi extension 與額外目標都判定已安裝且內容相同，遠端 Codex 判定「已信任」（讀得到我先前請使用者在 `/hooks` 信任後產生的紀錄）。
+
+**未驗證／限制：**真的執行（非 dry-run）的實機：在乾淨環境從零安裝、`run.sh -r` 完整走一次；遠端「從零安裝」只有用本機暫時 HOME 跑腳本驗證，沒有在真的乾淨的遠端 machine 上做；agy 與 claude 遠端沒有實機；hook 事件是否能完整送出各 agent 的最終回覆只驗過 pi 與 codex（ISSUE-226）；**看板 machine 面板的 hook 欄位沒做**（卡片驗收條件要求，尚未滿足）；**「設了但沒有事件送回來」的自我測試沒做**（做法已決定：從遠端用 `herdr-discord-hook.py --machine <id>` 送帶唯一標記的測試事件，bridge 看到才算通道通）；`run.sh -rg` 不處理；安裝器對 Claude 本機只處理 `settings.json` 的 Stop 與 PermissionRequest，不處理專案層設定；cardReview 沒設 `kinds` 的 machine 不知道要裝哪些 CLI，只略過；`preflightLead` 還沒重用這裡的判斷（目前只看有沒有 `hookSocket`）。
+
 ## ISSUE-226：遠端 machine 自己也跑 bridge 時，遠端 agent 的 hook 事件送不回本機 bridge
 
 2026-11-27。狀態：**已驗收（範圍有限，見最後一則）**（pi 與 codex 的遠端 hook 都在真實 Herdr pane 驗到事件，各 1 個樣本）。先前：codex 的遠端 hook 已登記但需使用者信任。來源：使用者要求把遠端 machine 補上 hook（為了 ISSUE-225 遠端 Lead 要求 machine 必須有 hook），補的過程中發現的幾個狀況。

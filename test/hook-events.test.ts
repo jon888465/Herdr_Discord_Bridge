@@ -638,3 +638,14 @@ test("ISSUE-090: a codex hook reply from a session of another cwd is not posted 
     `posted: ${JSON.stringify(sent)}`,
   );
 });
+
+test("REQ-20261127-hook-install：hooks 狀態列出每台遠端 machine 有沒有設 hookSocket", async () => {
+  const { hookStatusText } = await import("../src/hook-status.js");
+  const text = hookStatusText({}, "/nonexistent-home", [
+    { id: "m-with", hookSocket: "/h.sock" },
+    { id: "m-without" },
+  ]);
+  assert.match(text, /遠端 machine m-with\*\*：hookSocket ✅ 已設定/);
+  assert.match(text, /遠端 machine m-without\*\*：hookSocket ❌ 未設定/);
+  assert.doesNotMatch(hookStatusText({}, "/nonexistent-home"), /遠端 machine/);
+});
