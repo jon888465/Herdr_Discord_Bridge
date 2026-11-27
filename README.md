@@ -485,8 +485,10 @@ roles: {implement: "local:claude:sonnet", reviewer: "local:agy", fixer: "local:c
 ```
 
 Six roles are supported: implement, diagnose, review, verify, reviewer, fixer.
-Each quoted value is `machine:agent:model`; omitted dimensions retain the existing
-selection/default (`":claude"`, `"::sonnet"`, `"local"`). Cards without `roles`
+Each quoted value is `machine:agent:model[:level]`; omitted dimensions retain the existing
+selection/default (`":claude"`, `"::sonnet"`, `"local"`). `level` is the reasoning effort
+(`minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`), e.g. `remote-a:codex:GPT-6.2-Astra:medium`; like `model`
+it must match an `agentProfiles` entry, which sets `"level"` (codex: `-c model_reasoning_effort=…`, claude: `--effort …`). Cards without `roles`
 keep existing behavior. Cards with roles require `card assign --coding`.
 Models must match an enabled configured profile of the same agent kind; its
 modelFlag/args are used. This is an administrator allowlist, not a provider model

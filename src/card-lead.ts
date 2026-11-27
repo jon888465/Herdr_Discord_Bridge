@@ -7,11 +7,11 @@
 //   lead: machine:agent:model      再加 model
 //   lead: machine:agent:model:effort  再加 effort；model 不可含冒號（與 `roles` 不同，見設計文件 §3 B）
 
-import { CARD_MODEL, roleError, type RoleContext } from "./card-role-assignment.js";
+import { CARD_MODEL, ROLE_EFFORTS, roleError, type RoleContext } from "./card-role-assignment.js";
 
 export const LEAD_KINDS = ["claude", "codex", "agy", "pi"] as const;
 export type LeadKind = (typeof LEAD_KINDS)[number];
-export const LEAD_EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"] as const;
+export const LEAD_EFFORTS = ROLE_EFFORTS;
 const MACHINE = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
 
 export interface LeadSpec {

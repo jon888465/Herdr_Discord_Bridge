@@ -1,4 +1,5 @@
 import type { MachinePoolSnapshot, MachineWork } from "./machine-busy.js";
+import { levelArgsFor } from "./cli-adapter.js";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -13,6 +14,8 @@ export interface AgentProfile {
   kind: string;
   model?: string;
   modelFlag?: string;
+  /** 推理強度（ISSUE-229）：驗證時換成該 CLI 的啟動參數併入 `args`；卡片 `roles` 的第四段與它比對。 */
+  level?: string;
   args?: string[];
   capabilities?: string[];
 }
@@ -78,13 +81,22 @@ export function validateProfiles(value: unknown): AgentProfile[] {
       throw new Error(
         `profile ${p.id} requires a valid modelFlag for this CLI`,
       );
+    let args = p.args ?? [];
+    if (p.level !== undefined) {
+      const mapped = levelArgsFor(p.kind, p.level);
+      if (!mapped.ok) throw new Error(`invalid level for profile ${p.id}: ${mapped.reason}`);
+      // 已經帶過（重複驗證）就不再加，避免 args 越疊越長。
+      const has = args.some((_, i) => mapped.args.every((a, j) => args[i + j] === a));
+      if (!has) args = [...args, ...mapped.args];
+    }
     ids.add(p.id);
     return {
       id: p.id,
       kind: p.kind,
       model: p.model,
       modelFlag,
-      args: p.args ?? [],
+      ...(p.level !== undefined ? { level: p.level } : {}),
+      args,
       capabilities: p.capabilities ?? [],
     };
   });
