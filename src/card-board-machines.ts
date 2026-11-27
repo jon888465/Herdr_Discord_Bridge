@@ -148,7 +148,7 @@ function clampToHeight(lines: string[], height: number): string[] {
 }
 
 export const CARD_HINT =
-  "Tab/m/c 切換檢視  j/k 移動  PgUp/PgDn 翻頁  Home/End 頭尾  e 編輯  n 新增  r 設為 ready  q 離開";
+  "Tab/m/c 切換檢視  j/k 移動  PgUp/PgDn 翻頁  Home/End 頭尾  Enter 檢視  e 編輯  n 新增  r 設為 ready  q 離開";
 
 export interface CardViewState {
   rows: BoardRow[];
