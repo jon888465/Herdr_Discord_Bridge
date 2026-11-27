@@ -2,7 +2,7 @@
 
 ## ISSUE-228：看板 Enter 看不到卡片內容、編輯不能改 lead 與 roles
 
-2026-11-27。狀態：**已修正、待實機驗收**。使用者要求（2026-11-26、2026-11-27）：Enter 檢視要能看到所有卡片內容（done 與 draft 都是檢視、Esc 返回），按 `e` 才編輯，且編輯要能改 role。需求卡 `REQ-20261126-board-card-view`（狀態目錄，不在 repo）。
+2026-11-27。狀態：**已驗收（使用者 2026-11-27 確認這張卡可算完成；部署版本 `aeb2ee0`，只是口頭確認，下列「未驗證」項目沒有逐項實測）**。使用者要求（2026-11-26、2026-11-27）：Enter 檢視要能看到所有卡片內容（done 與 draft 都是檢視、Esc 返回），按 `e` 才編輯，且編輯要能改 role。需求卡 `REQ-20261126-board-card-view`（狀態目錄，不在 repo）。
 
 **症狀：**Enter 與 `e` 都走編輯流程，不能編輯的卡（done、執行中…）只顯示「不能編輯」、看不到內容；編輯器只有 title、notify、project、mode，不能改 `lead`、`roles`（要改只能手動改檔或在 Discord 下指令）。
 
@@ -10,7 +10,9 @@
 
 **測試（2026-11-27，本機，build、lint 通過）：**完整測試 2371 項，2370 通過、0 失敗、1 跳過。新增 `test/card-board-detail.test.ts` 7 項（全文含所有欄位與流程紀錄、折行與控制字元、捲動夾限、矮窄終端機不超出、lead／roles 的寫入／round trip／清空／不合法拒絕、done 卡編輯仍被擋）。**實機（2026-11-27，用 pty 在暫時狀態目錄執行真的看板）：**對 done 卡按 Enter 出現唯讀檢視頁（含 frontmatter 與正文），按 `e` 只顯示「不能編輯：done，唯讀」，Esc 回到列表，卡片檔案位元組不變。
 
-**未驗證：**draft 卡在檢視頁按 `e` 開 `$EDITOR`、存檔後回到檢視頁（只由單元測試涵蓋套用邏輯，沒有在 pty 驗證編輯器來回）；真實 Herdr pane 內的 Esc／PgUp 行為；寬字元與超長流程紀錄的實際畫面；檢視頁是開啟當下的快照，不隨 3 秒輪詢更新（按 Esc 再 Enter 重讀）。`roles` 的 effort 語法（`GPT-6.2-Astra:medium` 目前整串視為 model）仍待決定。
+**部署（2026-11-27）：**主 checkout 同步到 `aeb2ee0` 後 `scripts/run.sh -r`，`dist` 含新程式，bridge 重啟並連線；需求卡 `REQ-20261126-board-card-view` 已設為 done。
+
+**未驗證（驗收時仍未實測）：**draft 卡在檢視頁按 `e` 開 `$EDITOR`、存檔後回到檢視頁（只由單元測試涵蓋套用邏輯，沒有在 pty 驗證編輯器來回）；真實 Herdr pane 內的 Esc／PgUp 行為；寬字元與超長流程紀錄的實際畫面；檢視頁是開啟當下的快照，不隨 3 秒輪詢更新（按 Esc 再 Enter 重讀）。`roles` 的 effort 語法（`GPT-6.2-Astra:medium` 目前整串視為 model）仍待決定。
 
 ## ISSUE-227：hook 要手動註冊，新增 machine 缺 hook 時靜默失效
 
