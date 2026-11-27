@@ -1,3 +1,4 @@
+import { formatLead } from "./card-lead.js";
 import { serializeCardRoles } from "./card-role-assignment.js";
 import { isDeepStrictEqual } from "node:util";
 import {
@@ -81,7 +82,8 @@ export function serializeCard(
         .map(([key, value]) => `${key}: ${formatString(value)}`)
         .join(", ")}}`,
     );
-  if (card.lead !== undefined) lines.push(`lead: ${formatString(card.lead)}`);
+  if (card.leadSpec !== undefined) lines.push(`lead: ${formatString(formatLead(card.leadSpec))}`);
+  else if (card.lead !== undefined) lines.push(`lead: ${formatString(card.lead)}`);
   if (card.mode !== undefined) lines.push(`mode: ${formatString(card.mode)}`);
   if (card.notify !== undefined)
     lines.push(`notify: ${formatString(card.notify)}`);

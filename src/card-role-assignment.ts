@@ -20,7 +20,7 @@ export interface RoleConstraint {
 }
 export type CardRoles = Partial<Record<CardRole, RoleConstraint>>;
 /** `machines[].cardReview` 開放的遠端 id 與 kinds；toolchain 才可分配 verify；write 才可分配 implement（ISSUE-171）。 */
-export type RemoteReviewMachine = { id: string; kinds: readonly string[]; toolchain?: boolean; write?: boolean };
+export type RemoteReviewMachine = { id: string; kinds: readonly string[]; toolchain?: boolean; write?: boolean; lead?: boolean; hook?: boolean };
 /** task 內可以派到遠端的角色：diagnose／review／verify 唯讀；implement 寫入（改動取回後由 bridge 在本機 commit，ISSUE-171）。fixer 尚未支援。 */
 export const REMOTE_TASK_ROLES = ["diagnose", "review", "verify", "implement"] as const;
 export interface RoleSnapshot {

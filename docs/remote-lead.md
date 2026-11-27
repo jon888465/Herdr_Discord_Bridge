@@ -1,6 +1,6 @@
 # 遠端 Lead：卡片指定 Lead 跑在遠端 machine
 
-需求卡 `REQ-20261127-remote-lead`（plugin 狀態目錄，不在 repo）。ISSUE-225。2026-11-27 設計文件，**狀態：A、B（lead）、C 的 hook 要求、D 已由使用者確認（2026-11-27），第 1 階段實作中；E 待確認。本文所有「現況」來自讀碼（引用檔案與函式），沒有實機驗證，標明「實測」的除外。**
+需求卡 `REQ-20261127-remote-lead`（plugin 狀態目錄，不在 repo）。ISSUE-225。2026-11-27 設計文件，**狀態：A 到 E、C 的 hook 要求都已由使用者確認（2026-11-27），第 1 階段已實作待驗收，其餘階段尚未開始。本文所有「現況」來自讀碼（引用檔案與函式），沒有實機驗證，標明「實測」的除外。**
 
 ## 1. 目標與非目標
 
@@ -94,7 +94,7 @@ card assign --worktree → 本機 worktree workspace 裡的 agent = Lead = 之�
 
 **遠端 Lead 的問題：**agy 與 pi 沒有可讀的 transcript（codex 有，經 ssh 讀遠端 rollout，ISSUE-175），所以遠端 agy 或 pi 當 Lead 時，bridge 取不到它的 session，PR 階段「Lead 當作者」的比對會變成「不明」。
 
-**建議：PR 階段的作者改成「task 內 implement 的 writer（與之後 fixer）」，不再用 Lead。**理由：這才是真正寫程式的一方，而且它的身分在 task 內已經被記錄（遠端 writer 也有）；Lead 只負責規劃與下指派，不需要在 PR 階段扮演作者。這樣 Lead 在不在遠端都不影響獨立性判斷。**代價：**PR 階段的 reviewer 種類偏好要改看 writer 的種類；沒有 writer artifact 的卡（例如整張卡是 Lead 自己做的 readonly 卡，沒有 PR）不受影響。**使用者還沒確認這一點（2026-11-27 使用者問「什麼意思」，上面是白話說明）。**
+**建議：PR 階段的作者改成「task 內 implement 的 writer（與之後 fixer）」，不再用 Lead。**理由：這才是真正寫程式的一方，而且它的身分在 task 內已經被記錄（遠端 writer 也有）；Lead 只負責規劃與下指派，不需要在 PR 階段扮演作者。這樣 Lead 在不在遠端都不影響獨立性判斷。**代價：**PR 階段的 reviewer 種類偏好要改看 writer 的種類；沒有 writer artifact 的卡（例如整張卡是 Lead 自己做的 readonly 卡，沒有 PR）不受影響。**使用者已確認，照這個建議做（2026-11-27，經白話說明之後）。**實作放在第 3 階段（worktree 卡的 PR 階段 review／fix），不在第 1 階段。
 
 ### F. 失敗模式
 
@@ -132,7 +132,7 @@ card commit → card pr → card review／card loop（不再要求作者 pane �
 | 階段 | 內容 | 驗收（每項要實機證據，且明寫樣本數與範圍） |
 | --- | --- | --- |
 | 0 | 本設計文件經使用者確認 A 到F | 使用者回覆決定 |
-| 1 | 解析與驗證：`lead` 四段格式、`cardReview.lead` 閘門、斷線拒絕、撿卡前檢查；**不啟動任何遠端 Lead** | 單元測試；撿卡前拒絕訊息實機一次 |
+| 1 | **（已實作，待實機驗收，2026-11-27）**解析與驗證：`lead` 四段格式、`cardReview.lead` 閘門、hook 要求、斷線拒絕、撿卡前檢查；**不啟動任何遠端 Lead** | 單元測試（已有）；撿卡前拒絕訊息實機一次 |
 | 2 | **前置：**`parseAssignmentPlan` 套 `repairJsonStrings`、遠端 Lead 優先走 hook。接著 readonly 卡（沒有 worktree，最單純）啟動遠端 Lead | 沙盒 readonly 卡，遠端 Lead 完成一個計畫與回報；斷線不 fallback；cleanup 乾淨 |
 | 3 | worktree 卡：快照、`afterTurn` 指紋、PR 階段 review／fix 不再依賴作者 pane（D） | 沙盒 L0 到 commit；L1 開 PR 並 `card review`；L2 loop 到停在 CI |
 | 4 | model 與 effort：agy `levelArgs`、`agy models` 驗證 | 沙盒卡指定 `neon`／`medium` 實際啟動並確認 session 的 model 與 effort |
@@ -156,4 +156,4 @@ card commit → card pr → card review／card loop（不再要求作者 pane �
 | A | **同意**：先用任務開始時的快照，接受它會過期 |
 | C／風險 6 | **遠端 Lead 的 machine 必須有 hook**（見 C 對 hook 的說明）；第 1 階段實作這個檢查 |
 | 順序 | **同意先做第 1 階段**（解析與撿卡前檢查，不啟動任何遠端 Lead） |
-| **E** | **待確認**：PR 階段的作者改成 implement 的 writer（見 E 的白話說明） |
+| E | **確認（照建議）**：PR 階段的作者改成 implement 的 writer（與之後 fixer），不再用 Lead |
