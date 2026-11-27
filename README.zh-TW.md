@@ -483,7 +483,7 @@ roles: {implement: "local:claude:sonnet", reviewer: "local:agy", fixer: "local:c
 ```
 
 支援 implement、diagnose、review、verify、reviewer、fixer 六角色。每個引號字串是
-`machine:agent:model[:level]`；省略維度沿用原選擇／預設（`":claude"`、`"::sonnet"`、`"local"`）。`level` 是推理強度（`minimal`、`low`、`medium`、`high`、`xhigh`、`max`、`ultra`），例如 `remote-a:codex:GPT-6.2-Astra:medium`；跟 `model` 一樣必須對應到某個 `agentProfiles` 項目，該項目用 `"level"` 欄位設定（codex 換成 `-c model_reasoning_effort=…`，claude 換成 `--effort …`）。
+`machine:agent:model[:level]`；省略維度沿用原選擇／預設（`":claude"`、`"::sonnet"`、`"local"`）。`level` 是推理強度（`minimal`、`low`、`medium`、`high`、`xhigh`、`max`、`ultra`），例如 `remote-a:codex:gpt-6.2-astra:medium`；跟 `model` 一樣必須對應到某個 `agentProfiles` 項目，該項目用 `"level"` 欄位設定（codex 換成 `-c model_reasoning_effort=…`，claude 換成 `--effort …`）。model 要寫 CLI 認得的 slug（`gpt-6.2-astra`），不要寫顯示名稱（`GPT-6.2-Astra`）：用 ChatGPT 帳號的 codex 會以「model is not supported」拒絕顯示名稱（ISSUE-229）。
 沒有 `roles` 的卡片維持舊行為；有指定的 card assign 必須帶 --coding。
 model 必須在同種類已開放配置 profile 允許清單，沿用該 profile 的 modelFlag／args，
 不是供應商模型目錄。新啟動禁止 resume／session 綁定／覆寫 model 參數。

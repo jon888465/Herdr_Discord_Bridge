@@ -1,16 +1,31 @@
 # Known Issues
 
+## ISSUE-230：卡片 `roles` 的鍵順序與 bridge 寫回的標準順序不同時，撿卡被誤判為「角色宣告改變」
+
+2026-11-27。狀態：**待修正（根因已確認、已重現）**。
+
+**症狀：**一張寫了 `roles` 的卡被撿起後，Lead 都還沒啟動就失敗：「lead：卡片角色宣告在 preflight 後改變，未啟動 Lead」，卡片狀態仍是 `ready`。卡片檔本身沒有被使用者改過。**預期：**同樣內容的 `roles`，不論鍵的寫法順序，都能正常撿卡。
+
+**根因（讀碼確認並重現）：**`parseCardRoles`（`src/card-role-assignment.ts`）依作者寫的順序（`Object.entries`）建立 `roles`；bridge 撿卡並記錄流程事件時把卡片重新寫回，`serializeCardRoles` 用固定順序（`CARD_ROLES`：implement、diagnose、review、verify、reviewer、fixer）輸出。`src/main.ts` 的 `validateJob` 重新讀卡後用 `JSON.stringify(current.roles) !== JSON.stringify(job.card.roles)` 比對，鍵順序不同就被當成內容改變。重現：作者寫 `{implement, verify, review, reviewer}`，經 `serializeCardRoles` 再 `parseCardRoles` 後鍵順序變成 `implement, review, verify, reviewer`，`JSON.stringify` 比對為 `false`（本機以建置後的實際函式重現，2026-11-27）。已用固定順序寫法的卡不受影響，所以只有 roles 沒照標準順序寫的卡會中。
+
+**修正方向（尚未實作）：**比對改成與鍵順序無關（逐角色比內容），並補一則測試：打亂鍵順序的 roles 撿卡不應失敗。**暫時繞過：**卡片的 `roles` 照 implement、diagnose、review、verify、reviewer、fixer 的順序寫。
+
+**未驗證：**修正後的撿卡路徑；`lead` 與其他欄位是否有同類的順序問題（只確認了 `roles`）。
+
 ## ISSUE-229：卡片 roles 沒有 effort（level）語法，`GPT-6.2-Astra:medium` 被整串當 model 而被拒
 
-2026-11-27。狀態：**已修正、待實機驗收（尚未部署）**。使用者回報 `REQ-20261124-team-discuss-attachments` 被撿卡後立刻停手，並決定做 effort 語法（effort 就是既有的 level）。
+2026-11-27。狀態：**已修正、已部署、待驗收**（model 與 level 指定已用沙盒卡實機驗證；原本失敗的那類卡尚未用新設定重跑）。使用者回報 `REQ-20261124-team-discuss-attachments` 被撿卡後立刻停手，並決定做 effort 語法（effort 就是既有的 level）。
 
 **症狀：**撿卡失敗，流程紀錄 `autopick_stopped`：「卡片角色指定無效：reviewer：不合法 model GPT-6.2-Astra:medium（須在同 kind 已開放 profile 的配置允許清單）」。**根因（讀碼確認）：**`roles` 值只拆前兩個冒號，`GPT-6.2-Astra:medium` 整串被當 model；model 又必須等於某個已開放 profile 的 `model`，而設定裡的 codex profile 都沒有 `model`，所以任何 model 指定都被拒；也沒有地方表達推理強度。同樣的 roles 也寫在 `REQ-20261124-team-ask-attachments`（仍是 draft，尚未發生）。
 
-**修正（2026-11-27）：**`roles` 值改為 `machine:agent:model[:level]`（`src/card-role-assignment.ts`：最後一段是已知 level 才拆出，舊卡含冒號的 model 不受影響；序列化往返不變）；`agentProfiles[].level`（`src/agent-pool.ts`：驗證時換成 CLI 啟動參數併入 `args`，重複驗證不疊加；不支援的 CLI 與壞格式拒絕）；preflight 以 model 與 level 比對 profile、`assertFreshProfile` 不把 adapter 產生的 level 參數當成使用者 args 擋掉；`lead` 的 effort 字彙改用同一份常數。**這個修正本身不會讓上述卡片通過**：`config.json` 的 `agentProfiles` 還要加一個 `{kind: "codex", model: "GPT-6.2-Astra", level: "medium", ...}` 的 profile（設定在本機、不在 repo，需使用者同意並重啟 bridge）。
+**修正（2026-11-27）：**`roles` 值改為 `machine:agent:model[:level]`（`src/card-role-assignment.ts`：最後一段是已知 level 才拆出，舊卡含冒號的 model 不受影響；序列化往返不變）；`agentProfiles[].level`（`src/agent-pool.ts`：驗證時換成 CLI 啟動參數併入 `args`，重複驗證不疊加；不支援的 CLI 與壞格式拒絕）；preflight 以 model 與 level 比對 profile、`assertFreshProfile` 不把 adapter 產生的 level 參數當成使用者 args 擋掉；`lead` 的 effort 字彙改用同一份常數。**這個修正本身不會讓上述卡片通過**：`config.json` 的 `agentProfiles` 還要加一個 `{kind: "codex", model: "gpt-6.2-astra", level: "medium", ...}` 的 profile（model 要寫 slug，見下面的實機發現）（設定在本機、不在 repo，需使用者同意並重啟 bridge）。
 
 **測試（2026-11-27，本機，build、lint 通過）：**完整測試 2376 項，2375 通過、0 失敗、1 跳過（修正後重跑；中途一項舊的看板測試因舊語意失敗，已改成新語意）。新增 `test/role-effort.test.ts` 5 項（拆 level 與舊 model 相容、往返、profile level 換參數與冪等與拒絕、本機與遠端 preflight 選到的 profile 帶著 level 參數、沒有符合 level 的 profile 時的訊息、未知欄位仍拒絕）。
 
-**未驗證：**真的用 level 啟動 codex／claude（只驗證參數組合，沒有實機啟動並確認推理強度生效）；agy、pi 沒有 level 參數（設了會拒絕）；遠端 Worker 啟動路徑吃 profile 的 `args` 是讀碼確認，沒有實機；`assertRoleMatches` 不檢查實際的 level（只靠選 profile）；卡片 `lead` 的 effort 仍未實際啟動（ISSUE-225 第 4 階段）；尚未部署。
+**實機發現（2026-11-27，兩台遠端 Linux machine 與本機）：**(1) **模型名稱要寫 slug，不能寫顯示名稱。**codex（ChatGPT 帳號）以 `-m gpt-6.2-astra`、`-m gpt-6-luna`、`-m gpt-6.2-sol` 都能正常回答；以 `-m GPT-6.2-Astra`、`-m GPT-6-Luna` 則回「ERROR: The '…' model is not supported when using Codex with a ChatGPT account」（並先警告找不到該 model 的 metadata）。兩台不同帳號的遠端 machine 結果一致，所以先前「某帳號不支援 GPT-6.2-Astra」的判斷是錯的，真正原因是名稱寫法；codex 的 `models_cache.json` 列的是顯示名稱，**不能拿來當可用的寫法**。bridge 目前只比對 profile 的 `model` 字串，不檢查寫法，寫成顯示名稱要到 codex 啟動才報錯（卡住在 pane 的錯誤訊息，task 要等回合逾時）。(2) **model 與 level 指定實機生效：**沙盒卡把 implement、verify（遠端）與 review、reviewer（本機）固定成 `gpt-6-luna:low`，流程紀錄 `role_assigned` 顯示 `codex（gpt-6-luna）`，task 完成；`codex exec -m gpt-6-luna -c model_reasoning_effort=low` 的標頭顯示 `reasoning effort: low`。(3) 卡片 `lead` 帶 model／effort 仍被拒絕（「model／effort 指定尚未支援（ISSUE-225 第 4 階段）」），Lead 不受 roles 的模型約束。
+
+**未驗證：**
+ 以顯示名稱寫的卡在 bridge 側是否該提前拒絕或提示（目前沒有，是否要做待決定）；agy、pi 的 level 參數與 claude 的 `--effort` 沒有實機啟動；agy、pi 沒有 level 參數（設了會拒絕）；遠端 Worker 啟動路徑吃 profile 的 `args` 是讀碼確認，沒有實機；`assertRoleMatches` 不檢查實際的 level（只靠選 profile）；卡片 `lead` 的 effort 仍未實際啟動（ISSUE-225 第 4 階段）；尚未部署。
 
 ## ISSUE-228：看板 Enter 看不到卡片內容、編輯不能改 lead 與 roles
 
