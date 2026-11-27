@@ -822,6 +822,10 @@
 
 **收尾順序的實測（2026-11-20 稍晚，只是繞過，不是修正）：**取消一個進行中的 task 再清理，先 `team cancel`（要先在 bridge console `wk use <該 task 的 workspace>`，否則回 `task belongs to another workspace`），確認 `task_cancelled` 後再 `card cleanup`，最後處理分支；workspace 還在時 `card cleanup` 正常運作（乾淨的 worktree 會移除、有未提交改動會保留）。先關 workspace 才會踩到本 issue。
 
+**2026-11-27 17:23（Asia/Taipei，本機 macOS，重新開啟／待調查）：**唯一 `ready` 卡 `REQ-20261127-codexpod-verify` 已寫入 `autopick_picked`，但執行中的 bridge console 顯示指派被「已有作用中的 worktree」拒絕。`card-worktrees.json` 查得該卡仍登記 `w7P`，`herdr workspace list` 已無 `w7P`，而實體 worktree 仍在，`git status --short --untracked-files=all` 顯示 `?? docs/s23.txt`。Workspace 消失原因未確認。本次保留未追蹤成果、卡片狀態及索引。原驗收已由第二次嘗試卡 `REQ-20261127-codexpod-verify2` 完成並提交 `2d3c1b7b982b`。若仍需重跑原卡，先處理未追蹤成果，再對帳 worktree 索引並驗證能重新指派。
+
+**2026-11-27 17:26（Asia/Taipei）收尾與同批盤點：**依使用者確認備份卡片、任務與索引，以 `CardStore.update` 將原 `verify` 卡標為 `cancelled`，重讀確認人工收尾紀錄已寫入，保留 `docs/s23.txt`。檢查同批另外六張卡，僅 `verify6` 有同類殘留：`w7S` 已從 Herdr 清單消失，索引仍作用中且實體 worktree 仍在。`git status --short --ignored --untracked-files=all` 與 `git log --oneline main..HEAD` 均無輸出。`verify6` 仍為 `draft`，最新任務 `blocked`，本次保留現況。`verify2`、`verify4`、`verify7` 的 worktree 已移除且索引已更新。`verify3`、`verify5` 沒有任務或 worktree 紀錄。兩筆殘留索引仍待正式對帳，本次未改索引或重啟 bridge。
+
 ## ISSUE-181：Worker 啟動被判「卡在啟動提示」後，卡片沒有及時失敗，等到逾時才結束（使用者回報）
 
 更新日期：2026-11-20。狀態：已修正、待驗收（2026-11-20：根因已確認並修正，原始碼與自動化測試通過；**尚未部署重跑、未實機驗收**）。先前：待調查。
@@ -1754,6 +1758,14 @@ r7-f2：Core terminal 不繼承 caller shell。現 run 的 env 前綴傳 HERDR_B
 **2026-11-16 使用者授權收尾結果：**備份存於 bridge state `backups/card-closeout-20261116-095741/`，包含五張卡、五份 task journal 與 worktree 索引。透過執行中的 bridge console（w2:p6P）正式 `team cancel`，usage-query／role-agents／codex-lead-agy／pi-lead-live 四個 task 均新增 task_cancelled，快照為 cancelled；cleanup 卡原 task 維持 failed。沒有關閉任何 CLI session。再使用 CardStore.update 的 hash 比對，把 usage-query／role-agents 改 done，其餘三張改 cancelled，更新日期並追加人工收尾理由；所有原始流程歷史保留，未刪卡／分支。開發結案不代表補齊實機驗收。
 
 **清理失敗與剩餘阻擋：**正式執行 `card cleanup REQ-20261109-autopick-lead-cleanup` 回 `herdr worktree.remove: workspace_not_found workspace w56 not found`；重查索引仍沒有 removedAt。確認 `cleanupCardWorktree` 先呼叫 Herdr removeWorktree，成功後才 markRemoved；而 CardWorktreeStore 建構時載入整份索引並快取，save 會重寫整份。因此沒有直接改磁碟索引，以免被執行中 bridge 的舊快取覆寫；未授權重啟，也未為對帳擅自停止 bridge。這筆索引與卡片「作用中」欄位仍待修正／對帳，不影響五張卡已退出 in_progress 的結果。下一步：修正正式 cleanup 對已不存在 workspace 的對帳路徑（需同時證明 worktree 已不存在），或在使用者授權停止／重啟 bridge 的維護時段備份後離線對帳，再載入新索引。本輪沒有修改程式、build、部署或重啟；本 issue 維持待調查。
+
+**2026-11-27 唯讀盤點（本機 macOS，main `0b956aa`）：**`REQ-20261116-card-board-paging`（PR #258，`dc6fc679eb81`）與 `REQ-20261116-board-machine-status`（PR #270，`e9c4781b1d2f`）仍是 `in_progress`。卡片與 PR 索引都記錄已合併，`git merge-base --is-ancestor <commit> main` 對兩筆均成功。最新任務分別為 `blocked` 與 `cancelled`，兩筆 worktree 均已標記移除，`herdr workspace list` 未見相應 workspace。待人工結束第一張的 `blocked` 任務，再將兩張卡標為 `done` 並保留歷史。
+
+同次盤點另有 9 張失敗或取消的舊驗收卡。只有 `REQ-20261124-issue212-remote-verify-retry` 的 worktree 索引仍標為作用中（`removedAt` 為空）。`herdr workspace list` 無對應 workspace，`git worktree list --porcelain` 與磁碟均無該 worktree。索引殘留的形成原因未確認，仍待對帳，參見 ISSUE-182／218。本輪未改卡片、任務、索引或執行中的 bridge。
+
+**2026-11-27 使用者授權收尾：**備份 11 張卡、任務 journal 與索引後，執行 `team cancel task-41c2b777-2620-4061-b1c3-1b22975b24c1`，從 journal 確認新增 `task_cancelled`。以 `CardStore.update` 比對檔案雜湊，將兩張已合併卡改為 `done`，九張舊驗收卡改為 `cancelled`。重讀全部卡片確認 `in_progress` 為零，並逐張對照備份，確認原有流程事件仍在且已加入人工收尾紀錄。
+
+**索引對帳仍受阻：**`card cleanup REQ-20261124-issue212-remote-verify-retry` 實測回報 `workspace_not_found workspace w64 not found`，與 ISSUE-182 的限制相符。重查確認 worktree 路徑不存在，索引仍未標記移除。執行中的 bridge 持有索引快取，本次未直接修改索引或重啟 bridge。待修復正式對帳流程，或安排維護時段離線對帳。
 
 ## ISSUE-145：單一指派的 30 分鐘等待上限，讓已完成的 Worker 成果被 bridge 判逾時丟掉
 
