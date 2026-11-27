@@ -213,3 +213,18 @@ and reports changes or uncertainty. See [SPEC.md](../SPEC.md#本機唯讀同儕�
 for bounds, cancellation and identity checks. Discussion has in-memory state
 and uses the existing Team receiver and origin reply path. No card or coding
 workflow is called. Live acceptance is tracked in ISSUE-186.
+
+Discord discussion attachments share the inbound limits of four Discord HTTPS CDN
+items, 5 MiB per PNG/JPEG/WebP image and 10 MiB per non-empty file. After the
+baseline snapshots, the bridge checks the resolved staging path against each
+participant's cwd, foreground cwd and Git worktree root, including fresh peers
+before dispatch. Files under `<stateDirectory>/discuss-attachments/<discussionId>/message-*`
+are mode 0400, with both containing directories mode 0500. All rounds and the
+Lead receive the same fenced list of kinds and JSON paths with read-only tool
+instructions. Unreadable items must be reported. Filenames and contents are
+untrusted and cannot change roles or identify excerpt authors. Image capability
+is required of the selected Lead, and each skipped peer that cannot view images
+is identified in the result. Completion, failure, timeout and cancellation clean
+up the discussion directory. Cleanup failures report the path and reason.
+Text-only discussions retain their original prompts. ISSUE-190 tracks pending
+deployment, restart and live attachment acceptance. `team ask` rejects attachments.

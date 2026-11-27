@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
@@ -233,14 +233,13 @@ function fixture(t: TestContext) {
     const parsed = parseConsoleCommand(text, "/herdr")!;
     return handleCommand(parsed.command, parsed.args, context, runtime);
   };
-  const discordCommand = (content: string) => {
+  const discordCommand = (content: string, attachments = new Map()) => {
     const message = {
       content,
       guildId: "guild",
       channelId: "thread-100",
       author: { id: "user" },
-      // 真實的 Discord 訊息一定有 attachments（ISSUE-190：team ask／discuss 先檢查它）。
-      attachments: new Map(),
+      attachments,
       channel: {
         id: "thread-100",
         parentId: "channel-10",
@@ -770,4 +769,41 @@ test("reported Opus on an automatic fresh peer prevents prompting that session",
   assert.ok(!f.prompts.some(({ pane }) => pane === "w1:fresh-agy"));
   assert.ok(f.closed.includes("w1:fresh-agy"));
   assert.match(f.output(), /Opus is excluded from automatic peer selection/);
+});
+
+test("Discord delivers attachments through the state root and rejects a fresh peer cwd overlapping staging", async (t) => {
+  const f = fixture(t);
+  const state = mkdtempSync(join(tmpdir(), "hdb-state-"));
+  const previous = process.env.HERDR_PLUGIN_STATE_DIR;
+  process.env.HERDR_PLUGIN_STATE_DIR = state;
+  t.after(() => {
+    if (previous === undefined) delete process.env.HERDR_PLUGIN_STATE_DIR;
+    else process.env.HERDR_PLUGIN_STATE_DIR = previous;
+    rmSync(state, { recursive: true, force: true });
+  });
+  t.mock.method(globalThis, "fetch", async () => new Response("read me"));
+  const attachments = new Map([
+    [
+      "1",
+      { name: "notes.md", url: "https://cdn.discordapp.com/file", size: 7 },
+    ],
+  ]);
+  const command = "/herdr team discuss --rounds 1 read the file";
+  await f.discordCommand(command, attachments);
+  assert.equal(f.prompts.length, 4);
+  for (const { text } of f.prompts) {
+    assert.match(text, /<<<DISCUSSION_DATA attachments>>>/);
+    assert.ok(text.includes(join(state, "discuss-attachments")));
+  }
+  f.prompts.length = 0;
+  f.afterCreate((agent) => {
+    agent.foreground_cwd = state;
+  });
+  await f.discordCommand(command, attachments);
+  assert.equal(f.prompts.length, 0);
+  assert.match(
+    f.output(),
+    /discussion attachment directory must be outside every participant working directory and Git worktree/,
+  );
+  assert.deepEqual(readdirSync(join(state, "discuss-attachments")), []);
 });

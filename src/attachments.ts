@@ -197,16 +197,7 @@ async function download(
   return Buffer.concat(chunks);
 }
 
-/**
- * Images (PNG/JPEG/WebP) keep the strict checks above; every other Discord
- * attachment is saved as a plain file (at most 10 MiB) under a sanitized name.
- * The bridge never executes or interprets file contents.
- */
-export async function prepareAttachments(
-  items: InboundAttachment[],
-  root: string,
-  request: typeof fetch = fetch,
-): Promise<PreparedAttachment[]> {
+export function validateAttachments(items: readonly InboundAttachment[]): void {
   if (items.length > 4)
     throw new Error("At most four attachments per message are supported");
   for (const item of items) {
@@ -221,6 +212,19 @@ export async function prepareAttachments(
         throw new Error("Each file must be non-empty and at most 10 MiB");
     }
   }
+}
+
+/**
+ * Images (PNG/JPEG/WebP) keep the strict checks above; every other Discord
+ * attachment is saved as a plain file (at most 10 MiB) under a sanitized name.
+ * The bridge never executes or interprets file contents.
+ */
+export async function prepareAttachments(
+  items: InboundAttachment[],
+  root: string,
+  request: typeof fetch = fetch,
+): Promise<PreparedAttachment[]> {
+  validateAttachments(items);
   if (!items.length) return [];
   await mkdir(root, { recursive: true, mode: 0o700 });
   const dir = await mkdtemp(join(root, "message-"));
