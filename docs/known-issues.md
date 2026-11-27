@@ -2,13 +2,17 @@
 
 ## ISSUE-225：卡片不能指定 Lead 跑在遠端 machine（功能需求，設計中）
 
-2026-11-27。狀態：**待設計確認**（設計文件完成；A、B、C 的 hook 要求、D 已確認，E 待確認；第 1 階段程式另開 PR，尚未合併）。使用者要求（2026-11-26）：卡片 `lead` 可以寫成 `agy-machine:agy:neon:medium`（遠端 machine 的 agy，model neon、effort medium）。需求卡 `REQ-20261127-remote-lead`（plugin 狀態目錄，不在 repo）。
+2026-11-27。狀態：**第 1 階段已實作、待驗收；整體仍待設計確認（E 待確認）**（第 1 階段：解析與撿卡前檢查，不啟動任何遠端 Lead；第 2 階段起尚未開始）。使用者要求（2026-11-26）：卡片 `lead` 可以寫成 `agy-machine:agy:neon:medium`（遠端 machine 的 agy，model neon、effort medium）。需求卡 `REQ-20261127-remote-lead`（plugin 狀態目錄，不在 repo）。
 
 **現況：**`lead` 欄位只接受種類（`claude`／`codex`／`agy`／`pi`），Lead 一律在本機啟動；`roles` 沒有 lead。**設計文件：**[docs/remote-lead.md](remote-lead.md)（讀碼加兩個唯讀 CLI 查詢，沒有實機啟動過遠端 Lead）。
 
 **設計文件的主要發現（都是讀碼或唯讀查詢，沒有實機驗證）：**(1) 遠端角色已有可重用的機制（快照、遠端 workspace、指紋、cleanup、hook 轉發）；(2) **PR 階段的 `card review`／`card fix` 目前要求「作者在本機」，遠端 Lead 會被直接拒絕**，必須先決定作者與 Lead 的切分；(3) Lead 回的是長 JSON 計畫，遠端沒有 hook 時走終端畫面，而 `parseAssignmentPlan` 沒有 ISSUE-212／224 的補救，**這是開放遠端 Lead 的前置條件**；(4) agy CLI 有 `--model` 與 `--effort`，`agy models` 的 id 帶 effort 後綴（例如 `gemini-4-neon-medium`），但 `cli-adapter` 的 `levelArgs` 目前沒有 agy；(5) `roles` 的 model 欄位可含冒號，使用者寫在 `roles` 的 `GPT-6.2-Astra:medium` 目前整段是 model 名稱，不是 model 加 effort。
 
 **使用者決定（2026-11-27，見文件 §7）：**`lead` 用四段、第四段是 effort（`roles` 的 effort 寫法另案）；PR 階段 review／fix 不再依賴作者 pane；先用任務開始時的快照；遠端 Lead 的 machine 必須有 hook（bridge 的 CLI hook 通道，`machines[].hookSocket`）；先做第 1 階段。**仍待確認：**E（PR 階段的作者改成 implement 的 writer，不再用 Lead；文件已更正第一版對現況的描述——PR 階段目前是把 Lead 當作者代理）。
+
+**第 1 階段實作（2026-11-27）：**`src/card-lead.ts`（新）的 `parseLead`／`formatLead`／`preflightLead`；`src/card.ts` 解析 `lead`（`card.lead` 仍是種類、新增 `card.leadSpec`）、`src/card-serialize.ts` 原樣寫回；`src/machines.ts` 的 `machines[].cardReview.lead`（布林，預設關閉）；`src/main.ts` 的 `cardRoleContext` 帶出 `lead` 與 `hook`（有 `hookSocket`）旗標、自動撿卡的 `roleGate` 先跑 `preflightLead`；`src/card-notify.ts` 的拒絕分類加入 `lead` 與新標籤。**檢查順序：**本機只有種類不擋、本機指定 model／effort 拒絕；遠端依序 machine 存在、**已斷線（先於是否開放，因為實際的 context 會把斷線的 machine 排除出 `remoteMachines`，這是 ISSUE-223 的教訓，測試用實際形狀）**、`cardReview.lead` 與 `kinds`、`hookSocket`，全通過後仍回「遠端 Lead 尚未實作」。
+**測試（2026-11-27，本機，`npm run build`、`npm run lint` 通過）：**完整測試 2352 項，2351 通過、0 失敗、1 跳過；新增 `test/card-lead.test.ts`（解析、不合法寫法、互逆、卡片解析與序列化、`preflightLead` 各步驟含斷線被排除出清單的實際形狀、通知標籤不帶 machine 名稱）與 `cardReview.lead` 設定驗證；一個既有測試的錯誤訊息預期改為含 `lead`。
+**第 1 階段未驗證／限制：**實機（部署後建一張 `lead` 指向遠端 machine 的沙盒卡，確認各種拒絕訊息與「尚未實作」；斷線、沒開 `lead`、沒有 hook 各一次）；hook 是否對每種 agent 都能送出完整最終回覆沒有逐一驗證；`roles` 的 effort 寫法另案（使用者在 `roles` 寫的 `GPT-6.2-Astra:medium` 意圖是 effort，但現在整段是 model 名稱）；目前設定中不是每台遠端 machine 都有 `hookSocket`，所以那幾台即使開了 `lead` 也會被拒。
 
 ## ISSUE-224：遠端 codex 的 review／fix 回覆，自由文字含雙引號時 JSON 解析失敗
 

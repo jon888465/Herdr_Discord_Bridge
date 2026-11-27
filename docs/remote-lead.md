@@ -132,7 +132,7 @@ card commit → card pr → card review／card loop（不再要求作者 pane �
 | 階段 | 內容 | 驗收（每項要實機證據，且明寫樣本數與範圍） |
 | --- | --- | --- |
 | 0 | 本設計文件經使用者確認 A 到F | 使用者回覆決定 |
-| 1 | 解析與驗證：`lead` 四段格式、`cardReview.lead` 閘門、斷線拒絕、撿卡前檢查；**不啟動任何遠端 Lead** | 單元測試；撿卡前拒絕訊息實機一次 |
+| 1 | **（已實作，待實機驗收，2026-11-27）**解析與驗證：`lead` 四段格式、`cardReview.lead` 閘門、hook 要求、斷線拒絕、撿卡前檢查；**不啟動任何遠端 Lead** | 單元測試（已有）；撿卡前拒絕訊息實機一次 |
 | 2 | **前置：**`parseAssignmentPlan` 套 `repairJsonStrings`、遠端 Lead 優先走 hook。接著 readonly 卡（沒有 worktree，最單純）啟動遠端 Lead | 沙盒 readonly 卡，遠端 Lead 完成一個計畫與回報；斷線不 fallback；cleanup 乾淨 |
 | 3 | worktree 卡：快照、`afterTurn` 指紋、PR 階段 review／fix 不再依賴作者 pane（D） | 沙盒 L0 到 commit；L1 開 PR 並 `card review`；L2 loop 到停在 CI |
 | 4 | model 與 effort：agy `levelArgs`、`agy models` 驗證 | 沙盒卡指定 `neon`／`medium` 實際啟動並確認 session 的 model 與 effort |
