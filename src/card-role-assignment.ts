@@ -1,5 +1,6 @@
 /** Card-only constraints. Legacy cards never enter this resolver. */
 import { validateProfiles, type AgentProfile } from "./agent-pool.js";
+import { levelArgsFor } from "./cli-adapter.js";
 import type { AgentRecord } from "./types.js";
 import type { RoleIdentity } from "./card-events.js";
 
@@ -17,7 +18,11 @@ export interface RoleConstraint {
   machine?: string;
   agent?: string;
   model?: string;
+  /** 推理強度（level／effort）；與 `agentProfiles[].level` 比對，不憑空指定（ISSUE-229）。 */
+  level?: string;
 }
+/** 角色指定與 lead 共用的推理強度字彙；寫在 model 之後（`machine:agent:model:level`）。 */
+export const ROLE_EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"] as const;
 export type CardRoles = Partial<Record<CardRole, RoleConstraint>>;
 /** `machines[].cardReview` 開放的遠端 id 與 kinds；toolchain 才可分配 verify；write 才可分配 implement（ISSUE-171）。 */
 export type RemoteReviewMachine = { id: string; kinds: readonly string[]; toolchain?: boolean; write?: boolean; lead?: boolean; hook?: boolean };
@@ -64,8 +69,18 @@ export function parseCardRoles(value: unknown): CardRoles {
         : second < 0
           ? raw.slice(first + 1)
           : raw.slice(first + 1, second)) || undefined;
-    const model = (second < 0 ? "" : raw.slice(second + 1)) || undefined;
-    if (!machine && !agent && !model) roleError(name, "不可全部省略");
+    let model = (second < 0 ? "" : raw.slice(second + 1)) || undefined;
+    // 第四段 level：model 最後一個冒號之後是已知的推理強度時拆出來（舊卡的 model 本來就可含冒號，其他情況照舊整串是 model）。
+    let level: string | undefined;
+    const lastColon = model?.lastIndexOf(":") ?? -1;
+    if (model && lastColon >= 0) {
+      const tail = model.slice(lastColon + 1);
+      if ((ROLE_EFFORTS as readonly string[]).includes(tail)) {
+        level = tail;
+        model = model.slice(0, lastColon) || undefined;
+      }
+    }
+    if (!machine && !agent && !model && !level) roleError(name, "不可全部省略");
     if (machine && !/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(machine))
       roleError(name, "不合法 machine");
     if (agent && !KINDS.includes(agent))
@@ -76,6 +91,7 @@ export function parseCardRoles(value: unknown): CardRoles {
       ...(machine ? { machine } : {}),
       ...(agent ? { agent } : {}),
       ...(model ? { model } : {}),
+      ...(level ? { level } : {}),
     };
   }
   return roles;
@@ -84,7 +100,7 @@ export function serializeCardRoles(roles: CardRoles): Record<string, string> {
   return Object.fromEntries(
     CARD_ROLES.filter((r) => roles[r]).map((r) => {
       const c = roles[r]!;
-      return [r, `${c.machine ?? ""}:${c.agent ?? ""}:${c.model ?? ""}`];
+      return [r, `${c.machine ?? ""}:${c.agent ?? ""}:${c.model ?? ""}${c.level ? `:${c.level}` : ""}`];
     }),
   );
 }
@@ -99,7 +115,16 @@ export function assertFreshProfile(profile: AgentProfile): void {
     throw new Error(
       `profile ${profile.id} 的 modelFlag 不可 resume／綁定既有 session`,
     );
-  for (const arg of profile.args ?? []) {
+  // level 換成的啟動參數（例如 codex 的 `-c model_reasoning_effort=…`）是 adapter 產生的，不當成使用者寫的 args 檢查（ISSUE-229）。
+  let args = profile.args ?? [];
+  if (profile.level) {
+    const mapped = levelArgsFor(profile.kind, profile.level);
+    if (mapped.ok) {
+      const at = args.findIndex((_, i) => mapped.args.every((a, j) => args[i + j] === a));
+      if (at >= 0) args = [...args.slice(0, at), ...args.slice(at + mapped.args.length)];
+    }
+  }
+  for (const arg of args) {
     if (
       /^(?:resume|continue|attach)$/i.test(arg) ||
       /^--?(?:resume|continue|session(?:-id)?|conversation(?:-id)?|fork-session|resume-session|session-file|model|m|r|c)(?:=|$)/i.test(
@@ -150,7 +175,7 @@ export function preflightRoles(
       !c ||
       typeof c !== "object" ||
       Array.isArray(c) ||
-      Object.keys(c).some((k) => !["machine", "agent", "model"].includes(k)) ||
+      Object.keys(c).some((k) => !["machine", "agent", "model", "level"].includes(k)) ||
       Object.values(c).some((v) => typeof v !== "string" || !v)
     )
       roleError(name, "不合法角色欄位");
@@ -182,11 +207,17 @@ export function preflightRoles(
         role,
         `agent ${c.agent ?? "候選"} 未開放（需要已配置且符合角色開放條件的 profile）`,
       );
-    const matches = enabled.filter((p) => !c.model || p.model === c.model);
-    if (!matches.length)
+    const modelMatches = enabled.filter((p) => !c.model || p.model === c.model);
+    if (!modelMatches.length)
       roleError(
         role,
         `不合法 model ${c.model}（須在同 kind 已開放 profile 的配置允許清單）`,
+      );
+    const matches = modelMatches.filter((p) => !c.level || p.level === c.level);
+    if (!matches.length)
+      roleError(
+        role,
+        `不合法 level ${c.level}（須有同 kind 已開放、model 相符且設了 level: ${c.level} 的 profile；agentProfiles 要加 level 欄位）`,
       );
     for (const p of matches) {
       assertFreshProfile(p);

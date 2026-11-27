@@ -952,7 +952,7 @@ PR #189（`88e1ce6`）已於 2026-11-09 merge，並重啟 bridge 載入（`card 
 
 ### 卡片角色 machine／agent／model（2026-11-10，ISSUE-138，已修正、待驗收）
 
-`roles: {implement: "local:claude:sonnet", reviewer: "local:agy"}` 為一層 inline map；只接受 implement、diagnose、review、verify、reviewer、fixer。每個值是 machine:agent:model，只拆前兩個冒號；省略段落不約束該維度，model 可含冒號。空／重複／未知角色、非字串拒絕；未宣告 roles 時既有行為完全不變。有 roles 的 card assign 必須 --coding；每個已派出的角色都受約束，不能用非 coding assignment／Lead synthesis 繞過。
+`roles: {implement: "local:claude:sonnet", reviewer: "local:agy"}` 為一層 inline map；只接受 implement、diagnose、review、verify、reviewer、fixer。每個值是 machine:agent:model[:level]，先拆前兩個冒號；剩下的最後一個冒號之後若是已知的推理強度（minimal、low、medium、high、xhigh、max、ultra）就拆成 level（ISSUE-229），其餘情況整串是 model（舊卡的含冒號 model 照舊）；省略段落不約束該維度。level 同 model 是允許清單：`agentProfiles[].level`（新欄位，驗證時換成該 CLI 的啟動參數併入 args：codex 為 `-c model_reasoning_effort=<level>`、claude 為 `--effort <level>`，其他 CLI 設 level 會拒絕）必須等於卡片的 level，沒有符合的 profile 就拒絕並說明要在 agentProfiles 加 level；卡片沒寫 level 不限制。空／重複／未知角色、非字串拒絕；未宣告 roles 時既有行為完全不變。有 roles 的 card assign 必須 --coding；每個已派出的角色都受約束，不能用非 coding assignment／Lead synthesis 繞過。
 
 本卡 machine 範圍由 Lead 決定為「宣告＋驗證＋local 強制執行」。未知 machine 報不存在；remote 只開放 reviewer 與 task 內 diagnose／review／verify（見「遠端卡片 reviewer」與「task 內 remote 唯讀角色」），其餘在撿卡前拒絕，不 fallback 到 local。agent／model 必須有同 kind 已開放配置 profile；model 是管理者允許清單，不保證供應商可用。沿用選中 profile 的 modelFlag／args，不猜參數；新流程禁止 resume／session 綁定及 model 覆寫。agy、pi 均需 implementation／review opt-in；符合條件的 profile 可供六種卡片角色使用，無宣告卡的 roster 不變。
 

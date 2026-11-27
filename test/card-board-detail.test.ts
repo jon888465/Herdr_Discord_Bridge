@@ -89,7 +89,7 @@ test("e 編輯可以改 lead 與 roles：寫入、再讀回、清空會移除；
   const parsed = parseEditorText(text);
   assert.ok(parsed.ok);
   assert.deepEqual(parsed.edit.roles, {
-    reviewer: { machine: "remote-a", agent: "codex", model: "GPT-6.2-Astra:medium" },
+    reviewer: { machine: "remote-a", agent: "codex", model: "GPT-6.2-Astra", level: "medium" },
     verify: { machine: "remote-a", agent: "pi" },
   });
   assert.deepEqual(parsed.edit.lead, { kind: "agy", spec: { machine: "remote-b", agent: "agy", model: "neon", effort: "medium" } });

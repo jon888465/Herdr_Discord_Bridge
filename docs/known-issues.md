@@ -1,5 +1,17 @@
 # Known Issues
 
+## ISSUE-229：卡片 roles 沒有 effort（level）語法，`GPT-6.2-Astra:medium` 被整串當 model 而被拒
+
+2026-11-27。狀態：**已修正、待實機驗收（尚未部署）**。使用者回報 `REQ-20261124-team-discuss-attachments` 被撿卡後立刻停手，並決定做 effort 語法（effort 就是既有的 level）。
+
+**症狀：**撿卡失敗，流程紀錄 `autopick_stopped`：「卡片角色指定無效：reviewer：不合法 model GPT-6.2-Astra:medium（須在同 kind 已開放 profile 的配置允許清單）」。**根因（讀碼確認）：**`roles` 值只拆前兩個冒號，`GPT-6.2-Astra:medium` 整串被當 model；model 又必須等於某個已開放 profile 的 `model`，而設定裡的 codex profile 都沒有 `model`，所以任何 model 指定都被拒；也沒有地方表達推理強度。同樣的 roles 也寫在 `REQ-20261124-team-ask-attachments`（仍是 draft，尚未發生）。
+
+**修正（2026-11-27）：**`roles` 值改為 `machine:agent:model[:level]`（`src/card-role-assignment.ts`：最後一段是已知 level 才拆出，舊卡含冒號的 model 不受影響；序列化往返不變）；`agentProfiles[].level`（`src/agent-pool.ts`：驗證時換成 CLI 啟動參數併入 `args`，重複驗證不疊加；不支援的 CLI 與壞格式拒絕）；preflight 以 model 與 level 比對 profile、`assertFreshProfile` 不把 adapter 產生的 level 參數當成使用者 args 擋掉；`lead` 的 effort 字彙改用同一份常數。**這個修正本身不會讓上述卡片通過**：`config.json` 的 `agentProfiles` 還要加一個 `{kind: "codex", model: "GPT-6.2-Astra", level: "medium", ...}` 的 profile（設定在本機、不在 repo，需使用者同意並重啟 bridge）。
+
+**測試（2026-11-27，本機，build、lint 通過）：**完整測試 2376 項，2375 通過、0 失敗、1 跳過（修正後重跑；中途一項舊的看板測試因舊語意失敗，已改成新語意）。新增 `test/role-effort.test.ts` 5 項（拆 level 與舊 model 相容、往返、profile level 換參數與冪等與拒絕、本機與遠端 preflight 選到的 profile 帶著 level 參數、沒有符合 level 的 profile 時的訊息、未知欄位仍拒絕）。
+
+**未驗證：**真的用 level 啟動 codex／claude（只驗證參數組合，沒有實機啟動並確認推理強度生效）；agy、pi 沒有 level 參數（設了會拒絕）；遠端 Worker 啟動路徑吃 profile 的 `args` 是讀碼確認，沒有實機；`assertRoleMatches` 不檢查實際的 level（只靠選 profile）；卡片 `lead` 的 effort 仍未實際啟動（ISSUE-225 第 4 階段）；尚未部署。
+
 ## ISSUE-228：看板 Enter 看不到卡片內容、編輯不能改 lead 與 roles
 
 2026-11-27。狀態：**已驗收（使用者 2026-11-27 確認這張卡可算完成；部署版本 `aeb2ee0`，只是口頭確認，下列「未驗證」項目沒有逐項實測）**。使用者要求（2026-11-26、2026-11-27）：Enter 檢視要能看到所有卡片內容（done 與 draft 都是檢視、Esc 返回），按 `e` 才編輯，且編輯要能改 role。需求卡 `REQ-20261126-board-card-view`（狀態目錄，不在 repo）。
