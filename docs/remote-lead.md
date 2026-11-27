@@ -1,6 +1,6 @@
 # 遠端 Lead：卡片指定 Lead 跑在遠端 machine
 
-需求卡 `REQ-20261127-remote-lead`（plugin 狀態目錄，不在 repo）。ISSUE-225。2026-11-27 設計文件，**狀態：設計中，尚未實作；本文所有「現況」來自讀碼（引用檔案與函式），沒有實機驗證，標明「實測」的除外。**
+需求卡 `REQ-20261127-remote-lead`（plugin 狀態目錄，不在 repo）。ISSUE-225。2026-11-27 設計文件，**狀態：A、B（lead）、C 的 hook 要求、D 已由使用者確認（2026-11-27），第 1 階段實作中；E 待確認。本文所有「現況」來自讀碼（引用檔案與函式），沒有實機驗證，標明「實測」的除外。**
 
 ## 1. 目標與非目標
 
@@ -69,6 +69,7 @@ Lead 在遠端是唯讀角色：沿用 `afterTurn` 的遠端指紋比對，Lead 
 - **新增 `machines[].cardReview.lead: true`（預設關閉，與 `write`、`toolchain` 同樣明示開放）。**理由：遠端 Lead 會讓一個長時間、會規劃並呼叫 worker 的 agent 活在遠端，風險面比唯讀 review 大，應該明確開放。
 - 沿用 `cardReview.kinds` 限制種類；沿用 `leadGateFor`（agy、pi 當 Lead 需要同種類且宣告 `implementation` 的 profile）。遠端 Lead 的 profile 判斷要不要也依遠端隱含 profile（ISSUE-211）：**建議是**，與遠端角色一致，由第 2 階段實作時再確認。
 - 斷線時拒絕且**不 fallback 到本機**，訊息沿用 ISSUE-223（已斷線，不帶 machine 名稱）。
+- **遠端 Lead 的 machine 必須設定 `hookSocket`（使用者 2026-11-27：「理論上都要有 hook」）。**這裡的 hook 指 **bridge 自己的 CLI hook 通道**（`src/hook-events.ts`：agent CLI 的 `Stop` hook 把「回合結束與最終回覆全文」送到 bridge 的 hook socket），**不是 Herdr 的狀態偵測**；遠端要靠 `machines[].hookSocket` 讓 bridge 以 `ssh -R` 把遠端的 hook socket 轉回本機（`src/machines.ts`）。沒有 hook 時 bridge 只能讀終端畫面解析回覆，ISSUE-212、224 證明畫面會破壞長 JSON，而 Lead 回的是計畫 JSON。**第 1 階段就檢查：**沒設 `hookSocket` 的 machine 一律拒絕當 Lead。注意：**目前設定裡不是每台遠端 machine 都有 `hookSocket`**（有些只用畫面解析），所以這個要求實際上會讓那幾台不能當 Lead，要先補設定。
 
 ### D. worktree、Lead 與 PR 階段的「作者」
 
@@ -87,7 +88,13 @@ card assign --worktree → 本機 worktree workspace 裡的 agent = Lead = 之�
 
 ### E. 獨立性（作者與 reviewer 不同 session）
 
-現有檢查比對作者與 reviewer 的 session（codex 用 rollout、claude 用 session id）。遠端 Lead 的 session 辨識：codex 已有遠端 rollout 查詢（ISSUE-175，經 ssh）；agy 與 pi 沒有可讀的 transcript，現在只靠種類不同或「不明」標記。**建議：遠端 Lead 不當作「作者」做獨立性判斷**（作者是 implement 的 writer 與 fixer，不是 Lead），維持現有規則「writer 與 reviewer 必須不同 session」，Lead 只決定規劃。需要使用者確認這個切分。
+**先講現在的程式實際怎麼做（讀碼修正，2026-11-27；本文第一版寫成「作者是 writer」是不準確的）：**
+- **task 內的 review：**比對的是 reviewer 與 **implement 的 writer**（coding 的 artifact 記錄 `authorPaneId`／`authorSession`），這是真正的「作者不能審自己」。
+- **PR 階段的 `card review`：**`src/card-review-wiring.ts` 的 `author` 是「**最後一個 task 的 Lead**」的 pane（agent、paneId、session），reviewer 的種類偏好與獨立性比對都以它為準（`chooseReviewerKind({ authorKind: live.agent })`）。也就是說 PR 階段是把 **Lead 當成作者的代理**，並不是比對真正寫程式的 writer。
+
+**遠端 Lead 的問題：**agy 與 pi 沒有可讀的 transcript（codex 有，經 ssh 讀遠端 rollout，ISSUE-175），所以遠端 agy 或 pi 當 Lead 時，bridge 取不到它的 session，PR 階段「Lead 當作者」的比對會變成「不明」。
+
+**建議：PR 階段的作者改成「task 內 implement 的 writer（與之後 fixer）」，不再用 Lead。**理由：這才是真正寫程式的一方，而且它的身分在 task 內已經被記錄（遠端 writer 也有）；Lead 只負責規劃與下指派，不需要在 PR 階段扮演作者。這樣 Lead 在不在遠端都不影響獨立性判斷。**代價：**PR 階段的 reviewer 種類偏好要改看 writer 的種類；沒有 writer artifact 的卡（例如整張卡是 Lead 自己做的 readonly 卡，沒有 PR）不受影響。**使用者還沒確認這一點（2026-11-27 使用者問「什麼意思」，上面是白話說明）。**
 
 ### F. 失敗模式
 
@@ -137,14 +144,16 @@ card commit → card pr → card review／card loop（不再要求作者 pane �
 3. **PR 階段 review／fix 的重構**（D）影響所有卡的 L1／L2 流程，必須單獨驗證，不能因為「只是遠端 Lead」而輕率合併。
 4. **agy 與 pi 的 transcript 不可讀**（E）：無法為遠端 Lead 做 session 獨立性判斷，所以不讓 Lead 擔任獨立性判斷的一方。
 5. **遠端 Lead 的長時間存活**：一個會規劃多輪的 agent 活在遠端，pod 重建、斷線、額度耗盡（quota-failover，見 `docs/quota-failover-manager.md`）都會中斷它；第 2 階段起要有逾時與 `cleanup_pending`。
-6. **沒有 hook 的遠端 machine**（沒設 `hookSocket`）只能走終端解析，風險最高；是否直接拒絕沒有 hook 的 machine 當 Lead，待使用者決定。
+6. **沒有 hook 的遠端 machine**（沒設 `hookSocket`）只能走終端解析，風險最高；**已決定直接拒絕當 Lead（見 C）**。hook 本身是否對每種 agent 都能送出完整的最終回覆（claude、codex、agy 是否都支援 `Stop` hook），我沒有逐一驗證。
 7. **這份設計的範圍：**只有讀碼與兩個唯讀 CLI 查詢（`agy --help`、`agy models`）；沒有在遠端實際啟動過 Lead，所有行為都是推論。
 
-## 7. 需要使用者決定的事
+## 7. 決定紀錄（使用者 2026-11-27）與仍待確認的事
 
-1. **B：**`lead` 用四段（第四段 effort）、`roles` 暫時不動，同意嗎？你在 `roles` 寫的 `GPT-6.2-Astra:medium`，`medium` 的意圖是 effort 嗎？
-2. **D：**PR 階段的 review／fix 改成不依賴作者 pane，同意嗎？
-3. **E：**Lead 不當獨立性判斷的一方，同意嗎？
-4. **A：**先用「任務開始時快照」，並接受快照會過期，同意嗎？
-5. **C 與風險 6：**沒有 hook 的 machine 能不能當 Lead？
-6. **順序：**第 1 階段可以先做（不啟動任何遠端 Lead，風險最低），要不要先動工？
+| 項目 | 決定 |
+| --- | --- |
+| B | **同意：`lead` 用四段，第四段是 effort；`medium` 的意圖就是 effort。**`roles` 暫時不動——但使用者在 `roles` 也寫了 `GPT-6.2-Astra:medium`（意圖同樣是 effort），而現在 `roles` 會把整段當 model 名稱，所以 **`roles` 的 effort 寫法要另案決定**（沿用 B 的選項 2 或另開欄位），不在第 1 階段 |
+| D | **同意**：PR 階段 review／fix 不再依賴作者 pane |
+| A | **同意**：先用任務開始時的快照，接受它會過期 |
+| C／風險 6 | **遠端 Lead 的 machine 必須有 hook**（見 C 對 hook 的說明）；第 1 階段實作這個檢查 |
+| 順序 | **同意先做第 1 階段**（解析與撿卡前檢查，不啟動任何遠端 Lead） |
+| **E** | **待確認**：PR 階段的作者改成 implement 的 writer（見 E 的白話說明） |
