@@ -451,6 +451,12 @@ Coding 卡片 PR 預檢（ISSUE-187，已修正、待驗收）在每次 implemen
 
 傳入附件：除 PNG/JPEG/WebP 圖片外，其他 Discord 檔案（≤ 10 MiB、每則至多四個）會存到 Agent cwd 並把路徑交給 Agent（ISSUE-039，待實機驗收）。
 
+### 安裝 hook（`scripts/run.sh`，REQ-20261127-hook-install、ISSUE-227）
+
+`scripts/run.sh -r`（以及 relink 路徑、`--core -r`）build 之後會執行 `node dist/src/hook-install-cli.js`，所以新拉下來的專案不必再照上面的步驟手動註冊。它**只新增**：設定目錄不存在（`~/.claude`、`~/.codex`、`~/.gemini`、`~/.pi/agent`）的 CLI 略過；已經有項目指向存在的 `herdr-discord-hook` 就不動；改任何檔案前先備份（`<檔>.bak-<時間>`）；讀不了或不是合法 JSON 的檔案絕不覆寫；失敗只回報，不擋 bridge 啟動。新增的 Codex 項目仍要你在 Codex 輸入 `/hooks` 信任（安裝器會提示）。對 `config.json` 裡每台設了 `hookSocket` 的 machine，還會用 `ssh`（遠端只需要 Python 3）檢查 `herdr-discord-hook.py` 是不是最新、有沒有登記到 `cardReview.kinds` 的 CLI、寫入 pi 的 `extra-hook-targets.json` 目標，並回報 Codex 項目是否已信任。沒設 `hookSocket` 的 machine 只回報（安裝器不會改 `config.json`）；bridge 啟動時與 `hooks` 指令也會警告。
+
+只想預覽、不改任何東西：`node dist/src/hook-install-cli.js --dry-run`（加 `--local-only` 略過遠端）。在 `run.sh` 略過用 `--no-hooks`。安裝器**沒做**的：`run.sh -rg`（從 GitHub 安裝到 Herdr 的 plugin 目錄，要到那邊執行這個 CLI）、「設了但沒有事件送回來」的自我測試（規劃中）。
+
 ### 遠端 machine 的 hook
 
 遠端 Agent 預設只用 parser；在該 machine 設定 `hookSocket`（遠端的絕對路徑）後，bridge 會另外維持一條 `ssh -R <hookSocket>:<本機 hook socket>`（與 `-L` 分開，轉發失敗不會影響遠端控制），並在遠端建立 0700 目錄。遠端需安裝 `scripts/remote/herdr-discord-hook.py`（只需 Python 3，不需 Node），並註冊為該 CLI 的 `Stop` hook；agy 寫在 `~/.gemini/config/hooks.json`：`{ "herdr-discord-bridge": { "Stop": [{ "command": "/root/.local/bin/herdr-discord-hook.py --machine <id>", "timeout": 10, "type": "command" }] } }`。Claude／Codex 格式的 `Stop` 也接受。遠端腳本在遠端讀 agy transcript，不需要把檔案傳過 tunnel。

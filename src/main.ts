@@ -205,7 +205,8 @@ import {
 } from "./format.js";
 import { HerdrClient, HerdrError } from "./herdr.js";
 import { defaultAgyWorktreeTrust } from "./agy-worktree-trust.js";
-import { HerdrHub } from "./machines.js";
+import { HerdrHub, type MachineConfig } from "./machines.js";
+import { machinesWithoutHook } from "./hook-install.js";
 import type { OrchestrationEvent } from "./team-orchestration.js";
 import { TeamTaskEngine } from "./team-task-engine.js";
 import { mayCancelFromWorkspace } from "./team-cancel-scope.js";
@@ -677,6 +678,7 @@ async function startBridge(
   const stopCleanup = startAttachmentCleanup(herdr);
   restoreWorktreeAuthorization(config.allowedWorkspaceIds);
   reportProjectPolicy();
+  reportMachinesWithoutHook(config.machines);
   const stopCardSync = startCardSync(tasks, discord);
   const stopCardNotifications = startCardNotifications(herdr, discord);
   // H2 自動撿卡（ISSUE-096）：政策檔沒有 `autopick:` 時每次掃描都立刻返回，什麼都不做。
@@ -838,7 +840,7 @@ export async function handleCommand(
     case "hooks":
       await runtime.discord.reply(
         context.message,
-        hookStatusText(runtime.config.hookTransport),
+        hookStatusText(runtime.config.hookTransport, undefined, runtime.config.machines),
       );
       return;
     case "assign":
@@ -3137,6 +3139,14 @@ export async function promptMappedAgent(
 
 /** 啟動時與每 6 小時，清理各 Agent cwd 底下超過 3 天的附件目錄（本機與遠端，ISSUE-043）。 */
 const CARD_SYNC_INTERVAL_MS = 60 * 1000;
+
+/** 啟動時對每台沒設 `hookSocket` 的遠端 machine 警告（REQ-20261127-hook-install）：hook 通道沒啟用，回覆只能用畫面解析。 */
+function reportMachinesWithoutHook(machines: readonly MachineConfig[]): void {
+  for (const id of machinesWithoutHook(machines))
+    console.warn(
+      `machine ${id}：沒有設定 hookSocket，hook 通道未啟用（遠端 agent 的回覆只能用畫面解析，長 JSON 可能被破壞；也不能當遠端 Lead）。執行 \`node dist/src/hook-install-cli.js --dry-run\` 查看建議。`,
+    );
+}
 
 /** 啟動時檢查一次專案政策檔：有問題就在 console 說明（會改用安全預設，全部 L0）。 */
 function reportProjectPolicy(): void {

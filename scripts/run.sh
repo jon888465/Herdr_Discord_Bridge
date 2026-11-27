@@ -7,9 +7,10 @@ cd "$project_dir"
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/run.sh [--herdr|--core] [-r|-rg]
+Usage: scripts/run.sh [--herdr|--core] [-r|-rg] [--no-hooks]
 Backend defaults to --herdr. Options may appear in any order.
 -r: rebuild local checkout; -rg: reinstall from GitHub (Herdr only).
+--no-hooks: do not check/install CLI hooks after a local build (default: do).
 --core -rg is unsupported; no changes are made.
 USAGE
 }
@@ -22,6 +23,7 @@ backend="herdr"
 backend_seen=0
 mode=""
 help_requested=0
+install_hooks_enabled=1
 for argument in "$@"; do
   case "$argument" in
     --herdr|--core)
@@ -33,6 +35,7 @@ for argument in "$@"; do
       [[ -z "$mode" ]] || argument_error "Mode specified more than once: $argument"
       mode="$argument"
       ;;
+    --no-hooks) install_hooks_enabled=0 ;;
     -h|--help) help_requested=1 ;;
     *) argument_error "Unknown argument: $argument" ;;
   esac
@@ -42,6 +45,19 @@ if [[ "$help_requested" == 1 ]]; then
   usage
   exit 0
 fi
+
+# REQ-20261127-hook-install：local build 之後檢查並安裝各 CLI 的 hook（本機與 config 裡的遠端 machine）。
+# 只新增、先備份、已安裝就不動；失敗只回報，不擋啟動。`scripts/run.sh --no-hooks` 可略過；
+# 只想看會做什麼：`node dist/src/hook-install-cli.js --dry-run`。
+install_hooks() {
+  if [[ "$install_hooks_enabled" != 1 ]]; then
+    echo "Skipping hook install (--no-hooks)."
+    return 0
+  fi
+  [[ -f dist/src/hook-install-cli.js ]] || return 0
+  echo "Checking CLI hooks (local and configured remote machines)..."
+  node dist/src/hook-install-cli.js || echo "Hook check failed (continuing)." >&2
+}
 
 # The CLI's explicit absence message is `no core running`. Only that exact
 # message (plain or JSON error.message) plus a nonzero status permits start.
@@ -125,6 +141,7 @@ NODE
     npm ci
     echo "Building local bridge..."
     npm run build
+    install_hooks
   elif [[ ! -f dist/src/index.js ]]; then
     echo "Core bridge build missing; run scripts/run.sh --core -r." >&2
     exit 1
@@ -211,6 +228,7 @@ case "$mode" in
       mode="-r"
       [[ -d node_modules ]] || npm ci
       npm run build
+      install_hooks
     else
       echo "Starting existing installed plugin..."
     fi
@@ -220,6 +238,7 @@ case "$mode" in
     npm ci
     echo "Building local plugin..."
     npm run build
+    install_hooks
     ;;
   -rg)
     echo "Installing plugin from GitHub..."
