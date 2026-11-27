@@ -1,6 +1,6 @@
 # 遠端 Lead：卡片指定 Lead 跑在遠端 machine
 
-需求卡 `REQ-20261127-remote-lead`（plugin 狀態目錄，不在 repo）。ISSUE-225。2026-11-27 設計文件，**狀態：A、B（lead）、C 的 hook 要求、D 已由使用者確認（2026-11-27），第 1 階段實作中；E 待確認。本文所有「現況」來自讀碼（引用檔案與函式），沒有實機驗證，標明「實測」的除外。**
+需求卡 `REQ-20261127-remote-lead`（plugin 狀態目錄，不在 repo）。ISSUE-225。2026-11-27 設計文件，**狀態：A 到 E、C 的 hook 要求都已由使用者確認（2026-11-27），第 1 階段已實作待驗收，其餘階段尚未開始。本文所有「現況」來自讀碼（引用檔案與函式），沒有實機驗證，標明「實測」的除外。**
 
 ## 1. 目標與非目標
 
@@ -94,7 +94,7 @@ card assign --worktree → 本機 worktree workspace 裡的 agent = Lead = 之�
 
 **遠端 Lead 的問題：**agy 與 pi 沒有可讀的 transcript（codex 有，經 ssh 讀遠端 rollout，ISSUE-175），所以遠端 agy 或 pi 當 Lead 時，bridge 取不到它的 session，PR 階段「Lead 當作者」的比對會變成「不明」。
 
-**建議：PR 階段的作者改成「task 內 implement 的 writer（與之後 fixer）」，不再用 Lead。**理由：這才是真正寫程式的一方，而且它的身分在 task 內已經被記錄（遠端 writer 也有）；Lead 只負責規劃與下指派，不需要在 PR 階段扮演作者。這樣 Lead 在不在遠端都不影響獨立性判斷。**代價：**PR 階段的 reviewer 種類偏好要改看 writer 的種類；沒有 writer artifact 的卡（例如整張卡是 Lead 自己做的 readonly 卡，沒有 PR）不受影響。**使用者還沒確認這一點（2026-11-27 使用者問「什麼意思」，上面是白話說明）。**
+**建議：PR 階段的作者改成「task 內 implement 的 writer（與之後 fixer）」，不再用 Lead。**理由：這才是真正寫程式的一方，而且它的身分在 task 內已經被記錄（遠端 writer 也有）；Lead 只負責規劃與下指派，不需要在 PR 階段扮演作者。這樣 Lead 在不在遠端都不影響獨立性判斷。**代價：**PR 階段的 reviewer 種類偏好要改看 writer 的種類；沒有 writer artifact 的卡（例如整張卡是 Lead 自己做的 readonly 卡，沒有 PR）不受影響。**使用者已確認，照這個建議做（2026-11-27，經白話說明之後）。**實作放在第 3 階段（worktree 卡的 PR 階段 review／fix），不在第 1 階段。
 
 ### F. 失敗模式
 
@@ -156,4 +156,4 @@ card commit → card pr → card review／card loop（不再要求作者 pane �
 | A | **同意**：先用任務開始時的快照，接受它會過期 |
 | C／風險 6 | **遠端 Lead 的 machine 必須有 hook**（見 C 對 hook 的說明）；第 1 階段實作這個檢查 |
 | 順序 | **同意先做第 1 階段**（解析與撿卡前檢查，不啟動任何遠端 Lead） |
-| **E** | **待確認**：PR 階段的作者改成 implement 的 writer（見 E 的白話說明） |
+| E | **確認（照建議）**：PR 階段的作者改成 implement 的 writer（與之後 fixer），不再用 Lead |
