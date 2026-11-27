@@ -569,6 +569,7 @@
 - 完整 `npm test`（Linux、Node v22.23.4）共 2,388 項，2,360 通過、28 失敗、0 取消、0 略過，exit 1。失敗包含 CLI adapter 的回合逾時、coding workflow 的 blocked 狀態、run.sh 啟動逾時、team questions 及 task engine 的斷言。全套未綠，這些失敗的共同根因未確認。
 - 單線抽驗 `node --test --test-concurrency=1 --test-name-pattern='Claude tools cannot complete|Grok boxed turn|same-session and unknown reviewers|unanswered questions expire|normalized CRLF|run.sh Herdr matrix -r --herdr' dist/test/cli-adapter.test.js dist/test/coding-workflow.test.js dist/test/run-sh-args.test.js dist/test/team-questions.test.js dist/test/team-task-engine.test.js`：6 項、4 通過、2 失敗。仍失敗的是 team questions 的 unanswered questions expire 與 task engine 的 normalized CRLF。另以 Node 模組載入器替換三個修改過的原始碼模組為基準 `ea4d4e7`，同兩項測試單線 2/2 通過。切回本輪 build 執行 `node --test --test-concurrency=1 --test-name-pattern='unanswered questions expire|normalized CRLF' dist/test/team-questions.test.js dist/test/team-task-engine.test.js`，1 通過、1 失敗；questions 案例仍在讀取缺少的結果時失敗。未確認是本卡造成，不調低時間或斷言標準。
 
+- 接手複驗（2026-11-27，macOS 本機，同一份程式 `e7276a9`）：`npm run build`、`npm run lint`（300 個 TypeScript 檔案）通過；完整 `npm test` 共 2,388 項，2,387 通過、0 失敗、1 跳過。上面 Linux 遠端機器的 28 項失敗在這裡**沒有重現**，所以那些失敗與這次變更無關的可能性高，但根因仍未確認；以 CI（ubuntu、macOS）結果為準，見 PR。
 **待驗收：**本輪未部署或重啟，舊訊息不會補送。部署重啟後從 Discord 新送 `team discuss`，同附可辨識的文字檔與圖片，確認每輪同儕與 Lead 引用實際內容，結果列出 `Worktree fingerprints matched`，再記錄日期、環境與結果。`team ask` 另需實測拒絕訊息，附件交付屬尚未實作的 `REQ-20261124-team-ask-attachments`。
 
 ## ISSUE-189：Team 名單殘留一個失效 Worker，整個 `team ask` 直接失敗
