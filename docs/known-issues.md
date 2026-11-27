@@ -1,5 +1,15 @@
 # Known Issues
 
+## ISSUE-225：卡片不能指定 Lead 跑在遠端 machine（功能需求，設計中）
+
+2026-11-27。狀態：**待設計確認**（設計文件完成；A、B、C 的 hook 要求、D 已確認，E 待確認；第 1 階段程式另開 PR，尚未合併）。使用者要求（2026-11-26）：卡片 `lead` 可以寫成 `agy-machine:agy:neon:medium`（遠端 machine 的 agy，model neon、effort medium）。需求卡 `REQ-20261127-remote-lead`（plugin 狀態目錄，不在 repo）。
+
+**現況：**`lead` 欄位只接受種類（`claude`／`codex`／`agy`／`pi`），Lead 一律在本機啟動；`roles` 沒有 lead。**設計文件：**[docs/remote-lead.md](remote-lead.md)（讀碼加兩個唯讀 CLI 查詢，沒有實機啟動過遠端 Lead）。
+
+**設計文件的主要發現（都是讀碼或唯讀查詢，沒有實機驗證）：**(1) 遠端角色已有可重用的機制（快照、遠端 workspace、指紋、cleanup、hook 轉發）；(2) **PR 階段的 `card review`／`card fix` 目前要求「作者在本機」，遠端 Lead 會被直接拒絕**，必須先決定作者與 Lead 的切分；(3) Lead 回的是長 JSON 計畫，遠端沒有 hook 時走終端畫面，而 `parseAssignmentPlan` 沒有 ISSUE-212／224 的補救，**這是開放遠端 Lead 的前置條件**；(4) agy CLI 有 `--model` 與 `--effort`，`agy models` 的 id 帶 effort 後綴（例如 `gemini-4-neon-medium`），但 `cli-adapter` 的 `levelArgs` 目前沒有 agy；(5) `roles` 的 model 欄位可含冒號，使用者寫在 `roles` 的 `GPT-6.2-Astra:medium` 目前整段是 model 名稱，不是 model 加 effort。
+
+**使用者決定（2026-11-27，見文件 §7）：**`lead` 用四段、第四段是 effort（`roles` 的 effort 寫法另案）；PR 階段 review／fix 不再依賴作者 pane；先用任務開始時的快照；遠端 Lead 的 machine 必須有 hook（bridge 的 CLI hook 通道，`machines[].hookSocket`）；先做第 1 階段。**仍待確認：**E（PR 階段的作者改成 implement 的 writer，不再用 Lead；文件已更正第一版對現況的描述——PR 階段目前是把 Lead 當作者代理）。
+
 ## ISSUE-224：遠端 codex 的 review／fix 回覆，自由文字含雙引號時 JSON 解析失敗
 
 2026-11-26。狀態：**已修正、待驗收**（程式與自動化測試完成；實機尚未驗收，bridge 未重啟）。來源：ISSUE-212 第二個根因的延伸（那次只修了 verify 的 `commands`），使用者同意（2026-11-26）處理 `card-review`／`card-fix`。
