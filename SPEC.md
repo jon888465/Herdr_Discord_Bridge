@@ -769,6 +769,8 @@ Machine SSH 編輯（第四階段，ISSUE-167，已實作、待實機驗收，20
 
 第四階段固定訊息：「已儲存；重啟 bridge 後生效」、「沒有修改」、「未儲存：SSH 編輯格式不對」、「未儲存：SSH 連線設定不合法」、「未儲存：config.json 已變更，請重新編輯」、「未儲存：config.json 寫入失敗」。列顯示有效設定 target（user@host:port 或 alias），經 terminal sanitize 與寬度截斷。重啟與狀態說明合併在唯一保留的 Machine 按鍵 footer 開頭：「設定改動重啟 bridge 後生效；狀態＝執行中 bridge 的觀測 | Tab/m/c 切換 … e/Enter 編輯  o 連線  x 斷線  R 重啟 bridge  q 離開」，整列依顯示寬度截斷，即使短畫面有訊息或錯誤也不因高度裁切而丟失 footer；狀態不是新設定的連線結果。footer 算一個固定列，維持 listRoom／machineRoom 的高度與翻頁保證。hub 只在啟動載入 machines，儲存不自動重連；連線／斷線入口見第三階段 B。真實 SSH／Herdr 編輯、重啟與小終端驗收待完成，尚未部署。
 
+Card 看板檢視與編輯 lead／roles（REQ-20261126-board-card-view、ISSUE-228，2026-11-27，已實作、待實機驗收）：卡片列表按 **Enter 開唯讀檢視頁**，顯示卡片全文（frontmatter 全部欄位、描述、驗收條件、流程紀錄），依顯示寬度折行、控制字元換成 U+FFFD，`j`／`k`／方向鍵／PgUp／PgDn／Home／End 捲動，**Esc 回列表**（游標不變），`q` 離開；任何狀態的卡（done、cancelled、ready、執行中、draft）Enter 都是檢視，檢視頁沒有任何寫入路徑。**`e` 才編輯**（列表或檢視頁都可按）：沿用 `editability` 規則，不能編輯的卡顯示 `不能編輯：<原因>`；在檢視頁按 `e` 編輯完回到檢視頁（顯示最新內容、捲動位置不變）。編輯器欄位在原本的 `title`、`notify`、`project` 之後新增 `lead:`（`agent` 或 `machine:agent[:model[:effort]]`，寫入 `lead`／`leadSpec`；只寫 agent 時移除舊 `leadSpec`）與 `roles:`（`角色=machine:agent:model` 以逗號分隔，角色為 implement、diagnose、review、verify、reviewer、fixer，model 可含冒號；沿用 `parseCardRoles` 驗證），兩者留空＝移除該欄位；格式不合拒絕且不寫入。新增卡的範本同樣有這兩行。
+
 Card 看板的 `project`（ISSUE-161，已實作，2026-11-16 實機驗收）：編輯／新增範本含 `project:` 行（`<機器>:<repo 目錄名>`，格式不合拒絕，留空＝不設）；新增預設 `local:<看板工作目錄名>`。bridge 只自動撿宣告 `project`／`projects` 且政策選用的卡，所以放行沒有 `project` 的卡仍允許（可手動 `card assign`），但看板必須提醒「bridge 不會自動撿卡」。看板只寫 `project`，不改 `projects`。
 
 ## 機敏內容遮蔽（2026-11-02，ISSUE-056）

@@ -1,5 +1,7 @@
 import type { Card } from "./card.js";
 import { isCardDate } from "./card.js";
+import { formatLead, parseLead, type LeadSpec } from "./card-lead.js";
+import { CARD_ROLES, parseCardRoles, serializeCardRoles, type CardRoles } from "./card-role-assignment.js";
 import type { CardStore } from "./card-store.js";
 
 /** 人還在寫的卡：bridge 不會撿，隨時可編輯、可設成 ready。 */
@@ -61,14 +63,48 @@ export interface HumanEdit {
   project?: string;
   /** `readonly`＝只讀任務，自動撿卡不建 worktree、不走 coding（ISSUE-162）；留空＝一般任務。 */
   mode?: "readonly";
+  /** Lead 指定：`agent` 或 `machine:agent[:model[:effort]]`（ISSUE-225）；留空＝不指定。 */
+  lead?: { kind: NonNullable<Card["lead"]>; spec?: LeadSpec };
+  /** 角色指定（`roles`）；留空＝不指定。編輯器裡寫成 `roles: reviewer=machine:agent:model, verify=machine:agent`。 */
+  roles?: CardRoles;
   /** 人寫的正文（不含流程紀錄）。 */
   human: string;
 }
 
-/** 編輯器裡看到的文字：前四行是欄位，`---` 之後是正文。 */
+/** 編輯器裡 `roles:` 那一行的寫法：`role=machine:agent:model` 以逗號分隔；沒有指定回空字串。 */
+export function rolesToEditorLine(roles: CardRoles | undefined): string {
+  if (!roles) return "";
+  return Object.entries(serializeCardRoles(roles))
+    .map(([role, value]) => `${role}=${value}`)
+    .join(", ");
+}
+
+/** 編輯器裡看到的文字：`---` 之前是欄位（title、notify、project、lead、roles、mode），之後是正文。 */
 export function toEditorText(card: Card): string {
   const { human } = splitBody(card.body);
-  return `title: ${card.title}\nnotify: ${card.notify ?? ""}\nproject: ${card.project ?? ""}\nmode: ${card.mode ?? ""}\n---\n${human.replace(/^\n+/, "")}`;
+  const lead = card.leadSpec ? formatLead(card.leadSpec) : (card.lead ?? "");
+  return `title: ${card.title}\nnotify: ${card.notify ?? ""}\nproject: ${card.project ?? ""}\nlead: ${lead}\nroles: ${rolesToEditorLine(card.roles)}\nmode: ${card.mode ?? ""}\n---\n${human.replace(/^\n+/, "")}`;
+}
+
+function parseRolesLine(value: string): { ok: true; roles?: CardRoles } | { ok: false; error: string } {
+  if (!value) return { ok: true };
+  const map: Record<string, string> = {};
+  for (const part of value.split(",")) {
+    const item = part.trim();
+    if (!item) continue;
+    const at = item.indexOf("=");
+    const name = at < 0 ? item : item.slice(0, at).trim();
+    if (at < 0 || !(CARD_ROLES as readonly string[]).includes(name))
+      return { ok: false, error: `roles 要寫成 角色=machine:agent:model，角色可用 ${CARD_ROLES.join("、")}` };
+    if (Object.hasOwn(map, name)) return { ok: false, error: `roles 的 ${name} 重複` };
+    map[name] = item.slice(at + 1).trim();
+  }
+  if (!Object.keys(map).length) return { ok: true };
+  try {
+    return { ok: true, roles: parseCardRoles(map) };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 export type ParsedEdit =
@@ -83,7 +119,7 @@ export function parseEditorText(text: string): ParsedEdit {
   const header = text.slice(0, separator).split("\n");
   const fields = new Map<string, string>();
   for (const line of header) {
-    const match = /^(title|notify|project|mode):[ \t]*(.*)$/.exec(line);
+    const match = /^(title|notify|project|lead|roles|mode):[ \t]*(.*)$/.exec(line);
     if (match) fields.set(match[1]!, match[2]!.trim());
   }
   const title = fields.get("title");
@@ -98,12 +134,23 @@ export function parseEditorText(text: string): ParsedEdit {
   const mode = fields.get("mode");
   if (mode && mode !== "readonly")
     return { ok: false, error: "mode 只能留空或寫 readonly" };
+  const leadText = fields.get("lead");
+  let lead: HumanEdit["lead"];
+  if (leadText) {
+    const parsedLead = parseLead(leadText);
+    if (!parsedLead.ok) return { ok: false, error: `lead 不合法：${parsedLead.error}` };
+    lead = { kind: parsedLead.kind, ...(parsedLead.spec ? { spec: parsedLead.spec } : {}) };
+  }
+  const parsedRoles = parseRolesLine(fields.get("roles") ?? "");
+  if (!parsedRoles.ok) return { ok: false, error: parsedRoles.error };
   return {
     ok: true,
     edit: {
       title,
       ...(notify ? { notify } : {}),
       ...(project ? { project } : {}),
+      ...(lead ? { lead } : {}),
+      ...(parsedRoles.roles ? { roles: parsedRoles.roles } : {}),
       ...(mode ? { mode: "readonly" as const } : {}),
       human: `\n${text.slice(separator + 5).replace(/\s+$/, "")}\n\n`,
     },
@@ -145,9 +192,24 @@ export function applyEdit(
     else delete next.project;
     if (edit.mode) next.mode = edit.mode;
     else delete next.mode;
+    applyLeadAndRoles(next, edit);
     return next;
   });
   return result.ok ? { ok: true } : { ok: false, error: result.error };
+}
+
+/** lead／roles 留空＝清掉；leadSpec 只在寫了 machine:… 的完整寫法時才有。 */
+function applyLeadAndRoles(card: Card, edit: HumanEdit): void {
+  if (edit.lead) {
+    card.lead = edit.lead.kind;
+    if (edit.lead.spec) card.leadSpec = edit.lead.spec;
+    else delete card.leadSpec;
+  } else {
+    delete card.lead;
+    delete card.leadSpec;
+  }
+  if (edit.roles) card.roles = edit.roles;
+  else delete card.roles;
 }
 
 /** 把 draft 類的卡設成 ready；沒有 notify 或 project 仍放行，只回傳警告（ISSUE-121、ISSUE-215）。 */
@@ -225,7 +287,7 @@ export function boardRows(store: CardStore): {
 }
 
 export function newCardTemplate(defaultProject = ""): string {
-  return `title: \nnotify: \nproject: ${defaultProject}\nmode: \n---\n\n## 描述\n\n\n## 驗收條件\n\n- \n`;
+  return `title: \nnotify: \nproject: ${defaultProject}\nlead: \nroles: \nmode: \n---\n\n## 描述\n\n\n## 驗收條件\n\n- \n`;
 }
 
 const SLUG = /^[a-z0-9][a-z0-9-]{1,40}$/;
@@ -254,6 +316,7 @@ export function createDraft(
     ...(edit.mode ? { mode: edit.mode } : {}),
     body: `\n# ${edit.title}\n${edit.human}`,
   };
+  applyLeadAndRoles(card, edit);
   const result = store.create(card);
   return result.ok ? { ok: true, id } : { ok: false, error: result.error };
 }

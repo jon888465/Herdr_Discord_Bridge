@@ -12,6 +12,7 @@ import { LEDGER_MAX_FILE_BYTES } from "./card.js";
 import { CardStore } from "./card-store.js";
 import { ensureCardsDirectory } from "./card-directory.js";
 import { boardEditingMarker } from "./card-board-open.js";
+import { cardFullText, clampScroll, detailLines, detailRoom, scrollBy, wrapText, type DetailState } from "./card-board-detail.js";
 import {
   applyEdit,
   boardKeyAction,
@@ -74,6 +75,8 @@ let cursor = 0;
 let message = "";
 let editing = false;
 let view: BoardView = "cards";
+/** 唯讀檢視頁（Enter 開、Esc 返回）；null＝在列表。檢視頁不呼叫任何寫入函式。 */
+let detail: (DetailState & { text: string }) | null = null;
 let machines: MachineConfig[] = [];
 let machineCursor = 0;
 let statuses = new Map<string, MachineStatus>();
@@ -109,10 +112,37 @@ function reload(): void {
   cursor = Math.min(cursor, Math.max(0, rows.length - 1));
 }
 
+/** 讀卡片全文開檢視頁；保留 scroll（編輯後回來時位置不變）。 */
+function openDetail(id: string, scroll = 0): void {
+  const read = store.read(id);
+  if (!read.ok) {
+    message = read.error;
+    detail = null;
+    return;
+  }
+  const row = rows.find((r) => r.id === id);
+  detail = {
+    id,
+    title: read.card.title,
+    editable: row?.editability.editable ?? false,
+    text: cardFullText(read.card),
+    lines: [],
+    scroll,
+    message: "",
+  };
+}
+
 function render(): void {
   if (editing) return;
   const height = process.stdout.rows || 24;
   const width = process.stdout.columns || 80;
+  if (detail) {
+    detail.lines = wrapText(detail.text, width - 1);
+    detail.scroll = clampScroll(detail.scroll, detail.lines.length, detailRoom(height));
+    detail.message = message;
+    process.stdout.write(`\x1b[2J\x1b[H${detailLines(detail, width, height).join("\n")}`);
+    return;
+  }
   if (view === "machines") {
     // 標題、錯誤、訊息與提示都截斷成一列，加上列表不超過終端機高度（review round 2，F3）。
     process.stdout.write(
@@ -347,6 +377,22 @@ process.stdin.on("data", (key: string) => {
     clearInterval(timer);
     process.exit(0);
   }
+  if (detail) {
+    const scrollAction = boardKeyAction(key);
+    if (key === "\x1b") detail = null;
+    else if (scrollAction) {
+      detail.scroll = scrollBy(scrollAction, detail.scroll, detail.lines.length, detailRoom(process.stdout.rows || 24));
+    } else if (key === "e") {
+      const id = detail.id;
+      const scroll = detail.scroll;
+      editSelected();
+      // 編輯完回到檢視頁（顯示最新內容）；不能編輯時留在原頁，訊息列顯示原因。
+      reload();
+      openDetail(id, scroll);
+    }
+    render();
+    return;
+  }
   if (viewKeyAction(key)) {
     view = key === "m" ? "machines" : key === "c" ? "cards" : toggleView(view);
     reloadMachines();
@@ -386,8 +432,11 @@ process.stdin.on("data", (key: string) => {
         cardRoom({ rows, cursor, errors }, process.stdout.rows || 24),
       ),
     );
-  else if (key === "e" || key === "\r") editSelected();
-  else if (key === "n") newCard();
+  else if (key === "e") editSelected();
+  else if (key === "\r" || key === "\n") {
+    const row = rows[cursor];
+    if (row) openDetail(row.id);
+  } else if (key === "n") newCard();
   else if (key === "r") readySelected();
   reload();
   render();
